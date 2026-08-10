@@ -33,6 +33,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <sstream>
 #include <map>
 #include <utility>
+#include <array>
 #include <iomanip>  // put_time
 StepKernel::StepKernel()
 {
@@ -71,6 +72,53 @@ Vector3d perpendicular(const Vector3d& norm)
 {
   const Vector3d axis = fabs(norm[0]) < 0.9 ? Vector3d(1, 0, 0) : Vector3d(0, 1, 0);
   return norm.cross(axis).normalized();
+}
+
+// The axis the normal points along most; dropping it projects the plane onto
+// the remaining two coordinates without ever collapsing it.
+int dominantAxis(const Vector3d& norm)
+{
+  const double ax = fabs(norm[0]), ay = fabs(norm[1]), az = fabs(norm[2]);
+  if (ax >= ay && ax >= az) return 0;
+  return ay >= az ? 1 : 2;
+}
+
+std::array<double, 2> projectPoint(const Vector3d& pt, int drop)
+{
+  return {pt[(drop + 1) % 3], pt[(drop + 2) % 3]};
+}
+
+void projectLoop(const std::vector<Vector3d>& vertices, const std::vector<int>& loop, int drop,
+                 std::vector<std::array<double, 2>>& out)
+{
+  out.clear();
+  out.reserve(loop.size());
+  for (const int ind : loop) out.push_back(projectPoint(vertices[ind], drop));
+}
+
+double loopArea2d(const std::vector<std::array<double, 2>>& poly)
+{
+  double area = 0;
+  for (std::size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
+    area += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1]);
+  }
+  return fabs(area) * 0.5;
+}
+
+// Crossing number test. The half open comparison on the y coordinate makes a
+// ray which passes exactly through a vertex count once instead of twice, which
+// is what the 3D ray cast in mergeTriangles() gets wrong on concentric loops.
+bool pointInLoop2d(const std::vector<std::array<double, 2>>& poly, const std::array<double, 2>& pt)
+{
+  bool inside = false;
+  for (std::size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
+    if ((poly[i][1] > pt[1]) != (poly[j][1] > pt[1])) {
+      const double x =
+        (poly[j][0] - poly[i][0]) * (pt[1] - poly[i][1]) / (poly[j][1] - poly[i][1]) + poly[i][0];
+      if (pt[0] < x) inside = !inside;
+    }
+  }
+  return inside;
 }
 
 int uf_find(std::vector<int>& parent, int x)
@@ -152,6 +200,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   std::vector<std::vector<int>> loops(face_cnt);
   std::vector<Vector3d> loop_normals(face_cnt, Vector3d(0, 0, 0));
   std::vector<char> loop_valid(face_cnt, 0);
+  std::vector<char> loop_is_hole(face_cnt, 0);
+  std::vector<int> parents(face_cnt, -1);
   int degenerated_cnt = 0;
 
   for (std::size_t i = 0; i < face_cnt; i++) {
@@ -177,25 +227,74 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     }
     norm.normalize();
 
-    // The outer loop of a face has to run counter clockwise around the surface
-    // normal. mergeTriangles() knows the outward direction of the whole bucket,
-    // so use it to fix up loops which come out the wrong way round.
-    if (faceParents[i] == -1 && i < faceNormals.size()) {
+    // All triangles of a mergeTriangles() bucket face the same way, so a merged
+    // loop which winds the other way round can only be the boundary of a hole -
+    // it is never a valid outer loop.
+    parents[i] = faceParents[i];
+    if (i < faceNormals.size()) {
       const Vector3d ref = faceNormals[i].head<3>();
-      if (ref.squaredNorm() > 0.5 && ref.dot(norm) < 0) {
-        std::reverse(loop.begin(), loop.end());
-        norm = -norm;
-      }
+      if (ref.squaredNorm() > 0.5 && ref.dot(norm) < 0) loop_is_hole[i] = 1;
     }
+    if (parents[i] != -1) loop_is_hole[i] = 1;
 
     loops[i] = loop;
     loop_normals[i] = norm;
     loop_valid[i] = 1;
   }
 
+  // Re-attach holes which lost their enclosing loop. mergeTriangles() records
+  // it in faceParents, but its point in polygon test casts a ray through 3D
+  // space using a normal taken from the first three vertices of the loop; on
+  // concentric circular loops that ray runs straight through a vertex of the
+  // outer loop and the containment test fails ("par not found here 1"). The
+  // orphaned hole would then be written as an ordinary face, which shows up in
+  // the CAD system as a membrane spanning the bore.
+  int reattached_cnt = 0, orphan_cnt = 0;
+  for (std::size_t i = 0; i < face_cnt; i++) {
+    if (!loop_valid[i] || !loop_is_hole[i] || parents[i] != -1) continue;
+
+    const int drop = dominantAxis(loop_normals[i]);
+    const std::array<double, 2> probe = projectPoint(vertices[loops[i][0]], drop);
+    std::vector<std::array<double, 2>> cand;
+    double best_area = 0;
+
+    for (std::size_t j = 0; j < face_cnt; j++) {
+      if (j == i || !loop_valid[j] || loop_is_hole[j]) continue;
+      // only loops of the same bucket, i.e. the same plane, can enclose it
+      if (i >= faceNormals.size() || j >= faceNormals.size()) continue;
+      if (faceNormals[i].head<3>().dot(faceNormals[j].head<3>()) < 0.9999) continue;
+      if (fabs(faceNormals[i][3] - faceNormals[j][3]) > 1e-4) continue;
+
+      projectLoop(vertices, loops[j], drop, cand);
+      if (!pointInLoop2d(cand, probe)) continue;
+      const double area = loopArea2d(cand);
+      // the innermost enclosing loop is the parent
+      if (parents[i] == -1 || area < best_area) {
+        parents[i] = int(j);
+        best_area = area;
+      }
+    }
+
+    if (parents[i] != -1) {
+      reattached_cnt++;
+    } else {
+      // a reversed loop without an enclosing face cannot be exported as a face
+      loop_valid[i] = 0;
+      orphan_cnt++;
+    }
+  }
+
   if (degenerated_cnt > 0) {
     printf("STEP export: skipped %d degenerated face%s\n", degenerated_cnt,
            degenerated_cnt == 1 ? "" : "s");
+  }
+  if (reattached_cnt > 0) {
+    printf("STEP export: re-attached %d hole%s to the enclosing face\n", reattached_cnt,
+           reattached_cnt == 1 ? "" : "s");
+  }
+  if (orphan_cnt > 0) {
+    printf("STEP export: dropped %d reversed loop%s without an enclosing face\n", orphan_cnt,
+           orphan_cnt == 1 ? "" : "s");
   }
 
   // Build the loops, their edges and the carrier planes.
@@ -244,19 +343,19 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     planes[i] = new Plane(entities, plane_axis);
 
     auto edge_loop = new EdgeLoop(entities, oriented_edges);
-    face_bounds[i] = new FaceBound(entities, edge_loop, true, faceParents[i] == -1);
+    face_bounds[i] = new FaceBound(entities, edge_loop, true, !loop_is_hole[i]);
   }
 
   // Combine every outer loop with the loops of its holes into one ADVANCED_FACE.
   std::vector<Face *> sfaces;
   std::vector<std::vector<EdgeCurve *>> face_edges;
   for (std::size_t i = 0; i < face_cnt; i++) {
-    if (!loop_valid[i] || faceParents[i] != -1) continue;
+    if (!loop_valid[i] || loop_is_hole[i]) continue;
     std::vector<FaceBound *> singface;
     singface.push_back(face_bounds[i]);
     std::vector<EdgeCurve *> edges = loop_edges[i];
     for (std::size_t j = 0; j < face_cnt; j++) {
-      if (!loop_valid[j] || faceParents[j] != int(i)) continue;
+      if (!loop_valid[j] || parents[j] != int(i)) continue;
       singface.push_back(face_bounds[j]);
       edges.insert(edges.end(), loop_edges[j].begin(), loop_edges[j].end());
     }
