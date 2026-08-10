@@ -81,9 +81,12 @@ endif()
 #
 
 message("running '@OPENSCAD_BINPATH@ --info' to generate sysinfo.txt")
-execute_process(COMMAND @OPENSCAD_BINPATH@ --info OUTPUT_FILE sysinfo.txt)
+execute_process(COMMAND "@OPENSCAD_BINPATH@" --info OUTPUT_FILE sysinfo.txt)
 
-set(CTEST_CUSTOM_POST_TEST ${CTEST_CUSTOM_POST_TEST} "@Python3_EXECUTABLE@ \"@CMAKE_CURRENT_SOURCE_DIR@/test_pretty_print.py\" --builddir=@CMAKE_BINARY_DIR@")
+# Every path here has to be quoted: on Windows the interpreter is regularly
+# somewhere like C:/Program Files/..., and ctest splits an unquoted command on
+# the space and then reports "no such file or directory" for C:/Program.
+set(CTEST_CUSTOM_POST_TEST ${CTEST_CUSTOM_POST_TEST} "\"@Python3_EXECUTABLE@\" \"@CMAKE_CURRENT_SOURCE_DIR@/test_pretty_print.py\" \"--builddir=@CMAKE_BINARY_DIR@\"")
 
 if ( ${debug_openscad_template} )
   foreach(post_test ${CTEST_CUSTOM_POST_TEST} )
