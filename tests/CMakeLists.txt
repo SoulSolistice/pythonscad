@@ -162,9 +162,11 @@ set(TEST_PYTHONSCAD_EXPORT_POV_DIR     "${CCSD}/data/pythonscad-export-pov")
 set(TEST_PYTHONSCAD_OVERLAY_DIR "${CCSD}/data/pythonscad-overlay")
 set(TEST_PYTHONSCAD_OVERLAY_ECHO_DIR "${CCSD}/data/pythonscad-overlay-echo")
 set(TEST_CUSTOMIZER_DIR "${CCSD}/data/scad/customizer")
+set(TEST_STEP_EXPORT_DIR "${CCSD}/data/scad/step-export")
 set(TEST_PYTHON_DIR     "${CCSD}/data/python")
 # Test runner Python scripts
 set(STLEXPORTSANITYTEST_PY   "${CCSD}/stlexportsanitytest.py")
+set(STEPEXPORTSANITYTEST_PY  "${CCSD}/stepexportsanitytest.py")
 set(EXPORT_IMPORT_PNGTEST_PY "${CCSD}/export_import_pngtest.py")
 set(EXPORT_PNGTEST_PY        "${CCSD}/export_pngtest.py")
 set(SHOULDFAIL_PY            "${CCSD}/shouldfail.py")
@@ -1150,6 +1152,12 @@ add_cmdline_test(export-svg-fill-only SCRIPT ${EXPORT_IMPORT_PNGTEST_PY} SUFFIX 
 # FIXME: We don't actually need to compare the output of cgalstlsanitytest
 # with anything. It's self-contained and returns != 0 on error
 add_cmdline_test(export-stl-sanitytest  SCRIPT ${STLEXPORTSANITYTEST_PY} SUFFIX txt FILES ${TEST_SCAD_DIR}/misc/normal-nan.scad ARGS ${OPENSCAD_EXE_ARG} --trust-python)
+
+# STEP export sanity checks. Like the STL sanity test these are self-contained
+# and return != 0 on error, so the -expected files are empty. Each fixture
+# guards a defect the STEP exporter has had; see tests/validatestep.py.
+file(GLOB STEP_EXPORT_FILES ${TEST_STEP_EXPORT_DIR}/*.scad)
+add_cmdline_test(export-step-sanitytest SCRIPT ${STEPEXPORTSANITYTEST_PY} SUFFIX txt FILES ${STEP_EXPORT_FILES} ARGS ${OPENSCAD_EXE_ARG} --trust-python)
 
 # Export/import color support
 add_cmdline_test(offcolorpngtest EXPERIMENTAL SCRIPT ${EXPORT_IMPORT_PNGTEST_PY} SUFFIX png FILES ${COLOR_3D_TEST_FILES} EXPECTEDDIR render-manifold ARGS ${OPENSCAD_EXE_ARG} --format=OFF --backend=manifold --render --trust-python)
