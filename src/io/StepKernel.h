@@ -35,6 +35,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <utility>
 #include <algorithm>
 #include <sstream>
+#include <charconv>
+#include <clocale>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -55,15 +57,34 @@ inline std::string step_real(double v)
   if (!std::isfinite(v)) v = 0.0;
   if (v == 0.0) return "0.";
 
-  // Emit the shortest representation which still round-trips exactly, so no
-  // precision is lost between the in-memory model and the exported file.
+  // The formatting has to be independent of the active locale: openscad.cc
+  // calls setlocale(LC_ALL, ""), so on a locale with a comma radix (de, fr,
+  // ...) a coordinate would come out as "-5,394" and a STEP reader would parse
+  // it as two separate numbers, shifting every following argument.
   char buf[64];
-  for (int prec = 15; prec <= 17; prec++) {
-    snprintf(buf, sizeof(buf), "%.*g", prec, v);
-    if (std::strtod(buf, nullptr) == v) break;
+  std::string s;
+
+#ifdef __cpp_lib_to_chars
+  // std::to_chars is locale independent by definition and already yields the
+  // shortest representation which round-trips exactly.
+  const auto res = std::to_chars(buf, buf + sizeof(buf), v);
+  if (res.ec == std::errc{}) s.assign(buf, res.ptr);
+#endif
+
+  if (s.empty()) {
+    // Fallback: snprintf honours LC_NUMERIC, so the radix has to be corrected
+    // afterwards.
+    for (int prec = 15; prec <= 17; prec++) {
+      snprintf(buf, sizeof(buf), "%.*g", prec, v);
+      if (std::strtod(buf, nullptr) == v) break;
+    }
+    s = buf;
+    const char *radix = std::localeconv()->decimal_point;
+    if (radix != nullptr && radix[0] != '\0' && radix[0] != '.') {
+      std::replace(s.begin(), s.end(), radix[0], '.');
+    }
   }
 
-  std::string s(buf);
   auto epos = s.find_first_of("eE");
   if (epos == std::string::npos) {
     if (s.find('.') == std::string::npos) s += '.';
