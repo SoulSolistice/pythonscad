@@ -242,20 +242,29 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     loop_valid[i] = 1;
   }
 
-  // Re-attach holes which lost their enclosing loop. mergeTriangles() records
-  // it in faceParents, but its point in polygon test casts a ray through 3D
-  // space using a normal taken from the first three vertices of the loop; on
-  // concentric circular loops that ray runs straight through a vertex of the
-  // outer loop and the containment test fails ("par not found here 1"). The
-  // orphaned hole would then be written as an ordinary face, which shows up in
-  // the CAD system as a membrane spanning the bore.
-  int reattached_cnt = 0, orphan_cnt = 0;
+  // Work out which face each hole belongs to.
+  //
+  // mergeTriangles() records that in faceParents, but the search behind it is
+  // not reliable in two ways. It keeps the last enclosing loop it happens to
+  // find instead of the innermost one, so with concentric loops in one plane a
+  // hole ends up on a face further out: the face it really belongs to is then
+  // written without its hole and seals the bore, which is the membrane the CAD
+  // system shows. And the containment test itself casts a ray through 3D space
+  // using a normal taken from the first three vertices of the loop, which fails
+  // outright on concentric circular loops (the ray runs exactly through a
+  // vertex of the outer loop) and leaves the hole with no parent at all.
+  //
+  // So do not take faceParents at face value: project the coplanar loops and
+  // pick the innermost one that encloses the hole.
+  int reparented_cnt = 0, orphan_cnt = 0;
   for (std::size_t i = 0; i < face_cnt; i++) {
-    if (!loop_valid[i] || !loop_is_hole[i] || parents[i] != -1) continue;
+    if (!loop_valid[i] || !loop_is_hole[i]) continue;
 
+    const int previous = parents[i];
     const int drop = dominantAxis(loop_normals[i]);
     const std::array<double, 2> probe = projectPoint(vertices[loops[i][0]], drop);
     std::vector<std::array<double, 2>> cand;
+    int found = -1;
     double best_area = 0;
 
     for (std::size_t j = 0; j < face_cnt; j++) {
@@ -268,17 +277,20 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       projectLoop(vertices, loops[j], drop, cand);
       if (!pointInLoop2d(cand, probe)) continue;
       const double area = loopArea2d(cand);
-      // the innermost enclosing loop is the parent
-      if (parents[i] == -1 || area < best_area) {
-        parents[i] = int(j);
+      if (found == -1 || area < best_area) {
+        found = int(j);
         best_area = area;
       }
     }
 
-    if (parents[i] != -1) {
-      reattached_cnt++;
+    if (found != -1) {
+      parents[i] = found;
+      if (found != previous) reparented_cnt++;
+    } else if (previous != -1 && loop_valid[previous] && !loop_is_hole[previous]) {
+      parents[i] = previous;  // keep what mergeTriangles found
     } else {
       // a reversed loop without an enclosing face cannot be exported as a face
+      parents[i] = -1;
       loop_valid[i] = 0;
       orphan_cnt++;
     }
@@ -288,9 +300,9 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     printf("STEP export: skipped %d degenerated face%s\n", degenerated_cnt,
            degenerated_cnt == 1 ? "" : "s");
   }
-  if (reattached_cnt > 0) {
-    printf("STEP export: re-attached %d hole%s to the enclosing face\n", reattached_cnt,
-           reattached_cnt == 1 ? "" : "s");
+  if (reparented_cnt > 0) {
+    printf("STEP export: moved %d hole%s to the enclosing face\n", reparented_cnt,
+           reparented_cnt == 1 ? "" : "s");
   }
   if (orphan_cnt > 0) {
     printf("STEP export: dropped %d reversed loop%s without an enclosing face\n", orphan_cnt,

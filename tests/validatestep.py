@@ -21,6 +21,10 @@
 # o Hole loops written as ordinary faces (they show up as a membrane spanning
 #   the bore). Such a face reuses the edges of the hole, so the edge use count
 #   goes above two.
+# o Holes recorded against the wrong face. With concentric loops in one plane a
+#   hole can end up on a face further out; the face it belongs to is then left
+#   sealed, which is the same membrane. That one keeps the shell topologically
+#   closed, so only the nesting check finds it.
 # o Bodies which are not connected but share a single CLOSED_SHELL.
 # o Missing units and modelling tolerance, or representation entities written
 #   with missing mandatory arguments.
@@ -447,6 +451,117 @@ def check_face_normals(entities, problems):
             return
 
 
+def _loop_points(entities, bound_id):
+    loop, orientation = _bound_loop(entities, bound_id)
+    if loop is None:
+        return None
+    pts = []
+    for oid in loop.refs():
+        ends = _edge_endpoints(entities, oid)
+        if ends is None:
+            return None
+        vtx = entities.get(ends[0])
+        if vtx is None or not vtx.refs():
+            return None
+        cp = entities.get(vtx.refs()[0])
+        if cp is None:
+            return None
+        coords = cp.floats()
+        if len(coords) != 3:
+            return None
+        pts.append(coords)
+    return pts
+
+
+def _project(pts, drop):
+    a, b = (drop + 1) % 3, (drop + 2) % 3
+    return [(p[a], p[b]) for p in pts]
+
+
+def _point_in_loop(poly, pt):
+    inside = False
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        if (poly[i][1] > pt[1]) != (poly[j][1] > pt[1]):
+            x = (poly[j][0] - poly[i][0]) * (pt[1] - poly[i][1]) / (poly[j][1] - poly[i][1]) + poly[i][0]
+            if pt[0] < x:
+                inside = not inside
+        j = i
+    return inside
+
+
+def check_hole_nesting(entities, problems):
+    """A hole has to sit directly inside the outer bound of the face carrying it.
+
+    If another loop of the same plane lies between the two, the hole belongs to
+    that inner face instead. The face it was taken from is then written without
+    its hole and seals the opening - the membrane spanning a bore that the CAD
+    system shows. The shell stays topologically closed in that case, so the edge
+    use count does not notice it."""
+    planes = {}
+    faces = []
+    for face in entities.values():
+        if face.name != "ADVANCED_FACE":
+            continue
+        refs = face.refs()
+        outer = None
+        inner = []
+        for bid in refs[:-1]:
+            b = entities.get(bid)
+            if b is None:
+                continue
+            if b.name == "FACE_OUTER_BOUND":
+                outer = bid
+            elif b.name == "FACE_BOUND":
+                inner.append(bid)
+        if outer is None:
+            continue
+        pts = _loop_points(entities, outer)
+        if not pts or len(pts) < 3:
+            continue
+        # group by plane: normal rounded plus offset
+        n = [0.0, 0.0, 0.0]
+        for k in range(len(pts)):
+            a, b = pts[k], pts[(k + 1) % len(pts)]
+            n[0] += (a[1] - b[1]) * (a[2] + b[2])
+            n[1] += (a[2] - b[2]) * (a[0] + b[0])
+            n[2] += (a[0] - b[0]) * (a[1] + b[1])
+        ln = math.sqrt(sum(c * c for c in n))
+        if ln < 1e-12:
+            continue
+        n = [c / ln for c in n]
+        off = sum(a * b for a, b in zip(n, pts[0]))
+        key = (round(abs(n[0]), 4), round(abs(n[1]), 4), round(abs(n[2]), 4), round(abs(off), 4))
+        drop = max(range(3), key=lambda i: abs(n[i]))
+        faces.append((face.id, outer, inner, pts, drop, key))
+        planes.setdefault(key, []).append((face.id, outer, pts, drop))
+
+    for fid, outer, inner, outer_pts, drop, key in faces:
+        for hid in inner:
+            hpts = _loop_points(entities, hid)
+            if not hpts:
+                continue
+            probe = _project(hpts, drop)[0]
+            outer_poly = _project(outer_pts, drop)
+            if not _point_in_loop(outer_poly, probe):
+                problems.append(
+                    "#%d: hole %s lies outside the outer bound of its face" % (fid, hid)
+                )
+                continue
+            for ofid, obid, opts, odrop in planes[key]:
+                if ofid == fid:
+                    continue
+                poly = _project(opts, drop)
+                # an intervening loop: contains the hole and sits inside the face
+                if _point_in_loop(poly, probe) and _point_in_loop(outer_poly, poly[0]):
+                    problems.append(
+                        "#%d: hole %s is not directly inside this face - the outer bound of "
+                        "#%d lies between them, so the hole belongs to #%d (its face is left "
+                        "sealed)" % (fid, hid, ofid, ofid)
+                    )
+                    return
+
+
 def check_shells(entities, problems):
     """Faces which are not connected by a shared edge belong to different bodies
     and must not share one CLOSED_SHELL."""
@@ -505,6 +620,7 @@ def validateSTEP(filename):
         check_topology(entities, problems)
         check_shared_vertices(entities, problems)
         check_face_normals(entities, problems)
+        check_hole_nesting(entities, problems)
         check_shells(entities, problems)
 
     if problems:
