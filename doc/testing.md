@@ -186,6 +186,37 @@ There are sporadic reports of problems running on remote machines with proprieta
 drivers. Try doing a web search for your exact error message to see solutions and
 workarounds that others have found.
 
+### Windows + MSYS2
+
+The tests run the binary straight out of the build tree, but a build tree binary
+has no DLLs next to it. `cmake --install` is what gathers them: the
+`install(RUNTIME_DEPENDENCY_SET ...)` rule walks the executable's imports and
+copies the MSYS2 DLLs into the install prefix. Without that, launching
+`build/pythonscad.com` fails before it reaches `main`, and every test fails with
+exit status 3221225781 (`0xC0000135`, "required DLL not found").
+
+Note that the DLL named in the error is often misleading: MSYS2 resolves imports
+by searching the filesystem and does not understand Windows API sets, so it
+tends to report an `api-ms-win-crt-*.dll` that is virtual and never existed as a
+file.
+
+Install into a staging tree and point the tests at it:
+
+```bash
+cmake --build build -j4
+cmake --install build --prefix build/staging
+OPENSCAD_BINARY="E:/path/to/pythonscad/build/staging/pythonscad.com" cmake -B build <options>
+ctest --test-dir build -R <pattern> --output-on-failure
+```
+
+Use a native `E:/...` path rather than an MSYS `/e/...` one; CMake is a native
+Windows program and will not resolve the latter.
+
+Re-run `cmake --install` after every rebuild, otherwise the tests keep exercising
+the previously staged binary. `OPENSCAD_BINARY` is read at configure time and
+baked into `CTestTestfile.cmake`, so a later `cmake -B build` without it in the
+environment sends the tests back to the build tree binary.
+
 ### Windows + MSVC
 
 The MSVC build was last tested circa 2012. The last time it worked, these were the
