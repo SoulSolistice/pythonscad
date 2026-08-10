@@ -32,169 +32,323 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <chrono>
 #include <sstream>
 #include <map>
+#include <utility>
 #include <iomanip>  // put_time
-StepKernel::StepKernel() {}
+StepKernel::StepKernel()
+{
+}
 
-StepKernel::~StepKernel() {}
+StepKernel::~StepKernel()
+{
+  // every entity registers itself in `entities` in its constructor, so this
+  // frees exactly the entities allocated by this kernel, each of them once
+  for (auto *entity : entities) delete entity;
+  entities.clear();
+}
+
+namespace {
+
+// Newell's method. In contrast to the cross product of the first two edges it
+// is stable for concave corners (where the cross product points the wrong way)
+// and for polygons whose first three vertices happen to be collinear (where
+// the cross product collapses to zero). The magnitude is twice the area.
+Vector3d polygonNormal(const std::vector<Vector3d>& vertices, const std::vector<int>& poly)
+{
+  Vector3d norm(0, 0, 0);
+  const size_t n = poly.size();
+  for (size_t i = 0; i < n; i++) {
+    const Vector3d& a = vertices[poly[i]];
+    const Vector3d& b = vertices[poly[(i + 1) % n]];
+    norm[0] += (a[1] - b[1]) * (a[2] + b[2]);
+    norm[1] += (a[2] - b[2]) * (a[0] + b[0]);
+    norm[2] += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  return norm;
+}
+
+// An arbitrary unit vector perpendicular to norm
+Vector3d perpendicular(const Vector3d& norm)
+{
+  const Vector3d axis = fabs(norm[0]) < 0.9 ? Vector3d(1, 0, 0) : Vector3d(0, 1, 0);
+  return norm.cross(axis).normalized();
+}
+
+int uf_find(std::vector<int>& parent, int x)
+{
+  while (parent[x] != x) {
+    parent[x] = parent[parent[x]];
+    x = parent[x];
+  }
+  return x;
+}
+
+}  // namespace
 
 StepKernel::EdgeCurve *StepKernel::create_line_edge_curve(StepKernel::Vertex *vert1,
                                                           StepKernel::Vertex *vert2, bool dir)
 {
   // curve 1
   auto line_point1 = new Point(entities, vert1->point->pt);
-  Vector3d v = (vert2->point->pt - vert1->point->pt).normalized();
+  Vector3d v = vert2->point->pt - vert1->point->pt;
+  const double len = v.norm();
+  // A DIRECTION must have a non zero magnitude. Without this guard a zero
+  // length edge is written as DIRECTION('',(0.,0.,0.)), which importers report
+  // as a degenerated face.
+  if (len < 1e-12) v = Vector3d(1, 0, 0);
+  else v /= len;
 
   auto line_dir1 = new Direction(entities, v);
-  auto line_vector1 = new Vector(entities, line_dir1, 1.0);
+  auto line_vector1 = new Vector(entities, line_dir1, len > 1e-12 ? len : 1.0);
   auto line1 = new Line(entities, line_point1, line_vector1);
   //  auto surf_curve1 = new SurfaceCurve(entities, line1);
   return new EdgeCurve(entities, vert1, vert2, line1, dir);
 }
 
-void StepKernel::build_tri_body(const char *name, std::vector<Vector3d> vertices,
-                                std::vector<IndexedFace> faces,
+void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& vertices,
+                                const std::vector<IndexedFace>& faces,
                                 const std::vector<std::shared_ptr<Curve>>& curves,
-                                const std::vector<std::shared_ptr<Surface>> surfaces,
-                                const std::vector<int>& faceParents, double tol)
+                                const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                const std::vector<int>& faceParents,
+                                const std::vector<Vector4d>& faceNormals, double tol)
 {
-  //	auto base_axis = new Axis2Placement(entities, dir_1, dir_2, point);
-  std::vector<Face *> sfaces;
-  std::map<std::tuple<double, double, double, double, double, double>, EdgeCurve *> edge_map;
+  // TODO: `curves` and `surfaces` carry the analytic geometry recovered during
+  // evaluation. Once arcs and cylinders are written out they are picked up
+  // here; for now everything is exported as planes and lines.
+  (void)curves;
+  (void)surfaces;
 
-  // check for all points it they sit on an arc// TODO move place to be mor efficient
-  std::vector<int> vert2curve;
-  for (size_t i = 0; i < vertices.size(); i++) {
-    Vector3d pt = vertices[i];
-    //	        printf("%ld (%g/%g/%g)",i, pt[0], pt[1], pt[2]);
-    int found = -1;
-    for (size_t j = 0; j < curves.size(); j++) {
-      if (curves[j]->pointMember(vertices, pt)) {
-        //				printf("(%ld)",j);
-        found = j;
-      }
+  const double model_tol = tol > 0 ? tol : 1e-5;
+  // twice the area of the smallest polygon still considered a face
+  const double area_eps = 1e-12;
+  const std::size_t face_cnt = faces.size();
+
+  // Vertices which share the exact same coordinates have to end up as one
+  // single VERTEX_POINT. Otherwise every face brings its own copy of each
+  // corner and adjacent faces are no longer stitched along their common edge,
+  // which is what makes importers report gaps in the shell.
+  std::map<std::tuple<double, double, double>, int> point_map;
+  std::vector<int> canonical(vertices.size(), 0);
+  for (std::size_t i = 0; i < vertices.size(); i++) {
+    auto key = std::make_tuple(vertices[i][0], vertices[i][1], vertices[i][2]);
+    auto it = point_map.find(key);
+    if (it == point_map.end()) {
+      point_map.emplace(key, int(i));
+      canonical[i] = int(i);
+    } else {
+      canonical[i] = it->second;
     }
-    //		printf("\n");
-    vert2curve.push_back(found);
   }
 
-  // check all faces, if they are part of a special surface curve
-  for (size_t i = 0; i < faces.size(); i++) {
-    auto& face = faces[i];
-    //          printf("Face %ld ",i);
-    for (size_t j = 0; j < surfaces.size(); j++) {
-      int valid = 1;
-      for (size_t k = 0; valid && k < face.size(); k++) {
-        if (!surfaces[j]->pointMember(vertices, vertices[face[k]])) valid = 0;
-      }
-      //	   if(valid) printf("(%ld) ",j);
-    }
-
-    //	  printf("\n");
-  }
-
-  std::vector<FaceBound *> face_bounds;
-  std::vector<Plane *> planes;
-  for (std::size_t i = 0; i < faces.size(); i++) {
-    Vector3d p0 = vertices[faces[i][0]];
-    Vector3d p1 = vertices[faces[i][1]];
-    Vector3d p2 = vertices[faces[i][2]];
-
-    Vector3d d0 = (p1 - p0).normalized();
-    Vector3d d1 = (p2 - p0).normalized();
-    Vector3d d2 = d0.cross(d1).normalized();
-
-    int merged_edge_cnt;  // TODO faceNormal verwenden
-
-    IndexedFace perimeter_points = faces[i];  // TODO fix
-
-    // build the face
-    int n = perimeter_points.size();
-    std::vector<StepKernel::Vertex *> vert;
-
-    // eckpfeiler
-    for (int j = 0; j < n; j++) {
-      int ind = perimeter_points[j];
+  std::vector<Vertex *> step_verts(vertices.size(), nullptr);
+  auto get_vertex = [&](int ind) {
+    if (step_verts[ind] == nullptr) {
       auto point = new Point(entities, vertices[ind]);
-      auto v = new Vertex(entities, point);
-      vert.push_back(v);
+      step_verts[ind] = new Vertex(entities, point);
     }
+    return step_verts[ind];
+  };
+
+  // Clean up the loops and derive a usable plane for each of them.
+  std::vector<std::vector<int>> loops(face_cnt);
+  std::vector<Vector3d> loop_normals(face_cnt, Vector3d(0, 0, 0));
+  std::vector<char> loop_valid(face_cnt, 0);
+  int degenerated_cnt = 0;
+
+  for (std::size_t i = 0; i < face_cnt; i++) {
+    std::vector<int> loop;
+    for (std::size_t j = 0; j < faces[i].size(); j++) {
+      const int ind = canonical[faces[i][j]];
+      // repeated points produce zero length edges
+      if (!loop.empty() && loop.back() == ind) continue;
+      loop.push_back(ind);
+    }
+    while (loop.size() >= 2 && loop.front() == loop.back()) loop.pop_back();
+    if (loop.size() < 3) {
+      degenerated_cnt++;
+      continue;
+    }
+
+    Vector3d norm = polygonNormal(vertices, loop);
+    if (norm.norm() < area_eps) {
+      // zero area polygon, exporting it would create a face without a usable
+      // surface normal
+      degenerated_cnt++;
+      continue;
+    }
+    norm.normalize();
+
+    // The outer loop of a face has to run counter clockwise around the surface
+    // normal. mergeTriangles() knows the outward direction of the whole bucket,
+    // so use it to fix up loops which come out the wrong way round.
+    if (faceParents[i] == -1 && i < faceNormals.size()) {
+      const Vector3d ref = faceNormals[i].head<3>();
+      if (ref.squaredNorm() > 0.5 && ref.dot(norm) < 0) {
+        std::reverse(loop.begin(), loop.end());
+        norm = -norm;
+      }
+    }
+
+    loops[i] = loop;
+    loop_normals[i] = norm;
+    loop_valid[i] = 1;
+  }
+
+  if (degenerated_cnt > 0) {
+    printf("STEP export: skipped %d degenerated face%s\n", degenerated_cnt,
+           degenerated_cnt == 1 ? "" : "s");
+  }
+
+  // Build the loops, their edges and the carrier planes.
+  std::map<std::pair<int, int>, EdgeCurve *> edge_map;
+  std::vector<FaceBound *> face_bounds(face_cnt, nullptr);
+  std::vector<Plane *> planes(face_cnt, nullptr);
+  std::vector<std::vector<EdgeCurve *>> loop_edges(face_cnt);
+  int merged_edge_cnt = 0;
+
+  for (std::size_t i = 0; i < face_cnt; i++) {
+    if (!loop_valid[i]) continue;
+    const std::vector<int>& loop = loops[i];
+    const int n = int(loop.size());
 
     std::vector<OrientedEdge *> oriented_edges;
-    // latten
     for (int j = 0; j < n; j++) {
-      int ind = perimeter_points[j];
-      int indn = perimeter_points[(j + 1) % n];
-      EdgeCurve *edge_curve;
+      const int ind = loop[j];
+      const int indn = loop[(j + 1) % n];
       bool edge_dir = true;
-      // hier wird line eingesetzt
-      edge_curve = get_line_from_map(vertices[ind], vertices[indn], edge_map, vert[j], vert[(j + 1) % n],
-                                     edge_dir, merged_edge_cnt);
+      EdgeCurve *edge_curve = get_line_from_map(edge_map, ind, indn, get_vertex(ind), get_vertex(indn),
+                                                edge_dir, merged_edge_cnt);
       oriented_edges.push_back(new OrientedEdge(entities, edge_curve, edge_dir));
+      loop_edges[i].push_back(edge_curve);
     }
 
-    // create the plane
-    auto plane_point = new Point(entities, p0);
-    auto plane_dir_1 = new Direction(entities, d2);
-    auto plane_dir_2 = new Direction(entities, d0);
-    auto plane_axis = new Axis2Placement(entities, plane_dir_1, plane_dir_2, plane_point);
-    auto plane = new Plane(entities, plane_axis);
-    planes.push_back(plane);
+    // create the plane. The reference direction has to lie inside the plane, so
+    // project the longest edge onto it instead of using it as it comes.
+    const Vector3d& norm = loop_normals[i];
+    Vector3d ref(0, 0, 0);
+    double ref_len = 0;
+    for (int j = 0; j < n; j++) {
+      const Vector3d dir = vertices[loop[(j + 1) % n]] - vertices[loop[j]];
+      if (dir.norm() > ref_len) {
+        ref_len = dir.norm();
+        ref = dir;
+      }
+    }
+    ref -= norm * norm.dot(ref);
+    if (ref.norm() < 1e-12) ref = perpendicular(norm);
+    else ref.normalize();
 
-    // build the faces
+    auto plane_point = new Point(entities, vertices[loop[0]]);
+    auto plane_dir_1 = new Direction(entities, norm);
+    auto plane_dir_2 = new Direction(entities, ref);
+    auto plane_axis = new Axis2Placement(entities, plane_dir_1, plane_dir_2, plane_point);
+    planes[i] = new Plane(entities, plane_axis);
 
     auto edge_loop = new EdgeLoop(entities, oriented_edges);
-    face_bounds.push_back(new FaceBound(entities, edge_loop, true));  // TODO hier mehr edgelops dazu
+    face_bounds[i] = new FaceBound(entities, edge_loop, true, faceParents[i] == -1);
   }
 
-  for (std::size_t i = 0; i < faces.size(); i++) {
-    if (faceParents[i] != -1) continue;
+  // Combine every outer loop with the loops of its holes into one ADVANCED_FACE.
+  std::vector<Face *> sfaces;
+  std::vector<std::vector<EdgeCurve *>> face_edges;
+  for (std::size_t i = 0; i < face_cnt; i++) {
+    if (!loop_valid[i] || faceParents[i] != -1) continue;
     std::vector<FaceBound *> singface;
     singface.push_back(face_bounds[i]);
-    for (std::size_t j = 0; j < faces.size(); j++) {
-      if (faceParents[j] == i) singface.push_back(face_bounds[j]);
+    std::vector<EdgeCurve *> edges = loop_edges[i];
+    for (std::size_t j = 0; j < face_cnt; j++) {
+      if (!loop_valid[j] || faceParents[j] != int(i)) continue;
+      singface.push_back(face_bounds[j]);
+      edges.insert(edges.end(), loop_edges[j].begin(), loop_edges[j].end());
     }
 
     sfaces.push_back(new Face(entities, singface, planes[i], true));
+    face_edges.push_back(edges);
   }
 
-  // build the model
-  auto closed_shell = new Shell(entities, sfaces);
-  closed_shell->isOpen = false;
+  // A CLOSED_SHELL has to be a single connected shell, so split disconnected
+  // bodies into one MANIFOLD_SOLID_BREP each instead of stuffing all of them
+  // into one shell that can never close.
+  std::vector<int> component(sfaces.size(), 0);
+  for (std::size_t i = 0; i < sfaces.size(); i++) component[i] = int(i);
+  std::map<EdgeCurve *, int> edge_owner;
+  for (std::size_t i = 0; i < face_edges.size(); i++) {
+    for (auto *edge : face_edges[i]) {
+      auto it = edge_owner.find(edge);
+      if (it == edge_owner.end()) {
+        edge_owner.emplace(edge, int(i));
+        continue;
+      }
+      const int a = uf_find(component, it->second);
+      const int b = uf_find(component, int(i));
+      if (a != b) component[a] = b;
+    }
+  }
+  std::map<int, std::vector<Face *>> shell_faces;
+  for (std::size_t i = 0; i < sfaces.size(); i++) {
+    shell_faces[uf_find(component, int(i))].push_back(sfaces[i]);
+  }
 
-  auto manif_solid = new ManifoldSolid(entities, 0, closed_shell);
+  // units and modelling tolerance
+  auto length_unit = new SiUnit(entities, SiUnit::LENGTH);
+  auto angle_unit = new SiUnit(entities, SiUnit::PLANE_ANGLE);
+  auto solid_angle_unit = new SiUnit(entities, SiUnit::SOLID_ANGLE);
+  auto uncertainty = new UncertaintyMeasure(entities, length_unit, model_tol);
+  auto geom_context =
+    new GeometricContext(entities, uncertainty, length_unit, angle_unit, solid_angle_unit);
 
-  auto shape_repr = new ShapeRepresentation(entities, name);
-  auto adv_brep_shape_pres = new AdvancesBrepRepresentation(entities, name, manif_solid);
-  auto shape_repr_rel = new ShapeRepresentationRelationShip(entities, shape_repr, adv_brep_shape_pres);
+  // create the base csys
+  auto base_point = new Point(entities, Vector3d(0, 0, 0));
+  auto base_dir_1 = new Direction(entities, Vector3d(0, 0, 1));
+  auto base_dir_2 = new Direction(entities, Vector3d(1, 0, 0));
+  auto base_axis = new Axis2Placement(entities, base_dir_1, base_dir_2, base_point);
 
-  auto product_def = new ProductDefinition(entities);
+  // product structure
+  const std::string body_name = name != nullptr ? name : "";
+  auto app_context = new ApplicationContext(entities);
+  new ApplicationProtocolDefinition(entities, app_context);
+  auto prod_context = new ProductContext(entities, app_context);
+  auto product = new Product(entities, body_name, prod_context);
+  new ProductRelatedProductCategory(entities, product);
+  auto prod_formation = new ProductDefinitionFormation(entities, product);
+  auto prod_def_context = new ProductDefinitionContext(entities, app_context);
+  auto product_def = new ProductDefinition(entities, prod_formation, prod_def_context);
   auto product_def_shape = new ProductDefinitionShape(entities, product_def);
-  auto shape_def_repr = new ShapeDefinition_Representation(entities, product_def_shape, shape_repr);
+  auto shape_repr = new ShapeRepresentation(entities, body_name, base_axis, geom_context);
+  new ShapeDefinition_Representation(entities, product_def_shape, shape_repr);
+
+  // build the model
+  std::vector<ManifoldSolid *> solids;
+  for (auto& shell : shell_faces) {
+    auto closed_shell = new Shell(entities, shell.second);
+    closed_shell->isOpen = false;
+    solids.push_back(new ManifoldSolid(entities, 0, closed_shell));
+  }
+
+  if (!solids.empty()) {
+    auto adv_brep_shape_pres = new AdvancesBrepRepresentation(entities, body_name, solids, geom_context);
+    new ShapeRepresentationRelationShip(entities, shape_repr, adv_brep_shape_pres);
+  }
 }
 
 StepKernel::EdgeCurve *StepKernel::get_line_from_map(
-  Vector3d p0, Vector3d p1,
-  std::map<std::tuple<double, double, double, double, double, double>, StepKernel::EdgeCurve *>&
-    edge_map,
+  std::map<std::pair<int, int>, StepKernel::EdgeCurve *>& edge_map, int ind1, int ind2,
   StepKernel::Vertex *vert1, StepKernel::Vertex *vert2, bool& edge_dir, int& merge_cnt)
 {
-  StepKernel::EdgeCurve *edge_curve = 0;
+  // Keyed on the (deduplicated) vertex indices: the previous key was built from
+  // the raw coordinates, which only matches when the two faces meeting at the
+  // edge store bit identical doubles.
+  const auto key = std::make_pair(std::min(ind1, ind2), std::max(ind1, ind2));
   edge_dir = true;
-  auto edge_tuple1_f = std::make_tuple(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2]);
-  auto edge_tuple1_r = std::make_tuple(p1[0], p1[1], p1[2], p0[0], p0[1], p0[2]);
-  if (edge_map.count(edge_tuple1_f)) {
-    edge_curve = edge_map[edge_tuple1_f];
-    edge_dir = true;
+
+  auto it = edge_map.find(key);
+  if (it != edge_map.end()) {
+    edge_dir = (it->second->vert1 == vert1);
     merge_cnt++;
-  } else if (edge_map.count(edge_tuple1_r)) {
-    edge_curve = edge_map[edge_tuple1_r];
-    edge_dir = false;
-    merge_cnt++;
+    return it->second;
   }
-  if (!edge_curve) {
-    edge_curve = create_line_edge_curve(vert1, vert2, true);
-    edge_map[edge_tuple1_f] = edge_curve;
-  }
+
+  StepKernel::EdgeCurve *edge_curve = create_line_edge_curve(vert1, vert2, true);
+  edge_map.emplace(key, edge_curve);
   return edge_curve;
 }
 
@@ -284,8 +438,11 @@ void StepKernel::read_step(std::string file_name)
       else if (func_name == "PLANE") ent = new Plane(entities);
       else if (func_name == "EDGE_LOOP") ent = new EdgeLoop(entities);
       else if (func_name == "FACE_BOUND") ent = new FaceBound(entities);
-      else if (func_name == "FACE_OUTER_BOUND") ent = new FaceBound(entities);
-      else if (func_name == "ADVANCED_FACE") ent = new Face(entities);
+      else if (func_name == "FACE_OUTER_BOUND") {
+        auto face_bound = new FaceBound(entities);
+        face_bound->outer = true;
+        ent = face_bound;
+      } else if (func_name == "ADVANCED_FACE") ent = new Face(entities);
       else if (func_name == "FACE_SURFACE") ent = new Face(entities);
       else if (func_name == "OPEN_SHELL") ent = new Shell(entities);
       else if (func_name == "CLOSED_SHELL") ent = new Shell(entities);

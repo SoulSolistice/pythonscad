@@ -51,8 +51,12 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
 
   StepKernel sk;
 
+  // newNormals holds the outward normal of each merged face; without it the
+  // exporter has to guess the plane orientation from the first three points of
+  // the loop, which points the wrong way at a concave corner and collapses
+  // completely when those points are collinear.
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceParents, 1e-5);
+                    faceParents, newNormals, 1e-5);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;
@@ -64,8 +68,10 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   output << "ISO-10303-21;\n";
   output << "HEADER;\n";
   output << "FILE_DESCRIPTION(('STP203'),'2;1');\n";
-  output << "FILE_NAME('" << exportInfo.sourceFilePath << "','" << iso_time.str() << "',('" << author
-         << "'),('" << org << "'),' ','pythonscad',' ');\n";
+  // the source path has to be escaped: an apostrophe would end the string and a
+  // backslash (any Windows path) starts a control directive
+  output << "FILE_NAME('" << step_string(exportInfo.sourceFilePath) << "','" << iso_time.str() << "',('"
+         << author << "'),('" << org << "'),' ','pythonscad',' ');\n";
   output << "FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\n";
   output << "ENDSEC; \n";
 

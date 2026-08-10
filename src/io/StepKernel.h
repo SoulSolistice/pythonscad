@@ -26,15 +26,68 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
+#pragma once
+
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
+#include <utility>
 #include <algorithm>
 #include <sstream>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <math.h>
 #include "src/geometry/GeometryUtils.h"
 #include <src/geometry/Curve.h>
 #include <src/geometry/Surface.h>
+
+// Format a double as an ISO 10303-21 REAL literal.
+//
+// The default ostream formatting is unusable for STEP: it only emits 6
+// significant digits (which quietly shifts vertices and opens gaps between
+// neighbouring faces) and it produces literals such as "0" or "1e-07" which
+// are not valid REALs - the standard requires an explicit decimal point and
+// an upper case exponent marker.
+inline std::string step_real(double v)
+{
+  if (!std::isfinite(v)) v = 0.0;
+  if (v == 0.0) return "0.";
+
+  // Emit the shortest representation which still round-trips exactly, so no
+  // precision is lost between the in-memory model and the exported file.
+  char buf[64];
+  for (int prec = 15; prec <= 17; prec++) {
+    snprintf(buf, sizeof(buf), "%.*g", prec, v);
+    if (std::strtod(buf, nullptr) == v) break;
+  }
+
+  std::string s(buf);
+  auto epos = s.find_first_of("eE");
+  if (epos == std::string::npos) {
+    if (s.find('.') == std::string::npos) s += '.';
+  } else {
+    s[epos] = 'E';
+    if (s.find('.') == std::string::npos) s.insert(epos, 1, '.');
+  }
+  return s;
+}
+
+// Escape a string for use inside an ISO 10303-21 string literal. An apostrophe
+// is written twice, a backslash (which starts a control directive) as well.
+inline std::string step_string(const std::string& str)
+{
+  std::string out;
+  out.reserve(str.size());
+  for (const char c : str) {
+    if (c == '\'') out += "''";
+    else if (c == '\\') out += "\\\\";
+    else if (static_cast<unsigned char>(c) < 0x20) out += ' ';
+    else out += c;
+  }
+  return out;
+}
 
 class StepKernel
 {
@@ -92,8 +145,8 @@ public:
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = DIRECTION('" << label << "', (" << pt[0] << ", " << pt[1] << ", "
-                << pt[2] << "));\n";
+      stream_in << "#" << id << " = DIRECTION('" << label << "', (" << step_real(pt[0]) << ", "
+                << step_real(pt[1]) << ", " << step_real(pt[2]) << "));\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
@@ -123,8 +176,8 @@ public:
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = CARTESIAN_POINT('" << label << "', (" << pt[0] << "," << pt[1] << ","
-                << pt[2] << "));\n";
+      stream_in << "#" << id << " = CARTESIAN_POINT('" << label << "', (" << step_real(pt[0]) << ","
+                << step_real(pt[1]) << "," << step_real(pt[2]) << "));\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
@@ -231,19 +284,20 @@ public:
       r = 0;
     }
 
-    CylindricalSurface(std::vector<Entity *>& ent_list, std::string name, Axis2Placement *axis_in,
-                       double r)
+    CylindricalSurface(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+                       double r_in)
       : SurfaceType(ent_list)
     {
+      name = name_in;
       axis = axis_in;
+      r = r_in;
     }
     virtual ~CylindricalSurface() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = CYLINDRICAL_SURFACE('" << label << "',#" << axis->id << ");\n";
-      stream_in << "#" << id << " = CYLINDRICAL_SURFACE('" << label << "',#" << axis->id << "," << r
-                << ");\n";
+      stream_in << "#" << id << " = CYLINDRICAL_SURFACE('" << label << "',#" << axis->id << ","
+                << step_real(r) << ");\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
@@ -276,17 +330,19 @@ public:
       r = 0;
     }
 
-    Circle(std::vector<Entity *>& ent_list, std::string name, Axis2Placement *axis_in, double r)
+    Circle(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in, double r_in)
       : RoundType(ent_list)
     {
+      name = name_in;
       axis = axis_in;
+      r = r_in;
     }
     virtual ~Circle() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = CIRCLE('" << label << "',#" << axis->id << ");\n";
-      stream_in << "#" << id << " = CIRCLE('" << label << "',#" << axis->id << "," << r << ");\n";
+      stream_in << "#" << id << " = CIRCLE('" << label << "',#" << axis->id << "," << step_real(r)
+                << ");\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
@@ -349,18 +405,25 @@ public:
     {
       edgeLoop = 0;
       dir = true;
+      outer = false;
     }
-    FaceBound(std::vector<Entity *>& ent_list, EdgeLoop *edge_loop_in, bool dir_in) : Entity(ent_list)
+    FaceBound(std::vector<Entity *>& ent_list, EdgeLoop *edge_loop_in, bool dir_in,
+              bool outer_in = false)
+      : Entity(ent_list)
     {
       edgeLoop = edge_loop_in;
       dir = dir_in;
+      outer = outer_in;
     }
     virtual ~FaceBound() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = FACE_BOUND('" << label << "', #" << edgeLoop->id << ","
-                << (dir ? ".T." : ".F.") << ");\n";
+      // The outer loop of a face has to be tagged as FACE_OUTER_BOUND, otherwise
+      // importers have to guess which of the bounds is the perimeter and which
+      // ones are the holes.
+      stream_in << "#" << id << " = " << (outer ? "FACE_OUTER_BOUND" : "FACE_BOUND") << "('" << label
+                << "', #" << edgeLoop->id << "," << (dir ? ".T." : ".F.") << ");\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
@@ -378,6 +441,7 @@ public:
     }
     EdgeLoop *edgeLoop;
     bool dir;
+    bool outer;
   };
 
   class Face : public Entity
@@ -776,7 +840,8 @@ public:
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = VECTOR('" << label << "',#" << dir->id << "," << length << ");\n";
+      stream_in << "#" << id << " = VECTOR('" << label << "',#" << dir->id << "," << step_real(length)
+                << ");\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
@@ -795,18 +860,257 @@ public:
     double length;
     Direction *dir;
   };
+  // ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) ) and friends.
+  class SiUnit : public Entity
+  {
+  public:
+    enum Kind { LENGTH, PLANE_ANGLE, SOLID_ANGLE };
+    SiUnit(std::vector<Entity *>& ent_list, Kind kind_in) : Entity(ent_list) { kind = kind_in; }
+    virtual ~SiUnit() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = ";
+      switch (kind) {
+      case LENGTH:      stream_in << "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))"; break;
+      case PLANE_ANGLE: stream_in << "(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))"; break;
+      case SOLID_ANGLE: stream_in << "(NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT())"; break;
+      }
+      stream_in << ";\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Kind kind;
+  };
+
+  // The modelling tolerance. Without it importers fall back to their own
+  // default, which is often far tighter than the accuracy of the exported
+  // coordinates, and then report gaps between neighbouring faces.
+  class UncertaintyMeasure : public Entity
+  {
+  public:
+    UncertaintyMeasure(std::vector<Entity *>& ent_list, SiUnit *unit_in, double value_in)
+      : Entity(ent_list)
+    {
+      unit = unit_in;
+      value = value_in;
+    }
+    virtual ~UncertaintyMeasure() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(" << step_real(value)
+                << "),#" << unit->id << ",'distance_accuracy_value','confusion accuracy');\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    SiUnit *unit;
+    double value;
+  };
+
+  class GeometricContext : public Entity
+  {
+  public:
+    GeometricContext(std::vector<Entity *>& ent_list, UncertaintyMeasure *uncertainty_in,
+                     SiUnit *length_in, SiUnit *angle_in, SiUnit *solid_in)
+      : Entity(ent_list)
+    {
+      uncertainty = uncertainty_in;
+      length = length_in;
+      angle = angle_in;
+      solid = solid_in;
+    }
+    virtual ~GeometricContext() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = (GEOMETRIC_REPRESENTATION_CONTEXT(3)"
+                << "GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#" << uncertainty->id << "))"
+                << "GLOBAL_UNIT_ASSIGNED_CONTEXT((#" << length->id << ",#" << angle->id << ",#"
+                << solid->id << "))"
+                << "REPRESENTATION_CONTEXT('Context','3D Context with UNIT and UNCERTAINTY'));\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    UncertaintyMeasure *uncertainty;
+    SiUnit *length;
+    SiUnit *angle;
+    SiUnit *solid;
+  };
+
+  class ApplicationContext : public Entity
+  {
+  public:
+    ApplicationContext(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
+    virtual ~ApplicationContext() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id
+                << " = APPLICATION_CONTEXT('configuration controlled 3d designs of mechanical parts "
+                   "and assemblies');\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+  };
+
+  class ApplicationProtocolDefinition : public Entity
+  {
+  public:
+    ApplicationProtocolDefinition(std::vector<Entity *>& ent_list, ApplicationContext *context_in)
+      : Entity(ent_list)
+    {
+      context = context_in;
+    }
+    virtual ~ApplicationProtocolDefinition() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id
+                << " = APPLICATION_PROTOCOL_DEFINITION('international standard',"
+                   "'config_control_design',1994,#"
+                << context->id << ");\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    ApplicationContext *context;
+  };
+
+  class ProductContext : public Entity
+  {
+  public:
+    ProductContext(std::vector<Entity *>& ent_list, ApplicationContext *context_in) : Entity(ent_list)
+    {
+      context = context_in;
+    }
+    virtual ~ProductContext() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT_CONTEXT('',#" << context->id << ",'mechanical');\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    ApplicationContext *context;
+  };
+
+  class Product : public Entity
+  {
+  public:
+    Product(std::vector<Entity *>& ent_list, const std::string& name_in, ProductContext *context_in)
+      : Entity(ent_list)
+    {
+      name = name_in;
+      context = context_in;
+    }
+    virtual ~Product() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT('" << step_string(name) << "','" << step_string(name)
+                << "','',(#" << context->id << "));\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    std::string name;
+    ProductContext *context;
+  };
+
+  class ProductDefinitionFormation : public Entity
+  {
+  public:
+    ProductDefinitionFormation(std::vector<Entity *>& ent_list, Product *product_in) : Entity(ent_list)
+    {
+      product = product_in;
+    }
+    virtual ~ProductDefinitionFormation() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE('','',#"
+                << product->id << ",.NOT_KNOWN.);\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Product *product;
+  };
+
+  class ProductDefinitionContext : public Entity
+  {
+  public:
+    ProductDefinitionContext(std::vector<Entity *>& ent_list, ApplicationContext *context_in)
+      : Entity(ent_list)
+    {
+      context = context_in;
+    }
+    virtual ~ProductDefinitionContext() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT_DEFINITION_CONTEXT('part definition',#" << context->id
+                << ",'design');\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    ApplicationContext *context;
+  };
+
+  class ProductRelatedProductCategory : public Entity
+  {
+  public:
+    ProductRelatedProductCategory(std::vector<Entity *>& ent_list, Product *product_in)
+      : Entity(ent_list)
+    {
+      product = product_in;
+    }
+    virtual ~ProductRelatedProductCategory() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT_RELATED_PRODUCT_CATEGORY('part','',(#" << product->id
+                << "));\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Product *product;
+  };
+
   class ProductDefinition : public Entity
   {
   public:
-    ProductDefinition(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
+    ProductDefinition(std::vector<Entity *>& ent_list) : Entity(ent_list)
+    {
+      formation = 0;
+      context = 0;
+    }
+    ProductDefinition(std::vector<Entity *>& ent_list, ProductDefinitionFormation *formation_in,
+                      ProductDefinitionContext *context_in)
+      : Entity(ent_list)
+    {
+      formation = formation_in;
+      context = context_in;
+    }
     virtual ~ProductDefinition() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = PRODUCT_DEFINITION('', '');\n";
+      stream_in << "#" << id << " = PRODUCT_DEFINITION('design','',#" << formation->id << ",#"
+                << context->id << ");\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    ProductDefinitionFormation *formation;
+    ProductDefinitionContext *context;
   };
   class ProductDefinitionShape : public Entity
   {
@@ -831,20 +1135,29 @@ public:
   class ShapeRepresentation : public Entity
   {
   public:
-    ShapeRepresentation(std::vector<Entity *>& ent_list, const char *name_in) : Entity(ent_list)
+    ShapeRepresentation(std::vector<Entity *>& ent_list, const std::string& name_in,
+                        Axis2Placement *axis_in, GeometricContext *context_in)
+      : Entity(ent_list)
     {
-      name = strdup(name_in);
+      name = name_in;
+      axis = axis_in;
+      context = context_in;
     }
     virtual ~ShapeRepresentation() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = SHAPE_REPRESENTATION('" << name << "');\n";
+      // SHAPE_REPRESENTATION(name, items, context_of_items) - all three
+      // arguments are mandatory.
+      stream_in << "#" << id << " = SHAPE_REPRESENTATION('" << step_string(name) << "',(#" << axis->id
+                << "),#" << context->id << ");\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
 
-    char *name;
+    std::string name;
+    Axis2Placement *axis;
+    GeometricContext *context;
   };
   class ShapeDefinition_Representation : public Entity
   {
@@ -875,25 +1188,31 @@ public:
   class AdvancesBrepRepresentation : public Entity
   {
   public:
-    AdvancesBrepRepresentation(std::vector<Entity *>& ent_list, const char *name_in,
-                               ManifoldSolid *solid_in)
+    AdvancesBrepRepresentation(std::vector<Entity *>& ent_list, const std::string& name_in,
+                               const std::vector<ManifoldSolid *>& solids_in,
+                               GeometricContext *context_in)
       : Entity(ent_list)
     {
-      name = strdup(name_in);
-      solid = solid_in;
+      name = name_in;
+      solids = solids_in;
+      context = context_in;
     }
     virtual ~AdvancesBrepRepresentation() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = ADVANCED_BREP_SHAPE_REPRESENTATION('" << name << "',(#" << solid->id
-                << "),);\n";
+      stream_in << "#" << id << " = ADVANCED_BREP_SHAPE_REPRESENTATION('" << step_string(name) << "',(";
+      for (size_t i = 0; i < solids.size(); i++) {
+        if (i) stream_in << ",";
+        stream_in << "#" << solids[i]->id;
+      }
+      stream_in << "),#" << context->id << ");\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
-    char *name;
-    ManifoldSolid *solid;
-    double length;
+    std::string name;
+    std::vector<ManifoldSolid *> solids;
+    GeometricContext *context;
   };
 
   class ShapeRepresentationRelationShip : public Entity
@@ -967,20 +1286,15 @@ public:
   StepKernel::EdgeCurve *create_arc_edge_curve(StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
                                                bool dir);
 
-  void build_tri_body(const char *name, std::vector<Vector3d> tris, std::vector<IndexedFace> faces,
+  void build_tri_body(const char *name, const std::vector<Vector3d>& vertices,
+                      const std::vector<IndexedFace>& faces,
                       const std::vector<std::shared_ptr<Curve>>& curves,
-                      const std::vector<std::shared_ptr<Surface>> surfaces,
-                      const std::vector<int>& faceParents, double tol);
-  EdgeCurve *get_line_from_map(Vector3d p0, Vector3d p1,
-                               std::map<std::tuple<double, double, double, double, double, double>,
-                                        StepKernel::EdgeCurve *>& edge_map,
-                               StepKernel::Vertex *vert1, StepKernel::Vertex *vert2, bool& edge_dir,
-                               int& merge_cnt);
-  EdgeCurve *get_arc_from_map(Vector3d p0, Vector3d p1,
-                              std::map<std::tuple<double, double, double, double, double, double>,
-                                       StepKernel::EdgeCurve *>& edge_map,
-                              StepKernel::Vertex *vert1, StepKernel::Vertex *vert2, bool& edge_dir,
-                              int& merge_cnt);
+                      const std::vector<std::shared_ptr<Surface>>& surfaces,
+                      const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals,
+                      double tol);
+  EdgeCurve *get_line_from_map(std::map<std::pair<int, int>, StepKernel::EdgeCurve *>& edge_map,
+                               int ind1, int ind2, StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
+                               bool& edge_dir, int& merge_cnt);
   std::string read_line(std::ifstream& stp_file, bool skip_all_space);
   void read_step(std::string file_name);
   std::vector<Entity *> entities;
