@@ -159,11 +159,20 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
                                 const std::vector<int>& faceParents,
                                 const std::vector<Vector4d>& faceNormals, double tol)
 {
-  // TODO: `curves` and `surfaces` carry the analytic geometry recovered during
-  // evaluation. Once arcs and cylinders are written out they are picked up
-  // here; for now everything is exported as planes and lines.
+  // `curves` and `surfaces` carry the analytic geometry the model was built
+  // from. Writing CIRCLE and CYLINDRICAL_SURFACE instead of the facets needs
+  // them: a ring of N quads is exactly the mesh of an N sided prism, so the
+  // facets alone never say which was meant. Everything is still written as
+  // planes and lines; this only reports what arrived.
   (void)curves;
-  (void)surfaces;
+  if (!surfaces.empty()) {
+    int cylinders = 0;
+    for (const auto& surface : surfaces) {
+      if (dynamic_cast<const CylinderSurface *>(surface.get()) != nullptr) cylinders++;
+    }
+    printf("STEP export: %d analytic surface%s available (%d cylindrical)\n", int(surfaces.size()),
+           surfaces.size() == 1 ? "" : "s", cylinders);
+  }
 
   const double model_tol = tol > 0 ? tol : 1e-5;
   // twice the area of the smallest polygon still considered a face

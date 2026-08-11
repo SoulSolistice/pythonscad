@@ -377,6 +377,19 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
     }
   }
 
+  // Record that the wall was meant as a cylinder. The facets alone cannot say
+  // so: a ring of N quads is exactly the mesh of an N sided prism, and no
+  // amount of measuring the result tells the two apart. Exporters that write
+  // analytic geometry read this to know which is which; nothing else uses it,
+  // and dropping it only costs the analytic form.
+  //
+  // Only for a straight, closed cylinder - a cone is not a CylinderSurface and
+  // a pie slice has flat sides which are not part of it.
+  if (!cone && !inverted_cone && r1 == r2 && this->angle == 360) {
+    polyset->surfaces.push_back(
+      std::make_shared<CylinderSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1), r1));
+  }
+
   return polyset;
 }
 

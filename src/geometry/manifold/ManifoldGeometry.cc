@@ -45,11 +45,13 @@ ManifoldGeometry::ManifoldGeometry() : manifold_(manifold::Manifold())
 
 ManifoldGeometry::ManifoldGeometry(manifold::Manifold mani, const std::set<uint32_t>& originalIDs,
                                    const std::map<uint32_t, Color4f>& originalIDToColor,
-                                   const std::set<uint32_t>& subtractedIDs)
+                                   const std::set<uint32_t>& subtractedIDs,
+                                   const std::vector<std::shared_ptr<Surface>>& surfaces)
   : manifold_(std::move(mani)),
     originalIDs_(originalIDs),
     originalIDToColor_(originalIDToColor),
-    subtractedIDs_(subtractedIDs)
+    subtractedIDs_(subtractedIDs),
+    surfaces_(surfaces)
 {
 }
 
@@ -206,6 +208,11 @@ std::shared_ptr<PolySet> ManifoldGeometry::toPolySet() const
     }
     start = end;
   }
+
+  // Hand the analytic surfaces on to whoever consumes the PolySet; the STEP
+  // exporter uses them to tell a faceted cylinder from a prism.
+  ps->surfaces = surfaces_;
+
   return ps;
 }
 
@@ -260,6 +267,34 @@ template std::shared_ptr<CGAL::Polyhedron_3<CGAL_Kernel3>> ManifoldGeometry::toP
 
 #endif
 
+namespace {
+
+/*! Surface::operator== is not usable through the base class (the virtual
+ * overload always returns 0), so compare the parameters directly. Only used to
+ * stop the list growing without bound through a deep boolean tree. */
+bool sameSurface(const std::shared_ptr<Surface>& a, const std::shared_ptr<Surface>& b)
+{
+  if (a == b) return true;
+  if (!a || !b) return false;
+  const auto *ca = dynamic_cast<const CylinderSurface *>(a.get());
+  const auto *cb = dynamic_cast<const CylinderSurface *>(b.get());
+  if ((ca == nullptr) != (cb == nullptr)) return false;
+  if (ca != nullptr && fabs(ca->r - cb->r) > 1e-9) return false;
+  if ((a->refpt - b->refpt).norm() > 1e-9) return false;
+  return fabs(fabs(a->normdir.dot(b->normdir)) - 1.0) < 1e-9;
+}
+
+bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
+                     const std::shared_ptr<Surface>& surface)
+{
+  for (const auto& s : list) {
+    if (sameSurface(s, surface)) return true;
+  }
+  return false;
+}
+
+}  // namespace
+
 ManifoldGeometry ManifoldGeometry::binOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs,
                                          manifold::OpType opType) const
 {
@@ -285,7 +320,16 @@ ManifoldGeometry ManifoldGeometry::binOp(const ManifoldGeometry& lhs, const Mani
     originalIDToColor.insert(rhs.originalIDToColor_.begin(), rhs.originalIDToColor_.end());
     subtractedIDs.insert(rhs.subtractedIDs_.begin(), rhs.subtractedIDs_.end());
   }
-  return {mani, originalIDs, originalIDToColor, subtractedIDs};
+
+  // Keep the analytic surfaces of both operands. A cylinder used as a tool
+  // leaves a bore of the same axis and radius behind, so the surfaces of the
+  // right hand side stay meaningful for a subtraction too.
+  auto surfaces = lhs.surfaces_;
+  for (const auto& surface : rhs.surfaces_) {
+    if (!containsSurface(surfaces, surface)) surfaces.push_back(surface);
+  }
+
+  return {mani, originalIDs, originalIDToColor, subtractedIDs, surfaces};
 }
 
 std::shared_ptr<ManifoldGeometry> minkowskiOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs)
@@ -366,6 +410,18 @@ void ManifoldGeometry::transform(const Transform3d& mat)
     {mat(0, 0), mat(1, 0), mat(2, 0)}, {mat(0, 1), mat(1, 1), mat(2, 1)},
     {mat(0, 2), mat(1, 2), mat(2, 2)}, {mat(0, 3), mat(1, 3), mat(2, 3)});
   manifold_ = getManifold().Transform(glMat);
+
+  // The surfaces are recorded in world coordinates, so they move with the
+  // geometry. Copy before transforming: the same surface may still be
+  // referenced by another geometry. Anything a similarity cannot carry (a non
+  // uniform scale turns a cylinder into an ellipse) is dropped rather than
+  // kept wrong.
+  std::vector<std::shared_ptr<Surface>> moved;
+  for (const auto& surface : surfaces_) {
+    auto copy = surface->clone();
+    if (copy->transform(mat)) moved.push_back(copy);
+  }
+  surfaces_ = std::move(moved);
 }
 
 void ManifoldGeometry::setColor(const Color4f& c)
