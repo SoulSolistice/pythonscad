@@ -295,6 +295,14 @@ bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
 
 }  // namespace
 
+void ManifoldGeometry::mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
+                                     const std::vector<std::shared_ptr<Surface>>& from)
+{
+  for (const auto& surface : from) {
+    if (!containsSurface(into, surface)) into.push_back(surface);
+  }
+}
+
 ManifoldGeometry ManifoldGeometry::binOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs,
                                          manifold::OpType opType) const
 {
@@ -325,9 +333,7 @@ ManifoldGeometry ManifoldGeometry::binOp(const ManifoldGeometry& lhs, const Mani
   // leaves a bore of the same axis and radius behind, so the surfaces of the
   // right hand side stay meaningful for a subtraction too.
   auto surfaces = lhs.surfaces_;
-  for (const auto& surface : rhs.surfaces_) {
-    if (!containsSurface(surfaces, surface)) surfaces.push_back(surface);
-  }
+  mergeSurfaces(surfaces, rhs.surfaces_);
 
   return {mani, originalIDs, originalIDToColor, subtractedIDs, surfaces};
 }

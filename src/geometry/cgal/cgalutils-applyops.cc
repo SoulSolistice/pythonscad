@@ -169,6 +169,18 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
 
   auto addPoint = [&](const auto& v) { reindexer.lookup(v); };
 
+  // The analytic surfaces the children declared, kept for the same reason as in
+  // the Manifold backend's hull: they are a statement of intent which an
+  // exporter only acts on after finding an exact fit in the resulting mesh.
+  std::vector<std::shared_ptr<Surface>> surfaces;
+  auto addSurfaces = [&](const std::vector<std::shared_ptr<Surface>>& from) {
+    for (const auto& surface : from) {
+      bool known = false;
+      for (const auto& s : surfaces) known = known || s == surface;
+      if (!known) surfaces.push_back(surface);
+    }
+  };
+
   for (const auto& item : children) {
     auto& chgeom = item.second;
 #ifdef ENABLE_CGAL
@@ -182,6 +194,7 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
 #endif  // ENABLE_CGAL
 #ifdef ENABLE_MANIFOLD
     } else if (const auto *mani = dynamic_cast<const ManifoldGeometry *>(chgeom.get())) {
+      addSurfaces(mani->getSurfaces());
       addCapacity(mani->numVertices());
       mani->foreachVertexUntilTrue([&](auto& p) {
         addPoint(CGALUtils::vector_convert<Hull_kernel::Point_3>(p));
@@ -189,6 +202,7 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
       });
 #endif  // ENABLE_MANIFOLD
     } else if (const auto *ps = dynamic_cast<const PolySet *>(chgeom.get())) {
+      addSurfaces(ps->surfaces);
       addCapacity(ps->indices.size() * 3);
       for (const auto& p : ps->indices) {
         for (const auto& ind : p) {
@@ -212,7 +226,9 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
       PRINTDB("After hull valid: %d", r.is_valid());
       // FIXME: Make sure PolySet is set to convex.
       // FIXME: Can we guarantee a manifold PolySet here?
-      return CGALUtils::createPolySetFromPolyhedron(r);
+      auto result = CGALUtils::createPolySetFromPolyhedron(r);
+      if (result) result->surfaces = surfaces;
+      return result;
     } catch (const CGAL::Failure_exception& e) {
       LOG(message_group::Error, "CGAL error in applyHull3D(): %1$s", e.what());
     }

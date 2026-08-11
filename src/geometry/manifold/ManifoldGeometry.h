@@ -76,6 +76,17 @@ public:
 
   const manifold::Manifold& getManifold() const;
 
+  /*! The analytic surfaces this geometry carries. See surfaces_ below. */
+  [[nodiscard]] const std::vector<std::shared_ptr<Surface>>& getSurfaces() const { return surfaces_; }
+
+  /*! Append `from` to `into`, skipping records already there.
+   *
+   * Used by every operation that has more than one operand, so that a deep
+   * tree of booleans and hulls does not accumulate one copy of the same
+   * cylinder per node. */
+  static void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
+                            const std::vector<std::shared_ptr<Surface>>& from);
+
 private:
   ManifoldGeometry binOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs,
                          manifold::OpType opType) const;

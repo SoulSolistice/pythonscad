@@ -3,7 +3,11 @@
 
 #ifdef ENABLE_MANIFOLD
 
+#include <cstdint>
+#include <map>
 #include <memory>
+#include <set>
+#include <vector>
 
 #include "core/AST.h"
 #include "core/enums.h"
@@ -31,16 +35,25 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
 {
   if (op == OpenSCADOperator::HULL) {
     std::vector<manifold::vec3> pts;
+    // The analytic surfaces the children declared. A hull only adds material,
+    // so a wall its child declared either survives on the hull's boundary or is
+    // buried inside it - and these records are a statement of intent, not
+    // geometry: an exporter still has to find an exact fit in the mesh before it
+    // uses one. Carrying them is what keeps the commonest chamfer idiom,
+    // hull(cylinder(r=R), cylinder(r=R-c)), from costing the wall its identity.
+    std::vector<std::shared_ptr<Surface>> surfaces;
     for (const auto& item : children) {
       if (!item.second) continue;
       auto& chgeom = item.second;
       if (const auto *mani = dynamic_cast<const ManifoldGeometry *>(chgeom.get())) {
+        ManifoldGeometry::mergeSurfaces(surfaces, mani->getSurfaces());
         pts.reserve(pts.size() + mani->numVertices());
         mani->foreachVertexUntilTrue([&](auto& p) {
           pts.push_back(p);
           return false;
         });
       } else if (const auto *ps = dynamic_cast<const PolySet *>(chgeom.get())) {
+        ManifoldGeometry::mergeSurfaces(surfaces, ps->surfaces);
         pts.reserve(pts.size() + ps->indices.size() * 3);
         for (const auto& p : ps->indices) {
           for (const auto& ind : p) {
@@ -51,6 +64,7 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       } else {
         auto chN = createManifoldFromGeometry(chgeom);
         if (chN && !chN->isEmpty()) {
+          ManifoldGeometry::mergeSurfaces(surfaces, chN->getSurfaces());
           chN->foreachVertexUntilTrue([&](auto& p) {
             pts.push_back(p);
             return false;
@@ -60,7 +74,9 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       if (item.first) item.first->progress_report();
     }
     if (pts.empty()) return nullptr;
-    return std::make_shared<ManifoldGeometry>(manifold::Manifold::Hull(pts));
+    return std::make_shared<ManifoldGeometry>(manifold::Manifold::Hull(pts), std::set<uint32_t>{},
+                                              std::map<uint32_t, Color4f>{}, std::set<uint32_t>{},
+                                              surfaces);
   }
 
   std::shared_ptr<ManifoldGeometry> geom;
