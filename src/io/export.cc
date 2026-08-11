@@ -101,8 +101,15 @@ Containers& containers()
     add_item(*containers, {FileFormat::PDF, "pdf", "pdf", "PDF"});
     add_item(*containers, {FileFormat::POV, "pov", "pov", "POV"});
 
-    // Alias
+    // Aliases.
+    //
+    // Both the command line (-o file.ext) and export() in a Python script
+    // resolve the format by passing the file suffix to fromIdentifier(), so
+    // every suffix which differs from its format identifier needs an entry
+    // here. Without one, `-o part.stp` is rejected as an invalid suffix and
+    // export(part, "part.stp") silently falls back to writing a binary STL.
     containers->identifierToInfo["stl"] = containers->identifierToInfo["asciistl"];
+    containers->identifierToInfo["stp"] = containers->identifierToInfo["step"];
     return containers;
   }();
   return *containers;
