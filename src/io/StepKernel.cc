@@ -34,6 +34,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <map>
 #include <utility>
 #include <array>
+#include <set>
 #include <iomanip>  // put_time
 StepKernel::StepKernel()
 {
@@ -121,6 +122,45 @@ bool pointInLoop2d(const std::vector<std::array<double, 2>>& poly, const std::ar
   return inside;
 }
 
+/*! A ring of facets recognised as one cylinder.
+ *
+ * `walls` are the loops the ring is made of, which are dropped in favour of a
+ * single CYLINDRICAL_SURFACE face. `bottom_loop`/`top_loop` are the loops of
+ * the neighbouring faces that bound the same rims - a disc or the hole of an
+ * annulus - and their N straight edges collapse into one CIRCLE each. */
+struct CylinderRing {
+  std::vector<std::size_t> walls;
+  Vector3d axis, base;  // base is the centre of the bottom rim
+  double radius = 0;
+  double height = 0;
+  std::size_t bottom_loop = 0, top_loop = 0;
+  bool bottom_ccw = false, top_ccw = false;  // rim traversal, right handed about axis
+  bool outward = false;                      // wall normals point away from the axis
+  int seam_bottom = -1, seam_top = -1;       // the vertices the seam runs between
+};
+
+/*! Signed rotation of a loop about an axis: positive when it runs counter
+ * clockwise in the right handed sense. */
+double loopTurnDirection(const std::vector<Vector3d>& vertices, const std::vector<int>& loop,
+                         const Vector3d& axis, const Vector3d& centre)
+{
+  double total = 0;
+  const std::size_t n = loop.size();
+  for (std::size_t i = 0; i < n; i++) {
+    const Vector3d a = vertices[loop[i]] - centre;
+    const Vector3d b = vertices[loop[(i + 1) % n]] - centre;
+    total += axis.dot(a.cross(b));
+  }
+  return total;
+}
+
+/*! Distance from a point to the line through `base` along `axis`. */
+double distanceToAxis(const Vector3d& pt, const Vector3d& base, const Vector3d& axis)
+{
+  const Vector3d rel = pt - base;
+  return (rel - axis * axis.dot(rel)).norm();
+}
+
 int uf_find(std::vector<int>& parent, int x)
 {
   while (parent[x] != x) {
@@ -157,7 +197,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
                                 const std::vector<std::shared_ptr<Curve>>& curves,
                                 const std::vector<std::shared_ptr<Surface>>& surfaces,
                                 const std::vector<int>& faceParents,
-                                const std::vector<Vector4d>& faceNormals, double tol)
+                                const std::vector<Vector4d>& faceNormals, double tol, bool analytic)
 {
   // `curves` and `surfaces` carry the analytic geometry the model was built
   // from. Writing CIRCLE and CYLINDRICAL_SURFACE instead of the facets needs
@@ -318,6 +358,222 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
            orphan_cnt == 1 ? "" : "s");
   }
 
+  std::vector<Face *> sfaces_extra;
+  std::vector<std::vector<EdgeCurve *>> face_edges_extra;
+
+  // Recognise rings of facets that were modelled as a cylinder.
+  //
+  // The fit alone can never decide this: a ring of N quads is exactly the mesh
+  // of an N sided prism, and a cube's four sides fit a cylinder through its
+  // corners with zero residual. So a ring is only accepted when the model also
+  // declared a matching CylinderSurface - geometry from the mesh, intent from
+  // the primitive that produced it.
+  std::vector<CylinderRing> rings;
+  std::vector<char> consumed(face_cnt, 0);
+  std::map<std::size_t, std::size_t> rim_of_loop;  // rim loop -> index into rings
+
+  if (analytic && !surfaces.empty()) {
+    std::map<std::pair<int, int>, std::vector<std::size_t>> loop_edges_map;
+    for (std::size_t i = 0; i < face_cnt; i++) {
+      if (!loop_valid[i]) continue;
+      const auto& loop = loops[i];
+      for (std::size_t j = 0; j < loop.size(); j++) {
+        const int a = loop[j], b = loop[(j + 1) % loop.size()];
+        loop_edges_map[{std::min(a, b), std::max(a, b)}].push_back(i);
+      }
+    }
+
+    for (std::size_t seed = 0; seed < face_cnt; seed++) {
+      if (!loop_valid[seed] || consumed[seed] || loop_is_hole[seed]) continue;
+      if (loops[seed].size() != 4) continue;
+
+      for (int k = 0; k < 2; k++) {
+        const Vector3d d0 = (vertices[loops[seed][(k + 1) % 4]] - vertices[loops[seed][k]]).normalized();
+        const Vector3d d2 =
+          (vertices[loops[seed][(k + 3) % 4]] - vertices[loops[seed][(k + 2) % 4]]).normalized();
+        if (fabs(fabs(d0.dot(d2)) - 1.0) > 1e-9) continue;
+        const Vector3d axis = (d0[2] < 0 || (d0[2] == 0 && d0[0] < 0)) ? Vector3d(-d0) : d0;
+
+        // grow the ring across the edges that run along the axis
+        std::vector<std::size_t> ring;
+        std::vector<std::size_t> stack{seed};
+        std::set<std::size_t> in_ring;
+        while (!stack.empty()) {
+          const std::size_t cur = stack.back();
+          stack.pop_back();
+          if (in_ring.count(cur)) continue;
+          in_ring.insert(cur);
+          ring.push_back(cur);
+          const auto& loop = loops[cur];
+          for (std::size_t j = 0; j < loop.size(); j++) {
+            const int a = loop[j], b = loop[(j + 1) % loop.size()];
+            const Vector3d dir = (vertices[b] - vertices[a]).normalized();
+            if (fabs(fabs(dir.dot(axis)) - 1.0) > 1e-9) continue;
+            for (const std::size_t nb : loop_edges_map[{std::min(a, b), std::max(a, b)}]) {
+              if (nb == cur || in_ring.count(nb) || consumed[nb]) continue;
+              if (loops[nb].size() == 4 && !loop_is_hole[nb]) stack.push_back(nb);
+            }
+          }
+        }
+        if (ring.size() < 3) continue;
+
+        // every wall vertex has to sit on one of the two rims
+        std::map<int, double> along;
+        for (const std::size_t f : ring) {
+          for (const int v : loops[f]) along[v] = axis.dot(vertices[v]);
+        }
+        double lo = along.begin()->second, hi = lo;
+        for (const auto& kv : along) {
+          lo = std::min(lo, kv.second);
+          hi = std::max(hi, kv.second);
+        }
+        if (hi - lo < model_tol) continue;
+
+        std::vector<int> bottom_set, top_set;
+        bool split_ok = true;
+        for (const auto& kv : along) {
+          if (fabs(kv.second - lo) < model_tol) bottom_set.push_back(kv.first);
+          else if (fabs(kv.second - hi) < model_tol) top_set.push_back(kv.first);
+          else split_ok = false;
+        }
+        if (!split_ok) continue;
+        if (bottom_set.size() != ring.size() || top_set.size() != ring.size()) continue;
+
+        // fit: one axis line, one radius
+        Vector3d centroid(0, 0, 0);
+        for (const auto& kv : along) centroid += vertices[kv.first];
+        centroid /= double(along.size());
+        const Vector3d base = centroid - axis * (axis.dot(centroid) - lo);
+        double r_sum = 0;
+        for (const auto& kv : along) r_sum += distanceToAxis(vertices[kv.first], base, axis);
+        const double radius = r_sum / double(along.size());
+        if (radius < model_tol) continue;
+        double dev = 0;
+        for (const auto& kv : along) {
+          dev = std::max(dev, fabs(distanceToAxis(vertices[kv.first], base, axis) - radius));
+        }
+        if (dev > 1e-7 * radius) continue;
+
+        // and the model has to have declared a cylinder here
+        bool declared = false;
+        for (const auto& surface : surfaces) {
+          const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
+          if (cyl == nullptr) continue;
+          if (fabs(cyl->r - radius) > 1e-7 * radius) continue;
+          if (fabs(fabs(cyl->normdir.normalized().dot(axis)) - 1.0) > 1e-7) continue;
+          if (distanceToAxis(cyl->refpt, base, axis) > 1e-7 * radius) continue;
+          declared = true;
+          break;
+        }
+        if (!declared) continue;
+
+        // both rims have to be a complete bound of a neighbouring face, so that
+        // collapsing them to a CIRCLE leaves that face's loop intact
+        const std::set<int> bottom_key(bottom_set.begin(), bottom_set.end());
+        const std::set<int> top_key(top_set.begin(), top_set.end());
+        std::size_t bottom_loop = face_cnt, top_loop = face_cnt;
+        for (std::size_t i = 0; i < face_cnt; i++) {
+          if (!loop_valid[i] || consumed[i] || in_ring.count(i) || rim_of_loop.count(i)) continue;
+          const std::set<int> key(loops[i].begin(), loops[i].end());
+          if (key.size() != loops[i].size()) continue;
+          if (key == bottom_key) bottom_loop = i;
+          else if (key == top_key) top_loop = i;
+        }
+        if (bottom_loop == face_cnt || top_loop == face_cnt) continue;
+
+        CylinderRing info;
+        info.walls = ring;
+        info.axis = axis;
+        info.base = base;
+        info.radius = radius;
+        info.height = hi - lo;
+        info.bottom_loop = bottom_loop;
+        info.top_loop = top_loop;
+        info.bottom_ccw = loopTurnDirection(vertices, loops[bottom_loop], axis, base) > 0;
+        info.top_ccw = loopTurnDirection(vertices, loops[top_loop], axis, base) > 0;
+        info.seam_bottom = loops[bottom_loop][0];
+        for (const int v : top_set) {
+          const Vector3d rel = vertices[v] - vertices[info.seam_bottom];
+          if ((rel - axis * axis.dot(rel)).norm() < model_tol) info.seam_top = v;
+        }
+        if (info.seam_top == -1) continue;
+
+        const Vector3d probe = vertices[loops[ring[0]][0]];
+        const Vector3d radial = (probe - base) - axis * axis.dot(probe - base);
+        info.outward = radial.normalized().dot(loop_normals[ring[0]]) > 0;
+
+        for (const std::size_t f : ring) consumed[f] = 1;
+        rim_of_loop[bottom_loop] = rings.size();
+        rim_of_loop[top_loop] = rings.size();
+        rings.push_back(info);
+        break;
+      }
+    }
+
+    if (!rings.empty()) {
+      std::size_t collapsed = 0;
+      for (const auto& ring : rings) collapsed += ring.walls.size();
+      printf("STEP export: %d cylinder%s recognised, %d facets replaced\n", int(rings.size()),
+             rings.size() == 1 ? "" : "s", int(collapsed));
+    }
+  }
+
+  // Emit the recognised cylinders: one CYLINDRICAL_SURFACE face each, bounded
+  // by a CIRCLE at either rim and a seam running between them.
+  //
+  // A cylinder is periodic, so a face covering the full turn cannot be bounded
+  // by the rims alone - the loop has to walk up one seam and back down it, the
+  // same edge used once in each direction. The two CIRCLE edges are shared with
+  // the neighbouring disc or annulus, which is why both rims had to be a
+  // complete bound of one of those faces.
+  std::vector<FaceBound *> ring_bounds(rings.size(), nullptr);
+  std::vector<std::pair<EdgeCurve *, EdgeCurve *>> ring_circles(rings.size(), {nullptr, nullptr});
+
+  for (std::size_t i = 0; i < rings.size(); i++) {
+    const CylinderRing& ring = rings[i];
+    const Vector3d top_centre = ring.base + ring.axis * ring.height;
+    const Vector3d ref = (vertices[ring.seam_bottom] - ring.base).normalized();
+
+    auto make_placement = [&](const Vector3d& origin) {
+      auto point = new Point(entities, origin);
+      auto dir_axis = new Direction(entities, ring.axis);
+      auto dir_ref = new Direction(entities, ref);
+      return new Axis2Placement(entities, dir_axis, dir_ref, point);
+    };
+
+    auto surface = new CylindricalSurface(entities, "", make_placement(ring.base), ring.radius);
+    auto circle_bottom = new Circle(entities, "", make_placement(ring.base), ring.radius);
+    auto circle_top = new Circle(entities, "", make_placement(top_centre), ring.radius);
+
+    Vertex *vert_bottom = get_vertex(ring.seam_bottom);
+    Vertex *vert_top = get_vertex(ring.seam_top);
+
+    // a full circle is one edge whose two ends are the same vertex
+    auto edge_bottom = new EdgeCurve(entities, vert_bottom, vert_bottom, circle_bottom, true);
+    auto edge_top = new EdgeCurve(entities, vert_top, vert_top, circle_top, true);
+    auto edge_seam = create_line_edge_curve(vert_bottom, vert_top, true);
+    ring_circles[i] = {edge_bottom, edge_top};
+
+    // A CIRCLE runs counter clockwise about its axis. The wall has to traverse
+    // each rim opposite to the neighbouring face, so take the direction from
+    // the rim loop that face will use and flip it.
+    std::vector<OrientedEdge *> loop;
+    loop.push_back(new OrientedEdge(entities, edge_bottom, !ring.bottom_ccw));
+    loop.push_back(new OrientedEdge(entities, edge_seam, true));
+    loop.push_back(new OrientedEdge(entities, edge_top, !ring.top_ccw));
+    loop.push_back(new OrientedEdge(entities, edge_seam, false));
+
+    auto edge_loop = new EdgeLoop(entities, loop);
+    ring_bounds[i] = new FaceBound(entities, edge_loop, true, true);
+
+    // The surface normal of a CYLINDRICAL_SURFACE points away from its axis, so
+    // a bore - where the material is outside the cylinder - is the opposite
+    // sense.
+    std::vector<FaceBound *> bounds{ring_bounds[i]};
+    sfaces_extra.push_back(new Face(entities, bounds, surface, ring.outward));
+    face_edges_extra.push_back({edge_bottom, edge_top, edge_seam});
+  }
+
   // Build the loops, their edges and the carrier planes.
   std::map<std::pair<int, int>, EdgeCurve *> edge_map;
   std::vector<FaceBound *> face_bounds(face_cnt, nullptr);
@@ -326,20 +582,32 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   int merged_edge_cnt = 0;
 
   for (std::size_t i = 0; i < face_cnt; i++) {
-    if (!loop_valid[i]) continue;
+    if (!loop_valid[i] || consumed[i]) continue;
     const std::vector<int>& loop = loops[i];
     const int n = int(loop.size());
 
     std::vector<OrientedEdge *> oriented_edges;
-    for (int j = 0; j < n; j++) {
-      const int ind = loop[j];
-      const int indn = loop[(j + 1) % n];
-      bool edge_dir = true;
-      EdgeCurve *edge_curve = get_line_from_map(edge_map, ind, indn, get_vertex(ind), get_vertex(indn),
-                                                edge_dir, merged_edge_cnt);
-      oriented_edges.push_back(new OrientedEdge(entities, edge_curve, edge_dir));
-      loop_edges[i].push_back(edge_curve);
-    }
+
+    // a rim of a recognised cylinder is one circular edge instead of n straight
+    // ones, shared with the cylindrical face
+    const auto rim = rim_of_loop.find(i);
+    if (rim != rim_of_loop.end()) {
+      const CylinderRing& ring = rings[rim->second];
+      const bool bottom = (i == ring.bottom_loop);
+      EdgeCurve *circle = bottom ? ring_circles[rim->second].first : ring_circles[rim->second].second;
+      const bool ccw = bottom ? ring.bottom_ccw : ring.top_ccw;
+      oriented_edges.push_back(new OrientedEdge(entities, circle, ccw));
+      loop_edges[i].push_back(circle);
+    } else
+      for (int j = 0; j < n; j++) {
+        const int ind = loop[j];
+        const int indn = loop[(j + 1) % n];
+        bool edge_dir = true;
+        EdgeCurve *edge_curve = get_line_from_map(edge_map, ind, indn, get_vertex(ind), get_vertex(indn),
+                                                  edge_dir, merged_edge_cnt);
+        oriented_edges.push_back(new OrientedEdge(entities, edge_curve, edge_dir));
+        loop_edges[i].push_back(edge_curve);
+      }
 
     // create the plane. The reference direction has to lie inside the plane, so
     // project the longest edge onto it instead of using it as it comes.
@@ -371,18 +639,24 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   std::vector<Face *> sfaces;
   std::vector<std::vector<EdgeCurve *>> face_edges;
   for (std::size_t i = 0; i < face_cnt; i++) {
-    if (!loop_valid[i] || loop_is_hole[i]) continue;
+    if (!loop_valid[i] || loop_is_hole[i] || consumed[i]) continue;
     std::vector<FaceBound *> singface;
     singface.push_back(face_bounds[i]);
     std::vector<EdgeCurve *> edges = loop_edges[i];
     for (std::size_t j = 0; j < face_cnt; j++) {
-      if (!loop_valid[j] || parents[j] != int(i)) continue;
+      if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
       singface.push_back(face_bounds[j]);
       edges.insert(edges.end(), loop_edges[j].begin(), loop_edges[j].end());
     }
 
     sfaces.push_back(new Face(entities, singface, planes[i], true));
     face_edges.push_back(edges);
+  }
+
+  // the recognised cylinders are faces of the same shell
+  for (std::size_t i = 0; i < sfaces_extra.size(); i++) {
+    sfaces.push_back(sfaces_extra[i]);
+    face_edges.push_back(face_edges_extra[i]);
   }
 
   // A CLOSED_SHELL has to be a single connected shell, so split disconnected

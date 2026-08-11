@@ -28,6 +28,7 @@
 #include "src/geometry/PolySet.h"
 #include "src/geometry/cgal/cgalutils.h"
 #include "src/geometry/PolySetUtils.h"
+#include <cstdlib>
 #include <unordered_map>
 #include "src/utils/boost-utils.h"
 #include <src/utils/hash.h>
@@ -55,8 +56,15 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   // exporter has to guess the plane orientation from the first three points of
   // the loop, which points the wrong way at a concave corner and collapses
   // completely when those points are collinear.
+  // Writing CYLINDRICAL_SURFACE and CIRCLE instead of the facets is still
+  // provisional: the seam and orientation of a periodic face have to satisfy
+  // importers this has not been tried against yet, and a malformed analytic
+  // face is worse than a correct faceted one. Opt in with
+  // PYTHONSCAD_STEP_ANALYTIC=1 until it has had that exposure.
+  const bool analytic = getenv("PYTHONSCAD_STEP_ANALYTIC") != nullptr;
+
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceParents, newNormals, 1e-5);
+                    faceParents, newNormals, 1e-5, analytic);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;
