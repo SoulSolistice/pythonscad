@@ -126,6 +126,23 @@ elif ok:
     if ok:
         os.unlink(localefile)
 
+# Export once more with the analytic geometry turned on. Every check in
+# validatestep.py applies to that file too - a cylinder written as a
+# CYLINDRICAL_SURFACE still has to leave the shell watertight, its rims still
+# have to be used once in each direction - and the surface checks only have
+# anything to look at here.
+if ok:
+    analyticfile = stepfile.replace(".stp", "-analytic.stp")
+    env = dict(os.environ)
+    env["PYTHONSCAD_STEP_ANALYTIC"] = "1"
+    print("Re-exporting with PYTHONSCAD_STEP_ANALYTIC=1", file=sys.stderr)
+    export(args.openscad, inputfile, analyticfile, remaining_args, env=env)
+    if not validateSTEP(analyticfile):
+        print("the analytic export is not valid", file=sys.stderr)
+        ok = False
+    else:
+        os.unlink(analyticfile)
+
 if ok:
     os.unlink(stepfile)
 else:

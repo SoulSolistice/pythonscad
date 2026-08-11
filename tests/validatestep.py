@@ -457,12 +457,29 @@ def check_face_normals(entities, problems):
             return
 
 
+def _edge_geometry(entities, oriented_id):
+    """The curve an ORIENTED_EDGE's EDGE_CURVE lies on, or None."""
+    oe = entities.get(oriented_id)
+    if oe is None or not oe.refs():
+        return None
+    ec = entities.get(oe.refs()[-1])
+    if ec is None or ec.name != "EDGE_CURVE" or len(ec.refs()) < 3:
+        return None
+    return entities.get(ec.refs()[2])
+
+
 def _loop_points(entities, bound_id):
     loop, orientation = _bound_loop(entities, bound_id)
     if loop is None:
         return None
     pts = []
     for oid in loop.refs():
+        # Only a loop made of straight edges projects to a polygon with the
+        # same interior. An arc bulges away from its chord, so a loop carrying
+        # one is left to the surface checks rather than approximated here.
+        geom = _edge_geometry(entities, oid)
+        if geom is None or geom.name != "LINE":
+            return None
         ends = _edge_endpoints(entities, oid)
         if ends is None:
             return None
@@ -510,6 +527,10 @@ def check_hole_nesting(entities, problems):
         if face.name != "ADVANCED_FACE":
             continue
         refs = face.refs()
+        # the check is about loops sharing a plane; a curved face has none
+        surface = entities.get(refs[-1]) if refs else None
+        if surface is None or surface.name != "PLANE":
+            continue
         outer = None
         inner = []
         for bid in refs[:-1]:
@@ -566,6 +587,95 @@ def check_hole_nesting(entities, problems):
                         "sealed)" % (fid, hid, ofid, ofid)
                     )
                     return
+
+
+def check_cylindrical_faces(entities, problems):
+    """A CYLINDRICAL_SURFACE face has one of exactly two shapes.
+
+    A wall which closes on itself is periodic and cannot be bounded by its two
+    rims alone, so it walks up a seam and back down it: two full CIRCLEs (an
+    edge whose two ends are the same vertex) and one straight edge used once in
+    each direction. A wall which stops short of a full turn is not periodic and
+    is bounded by an arc at either rim and the band's two distinct end edges.
+
+    Anything else - three circles, a seam used twice the same way, an arc whose
+    radius disagrees with its surface - is a face no importer can make sense of,
+    and all of them are mistakes this exporter can plausibly make."""
+    for face in entities.values():
+        if face.name != "ADVANCED_FACE":
+            continue
+        refs = face.refs()
+        surface = entities.get(refs[-1]) if refs else None
+        if surface is None or surface.name != "CYLINDRICAL_SURFACE":
+            continue
+
+        radius = surface.floats()[-1] if surface.floats() else None
+        if radius is None or radius <= 0:
+            problems.append("#%d: CYLINDRICAL_SURFACE without a positive radius" % surface.id)
+            continue
+
+        bounds = [b for b in refs[:-1] if entities.get(b) is not None]
+        if len(bounds) != 1:
+            problems.append("#%d: cylindrical face has %d bounds, expected 1" % (face.id, len(bounds)))
+            continue
+        loop, _ = _bound_loop(entities, bounds[0])
+        if loop is None:
+            problems.append("#%d: cylindrical face has no edge loop" % face.id)
+            continue
+
+        oriented = loop.refs()
+        if len(oriented) != 4:
+            problems.append(
+                "#%d: cylindrical face has %d edges, expected 4" % (face.id, len(oriented))
+            )
+            continue
+
+        circles, lines, closed = [], [], 0
+        for oid in oriented:
+            geom = _edge_geometry(entities, oid)
+            ends = _edge_endpoints(entities, oid)
+            if geom is None or ends is None:
+                problems.append("#%d: cylindrical face has an unreadable edge" % face.id)
+                break
+            if geom.name == "CIRCLE":
+                circles.append((oid, geom, ends))
+                if ends[0] == ends[1]:
+                    closed += 1
+            else:
+                lines.append((oid, ends))
+        else:
+            if len(circles) != 2:
+                problems.append(
+                    "#%d: cylindrical face is bounded by %d circular edges, expected 2"
+                    % (face.id, len(circles))
+                )
+                continue
+            for _, geom, _ends in circles:
+                cr = geom.floats()[-1] if geom.floats() else None
+                if cr is None or abs(cr - radius) > 1e-6 * max(1.0, radius):
+                    problems.append(
+                        "#%d: rim CIRCLE #%d has radius %s, but its surface has %s"
+                        % (face.id, geom.id, cr, radius)
+                    )
+            if closed not in (0, 2):
+                problems.append(
+                    "#%d: cylindrical face mixes a full circle with an arc" % face.id
+                )
+                continue
+            line_edges = set()
+            for oid, _ends in lines:
+                oe = entities.get(oid)
+                line_edges.add(oe.refs()[-1] if oe is not None and oe.refs() else None)
+            if closed == 2 and len(line_edges) != 1:
+                problems.append(
+                    "#%d: a periodic cylindrical face needs one seam edge used twice, found %d"
+                    % (face.id, len(line_edges))
+                )
+            if closed == 0 and len(line_edges) != 2:
+                problems.append(
+                    "#%d: a partial cylindrical face needs two distinct end edges, found %d"
+                    % (face.id, len(line_edges))
+                )
 
 
 def check_shells(entities, problems):
@@ -627,6 +737,7 @@ def validateSTEP(filename):
         check_shared_vertices(entities, problems)
         check_face_normals(entities, problems)
         check_hole_nesting(entities, problems)
+        check_cylindrical_faces(entities, problems)
         check_shells(entities, problems)
 
     if problems:
