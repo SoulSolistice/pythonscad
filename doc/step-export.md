@@ -182,7 +182,10 @@ carry colour. `eb2ae2a` extends the same mechanism to carry the analytic
 surfaces a primitive declared. `CylinderNode::createGeometry()` records its wall;
 `PolySet::transform()` and `ManifoldGeometry::binOp()` carry it; a subtraction
 keeps the tool's surfaces, because a cylinder used to cut a bore leaves a
-cylindrical wall of the same axis and radius.
+cylindrical wall of the same axis and radius. `applyOperator3DManifold()` and
+`CGALUtils::applyHull3D()` carry them through a hull for the same reason: a hull
+only adds material, and an exporter still has to find the wall in the mesh
+before it uses the record.
 
 So: **geometry from the mesh, intent from the primitive.** A ring is collapsed
 only when the fit succeeds *and* the model declared a matching cylinder.
@@ -201,6 +204,45 @@ Two structural consequences worth knowing:
 `same_sense` is `.T.` for an outer wall and `.F.` for a bore, because a
 cylindrical surface's normal points away from its axis and a bore's material
 lies outside it.
+
+### Partial cylinders
+
+A wall which does not close is written the same way, minus the periodicity: one
+`CYLINDRICAL_SURFACE` face bounded by an arc at either rim and the band's two
+straight end edges — arc, line, arc, line, no seam. A band is accepted when it
+has one rim vertex per facet *plus one*, the far end of the last facet.
+
+The structural change is on the neighbour's side. A full rim collapses the whole
+of the neighbouring loop into one `CIRCLE`; an arc replaces only a **run** of
+that loop's edges, so the run has to be consecutive in the loop and no two bands
+may claim overlapping runs. Both rims still have to border exactly one face: a
+rim which borders one face per facet, as a wall standing on a chamfer does, has
+no single loop to rewrite.
+
+Two traps, both found by prototyping the pass in Python over an existing export
+before writing any C++:
+
+- **The centre has to be fitted, not averaged.** The centroid of a full rim lies
+  on the axis, which is why the closed ring case can average; the centroid of an
+  arc sits inside its chord. Averaging put the axis of a 54° arc of a radius 78
+  wall at radius 266, and the wall was then rejected for not fitting itself.
+  `fitCircleCentre()` uses Kasa's linearisation, and the residual check that
+  follows it is what makes an inexact fit safe to attempt.
+- **A rim can border more than one face**, and then there is nothing to rewrite.
+  This is what rejects the four short bands under the bayonet's lug ramps: their
+  upper rim borders ten separate ramp facets.
+
+Run over the bayonet base's exported mesh, the pass finds 4 such bands and
+replaces 72 facets — measured by the Python prototype, on the same loops the
+exporter sees, not by re-exporting the part.
+
+`validatestep.py` gained `check_cylindrical_faces()` for the two shapes a
+cylindrical face may have, and `check_hole_nesting()` now skips loops carrying
+an arc — an arc bulges away from its chord, so projecting the loop as a polygon
+would understate the face. `tests/data/scad/step-export/step-partial-cylinder.scad`
+is the fixture, and the sanity driver now exports every fixture a third time
+with `PYTHONSCAD_STEP_ANALYTIC=1` and validates that too, so the analytic path
+is covered by the same invariants as the faceted one.
 
 ### What SolidWorks said
 
@@ -287,47 +329,14 @@ needed for them; the trims are planar cuts perpendicular to or parallel with the
 axis. Only the 8 pentagons touch a ramp, whose trace on the cylinder is a curve
 the mesh only approximates, and those can stay planar.
 
+That case is now handled, and the two which are not tell you what to build next:
+see *Partial cylinders* below, then items 1 and 5.
+
 ## How to continue
 
 Ordered by value per unit of work. Each of the first four is independently
 shippable behind the same flag, and each extends `validatestep.py` with its own
 surface checks.
-
-### 0. Arc edges inside a loop
-
-Added after the measurement above, which showed that three of the items below
-are blocked on one shared rule rather than on their own difficulty.
-
-A rim is collapsed into a `CIRCLE` today only when it is the *complete* bound of
-a neighbouring face. That rule is what keeps the shell consistent — collapsing N
-edges into one arc rewrites every loop that used them — and it is also what
-rejects the body wall above (its neighbour is a cone, not a face with a matching
-loop), and what a partial ring would break (its arc covers only part of the
-neighbour's loop).
-
-Generalising it — let a run of consecutive edges anywhere in a loop become one
-arc, provided every face using that run agrees to the same substitution — is one
-change that unblocks cones sharing a rim with a cylinder, planar-trimmed partial
-cylinders, and any wall that meets a chamfer or a fillet. It is worth doing
-before, not during, the surface types below.
-
-The check in `validatestep.py` generalises with it: an edge used by exactly two
-faces once in each direction is still the invariant, with an arc counting as one
-edge.
-
-### 0b. Provenance through `hull()`
-
-A few lines in `applyOperator3DManifold()`: pass the union of the children's
-`surfaces` to the resulting `ManifoldGeometry`, as `binOp()` already does. The
-record is intent only — the exporter still requires an exact fit, a closed ring
-and a matching axis and radius — so carrying one through a hull that dropped the
-geometry cannot by itself produce a wrong face.
-
-Do it together with item 0; on its own it adds nothing, because the walls it
-recovers are the ones that sit on a chamfer.
-
-`minkowski()` drops the records the same way and should be left alone: it
-genuinely changes the radius.
 
 ### 1. Cones
 
@@ -340,9 +349,18 @@ construction and `same_sense` are reused unchanged. The fit generalises from
 height". Roughly 150 lines.
 
 Rim collapse is **not** reused unchanged, which the worked example above
-corrects: a cylinder stacked on a chamfer shares a rim that is the complete
-bound of neither, so both stay faceted until item 0 lands. A cone whose other
-neighbours are discs is unaffected.
+corrects: a cylinder stacked on a chamfer shares a rim which is the complete
+bound of neither face. The run substitution added for partial cylinders does not
+help here — a run of one edge per neighbouring facet is not a run — so the rule
+needs a third case: **a rim shared between two recognised rings**, collapsed
+into one `CIRCLE` used by both. That is a small addition to a rule that already
+exists, but it has to be made deliberately, and until it is, a chamfered body
+keeps its faceted wall no matter how well the wall itself fits.
+
+Provenance is no longer the obstacle there: `hull()` now carries the surfaces
+its children declared, so `hull(cylinder(r=R), cylinder(r=R-c))` — the standard
+chamfer idiom — declares its wall. That change alone adds nothing to the output
+until this rim case lands, which is worth knowing before measuring it.
 
 Exclude a true cone (`r2 = 0`) at first: its apex is a degenerate rim needing a
 `VERTEX_LOOP`. Chamfers and countersinks are frusta and do not hit this.
@@ -397,15 +415,16 @@ what separates "cylinders survive if nothing touched them" from "analytic
 geometry survives modelling", and it is a larger jump than cones, spheres and
 tori combined.
 
-**Split off the planar-trimmed case and do it much earlier.** Where the trim is
-a plane perpendicular to the axis or parallel with it — which is every trim on
-the bayonet base's lip wall except the 8 facets touching a ramp — the bound is
-an arc and a straight line, both exact, and no `SURFACE_CURVE` appears at all.
-That subset needs item 0 and nothing else, and it is worth roughly a third of
-this part's faces on its own. What stays in item 5 is the genuinely hard
-remainder: a trim curve that exists only as a polyline in the mesh, where
-putting the approximation on the analytic face would open the shell against its
-planar neighbour.
+The planar-trimmed subset of this has been split off and done — see *Partial
+cylinders* above. Where the trim is a plane perpendicular to the axis or
+parallel with it, the bound is an arc and a straight line, both exact, and no
+`SURFACE_CURVE` appears at all.
+
+What stays here is the genuinely hard remainder: a trim curve which exists only
+as a polyline in the mesh. Putting that approximation on an analytic face would
+open the shell against its planar neighbour, so those walls stay faceted, and no
+amount of care over the surface changes that — the curve has to come from the
+generator, as with the splines in item 3.
 
 ## Method notes
 
