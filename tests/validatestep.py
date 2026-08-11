@@ -189,13 +189,19 @@ def check_units_and_context(entities, problems):
         "LENGTH_UNIT",
         "UNCERTAINTY_MEASURE_WITH_UNIT",
         "ADVANCED_BREP_SHAPE_REPRESENTATION",
-        "SHAPE_REPRESENTATION",
         "PRODUCT_DEFINITION",
         "FACE_OUTER_BOUND",
     ]
     for name in required:
         if name not in names:
             problems.append("no %s in the file" % name)
+
+    # A separate SHAPE_REPRESENTATION tied to the brep by a
+    # SHAPE_REPRESENTATION_RELATIONSHIP is one valid arrangement, but pointing
+    # the SHAPE_DEFINITION_REPRESENTATION straight at the brep is another -
+    # SolidWorks writes the latter - so only require that one of them is there.
+    if "SHAPE_DEFINITION_REPRESENTATION" not in names:
+        problems.append("no SHAPE_DEFINITION_REPRESENTATION in the file")
 
     for e in entities.values():
         # SHAPE_REPRESENTATION(name, items, context) - all three are mandatory
