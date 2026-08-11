@@ -231,11 +231,103 @@ All are recorded in `doc/testing.md`; the short version:
   the tests nor the wrapper's own `CreateProcess` lookup could find it
   (`6111c08`).
 
+## A worked example: which walls got through, and why
+
+A user exported the bayonet container's base
+(`bayonet_container_v12.scad`, `_part = "base"`, shipped defaults, `$fn = 120`)
+with `PYTHONSCAD_STEP_ANALYTIC=1` and asked why the bore came out as a cylinder
+and none of the outer walls did. The file is a good measurement of where the
+current restrictions actually bite, because the part is nothing but coaxial
+cylinders.
+
+It has 452 faces. One is a `CYLINDRICAL_SURFACE`; **280 of the remaining 451
+planar faces are facets of a cylindrical wall**, all fitting their axis to
+better than 1e-9.
+
+| wall | r | facets | modelled by | declared | closed ring | rims bound a face |
+| --- | --- | --- | --- | --- | --- | --- |
+| bore | 75 | *(collapsed)* | `cylinder(r=bore)` cut in a `difference()` | yes | yes | yes |
+| body | 82.75 | 120 | `roundCylinder()` → `hull()` of two cylinders | **no** | yes | **no** |
+| lip | 78 | 120 | `cylinder(r=lipRadius)` in a `union()` | yes | **no** | — |
+| lugs | 79.5 | 40 | `smallArc()` → `hull()` with the ramp | **no** | **no** | — |
+
+Only the bore satisfies all three gates, which is the whole of the reported
+asymmetry. It is not an inner/outer distinction — it is that the bore is the one
+wall in the part that is a bare `cylinder()` primitive *and* survives to the mesh
+uninterrupted.
+
+Each of the other three fails differently, and each failure names a different
+piece of future work:
+
+- **The body wall is not declared, because `hull()` drops provenance.**
+  `applyOperator3DManifold(..., HULL)` (`manifold-applyops.cc`) collects the
+  children's vertices into a point cloud and returns a fresh `ManifoldGeometry`,
+  so the `CylinderSurface` that `cylinder(r=82.75)` recorded never reaches the
+  exporter. This matters well beyond one model: chamfering or filleting a body
+  by hulling it with a smaller copy of itself is the standard idiom, and it
+  currently costs the body its analytic identity.
+- **The body wall's lower rim adjoins the chamfer, which is a cone.** Its upper
+  rim at z=10 *is* the complete outer bound of an annulus, so that end is fine;
+  at z=2 the neighbour is 120 separate quads of a 45° frustum and no loop
+  matches the rim, so `bottom_loop` is never found. Note that this rejects the
+  ring **on its own**, before provenance is even considered: fixing `hull()`
+  alone would not add a single face to this file.
+- **The lip wall is declared and fits exactly, but the lugs cut it up.** Its 120
+  facets are 8 disconnected arcs — 4 of 18 facets running the full z=10..20, 4
+  of 10 facets stopping at z=14.25 where a lug ramp lands — plus 8 pentagons at
+  the transitions. Each arc has one more rim vertex than it has facets, which is
+  exactly what `bottom_set.size() != ring.size()` tests for.
+- **The lug walls are 30° arcs and were hulled**, so they fail both gates.
+
+The lip is the interesting one, because it is the case that is *nearly* free.
+Those 4×18-facet arcs are bounded by two coaxial circular arcs and two
+axis-parallel lines — the arc, line, arc, line construction SolidWorks itself
+produced when it re-saved our file. No `SURFACE_CURVE` and no approximation is
+needed for them; the trims are planar cuts perpendicular to or parallel with the
+axis. Only the 8 pentagons touch a ramp, whose trace on the cylinder is a curve
+the mesh only approximates, and those can stay planar.
+
 ## How to continue
 
 Ordered by value per unit of work. Each of the first four is independently
 shippable behind the same flag, and each extends `validatestep.py` with its own
 surface checks.
+
+### 0. Arc edges inside a loop
+
+Added after the measurement above, which showed that three of the items below
+are blocked on one shared rule rather than on their own difficulty.
+
+A rim is collapsed into a `CIRCLE` today only when it is the *complete* bound of
+a neighbouring face. That rule is what keeps the shell consistent — collapsing N
+edges into one arc rewrites every loop that used them — and it is also what
+rejects the body wall above (its neighbour is a cone, not a face with a matching
+loop), and what a partial ring would break (its arc covers only part of the
+neighbour's loop).
+
+Generalising it — let a run of consecutive edges anywhere in a loop become one
+arc, provided every face using that run agrees to the same substitution — is one
+change that unblocks cones sharing a rim with a cylinder, planar-trimmed partial
+cylinders, and any wall that meets a chamfer or a fillet. It is worth doing
+before, not during, the surface types below.
+
+The check in `validatestep.py` generalises with it: an edge used by exactly two
+faces once in each direction is still the invariant, with an arc counting as one
+edge.
+
+### 0b. Provenance through `hull()`
+
+A few lines in `applyOperator3DManifold()`: pass the union of the children's
+`surfaces` to the resulting `ManifoldGeometry`, as `binOp()` already does. The
+record is intent only — the exporter still requires an exact fit, a closed ring
+and a matching axis and radius — so carrying one through a hull that dropped the
+geometry cannot by itself produce a wrong face.
+
+Do it together with item 0; on its own it adds nothing, because the walls it
+recovers are the ones that sit on a chamfer.
+
+`minkowski()` drops the records the same way and should be left alone: it
+genuinely changes the radius.
 
 ### 1. Cones
 
@@ -243,9 +335,14 @@ surface checks.
 provenance guard excludes them today. A cone ring is topologically identical to
 a cylinder ring — N quads, two circular rims perpendicular to the axis — and
 `CONICAL_SURFACE` takes the same `AXIS2_PLACEMENT_3D` plus a half-angle. Seam
-construction, `same_sense` and rim collapse are reused unchanged. The fit
-generalises from "all vertices equidistant from the axis" to "radius varies
-linearly with height". Roughly 150 lines.
+construction and `same_sense` are reused unchanged. The fit generalises from
+"all vertices equidistant from the axis" to "radius varies linearly with
+height". Roughly 150 lines.
+
+Rim collapse is **not** reused unchanged, which the worked example above
+corrects: a cylinder stacked on a chamfer shares a rim that is the complete
+bound of neither, so both stay faceted until item 0 lands. A cone whose other
+neighbours are discs is unaffected.
 
 Exclude a true cone (`r2 = 0`) at first: its apex is a degenerate rim needing a
 `VERTEX_LOOP`. Chamfers and countersinks are frusta and do not hit this.
@@ -299,6 +396,16 @@ the other 9 are walls interrupted by the bayonet channels. Handling those is
 what separates "cylinders survive if nothing touched them" from "analytic
 geometry survives modelling", and it is a larger jump than cones, spheres and
 tori combined.
+
+**Split off the planar-trimmed case and do it much earlier.** Where the trim is
+a plane perpendicular to the axis or parallel with it — which is every trim on
+the bayonet base's lip wall except the 8 facets touching a ramp — the bound is
+an arc and a straight line, both exact, and no `SURFACE_CURVE` appears at all.
+That subset needs item 0 and nothing else, and it is worth roughly a third of
+this part's faces on its own. What stays in item 5 is the genuinely hard
+remainder: a trim curve that exists only as a polyline in the mesh, where
+putting the approximation on the analytic face would open the shell against its
+planar neighbour.
 
 ## Method notes
 
