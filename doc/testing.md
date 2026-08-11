@@ -212,6 +212,19 @@ ctest --test-dir build -R <pattern> --output-on-failure
 Use a native `E:/...` path rather than an MSYS `/e/...` one; CMake is a native
 Windows program and will not resolve the latter.
 
+Two things that mislead while debugging a Windows build:
+
+* The `pythonscad.com` wrapper only writes to a real Windows console. Run it
+  from `cmd.exe` and it prints normally; run it from an MSYS2 shell and it
+  produces no output at all, however the command succeeded. Redirecting to a
+  file, or letting a program capture it (which is what the test drivers do),
+  works from either shell.
+* The version reported by `--info` is baked in by `configure_file()` when cmake
+  runs, not when the code is compiled, so after a plain rebuild it still names
+  the commit cmake last saw. To tell whether a binary contains a given change,
+  check the timestamp of the executable or look for the change's behaviour -
+  not the version string.
+
 Re-run `cmake --install` after every rebuild, otherwise the tests keep exercising
 the previously staged binary. `OPENSCAD_BINARY` is read at configure time and
 baked into `CTestTestfile.cmake`, so a later `cmake -B build` without it in the
