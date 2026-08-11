@@ -58,9 +58,17 @@ def export(openscad, inputfile, outfile, extra_args, env=None):
     cmd = [openscad, inputfile, "-o", outfile] + extra_args
     print("Running PythonSCAD:", " ".join(cmd), file=sys.stderr)
     sys.stderr.flush()
-    subprocess.check_call(cmd, env=env)
+    # Capture the output rather than letting check_call raise: what PythonSCAD
+    # printed is the whole diagnosis when an export fails, and a traceback of
+    # this script hides it.
+    proc = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output = proc.stdout.decode("utf-8", "replace").strip()
+    if output:
+        print(output, file=sys.stderr)
+    if proc.returncode != 0:
+        failquit("PythonSCAD exited with status %d without exporting %s" % (proc.returncode, outfile))
     if not os.path.exists(outfile):
-        failquit("no STEP file was written to " + outfile)
+        failquit("PythonSCAD reported success but wrote no file to " + outfile)
 
 
 def normalized(path):
