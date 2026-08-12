@@ -746,7 +746,8 @@ hats.
 `step-shared-arc.scad` is the fixture for the second; the first needs none,
 because `step-partial-cylinder` already contains the shape that provoked it and
 simply recognises more of it now. On the fixture the exporter reports *2
-surfaces recognised (1 conical, 2 partial), 48 facets replaced*, taking the part
+surfaces recognised (0 spherical, 1 conical, 2 partial), 48 facets replaced*,
+taking the part
 from 52 faces to 6, and SolidWorks round trips the shared arc - see *What
 SolidWorks said*.
 
@@ -773,7 +774,8 @@ if (!cone && !inverted_cone && r1 == r2 && this->angle == 360) {   // was
   primitive now declares the circle at each of its rims, which is the same
   statement of intent the hull makes, so the two leave identical provenance.
   Nothing in the recogniser changed, and `step-cone-primitive` comes out as
-  *1 surface recognised (1 conical, 0 partial), 32 facets replaced* - 3 faces.
+  *1 surface recognised (0 spherical, 1 conical, 0 partial), 32 facets
+  replaced* - 3 faces.
 - **A pie slice declared nothing**, on the reasoning that its flat sides are not
   part of the cylinder. True, and the wrong place to act on it: those sides run
   through the axis, so they fit no cylinder and are discarded on the fit
@@ -812,9 +814,10 @@ degree wall must be partial. That is worth recording as a method note in itself:
 
 The parse is fixed, and `step-pie-slice` guards it from the STEP side: if
 `angle` is ever dropped again the band comes out closed, and the comment says
-what the report has to read. It now says *1 surface recognised (0 conical, 1
-partial), 31 facets replaced*, taking the slice from 35 faces to 5. Between the
-run that found the defect and the run that confirmed the fix, that one line is
+what the report has to read. It now says *1 surface recognised (0 spherical, 0
+conical, 1 partial), 31 facets replaced*, taking the slice from 35 faces to 5.
+Between the run that found the defect and the run that confirmed the fix, that
+one line is
 the **only** thing that changed in the whole suite - every other fixture's
 report and face count is identical, which is the evidence that the parse fix
 touched nothing else.
@@ -834,9 +837,9 @@ emission work in it, only the record. `declareSurfacesOfRevolution()` in
 circle per radius; `step-rotate-extrude.scad` is the fixture, a stepped tube
 whose six profile edges cover all three kinds (flat annulus, cylinder, frustum)
 and whose two internal rims each bound two curved faces and nothing else. It
-reports *3 analytic surfaces available, 4 surfaces recognised (1 conical, 0
-partial), 128 facets replaced* - three records for six edges, four faces from
-them, and the whole tube down to 6 faces.
+reports *3 analytic surfaces available, 4 surfaces recognised (0 spherical, 1
+conical, 0 partial), 128 facets replaced* - three records for six edges, four
+faces from them, and the whole tube down to 6 faces.
 
 Two things it deliberately does not do:
 
@@ -963,17 +966,44 @@ faces pass through the mesh vertices with zero residual, share every rim, and
 leave the shell watertight; it is not the true surface, but neither is the
 faceted mesh it replaces, and it is 30 times smaller.
 
-So `SphereNode` now declares the circle at each ring, and a sphere collapses
-with no recogniser work at all. At `$fn = 32`: 16 rings, 480 quads and two caps,
-**482 faces down to 17** - 8 declared radii, 15 bands, of which the one
-straddling the equator is a cylinder and the other 14 are cones.
-`step-sphere.scad` is the fixture.
+So `SphereNode` declares the circle at each ring, and a sphere collapses with no
+recogniser work at all: at `$fn = 32`, 16 rings and 480 quads become 15 bands,
+the one straddling the equator a cylinder and the other 14 cones, **482 faces
+down to 17**.
 
-What is left of the item is `SPHERICAL_SURFACE` itself, worth a further 17 faces
-to 3, and needing the grid grower a torus also needs. The argument for it is the
-same one the torus has - a stack of cones has tangent discontinuities where the
-true surface is smooth - and it is now the second half of a shared piece of work
-rather than an item of its own.
+### And then a sphere is a stack of bands, not a grid
+
+`SPHERICAL_SURFACE` was the rest of the item, and the roadmap said it needed a
+*grid grower*: a sphere's facets span many rings rather than two rims, so the
+strip walk cannot describe it. That is true of the strip walk and it is the
+wrong conclusion, because the grower does not have to start from facets.
+
+The first attempt did start from facets - flood across any edge into any face
+whose vertices lie on the declared sphere - and it swallowed the two caps. That
+is not a bug in the test. An OpenSCAD sphere is a **closed polyhedron inscribed
+in the sphere**, and its caps are planar polygons with every vertex on the
+surface and the same sag as any other facet; no local geometric test separates a
+cap from a ring quad, because geometrically there is nothing to separate.
+
+What separates them is structure, and the band pass has already computed it. A
+sphere is a **stack of bands**: every ring is a frustum whose two rims are
+circles, and the zone is the maximal run of them joined at shared rims whose
+vertices all lie on one declared sphere. So there is no new grower - the band
+pass does the work, and a merge pass joins up its answer. The run's outer rims
+are kept, so the rules resolved for the end bands still hold and the caps are
+untouched by construction. **482 faces down to 3.**
+
+The same mechanism gives a torus, whose run closes on itself instead of ending
+at a cap - see the torus section for what still stands in the way there.
+
+One thing genuinely is new, and it is the seam. A periodic face is closed by a
+seam that has to lie *on* the surface: up a cylinder or a cone that is a
+straight ruling, but over a sphere it is a **meridian**, and the straight line
+between the same two vertices sags 0.05 mm off a radius 10 sphere at `$fn = 32`
+- five thousand times the modelling tolerance. A spherical zone therefore seams
+with an arc of a great circle. Nothing else refers to a seam, since it is used
+twice by its own face and appears nowhere in the mesh, so swapping the line for
+an arc costs no neighbouring loop a rewrite.
 
 ### 4. Trimmed faces
 

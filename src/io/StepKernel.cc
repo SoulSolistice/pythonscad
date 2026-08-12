@@ -175,12 +175,13 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // out - which is a feature nobody has asked for yet.
   (void)curves;
   if (!surfaces.empty()) {
-    int cylinders = 0;
+    int cylinders = 0, spheres = 0;
     for (const auto& surface : surfaces) {
       if (dynamic_cast<const CylinderSurface *>(surface.get()) != nullptr) cylinders++;
+      else if (dynamic_cast<const SphereSurface *>(surface.get()) != nullptr) spheres++;
     }
-    printf("STEP export: %d analytic surface%s available (%d cylindrical)\n", int(surfaces.size()),
-           surfaces.size() == 1 ? "" : "s", cylinders);
+    printf("STEP export: %d analytic surface%s available (%d cylindrical, %d spherical)\n",
+           int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres);
   }
 
   const double model_tol = tol > 0 ? tol : 1e-5;
@@ -388,7 +389,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     const Vector3d ref = (rel - band.axis * band.axis.dot(rel)).normalized();
 
     SurfaceType *surface = nullptr;
-    if (!is_cone) {
+    if (band.sphere != nullptr) {
+      const auto *sph = dynamic_cast<const SphereSurface *>(band.sphere.get());
+      surface = new SphericalSurface(entities, "", placement(sph->refpt, band.axis, ref), sph->r);
+    } else if (!is_cone) {
       surface = new CylindricalSurface(entities, "", placement(band.base, band.axis, ref),
                                        band.r_bottom);
     } else {
@@ -454,8 +458,33 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     std::vector<OrientedEdge *> loop;
     std::vector<EdgeCurve *> face_edges_here;
     if (band.closed) {
-      auto edge_seam = create_line_edge_curve(get_vertex(band.seam_bottom),
-                                              get_vertex(band.seam_top), true);
+      // The seam of a periodic face has to lie *on* the surface. Up a cylinder
+      // or a cone that is a straight ruling; over a sphere it is a meridian,
+      // and the straight line between the same two vertices is a chord that
+      // sags off the surface by far more than the modelling tolerance - 0.05mm
+      // on a radius 10 sphere at $fn=32. So a spherical zone seams with an arc
+      // of a great circle instead.
+      //
+      // Nothing else refers to the seam: it is used twice by this one face and
+      // by nothing at all in the mesh, so replacing the line costs no
+      // neighbouring loop a rewrite.
+      EdgeCurve *edge_seam = nullptr;
+      if (band.sphere != nullptr) {
+        const auto *sph = dynamic_cast<const SphereSurface *>(band.sphere.get());
+        const Vector3d from = (vertices[band.seam_bottom] - sph->refpt).normalized();
+        const Vector3d to = (vertices[band.seam_top] - sph->refpt).normalized();
+        // this normal is the one that makes the sweep from `from` to `to`
+        // counter clockwise and shorter than half a turn, which a zone's
+        // latitude range always is - the flat cap at either end sees to that
+        const Vector3d normal = from.cross(to);
+        auto meridian =
+          new Circle(entities, "", placement(sph->refpt, normal.normalized(), from), sph->r);
+        edge_seam = new EdgeCurve(entities, get_vertex(band.seam_bottom), get_vertex(band.seam_top),
+                                  meridian, true);
+      } else {
+        edge_seam =
+          create_line_edge_curve(get_vertex(band.seam_bottom), get_vertex(band.seam_top), true);
+      }
       loop.push_back(new OrientedEdge(entities, rim_edge[0], rim_sense[0]));
       loop.push_back(new OrientedEdge(entities, edge_seam, true));
       loop.push_back(new OrientedEdge(entities, rim_edge[1], rim_sense[1]));

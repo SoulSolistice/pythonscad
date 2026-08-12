@@ -60,6 +60,45 @@ int Surface::operator==(const Surface& other)
   return 0;
 }
 
+SphereSurface::SphereSurface(Vector3d refpt, Vector3d normdir, double r)
+{
+  this->refpt = refpt;
+  this->normdir = normdir;
+  this->r = r;
+}
+
+void SphereSurface::display(const std::vector<Vector3d>& vertices)
+{
+  printf("SphereSurface r=%g at (%g/%g/%g)\n", r, refpt[0], refpt[1], refpt[2]);
+}
+
+std::shared_ptr<Surface> SphereSurface::clone() const
+{
+  return std::make_shared<SphereSurface>(*this);
+}
+
+bool SphereSurface::transform(const Transform3d& mat)
+{
+  if (!Surface::transform(mat)) return false;
+  this->r *= (mat.linear() * Vector3d(1, 0, 0)).norm();
+  return true;
+}
+
+int SphereSurface::operator==(const SphereSurface& other)
+{
+  // the polar axis is not compared: it only orients the parameterisation, and
+  // two records of the same sphere describe the same surface whichever way
+  // their poles point
+  if ((refpt - other.refpt).norm() > 1e-6) return 0;
+  if (fabs(r - other.r) > 1e-6) return 0;
+  return 1;
+}
+
+int SphereSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
+{
+  return fabs((pt - refpt).norm() - r) > 1e-5 ? 0 : 1;
+}
+
 CylinderSurface::CylinderSurface(Vector3d refpt, Vector3d normdir, double r)
 {
   this->refpt = refpt;

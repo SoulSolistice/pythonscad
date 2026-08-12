@@ -702,7 +702,11 @@ def check_cylindrical_faces(entities, problems):
             continue
         refs = face.refs()
         surface = entities.get(refs[-1]) if refs else None
-        if surface is None or surface.name not in ("CYLINDRICAL_SURFACE", "CONICAL_SURFACE"):
+        if surface is None or surface.name not in (
+            "CYLINDRICAL_SURFACE",
+            "CONICAL_SURFACE",
+            "SPHERICAL_SURFACE",
+        ):
             continue
 
         # CONICAL_SURFACE carries the half angle after the radius
@@ -735,7 +739,12 @@ def check_cylindrical_faces(entities, problems):
             )
             continue
 
+        # A rim is a closed CIRCLE on a periodic face and an arc on a partial
+        # one. The seam is whatever closes a periodic face: a straight ruling up
+        # a cylinder or a cone, but a *meridian arc* over a sphere, where the
+        # line between the same two vertices is a chord off the surface.
         circles, lines, closed = [], [], 0
+        arcs = []
         for oid in oriented:
             geom = _edge_geometry(entities, oid)
             ends = _edge_endpoints(entities, oid)
@@ -746,6 +755,8 @@ def check_cylindrical_faces(entities, problems):
                 circles.append((oid, geom, ends))
                 if ends[0] == ends[1]:
                     closed += 1
+                else:
+                    arcs.append((oid, ends))
             else:
                 lines.append((oid, ends))
         else:
@@ -768,25 +779,38 @@ def check_cylindrical_faces(entities, problems):
                         "#%d: rim CIRCLE #%d has radius %s, but its cylinder has %s"
                         % (face.id, geom.id, cr, radius)
                     )
+                elif surface.name == "SPHERICAL_SURFACE" and cr > radius * (1 + 1e-6):
+                    # a circle on a sphere cannot be wider than the sphere, and
+                    # the seam is a great circle so it is exactly as wide
+                    problems.append(
+                        "#%d: CIRCLE #%d has radius %s, wider than its sphere at %s"
+                        % (face.id, geom.id, cr, radius)
+                    )
             if closed not in (0, 2):
                 problems.append(
                     "#%d: cylindrical face mixes a full circle with an arc" % face.id
                 )
                 continue
-            line_edges = set()
-            for oid, _ends in lines:
-                oe = entities.get(oid)
-                line_edges.add(oe.refs()[-1] if oe is not None and oe.refs() else None)
-            if closed == 2 and len(circles) != 2:
-                problems.append(
-                    "#%d: a periodic cylindrical face needs exactly two full circles, found %d"
-                    % (face.id, len(circles))
-                )
-            if closed == 2 and len(line_edges) != 1:
-                problems.append(
-                    "#%d: a periodic cylindrical face needs one seam edge used twice, found %d"
-                    % (face.id, len(line_edges))
-                )
+            def distinct(entries):
+                out = set()
+                for oid, *_ in entries:
+                    oe = entities.get(oid)
+                    out.add(oe.refs()[-1] if oe is not None and oe.refs() else None)
+                return out
+
+            line_edges = distinct(lines)
+            if closed == 2:
+                # periodic: two rims and one seam, the seam used once in each
+                # direction. Over a sphere that seam is an arc, so it is not
+                # required to be a LINE - only to be a single edge used twice.
+                seam_edges = line_edges | distinct(arcs)
+                if len(circles) - closed != len(arcs):
+                    problems.append("#%d: periodic face mixes rim shapes" % face.id)
+                if len(seam_edges) != 1:
+                    problems.append(
+                        "#%d: a periodic %s face needs one seam edge used twice, found %d"
+                        % (face.id, surface.name, len(seam_edges))
+                    )
             if closed == 0 and len(line_edges) != 2:
                 problems.append(
                     "#%d: a partial cylindrical face needs two distinct end edges, found %d"

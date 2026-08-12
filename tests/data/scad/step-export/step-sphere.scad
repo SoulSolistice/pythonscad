@@ -18,9 +18,26 @@
 //     distinct records, and the two rings straddling the equator have the same
 //     radius - that band is a cylinder, not a cone.
 //
+// The rings are then *merged*. A sphere is a stack of bands, so the zone is the
+// maximal run of them joined at shared rims whose vertices all lie on the
+// declared sphere - which makes one SPHERICAL_SURFACE out of all 15 without any
+// grower of its own. Flooding across edges instead does not work and this
+// fixture is why: the caps have every vertex on the sphere too, with the same
+// sag as any ring quad, so a geometric test cannot tell them apart. Only the
+// structure can, and the band pass has already worked it out.
+//
+// The seam is the one genuinely new thing. A periodic face is closed by a seam
+// which has to lie *on* the surface; up a cylinder that is a straight ruling,
+// but over a sphere it is a meridian, and the straight line between the same
+// two vertices sags 0.048 mm off a radius 10 sphere - five thousand times the
+// modelling tolerance. So the seam here is an arc of a great circle.
+//
 // Expected at $fn = 32: num_rings = 16, so 480 quads plus two caps, 482 faces.
-// 8 analytic surfaces available, 15 surfaces recognised of which 14 are conical
-// and one - the equatorial band - is cylindrical, none partial, 480 facets
-// replaced. 17 faces out of 482.
+// 9 analytic surfaces available (8 cylindrical, 1 spherical), and 1 surface
+// recognised - spherical, not conical, not partial - with 480 facets replaced.
+// 3 faces out of 482: the zone and the two caps.
+//
+// If the report says 15 surfaces and 14 conical, the merge did not happen and
+// this is the cone stack again.
 $fn = 32;
 sphere(r = 10);

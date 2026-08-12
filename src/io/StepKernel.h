@@ -336,6 +336,50 @@ public:
     Axis2Placement *axis;
   };
 
+  /*! A sphere. The placement's axis is the pole of the surface's own
+   * parameterisation and carries no geometry: a sphere looks the same from
+   * every direction, but a face on one still has to say which way its seam
+   * runs. */
+  class SphericalSurface : public SurfaceType
+  {
+  public:
+    SphericalSurface(std::vector<Entity *>& ent_list) : SurfaceType(ent_list)
+    {
+      axis = 0;
+      r = 0;
+    }
+
+    SphericalSurface(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+                     double r_in)
+      : SurfaceType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      r = r_in;
+    }
+    virtual ~SphericalSurface() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = SPHERICAL_SURFACE('" << label << "',#" << axis->id << ","
+                << step_real(r) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> r;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double r;
+    Axis2Placement *axis;
+  };
+
   /*! A cone, given by the radius in the placement's plane and the half angle it
    * opens by along the placement's axis. ISO 10303 wants the half angle in
    * (0, pi/2), so a cone which narrows along its axis has to be written from

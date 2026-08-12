@@ -26,6 +26,30 @@ public:
   virtual bool transform(const Transform3d& mat);
 };
 
+/*! A sphere, declared by the primitive that drew it.
+ *
+ * Needed for the same reason a cylinder is: an OpenSCAD sphere is a closed
+ * polyhedron inscribed in the sphere, and no measurement of it says whether a
+ * sphere or a polyhedron was meant. `normdir` carries the polar axis of the
+ * tessellation, which an exporter needs to place the surface's own
+ * parameterisation but which says nothing geometric - a sphere looks the same
+ * from every direction. */
+class SphereSurface : public Surface
+{
+public:
+  SphereSurface(Vector3d center, Vector3d normdir, double r);
+  void display(const std::vector<Vector3d>& vertices);
+  int operator==(const SphereSurface& other);
+  int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
+  [[nodiscard]] std::shared_ptr<Surface> clone() const override;
+  bool transform(const Transform3d& mat) override;
+
+  double r;
+
+private:
+  int operator==(const Surface& other) override { return 0; }
+};
+
 class CylinderSurface : public Surface
 {
 public:

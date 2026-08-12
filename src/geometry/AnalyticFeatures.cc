@@ -712,18 +712,137 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     }
   }
 
-  std::size_t collapsed = 0, alive = 0, cones = 0, partial = 0;
+  // ---- merge a run of bands lying on one declared sphere ----------------
+  //
+  // A sphere is not a grid to be grown. Every ring of its tessellation is
+  // already a frustum whose rims are circles, so the zone is the maximal run of
+  // bands joined at shared rims whose vertices all lie on one declared sphere -
+  // which means the band pass has done the work and this only has to join up
+  // its answer. The merged band keeps the run's outer rims, so the rules that
+  // were resolved for the end bands still hold, and the flat cap at either end
+  // is untouched.
+  //
+  // The alternative, flooding across every edge into any face whose vertices
+  // are on the sphere, does not work: an OpenSCAD sphere is a closed polyhedron
+  // inscribed in the sphere and its caps have every vertex on the surface too,
+  // with the same sag as any other facet. There is no local geometric test that
+  // separates a cap from a ring quad, because geometrically there is nothing to
+  // separate - only the structure says which is which.
+  {
+    // which live bands meet at each rim, keyed by the rim's vertex set
+    std::map<std::set<int>, std::vector<std::size_t>> at_rim;
+    for (std::size_t i = 0; i < bands.size(); i++) {
+      if (!bands[i].alive || !bands[i].closed) continue;
+      for (const bool bottom : {true, false}) {
+        const std::vector<int>& level = bottom ? bands[i].bottom_set : bands[i].top_set;
+        at_rim[std::set<int>(level.begin(), level.end())].push_back(i);
+      }
+    }
+
+    auto on_sphere = [&](const SphereSurface *sph, std::size_t bi) {
+      for (const std::size_t f : bands[bi].walls) {
+        for (const int v : loops[f]) {
+          if (fabs((vertices[v] - sph->refpt).norm() - sph->r) > 1e-7 * sph->r) return false;
+        }
+      }
+      return true;
+    };
+
+    std::vector<char> absorbed(bands.size(), 0);
+    for (const auto& surface : surfaces) {
+      const auto *sph = dynamic_cast<const SphereSurface *>(surface.get());
+      if (sph == nullptr) continue;
+
+      for (std::size_t seed = 0; seed < bands.size(); seed++) {
+        if (!bands[seed].alive || absorbed[seed] || bands[seed].sphere != nullptr) continue;
+        if (!bands[seed].closed || !on_sphere(sph, seed)) continue;
+
+        // walk the run outwards from the seed, one rim at a time
+        std::vector<std::size_t> run{seed};
+        for (const bool up : {false, true}) {
+          std::size_t cur = seed;
+          for (;;) {
+            const std::vector<int>& level = up ? bands[cur].top_set : bands[cur].bottom_set;
+            const auto it = at_rim.find(std::set<int>(level.begin(), level.end()));
+            if (it == at_rim.end() || it->second.size() != 2) break;
+            const std::size_t next = it->second[0] == cur ? it->second[1] : it->second[0];
+            if (absorbed[next] || next == seed) break;
+            if (std::find(run.begin(), run.end(), next) != run.end()) break;  // closed on itself
+            if (!on_sphere(sph, next)) break;
+            run.push_back(next);
+            absorbed[next] = 1;
+            cur = next;
+          }
+        }
+        if (run.size() < 2) continue;
+
+        // the ends of the run are the bands with a rim no other band in it uses
+        std::map<std::set<int>, int> uses;
+        for (const std::size_t bi : run) {
+          for (const bool bottom : {true, false}) {
+            const std::vector<int>& level = bottom ? bands[bi].bottom_set : bands[bi].top_set;
+            uses[std::set<int>(level.begin(), level.end())]++;
+          }
+        }
+        std::size_t low = bands.size(), high = bands.size();
+        for (const std::size_t bi : run) {
+          const std::set<int> b(bands[bi].bottom_set.begin(), bands[bi].bottom_set.end());
+          const std::set<int> t(bands[bi].top_set.begin(), bands[bi].top_set.end());
+          if (uses[b] == 1) low = bi;
+          if (uses[t] == 1) high = bi;
+        }
+        if (low == bands.size() || high == bands.size()) {
+          // no free rim at either end: the run closes on itself, which is a
+          // torus rather than a zone and needs a face bounded by two seams
+          for (const std::size_t bi : run) absorbed[bi] = 0;
+          continue;
+        }
+
+        Band& merged = bands[seed];
+        std::vector<std::size_t> walls;
+        for (const std::size_t bi : run) {
+          walls.insert(walls.end(), bands[bi].walls.begin(), bands[bi].walls.end());
+        }
+        // keep the run's outer rims, and with them the rules already resolved
+        const std::pair<RimRef, RimRef> ends{rims[low].first, rims[high].second};
+        merged.walls = walls;
+        merged.bottom_set = bands[low].bottom_set;
+        merged.top_set = bands[high].top_set;
+        merged.base = bands[low].base;
+        // the top rim's centre has to land where the end band's does
+        merged.height = bands[high].height + bands[seed].axis.dot(bands[high].base - bands[low].base);
+        merged.r_bottom = bands[low].r_bottom;
+        merged.r_top = bands[high].r_top;
+        merged.seam_bottom = bands[low].seam_bottom;
+        merged.seam_top = bands[high].seam_top;
+        merged.outward = bands[low].outward;
+        merged.sphere = surface;
+        rims[seed] = ends;
+        for (const std::size_t bi : run) {
+          if (bi == seed) continue;
+          bands[bi].alive = false;
+          bands[bi].dropped = nullptr;  // absorbed, not rejected: keep its facets
+          absorbed[bi] = 1;
+        }
+        for (const std::size_t f : walls) band_of_loop[f] = seed;
+        absorbed[seed] = 0;
+      }
+    }
+  }
+
+  std::size_t collapsed = 0, alive = 0, cones = 0, partial = 0, spheres = 0;
   for (const auto& band : bands) {
     if (!band.alive) continue;
     alive++;
     collapsed += band.walls.size();
-    if (band.isCone()) cones++;
+    if (band.sphere != nullptr) spheres++;
+    else if (band.isCone()) cones++;
     if (!band.closed) partial++;
   }
   if (alive > 0) {
     result.report.push_back(
-      format("%d surface%s recognised (%d conical, %d partial), %d facets replaced", int(alive),
-             alive == 1 ? "" : "s", int(cones), int(partial), int(collapsed)));
+      format("%d surface%s recognised (%d spherical, %d conical, %d partial), %d facets replaced",
+             int(alive), alive == 1 ? "" : "s", int(spheres), int(cones), int(partial), int(collapsed)));
   }
   // Every band here fits its axis exactly and was declared by the model, so a
   // drop is always the topology around it rather than the surface itself.

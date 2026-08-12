@@ -278,6 +278,16 @@ std::unique_ptr<const Geometry> SphereNode::createGeometry() const
     polyset->indices.back().push_back(num_rings * num_fragments - i - 1);
   }
 
+  // Say that this is a sphere, and then say where each of its rings is.
+  //
+  // The two records do different jobs and both are wanted. The SphereSurface is
+  // what a SPHERICAL_SURFACE is written from, and it is matched first because
+  // it describes the whole thing; the ring circles are the fallback, and they
+  // are what collapses a sphere which has been cut about so that no complete
+  // zone of it survives - a hemisphere still has rings even when it no longer
+  // has a sphere an exporter can bound.
+  polyset->surfaces.push_back(std::make_shared<SphereSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), r));
+
   // Record the circle at each ring, which is what makes a sphere collapse.
   //
   // A sphere is not a band and is not going to become one: its facets span many
