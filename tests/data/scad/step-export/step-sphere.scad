@@ -33,9 +33,9 @@
 // modelling tolerance. So the seam here is an arc of a great circle.
 //
 // Expected at $fn = 32: num_rings = 16, so 480 quads plus two caps, 482 faces.
-// 9 analytic surfaces available (8 cylindrical, 1 spherical), and 1 surface
-// recognised - spherical, not conical, not partial - with 480 facets replaced.
-// 3 faces out of 482: the zone and the two caps.
+// 9 analytic surfaces available (8 cylindrical, 1 spherical, 0 toroidal), and
+// 1 surface recognised - spherical, not conical, not partial - with 480 facets
+// replaced. 3 faces out of 482: the zone and the two caps.
 //
 // If the report says 15 surfaces and 14 conical, the merge did not happen and
 // this is the cone stack again.

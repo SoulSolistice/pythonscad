@@ -336,6 +336,50 @@ public:
     Axis2Placement *axis;
   };
 
+  /*! A torus, given by the radius of the circle the tube's centre traces and
+   * the radius of the tube itself. */
+  class ToroidalSurface : public SurfaceType
+  {
+  public:
+    ToroidalSurface(std::vector<Entity *>& ent_list) : SurfaceType(ent_list)
+    {
+      axis = 0;
+      r_major = 0;
+      r_minor = 0;
+    }
+
+    ToroidalSurface(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+                    double r_major_in, double r_minor_in)
+      : SurfaceType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      r_major = r_major_in;
+      r_minor = r_minor_in;
+    }
+    virtual ~ToroidalSurface() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = TOROIDAL_SURFACE('" << label << "',#" << axis->id << ","
+                << step_real(r_major) << "," << step_real(r_minor) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> r_major >> r_minor;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double r_major, r_minor;
+    Axis2Placement *axis;
+  };
+
   /*! A sphere. The placement's axis is the pole of the surface's own
    * parameterisation and carries no geometry: a sphere looks the same from
    * every direction, but a face on one still has to say which way its seam

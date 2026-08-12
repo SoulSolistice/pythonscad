@@ -175,13 +175,14 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // out - which is a feature nobody has asked for yet.
   (void)curves;
   if (!surfaces.empty()) {
-    int cylinders = 0, spheres = 0;
+    int cylinders = 0, spheres = 0, tori = 0;
     for (const auto& surface : surfaces) {
       if (dynamic_cast<const CylinderSurface *>(surface.get()) != nullptr) cylinders++;
       else if (dynamic_cast<const SphereSurface *>(surface.get()) != nullptr) spheres++;
+      else if (dynamic_cast<const TorusSurface *>(surface.get()) != nullptr) tori++;
     }
-    printf("STEP export: %d analytic surface%s available (%d cylindrical, %d spherical)\n",
-           int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres);
+    printf("STEP export: %d analytic surface%s available (%d cylindrical, %d spherical, %d toroidal)\n",
+           int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres, tori);
   }
 
   const double model_tol = tol > 0 ? tol : 1e-5;
@@ -373,6 +374,59 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   for (std::size_t i = 0; i < bands.size(); i++) {
     const AnalyticFeatures::Band& band = bands[i];
     if (!band.alive) continue;
+
+    // A torus is closed in both directions, so its face is bounded by nothing
+    // but its own two seams: the major circle through one profile station and
+    // the meridian circle at one longitude, each a closed circle through the
+    // same vertex and each used once in either direction. That is the same four
+    // edge loop a periodic cylinder uses - the doubly periodic case needs no
+    // new shape, only a second seam - and it needs nothing from the mesh beyond
+    // that one vertex, since both circles come out of the declared record.
+    if (const auto *tor = dynamic_cast<const TorusSurface *>(band.zone.get())) {
+      const Vector3d centre = tor->refpt;
+      const Vector3d axis = tor->normdir.normalized();
+      const Vector3d corner = vertices[band.seam_bottom];
+      const Vector3d rel = corner - centre;
+      const double along = rel.dot(axis);
+      const Vector3d radial = (rel - axis * along).normalized();
+      // the point on the tube's centre circle nearest the corner
+      const Vector3d tube = centre + radial * tor->r_major;
+
+      auto placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
+        auto point = new Point(entities, origin);
+        auto dir_axis = new Direction(entities, dir);
+        auto dir_ref = new Direction(entities, towards);
+        return new Axis2Placement(entities, dir_axis, dir_ref, point);
+      };
+
+      auto surface =
+        new ToroidalSurface(entities, "", placement(centre, axis, radial), tor->r_major, tor->r_minor);
+      Vertex *vert = get_vertex(band.seam_bottom);
+
+      // the major circle: round the axis, through the corner
+      auto major = new Circle(entities, "", placement(centre + axis * along, axis, radial),
+                              (rel - axis * along).norm());
+      auto edge_major = new EdgeCurve(entities, vert, vert, major, true);
+
+      // the meridian circle: round the tube, in the plane the axis and the
+      // radial direction span
+      auto meridian = new Circle(
+        entities, "", placement(tube, radial.cross(axis), (corner - tube).normalized()), tor->r_minor);
+      auto edge_meridian = new EdgeCurve(entities, vert, vert, meridian, true);
+
+      std::vector<OrientedEdge *> loop{
+        new OrientedEdge(entities, edge_major, true),
+        new OrientedEdge(entities, edge_meridian, true),
+        new OrientedEdge(entities, edge_major, false),
+        new OrientedEdge(entities, edge_meridian, false),
+      };
+      auto edge_loop = new EdgeLoop(entities, loop);
+      std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
+      sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
+      face_edges_extra.push_back({edge_major, edge_meridian});
+      continue;
+    }
+
     const Vector3d top_centre = band.base + band.axis * band.height;
     const bool is_cone = band.isCone();
 
@@ -389,8 +443,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     const Vector3d ref = (rel - band.axis * band.axis.dot(rel)).normalized();
 
     SurfaceType *surface = nullptr;
-    if (band.sphere != nullptr) {
-      const auto *sph = dynamic_cast<const SphereSurface *>(band.sphere.get());
+    if (band.zone != nullptr) {
+      const auto *sph = dynamic_cast<const SphereSurface *>(band.zone.get());
       surface = new SphericalSurface(entities, "", placement(sph->refpt, band.axis, ref), sph->r);
     } else if (!is_cone) {
       surface = new CylindricalSurface(entities, "", placement(band.base, band.axis, ref),
@@ -469,8 +523,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       // by nothing at all in the mesh, so replacing the line costs no
       // neighbouring loop a rewrite.
       EdgeCurve *edge_seam = nullptr;
-      if (band.sphere != nullptr) {
-        const auto *sph = dynamic_cast<const SphereSurface *>(band.sphere.get());
+      if (band.zone != nullptr) {
+        const auto *sph = dynamic_cast<const SphereSurface *>(band.zone.get());
         const Vector3d from = (vertices[band.seam_bottom] - sph->refpt).normalized();
         const Vector3d to = (vertices[band.seam_top] - sph->refpt).normalized();
         // this normal is the one that makes the sweep from `from` to `to`

@@ -754,7 +754,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       if (sph == nullptr) continue;
 
       for (std::size_t seed = 0; seed < bands.size(); seed++) {
-        if (!bands[seed].alive || absorbed[seed] || bands[seed].sphere != nullptr) continue;
+        if (!bands[seed].alive || absorbed[seed] || bands[seed].zone != nullptr) continue;
         if (!bands[seed].closed || !on_sphere(sph, seed)) continue;
 
         // walk the run outwards from the seed, one rim at a time
@@ -792,8 +792,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
           if (uses[t] == 1) high = bi;
         }
         if (low == bands.size() || high == bands.size()) {
-          // no free rim at either end: the run closes on itself, which is a
-          // torus rather than a zone and needs a face bounded by two seams
+          // No free rim at either end: the run closes on itself, which is a
+          // torus. It is only accepted when a torus was declared - `sph` here
+          // is a sphere, and a closed run of bands on a sphere is impossible,
+          // so this always falls through to the torus pass below.
           for (const std::size_t bi : run) absorbed[bi] = 0;
           continue;
         }
@@ -836,7 +838,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         merged.seam_bottom = seam_bottom;
         merged.seam_top = seam_top;
         merged.outward = outward;
-        merged.sphere = surface;
+        merged.zone = surface;
         rims[seed] = ends;
         for (const std::size_t bi : run) {
           if (bi == seed) continue;
@@ -850,19 +852,120 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     }
   }
 
-  std::size_t collapsed = 0, alive = 0, cones = 0, partial = 0, spheres = 0;
+  // ---- merge a run of bands which closes on itself, on a declared torus ----
+  //
+  // The same observation as for a sphere: a torus is a stack of bands, one per
+  // profile edge, and the zone is the run of them joined at shared rims. The
+  // difference is only that the run has no ends - every rim is shared - so
+  // there is nothing to keep, and the face is bounded by its own two seams
+  // instead. That is why it needs a declaration of its own rather than falling
+  // out of the ring circles: those already collapse a torus into a stack of
+  // exact cones, and only a TorusSurface says the stack was one surface.
+  {
+    std::vector<char> absorbed(bands.size(), 0);
+    for (const auto& surface : surfaces) {
+      const auto *tor = dynamic_cast<const TorusSurface *>(surface.get());
+      if (tor == nullptr) continue;
+
+      auto on_torus = [&](std::size_t bi) {
+        for (const std::size_t f : bands[bi].walls) {
+          for (const int v : loops[f]) {
+            const Vector3d rel = vertices[v] - tor->refpt;
+            const double along = rel.dot(tor->normdir);
+            const double radial = (rel - tor->normdir * along).norm();
+            const double d = radial - tor->r_major;
+            if (fabs(sqrt(d * d + along * along) - tor->r_minor) > 1e-7 * tor->r_minor) return false;
+          }
+        }
+        return true;
+      };
+
+      std::map<std::set<int>, std::vector<std::size_t>> at_rim;
+      for (std::size_t i = 0; i < bands.size(); i++) {
+        if (!bands[i].alive || !bands[i].closed || bands[i].zone != nullptr) continue;
+        if (!on_torus(i)) continue;
+        for (const bool bottom : {true, false}) {
+          const std::vector<int>& level = bottom ? bands[i].bottom_set : bands[i].top_set;
+          at_rim[std::set<int>(level.begin(), level.end())].push_back(i);
+        }
+      }
+
+      for (std::size_t seed = 0; seed < bands.size(); seed++) {
+        if (!bands[seed].alive || absorbed[seed] || bands[seed].zone != nullptr) continue;
+        if (!bands[seed].closed || !on_torus(seed)) continue;
+
+        // walk the ring until it comes back to the seed
+        std::vector<std::size_t> run{seed};
+        std::size_t cur = seed;
+        bool cyclic = false;
+        for (;;) {
+          const std::set<int> level(bands[cur].top_set.begin(), bands[cur].top_set.end());
+          const auto it = at_rim.find(level);
+          if (it == at_rim.end() || it->second.size() != 2) break;
+          const std::size_t next = it->second[0] == cur ? it->second[1] : it->second[0];
+          if (next == seed) {
+            cyclic = true;
+            break;
+          }
+          if (absorbed[next] || std::find(run.begin(), run.end(), next) != run.end()) break;
+          run.push_back(next);
+          cur = next;
+        }
+        if (!cyclic || run.size() < 3) continue;
+
+        std::vector<std::size_t> walls;
+        for (const std::size_t bi : run) {
+          walls.insert(walls.end(), bands[bi].walls.begin(), bands[bi].walls.end());
+        }
+
+        // A torus face is bounded by nothing but its own two seams, so the only
+        // thing the emitter needs from the mesh is one vertex where they cross.
+        // Everything else - both circles, their centres, their radii - comes
+        // out of the record.
+        const int corner = bands[seed].bottom_set.front();
+
+        // Which way the face looks: away from the tube's centre circle, which
+        // for the inner half of a torus is the opposite of away from the axis.
+        const Vector3d probe = vertices[loops[bands[seed].walls[0]][0]];
+        const Vector3d rel = probe - tor->refpt;
+        const double along = rel.dot(tor->normdir);
+        const Vector3d radial = rel - tor->normdir * along;
+        const Vector3d tube = tor->refpt + radial.normalized() * tor->r_major;
+        const bool outward = (probe - tube).normalized().dot(loop_normals[bands[seed].walls[0]]) > 0;
+
+        Band& merged = bands[seed];
+        merged.walls = walls;
+        merged.seam_bottom = corner;
+        merged.seam_top = corner;
+        merged.outward = outward;
+        merged.zone = surface;
+        for (const std::size_t bi : run) {
+          if (bi == seed) continue;
+          bands[bi].alive = false;
+          bands[bi].dropped = nullptr;  // absorbed, not rejected: keep its facets
+          absorbed[bi] = 1;
+        }
+        for (const std::size_t f : walls) band_of_loop[f] = seed;
+      }
+    }
+  }
+
+  std::size_t collapsed = 0, alive = 0, cones = 0, partial = 0, spheres = 0, tori = 0;
   for (const auto& band : bands) {
     if (!band.alive) continue;
     alive++;
     collapsed += band.walls.size();
-    if (band.sphere != nullptr) spheres++;
+    if (dynamic_cast<const TorusSurface *>(band.zone.get()) != nullptr) tori++;
+    else if (band.zone != nullptr) spheres++;
     else if (band.isCone()) cones++;
     if (!band.closed) partial++;
   }
   if (alive > 0) {
     result.report.push_back(
-      format("%d surface%s recognised (%d spherical, %d conical, %d partial), %d facets replaced",
-             int(alive), alive == 1 ? "" : "s", int(spheres), int(cones), int(partial), int(collapsed)));
+      format("%d surface%s recognised (%d toroidal, %d spherical, %d conical, %d partial), "
+             "%d facets replaced",
+             int(alive), alive == 1 ? "" : "s", int(tori), int(spheres), int(cones), int(partial),
+             int(collapsed)));
   }
   // Every band here fits its axis exactly and was declared by the model, so a
   // drop is always the topology around it rather than the surface itself.

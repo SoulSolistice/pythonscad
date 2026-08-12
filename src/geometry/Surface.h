@@ -50,6 +50,29 @@ private:
   int operator==(const Surface& other) override { return 0; }
 };
 
+/*! A torus: a circle of radius `r_minor` swept round `normdir` at a distance
+ * `r_major` from `refpt`.
+ *
+ * Declared by `rotate_extrude` when its child is a circle, which it can only
+ * know by reading the node tree - a 2D outline carries no record of having been
+ * one. */
+class TorusSurface : public Surface
+{
+public:
+  TorusSurface(Vector3d center, Vector3d normdir, double r_major, double r_minor);
+  void display(const std::vector<Vector3d>& vertices);
+  void reverse(void);
+  int operator==(const TorusSurface& other);
+  int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
+  [[nodiscard]] std::shared_ptr<Surface> clone() const override;
+  bool transform(const Transform3d& mat) override;
+
+  double r_major, r_minor;
+
+private:
+  int operator==(const Surface& other) override { return 0; }
+};
+
 class CylinderSurface : public Surface
 {
 public:

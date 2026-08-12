@@ -754,8 +754,8 @@ hats.
 `step-shared-arc.scad` is the fixture for the second; the first needs none,
 because `step-partial-cylinder` already contains the shape that provoked it and
 simply recognises more of it now. On the fixture the exporter reports *2
-surfaces recognised (0 spherical, 1 conical, 2 partial), 48 facets replaced*,
-taking the part
+surfaces recognised (0 toroidal, 0 spherical, 1 conical, 2 partial), 48 facets
+replaced*, taking the part
 from 52 faces to 6, and SolidWorks round trips the shared arc - see *What
 SolidWorks said*.
 
@@ -782,7 +782,7 @@ if (!cone && !inverted_cone && r1 == r2 && this->angle == 360) {   // was
   primitive now declares the circle at each of its rims, which is the same
   statement of intent the hull makes, so the two leave identical provenance.
   Nothing in the recogniser changed, and `step-cone-primitive` comes out as
-  *1 surface recognised (0 spherical, 1 conical, 0 partial), 32 facets
+  *1 surface recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 32 facets
   replaced* - 3 faces.
 - **A pie slice declared nothing**, on the reasoning that its flat sides are not
   part of the cylinder. True, and the wrong place to act on it: those sides run
@@ -822,10 +822,10 @@ degree wall must be partial. That is worth recording as a method note in itself:
 
 The parse is fixed, and `step-pie-slice` guards it from the STEP side: if
 `angle` is ever dropped again the band comes out closed, and the comment says
-what the report has to read. It now says *1 surface recognised (0 spherical, 0
-conical, 1 partial), 31 facets replaced*, taking the slice from 35 faces to 5.
-Between the run that found the defect and the run that confirmed the fix, that
-one line is
+what the report has to read. It now says *1 surface recognised (0 toroidal, 0
+spherical, 0 conical, 1 partial), 31 facets replaced*, taking the slice from 35
+faces to 5. Between the run that found the defect and the run that confirmed the
+fix, that one line is
 the **only** thing that changed in the whole suite - every other fixture's
 report and face count is identical, which is the evidence that the parse fix
 touched nothing else.
@@ -845,9 +845,9 @@ emission work in it, only the record. `declareSurfacesOfRevolution()` in
 circle per radius; `step-rotate-extrude.scad` is the fixture, a stepped tube
 whose six profile edges cover all three kinds (flat annulus, cylinder, frustum)
 and whose two internal rims each bound two curved faces and nothing else. It
-reports *3 analytic surfaces available, 4 surfaces recognised (0 spherical, 1
-conical, 0 partial), 128 facets replaced* - three records for six edges, four
-faces from them, and the whole tube down to 6 faces.
+reports *3 analytic surfaces available, 4 surfaces recognised (0 toroidal, 0
+spherical, 1 conical, 0 partial), 128 facets replaced* - three records for six
+edges, four faces from them, and the whole tube down to 6 faces.
 
 Two things it deliberately does not do:
 
@@ -859,10 +859,11 @@ Two things it deliberately does not do:
   is not a surface of revolution at all. That is not a corner case: it is how a
   screw thread is built, and it is the same fact that sinks item 5.
 
-### A torus is already a stack of exact cones
+### A torus is a stack of exact cones, and then one surface
 
-`TOROIDAL_SURFACE` was next on this list until it was measured, and the
-measurement moved it a long way down.
+`TOROIDAL_SURFACE` was next on this list until it was measured, the measurement
+moved it a long way down, and it was then done anyway - by which time it was
+much smaller than it had looked. Both halves of that are worth keeping.
 
 `rotate_extrude()` meshes a circular profile as a grid: one ring per profile
 edge, every quad with its four corners at two radii and two heights. That is
@@ -891,14 +892,31 @@ collected for nothing - and it costs three hard pieces to get:
 - **A torus is not a band.** Its facets span many rings rather than two rims, so
   the strip walk does not describe it. It needs a grid grower, which it shares
   with spheres (item 3).
-- **A full torus face is bounded by two seams**, not by rims at all - the loop
-  is not the four-edge one every face so far has used.
+- **A full torus face is bounded by two seams**, not by rims at all. This was
+  the part expected to need a new loop shape and it does not: two seams give
+  *four* edges, two distinct ones each used once in either direction, which is
+  precisely the loop a periodic cylinder already uses. The second seam is a
+  second edge, not a different kind of bound.
 
 The practical case for it is quality rather than count: a fillet that comes out
 as 32 conical bands has tangent discontinuities where the true surface is
 smooth, which matters to whatever the importing CAD system does next. That is a
 real argument, and it is a different argument from the one that put the item
 high on this list.
+
+**All three are now done**, and the first of them is what made the other two
+cheap:
+
+- `rotate_extrude` declares a `TorusSurface` by reading its **child node** -
+  a chain of pure translations ending at a whole `circle()`. Not the geometry,
+  which by then is a polygon. It is deliberately narrow, because anything it
+  does not recognise stays a stack of cones, which is already exact; a
+  `difference()` in the way ends the match, and that is the known limit of
+  reading the tree.
+- The merge is the sphere's, with the run allowed to close on itself.
+- The face needs nothing from the mesh but **one vertex** - the corner where
+  the two seams cross. Both circles, their centres and their radii come out of
+  the record, so there is no grid to recover.
 
 `step-torus.scad` is the fixture, and it earns its place for a second reason:
 it is the first thing to chain more than three closed bands through shared

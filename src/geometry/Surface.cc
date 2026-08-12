@@ -99,6 +99,56 @@ int SphereSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
   return fabs((pt - refpt).norm() - r) > 1e-5 ? 0 : 1;
 }
 
+TorusSurface::TorusSurface(Vector3d refpt, Vector3d normdir, double r_major, double r_minor)
+{
+  this->refpt = refpt;
+  this->normdir = normdir;
+  this->r_major = r_major;
+  this->r_minor = r_minor;
+}
+
+void TorusSurface::display(const std::vector<Vector3d>& vertices)
+{
+  printf("TorusSurface R=%g r=%g at (%g/%g/%g)\n", r_major, r_minor, refpt[0], refpt[1], refpt[2]);
+}
+
+void TorusSurface::reverse(void)
+{
+  this->normdir = -this->normdir;
+}
+
+std::shared_ptr<Surface> TorusSurface::clone() const
+{
+  return std::make_shared<TorusSurface>(*this);
+}
+
+bool TorusSurface::transform(const Transform3d& mat)
+{
+  if (!Surface::transform(mat)) return false;
+  const double scale = (mat.linear() * Vector3d(1, 0, 0)).norm();
+  this->r_major *= scale;
+  this->r_minor *= scale;
+  return true;
+}
+
+int TorusSurface::operator==(const TorusSurface& other)
+{
+  if ((normdir - other.normdir).norm() > 1e-6) return 0;
+  if ((refpt - other.refpt).norm() > 1e-6) return 0;
+  if (fabs(r_major - other.r_major) > 1e-6) return 0;
+  if (fabs(r_minor - other.r_minor) > 1e-6) return 0;
+  return 1;
+}
+
+int TorusSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
+{
+  // distance from the tube's centre circle, which is what a torus is
+  const Vector3d rel = pt - refpt;
+  const double along = rel.dot(normdir);
+  const double radial = (rel - normdir * along).norm();
+  return fabs(sqrt((radial - r_major) * (radial - r_major) + along * along) - r_minor) > 1e-5 ? 0 : 1;
+}
+
 CylinderSurface::CylinderSurface(Vector3d refpt, Vector3d normdir, double r)
 {
   this->refpt = refpt;

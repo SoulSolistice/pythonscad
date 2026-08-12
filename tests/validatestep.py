@@ -706,6 +706,7 @@ def check_cylindrical_faces(entities, problems):
             "CYLINDRICAL_SURFACE",
             "CONICAL_SURFACE",
             "SPHERICAL_SURFACE",
+            "TOROIDAL_SURFACE",
         ):
             continue
 
@@ -737,6 +738,54 @@ def check_cylindrical_faces(entities, problems):
             problems.append(
                 "#%d: cylindrical face has %d edges, expected at least 4" % (face.id, len(oriented))
             )
+            continue
+
+        # A torus is closed in *both* directions, so its face has no rims at
+        # all: it is bounded by its own two seams, each a closed circle through
+        # the one vertex where they cross and each used once in either
+        # direction. Same four edges as a periodic cylinder, two seams instead
+        # of one.
+        if surface.name == "TOROIDAL_SURFACE":
+            if len(oriented) != 4:
+                problems.append(
+                    "#%d: toroidal face has %d edges, expected 4" % (face.id, len(oriented))
+                )
+                continue
+            seams, closed_circles = set(), 0
+            for oid in oriented:
+                geom = _edge_geometry(entities, oid)
+                ends = _edge_endpoints(entities, oid)
+                if geom is None or ends is None or geom.name != "CIRCLE":
+                    problems.append("#%d: toroidal face has a non circular edge" % face.id)
+                    break
+                if ends[0] == ends[1]:
+                    closed_circles += 1
+                oe = entities.get(oid)
+                seams.add(oe.refs()[-1] if oe is not None and oe.refs() else None)
+            else:
+                if closed_circles != 4:
+                    problems.append(
+                        "#%d: a toroidal face is bounded by two closed circles, found %d closed of 4"
+                        % (face.id, closed_circles)
+                    )
+                if len(seams) != 2:
+                    problems.append(
+                        "#%d: a toroidal face needs two seam edges each used twice, found %d"
+                        % (face.id, len(seams))
+                    )
+                # the two seams are the tube's own circle and the circle its
+                # centre traces, so neither may be wider than the torus
+                r_major = surface.floats()[0] if surface.floats() else None
+                for oid in oriented:
+                    geom = _edge_geometry(entities, oid)
+                    cr = geom.floats()[-1] if geom is not None and geom.floats() else None
+                    if cr is None or cr <= 0:
+                        problems.append("#%d: seam CIRCLE has no positive radius" % face.id)
+                    elif r_major is not None and cr > r_major * (1 + 1e-6):
+                        problems.append(
+                            "#%d: seam CIRCLE has radius %s, wider than the torus at %s"
+                            % (face.id, cr, r_major)
+                        )
             continue
 
         # A rim is a closed CIRCLE on a periodic face and an arc on a partial

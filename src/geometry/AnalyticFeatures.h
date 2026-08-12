@@ -46,7 +46,8 @@ inline constexpr std::size_t NO_BAND = std::size_t(-1);
  * decided later - see RimRef. */
 struct Band {
   std::vector<std::size_t> walls;
-  /*! Set when a chain of bands was merged into one spherical zone.
+  /*! Set when a chain of bands was merged into one curved zone - a sphere when
+   * the run ends at a cap, a torus when it closes on itself.
    *
    * A sphere is not a grid to be grown, it is a *stack of bands*: every ring of
    * its tessellation is already a frustum whose two rims are circles, and the
@@ -54,7 +55,7 @@ struct Band {
    * all lie on one declared sphere. The merged band keeps the outer rims of the
    * run, so the rim rules that were resolved for the ends still hold and the
    * caps at either end are untouched. */
-  std::shared_ptr<const Surface> sphere;
+  std::shared_ptr<const Surface> zone;
   Vector3d axis, base;  // base is the centre of the bottom rim
   double r_bottom = 0, r_top = 0;
   double height = 0;

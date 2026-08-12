@@ -21,6 +21,8 @@
 #include "core/RenderNode.h"
 #include "core/RoofNode.h"
 #include "core/RotateExtrudeNode.h"
+#include "core/primitives.h"
+#include "geometry/Surface.h"
 #include "core/SkinNode.h"
 #include "core/PathExtrudeNode.h"
 #include "core/PullNode.h"
@@ -2721,6 +2723,63 @@ Response GeometryEvaluator::visit(State& state, const PathExtrudeNode& node)
     o Union all children
     o Perform extrude
  */
+/*! The torus a `rotate_extrude` sweeps, when its child is a circle.
+ *
+ * Everything else the exporter knows is declared by the node that draws it, and
+ * this one cannot be: by the time `rotate_extrude` has its child's geometry the
+ * circle is a polygon, and `Outline2d` carries vertices, a winding flag and a
+ * colour - nothing that says it was ever round. Fitting the outline instead is
+ * not a way out, because a 32-gon profile revolved gives *exactly* the mesh a
+ * circle profile gives; that is the cylinder-and-prism ambiguity one dimension
+ * down, and the whole reason declarations exist.
+ *
+ * So this reads the node tree rather than the geometry. It is deliberately
+ * narrow - one child, transforms that are pure translations, a whole circle, no
+ * twist and no helical `v` - because everything it does not recognise simply
+ * stays a stack of cones, which is already exact. A `difference()` in the way
+ * ends the match, and that is the known limit of reading the tree: the honest
+ * fix is a curve channel on Outline2d, which has to survive Clipper.
+ */
+static std::shared_ptr<Surface> torusOfRevolution(const RotateExtrudeNode& node)
+{
+  if (node.v.norm() != 0 || node.twist != 0) return nullptr;
+  if (node.origin_x != 0 || node.origin_y != 0) return nullptr;
+  if (node.offset_x != 0 || node.offset_y != 0) return nullptr;
+#ifdef ENABLE_PYTHON
+  if (node.profile_func != nullptr || node.twist_func != nullptr) return nullptr;
+#endif
+
+  // walk down through transforms, keeping the matrix they compose to
+  Transform3d matrix = Transform3d::Identity();
+  const AbstractNode *cur = &node;
+  for (;;) {
+    if (cur->getChildren().size() != 1) return nullptr;
+    const AbstractNode *child = cur->getChildren().front().get();
+    if (const auto *xform = dynamic_cast<const TransformNode *>(child)) {
+      matrix = matrix * xform->matrix;
+      cur = child;
+      continue;
+    }
+    const auto *circle = dynamic_cast<const CircleNode *>(child);
+    if (circle == nullptr || circle->r <= 0 || circle->angle != 360) return nullptr;
+
+    // Only a translation. A rotation tips the profile out of the plane the
+    // sweep is taken in and a non uniform scale turns the circle into an
+    // ellipse; neither is a torus, and the fit downstream would reject it
+    // anyway - this only avoids offering a record that cannot be right.
+    const Matrix3d linear = matrix.linear();
+    if (!linear.isApprox(Matrix3d::Identity(), 1e-12)) return nullptr;
+
+    const Vector3d centre = matrix * Vector3d(0, 0, 0);
+    const double r_major = centre[0];
+    // a circle reaching the axis sweeps a horn torus, and one crossing it is
+    // rejected by rotatePolygon() long before this
+    if (r_major < circle->r) return nullptr;
+    return std::make_shared<TorusSurface>(Vector3d(0, 0, centre[1]), Vector3d(0, 0, 1), r_major,
+                                          circle->r);
+  }
+}
+
 Response GeometryEvaluator::visit(State& state, const RotateExtrudeNode& node)
 {
   if (state.isPrefix() && isSmartCached(node)) return Response::PruneTraversal;
@@ -2732,7 +2791,13 @@ Response GeometryEvaluator::visit(State& state, const RotateExtrudeNode& node)
       const auto polygons = std::dynamic_pointer_cast<const Polygon2d>(geometry);
       const auto barcode1d = std::dynamic_pointer_cast<const Barcode1d>(geometry);
 
-      if (polygons != nullptr) geom = rotatePolygon(node, *polygons);
+      if (polygons != nullptr) {
+        auto swept = rotatePolygon(node, *polygons);
+        if (auto torus = torusOfRevolution(node)) {
+          if (auto *ps = dynamic_cast<PolySet *>(swept.get())) ps->surfaces.push_back(torus);
+        }
+        geom = std::move(swept);
+      }
       if (barcode1d != nullptr) geom = rotateBarcode(node, *barcode1d);
       if (geom == nullptr) geom = {};
     } else {
