@@ -1239,10 +1239,33 @@ and shared by all three backends' merge paths.
 All three were invisible in the same way the recogniser's own failures are: the
 output validates, and a file with no analytic surfaces looks exactly like a
 model that declared none. So the sanity test now exports every fixture a third
-time under `--backend=CGAL` and fails if the Manifold run recognised surfaces
-and the CGAL run recognised none. Not that they recognise the *same* ones - the
-backends mesh differently, and recognition depends on the topology as well as
-the declarations - only that the channel is not empty.
+time under `--backend=CGAL` and compares **how many declarations reached the
+exporter**, which both runs report. Every fixture agrees, from 1 to 18.
+
+Not how many were *written*, which was the first thing this test asserted and
+was wrong. Those are different quantities and only the first is the channel.
+
+### The two backends do not recognise the same surfaces
+
+The measurement that followed from getting that assertion wrong is worth
+keeping. Exactly the four fixtures whose top level object is a Nef polyhedron -
+the ones with a boolean in them - come out differently; every fixture that stays
+a PolySet is identical on both backends, down to the entity count.
+
+| fixture | Manifold | CGAL |
+| --- | --- | --- |
+| step-bore | 2 | 1 |
+| step-nested-rings | 5 whole | 17 partial |
+| step-partial-cylinder | 4 | 0 |
+| step-shared-arc | 2 | 0 |
+
+Same declarations, same number of faces in the faceted export, different
+recognition. `step-nested-rings` gives it away: five closed rings become
+seventeen arcs, so the Nef boolean is splitting wall loops at the seams where
+its operands met, and a wall in several pieces is a wall whose rims no longer
+border a single face. That is not a lost declaration, it is a mesh the
+recogniser reads differently, and it is a real quality gap for anyone on
+`--backend=CGAL` - just a separate one from the channel this item fixed.
 
 ### Only one item is short of a channel
 
@@ -1304,6 +1327,12 @@ prism elsewhere in the part. Bounded, but not zero.
 4. **`FilletNode` declaring a B-spline.** No channel work at all: a surface
    type, the matching, the emission, and the rim generalisation that item 2 has
    been carrying all along.
+5. **A wall split by a Nef boolean.** New, and measured above: on
+   `--backend=CGAL` a boolean leaves the wall of an untouched ring cut into arcs
+   at the seams where the operands met, and the recogniser then sees several
+   walls where there is one. Merging runs of coplanar-and-cocylindrical bands
+   back together before the rim rules are applied would recover it, and would
+   also help the seams a Manifold boolean leaves behind.
 
 ## Method notes
 

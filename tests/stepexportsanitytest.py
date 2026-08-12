@@ -16,6 +16,7 @@
 import argparse
 import locale
 import os
+import re
 import subprocess
 import sys
 
@@ -69,6 +70,7 @@ def export(openscad, inputfile, outfile, extra_args, env=None):
         failquit("PythonSCAD exited with status %d without exporting %s" % (proc.returncode, outfile))
     if not os.path.exists(outfile):
         failquit("PythonSCAD reported success but wrote no file to " + outfile)
+    return output
 
 
 def normalized(path):
@@ -126,67 +128,70 @@ elif ok:
     if ok:
         os.unlink(localefile)
 
+
+def surfaces_available(output):
+    """The surface declarations that reached the exporter, from its own report.
+
+    This is the declaration channel, and it is a different quantity from the
+    surfaces actually written: a declaration is only a hint, and the exporter
+    accepts it only where it also finds an exact fit and a topology that can
+    take the substitution."""
+    m = re.search(r"(\d+) analytic surfaces? available", output)
+    return int(m.group(1)) if m else 0
+
+
 # Export once more with the analytic geometry turned on. Every check in
 # validatestep.py applies to that file too - a cylinder written as a
 # CYLINDRICAL_SURFACE still has to leave the shell watertight, its rims still
 # have to be used once in each direction - and the surface checks only have
 # anything to look at here.
-ANALYTIC_ENTITIES = (
-    "CYLINDRICAL_SURFACE",
-    "CONICAL_SURFACE",
-    "SPHERICAL_SURFACE",
-    "TOROIDAL_SURFACE",
-)
-
-
-def count_analytic(path):
-    """How many analytic surfaces the file was written with."""
-    with open(path, encoding="utf-8", errors="replace") as f:
-        text = f.read()
-    return sum(text.count(name) for name in ANALYTIC_ENTITIES)
-
-
 if ok:
     analyticfile = stepfile.replace(".stp", "-analytic.stp")
     analytic_flag = "--enable=step-analytic-surfaces"
     print("Re-exporting with " + analytic_flag, file=sys.stderr)
-    export(args.openscad, inputfile, analyticfile, remaining_args + [analytic_flag])
+    output = export(args.openscad, inputfile, analyticfile, remaining_args + [analytic_flag])
     if not validateSTEP(analyticfile):
         print("the analytic export is not valid", file=sys.stderr)
         ok = False
     else:
-        recognised = count_analytic(analyticfile)
+        declared = surfaces_available(output)
         os.unlink(analyticfile)
 
-        # Once more on the CGAL backend. A surface declaration is carried by the
-        # geometry it describes, and each backend has its own representation to
-        # carry it through: a model which exports with analytic surfaces under
-        # Manifold and comes out faceted under CGAL has lost them in a
-        # conversion, which is a bug that is otherwise invisible - both files
-        # validate, and the faceted one looks exactly like a model that never
-        # declared anything.
+        # Once more on the CGAL backend. A surface declaration rides along with
+        # the geometry it describes, and each backend has its own representation
+        # to carry it: on this one a boolean converts both operands to Nef
+        # polyhedra, which had nowhere to put them and dropped every record on
+        # the way in. That was invisible - both files validate, and an export
+        # with no analytic surfaces looks exactly like a model that declared
+        # none.
         #
-        # The two are not required to recognise the *same* surfaces. The
-        # backends mesh differently, and recognition depends on the topology of
-        # the mesh as well as on the declarations. Losing all of them is the
-        # defect this guards against.
-        if recognised:
+        # What is compared is how many declarations *reached* the exporter, not
+        # how many it wrote. Those are different questions, and only the first
+        # one is about the channel. The backends mesh differently, so the same
+        # model can offer identical declarations and still have a different
+        # number of them accepted: a Nef boolean splits wall loops at the seams
+        # where its operands met, and step-nested-rings comes out of it as 17
+        # arcs where Manifold gives 5 closed rings. Requiring the two to write
+        # the same surfaces would be asserting that the two backends produce the
+        # same mesh, which they do not and need not.
+        if declared:
             cgalfile = stepfile.replace(".stp", "-cgal.stp")
             print("Re-exporting with " + analytic_flag + " --backend=CGAL", file=sys.stderr)
-            export(
+            output = export(
                 args.openscad,
                 inputfile,
                 cgalfile,
                 remaining_args + [analytic_flag, "--backend=CGAL"],
             )
+            carried = surfaces_available(output)
             if not validateSTEP(cgalfile):
                 print("the analytic export on the CGAL backend is not valid", file=sys.stderr)
                 ok = False
-            elif not count_analytic(cgalfile):
+            elif carried != declared:
                 print(
-                    "%d analytic surfaces on the Manifold backend and none on CGAL: the "
-                    "declarations did not survive the conversion to a Nef polyhedron"
-                    % recognised,
+                    "%d surface declarations reached the exporter on the Manifold backend "
+                    "and %d on CGAL: they did not survive the conversion to a Nef polyhedron"
+                    % (declared, carried),
                     file=sys.stderr,
                 )
                 ok = False
