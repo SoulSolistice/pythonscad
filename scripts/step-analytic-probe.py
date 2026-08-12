@@ -220,6 +220,30 @@ def fit_centre(coords, ids, axis, level):
     return sub(c, scale(axis, dot(axis, c) - level))
 
 
+def fit_radius_line(pts):
+    """Least squares r = a + b*z over (radius, height) pairs.
+
+    A facet lies on a cylinder or a cone about the axis exactly when all its
+    vertices satisfy one such line: b = 0 is a cylinder, b != 0 a cone. That
+    is the test which separates a face whose *surface* is missing from one
+    whose surface is there and only the trim is not planar - the first needs a
+    new surface type, the second needs a trim curve.
+
+    Returns (a, b, largest residual)."""
+    n = len(pts)
+    sz = sum(z for _, z in pts)
+    sr = sum(r for r, _ in pts)
+    szz = sum(z * z for _, z in pts)
+    szr = sum(z * r for r, z in pts)
+    den = n * szz - sz * sz
+    if abs(den) < 1e-18:  # every vertex at one height: a cylinder iff r is constant
+        rs = [r for r, _ in pts]
+        return (sum(rs) / n, 0.0, max(rs) - min(rs))
+    b = (n * szr - sz * sr) / den
+    a = (sr - b * sz) / n
+    return (a, b, max(abs(r - (a + b * z)) for r, z in pts))
+
+
 def edge_key(a, b):
     return (min(a, b), max(a, b))
 
@@ -603,6 +627,7 @@ def cmd_surfaces(args):
 
     stats = defaultdict(int)
     revol = defaultdict(list)
+    trimmed = defaultdict(int)
     outer = 0
     for i, lp in enumerate(loops):
         if is_hole[i]:
@@ -618,19 +643,28 @@ def cmd_surfaces(args):
         elif len(zs) == 2 and len(rs) <= 2 and len(lp) == 4:
             label = 'facet of a surface of revolution'
             revol[(tuple(rs), tuple(zs))].append(i)
-        elif len(rs) == 1:
-            label = 'on a cylinder, but the trim is not planar'
-        elif len(zs) == 2 and len(lp) == 4:
-            label = 'quad on two levels, radius varies along a rim'
-        elif len(zs) > 2 and len(lp) == 4:
-            label = 'quad spanning more than two levels (a ramp or a helix)'
         else:
-            label = f'other ({len(lp)}-gon, {len(zs)} levels, {len(rs)} radii)'
+            # The surface may still be there with only the trim non-planar,
+            # which is a different item of work entirely.
+            a, b, residual = fit_radius_line(pol)
+            if residual <= 1e-7 * max(1.0, max(r for r, _ in pol)):
+                kind = 'cylinder' if abs(b) < 1e-9 else 'cone'
+                label = f'on a {kind} about the axis, but the trim is not planar'
+                trimmed[(round(a, 4), round(b, 6))] += 1
+            else:
+                label = 'on no surface of revolution at all'
         stats[label] += 1
 
     print(f'{args.file}: {len(loops)} loops ({outer} outer, {sum(is_hole)} holes)\n')
     for label, cnt in sorted(stats.items(), key=lambda kv: -kv[1]):
         print(f'  {cnt:5d} loops  {100 * cnt / outer:5.1f}%  {label}')
+
+    if trimmed:
+        print(f'\nthe non-planar-trim faces lie on {len(trimmed)} surfaces that '
+              f'are already recognisable, and need only a trim curve:')
+        for (a, b), cnt in sorted(trimmed.items(), key=lambda kv: -kv[1])[:args.top]:
+            what = f'cylinder r={a:g}' if abs(b) < 1e-9 else f'cone r={a:g}{b:+g}*z'
+            print(f'  {cnt:5d} facets  {what}')
 
     rows = sorted(revol.items(), key=lambda kv: -len(kv[1]))
     total = sum(len(ids) for _, ids in rows)

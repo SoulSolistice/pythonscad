@@ -10,8 +10,9 @@ full cylinders optionally written as real cylinders. The second started from
 with partial cylinders, cones, and rims shared between two curved faces - a
 chamfered body now round trips through SolidWorks as a chamfered body. The third
 was meant to start item 4 of the roadmap and instead measured it, found it was
-worth eleven faces of the part it was supposed to rescue, and lifted the
-recogniser out of the exporter so it can be reused and tested on its own.
+worth fourteen faces of the part it was supposed to rescue, fixed the two much
+smaller things the measurement turned up instead, and lifted the recogniser out
+of the exporter so it can be reused and tested on its own.
 
 *What generalises* and *What is actually left in the bayonet*, below, are the
 parts worth reading before starting a fourth.
@@ -515,7 +516,7 @@ and open the shell by far more than the modelling tolerance.
 
 This is a hard ceiling on what recognition can ever achieve from a faceted mesh,
 and it is the fact behind item 4 below: **the trim curve is not in the mesh**.
-On the bayonet that turns out to bind on eleven faces, which is why item 4 is
+On the bayonet that turns out to bind on fourteen faces, which is why item 4 is
 now last rather than first. Where the trim happens to be a plane perpendicular
 to the axis or parallel with it, the bound is an arc and a line and both are
 exact. Everywhere else, only the generator knows the curve.
@@ -591,8 +592,21 @@ the loops the recogniser sees. Every number below is one run of that script -
 
 **1693 faces. 664 of them — 39% — are facets of one of 14 surfaces of
 revolution.** That is the ceiling: no recogniser of any sophistication can
-collapse a face that does not lie on such a surface. Everything else is the
-bayonet ramps, the hose thread and the transition polygons between them.
+collapse a face that does not lie on such a surface.
+
+Splitting the rest by whether the surface is there and only the *trim* is not
+planar — every vertex of the face satisfying one line `r = a + b*z` — puts a
+number on each of the two remaining items, and they are not close:
+
+| | faces | |
+| --- | --- | --- |
+| facet of a surface of revolution | 664 | 39.4% |
+| on no surface of revolution at all | 999 | 59.3% |
+| on a cylinder or cone, trim not planar | 14 | 0.8% |
+| planar, perpendicular to the axis | 8 | 0.5% |
+
+The 14 are the whole of item 4 in this part. The 999 are item 5, and they are
+what actually dominates it.
 
 | | facets | faces after collapsing |
 | --- | --- | --- |
@@ -607,12 +621,10 @@ trim curves. The last 36 are one band whose rim borders 36 separate pentagons of
 the thread relief; there is no surface on the other side to share an edge with,
 and there will not be one until the thread itself is analytic.
 
-**Item 4's literal remainder is 11 faces.** Counting the faces of this model
-which lie exactly on a cylinder but whose boundary is *not* a plane
-perpendicular to or parallel with the axis — the case that needs a
-`SURFACE_CURVE` because the trim curve is only a polyline in the mesh — gives
-eleven, out of 1693. The planar-trimmed subset that got split off and done was
-not a subset; it was very nearly the whole of it.
+**Item 4's literal remainder is 14 faces** — eleven on a cylinder, three on a
+cone, spread over four surfaces of which the largest carries eight facets. The
+planar-trimmed subset that got split off and done was not a subset; it was very
+nearly the whole of it.
 
 One caveat on all of these numbers: the prototype has no provenance, so it
 measures the geometry and topology gates only. The intent gate can lower them,
@@ -759,7 +771,8 @@ The planar-trimmed subset has been split off and done — see *Partial cylinders
 above. Where the trim is a plane perpendicular to the axis or parallel with it,
 the bound is an arc and a straight line, both exact, and no `SURFACE_CURVE`
 appears at all. That turned out to be very nearly all of it: of the bayonet's
-1693 faces, **eleven** lie on a cylinder with a trim that is neither.
+1693 faces, **fourteen** lie on a cylinder or a cone with a trim that is
+neither, spread over four surfaces, the largest carrying eight facets.
 
 What stays is the genuinely hard remainder: a trim curve which exists only as a
 polyline in the mesh. Putting that approximation on an analytic face would open
@@ -778,23 +791,64 @@ Two lessons are worth more than the item:
   an axis derived from the wrong set of facets. Measure which gate a face
   actually fails before costing the surface behind it.
 
-### 5. Ramps, threads and other swept surfaces
+### 5. Swept surfaces — blocked, and worth knowing why
 
 Not previously on this list, and on the bayonet it is larger than items 1 to 4
-put together: **57% of that model** is bayonet ramps, the hose thread and the
-polygons that transition into them. None of it lies on a surface of revolution,
-so none of it is reachable by any extension of the band machinery.
+put together: **999 faces, 59.3% of that model**, lie on no surface of
+revolution at all. It is also what pins the last recognisable band in the part,
+since a wall whose rim borders a ramp one facet at a time has nothing to share
+that rim with.
 
-It is also what pins the last recognisable band in the model, since a wall whose
-rim borders a ramp one facet at a time has nothing to share that rim with. That
-makes this item worth *scoping* early even though it is the largest, because it
-is the only one that unblocks anything else.
+That made it look like the item to scope next. Reading where the geometry comes
+from says it cannot be started, and the reason is worth recording because it is
+a limit on the whole provenance approach rather than on this item.
 
-The shape of the work is item 2's, not item 1's: a swept or helical surface has
-no fit worth attempting from a mesh, and the generator — `hull()` of arcs at
-different heights, or whatever produces the thread — knows the sweep before it
-tessellates. Expect the topology gate to dominate here too, and expect to need
-the arbitrary-declared-curve generalisation that item 2 also needs.
+All 999 come from three places in the model, and **none of them is a PythonSCAD
+node**:
+
+- `bayonetChannel()` is a hand-written `polyhedron()`. It builds a point grid
+  from a list comprehension — a four point profile swept along an arc while its
+  height follows a cam — and hands over the triangles. The sweep exists only in
+  the user's `for` clause.
+- `hoseRidge()` is another `polyhedron()`, sweeping a four point profile along a
+  helix.
+- `bayonetLugs()` is `hull()` of two `smallArc()`s at different heights, and a
+  `smallArc()` is itself a `difference()` of two faceted cylinders by two cubes.
+
+Provenance cannot reach any of that. The mechanism this exporter relies on —
+*geometry from the mesh, intent from the primitive* — needs a primitive with an
+intent to declare, and `polyhedron()` is precisely the operation that has none.
+By the time PythonSCAD sees it, the sweep has already been evaluated into
+vertices, exactly as if the user had pasted an STL.
+
+The thread closes the door a second time, independently. Its profile is **not
+constant along the sweep**: a lead-in factor scales the ridge depth over the
+first quarter turn and out again over the last, so the cross-section at one
+angle differs from the cross-section at another. Even a complete helical-sweep
+recogniser, handed the sweep on a plate, could not write this as one swept
+surface — it is a different surface at every station.
+
+So what is actually available here is smaller and differently shaped than "add
+swept surfaces":
+
+- **Declare surfaces from the nodes that do have them.** `SkinNode`,
+  `PathExtrudeNode`, `linear_extrude` with a twist and `rotate_extrude` know
+  their cross-sections and their path before tessellating. That is real work
+  with real coverage — on models built from those nodes. It is items 1 and 2,
+  and it does nothing for this part.
+- **Give the user a way to declare a surface.** The gap this measurement
+  exposes is that a script which computes a swept surface has no way to say so.
+  A declaration at the language level — an OpenSCAD module or Python call that
+  attaches an analytic surface to geometry the script produced itself — would
+  reach `polyhedron()`, which nothing else can. It is a language design
+  question rather than an exporter one, and it should be costed as such.
+- **Fitting is still not the answer.** There is no unique B-spline underlying a
+  triangle mesh, and this thread would need a different one per station. See
+  item 2.
+
+Until one of those lands, the honest statement about this part is that
+**39% of it can be analytic and 59% cannot**, and the exporter is now within 36
+facets of the first number.
 
 ## Method notes
 
