@@ -570,7 +570,7 @@ now last rather than first. Where the trim happens to be a plane perpendicular
 to the axis or parallel with it, the bound is an arc and a line and both are
 exact. Everywhere else, only the generator knows the curve.
 
-### Two traps that will recur
+### Three traps that will recur
 
 - **Never choose the same thing twice from two sets of coordinates.** Both ends
   of a seam were picked independently as the rim vertex of smallest angle;
@@ -582,6 +582,13 @@ exact. Everywhere else, only the generator knows the curve.
   edges into any quad walks straight through a rib welded to the wall and out
   the far side. Fit the surface from the seed's neighbourhood first, then admit
   only facets which lie on it.
+- **A merge that keeps one of its inputs has to read them all first.** Merging a
+  run of bands into a spherical zone writes the result into one of the run - it
+  has to, or the others' facets would be handed back - so the reference being
+  written through can alias an end that has still to be read. Writing the new
+  base before computing the height from the old one silently turned a 19.9 mm
+  zone into a 0.38 mm one, and only when the run happened to be seeded from its
+  top end. Take a copy of both ends, then assign.
 
 ### A rejected surface is invisible
 

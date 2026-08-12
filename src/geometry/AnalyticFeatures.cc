@@ -798,24 +798,44 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
           continue;
         }
 
-        Band& merged = bands[seed];
         std::vector<std::size_t> walls;
         for (const std::size_t bi : run) {
           walls.insert(walls.end(), bands[bi].walls.begin(), bands[bi].walls.end());
         }
+
+        // Read both ends *before* writing anything. The merged band is one of
+        // the run - it has to be, or its facets would be put back - so the
+        // reference below may alias bands[low] or bands[high], and assigning
+        // through it would change what the other end still has to be read from.
+        // Taken the other way round the top rim's centre came out at the second
+        // ring rather than the last, its reference direction tilted 87 degrees
+        // out of the rim's plane, and the flat cap bounded by it stopped being
+        // flat.
+        const Vector3d base = bands[low].base;
+        const Vector3d top_centre = bands[high].base + bands[seed].axis * bands[high].height;
+        const std::vector<int> bottom_set = bands[low].bottom_set;
+        const std::vector<int> top_set = bands[high].top_set;
+        const double r_bottom = bands[low].r_bottom;
+        const double r_top = bands[high].r_top;
+        const int seam_bottom = bands[low].seam_bottom;
+        const int seam_top = bands[high].seam_top;
+        const bool outward = bands[low].outward;
         // keep the run's outer rims, and with them the rules already resolved
         const std::pair<RimRef, RimRef> ends{rims[low].first, rims[high].second};
+
+        Band& merged = bands[seed];
         merged.walls = walls;
-        merged.bottom_set = bands[low].bottom_set;
-        merged.top_set = bands[high].top_set;
-        merged.base = bands[low].base;
-        // the top rim's centre has to land where the end band's does
-        merged.height = bands[high].height + bands[seed].axis.dot(bands[high].base - bands[low].base);
-        merged.r_bottom = bands[low].r_bottom;
-        merged.r_top = bands[high].r_top;
-        merged.seam_bottom = bands[low].seam_bottom;
-        merged.seam_top = bands[high].seam_top;
-        merged.outward = bands[low].outward;
+        merged.bottom_set = bottom_set;
+        merged.top_set = top_set;
+        merged.base = base;
+        // stated as the two centres rather than as a sum of heights, so that it
+        // stays right however the run was ordered
+        merged.height = merged.axis.dot(top_centre - base);
+        merged.r_bottom = r_bottom;
+        merged.r_top = r_top;
+        merged.seam_bottom = seam_bottom;
+        merged.seam_top = seam_top;
+        merged.outward = outward;
         merged.sphere = surface;
         rims[seed] = ends;
         for (const std::size_t bi : run) {
