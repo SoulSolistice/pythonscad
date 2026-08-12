@@ -730,6 +730,10 @@ elsewhere in this file still resolve; only the order changed. Item 4 moved from
 first to last, and item 5 is new and did not previously exist as work at all —
 it is the largest thing in the bayonet and the only item that unblocks another.
 
+Items 0, 0b and the first half of 1 are done. What is left, cheapest first, is
+`TOROIDAL_SURFACE` (the rest of 1), then spheres (3), then the generalisation
+that item 2 needs; 4 and 5 are blocked for the reasons under each.
+
 ### 0. The two changes above - done and verified
 
 `step-shared-arc.scad` is the fixture for the second; the first needs none,
@@ -746,22 +750,67 @@ the seed's own neighbourhood there changed nothing measurable on the bayonet,
 so it was not made blind - but it is the obvious first suspect if a wall that
 plainly fits is ever missing again.
 
-### 1. `rotate_extrude` declaring its own surfaces
+### 0b. What the primitives were not declaring - done
+
+Reading `CylinderNode::createGeometry()` after item 0 turned up two shapes which
+could never be analytic, for reasons that had stopped being true:
+
+```cpp
+if (!cone && !inverted_cone && r1 == r2 && this->angle == 360) {   // was
+```
+
+- **A frustum declared nothing at all**, because `r1 == r2` excludes it. So
+  `cylinder(r1=8, r2=12)` exported as facets while `hull()` of two coaxial
+  cylinders - the workaround for the same shape - exported as a
+  `CONICAL_SURFACE`. The idiomatic construction lost to the workaround. The
+  primitive now declares the circle at each of its rims, which is the same
+  statement of intent the hull makes, so the two leave identical provenance.
+  Nothing in the recogniser changed.
+- **A pie slice declared nothing**, on the reasoning that its flat sides are not
+  part of the cylinder. True, and the wrong place to act on it: those sides run
+  through the axis, so they fit no cylinder and are discarded on the fit
+  anyway. The exclusion also predates partial cylinders - when it was written a
+  band had to close on itself to be written at all.
+
+An apex is still left undeclared: there is no circle there to collapse, and a
+radius of zero would match every other radius of zero.
+
+`step-cone-primitive.scad` and `step-pie-slice.scad` are the fixtures. The
+lesson is worth more than the fix: **both were invisible in the same way a
+rejected band is**, because a shape that is never declared looks exactly like a
+shape that does not fit. The recogniser's report says why it dropped a band; it
+cannot say anything about a band that was never a candidate. When coverage looks
+lower than it should, check what was declared before checking what was matched.
+
+### 1. `rotate_extrude` declaring its own surfaces - half done
 
 `RotateExtrudeNode` keeps its `profile_func`, so it can recognise that its own
 profile is a circle (torus) or a line segment (cylinder or cone) and declare the
 surface directly. This is provenance work rather than geometry work, and it
 widens coverage well beyond the `cylinder()` primitive.
 
-Half of this is now free. A `rotate_extrude` of a **line segment** produces
-exactly the band the recogniser already handles - a cylinder when the segment is
-parallel to the axis, a frustum when it is not - so for that case there is no
-emission work at all, only the declaration. Start there: it is a few lines and
-it widens coverage past `cylinder()` immediately.
+**The line segment half has landed.** A `rotate_extrude` of a straight profile
+edge produces exactly the band the recogniser already handles - a cylinder where
+the edge is parallel to the axis, a frustum where it is tilted - so there was no
+emission work in it, only the record. `declareSurfacesOfRevolution()` in
+`rotate_extrude.cc` walks the profile of the first station and declares one
+circle per radius; `step-rotate-extrude.scad` is the fixture, a stepped tube
+whose six profile edges cover all three kinds (flat annulus, cylinder, frustum)
+and whose two internal rims each bound two curved faces and nothing else.
 
-`TOROIDAL_SURFACE` is the real work in this item, and it is emission work: it is
-doubly periodic and needs two seams, so the loop is not the four edge one every
-face has used so far.
+Two things it deliberately does not do:
+
+- **It reads the profile after `alterprofile()`**, not the outline as drawn, so
+  the origin and offset are already applied. A record has to describe where the
+  wall ended up.
+- **It declares nothing when the stations differ.** A twist, a helical `v` or a
+  Python `profile_func` gives every station a different profile, and the result
+  is not a surface of revolution at all. That is not a corner case: it is how a
+  screw thread is built, and it is the same fact that sinks item 5.
+
+`TOROIDAL_SURFACE` is what is left, and it is the real work: emission rather
+than provenance, doubly periodic, needing two seams, so the loop is not the four
+edge one every face has used so far.
 
 ### 2. Fillet Bézier patches
 

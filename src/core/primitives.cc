@@ -377,17 +377,33 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
     }
   }
 
-  // Record that the wall was meant as a cylinder. The facets alone cannot say
-  // so: a ring of N quads is exactly the mesh of an N sided prism, and no
-  // amount of measuring the result tells the two apart. Exporters that write
-  // analytic geometry read this to know which is which; nothing else uses it,
-  // and dropping it only costs the analytic form.
+  // Record what the wall was meant to be. The facets alone cannot say: a ring
+  // of N quads is exactly the mesh of an N sided prism, and no amount of
+  // measuring the result tells the two apart. Exporters that write analytic
+  // geometry read this to know which is which; nothing else uses it, and
+  // dropping it only costs the analytic form.
   //
-  // Only for a straight, closed cylinder - a cone is not a CylinderSurface and
-  // a pie slice has flat sides which are not part of it.
-  if (!cone && !inverted_cone && r1 == r2 && this->angle == 360) {
+  // A frustum has no surface record of its own, so it says what it is the way
+  // hull() of two coaxial cylinders does - by declaring the circle at each rim.
+  // An exporter accepts a cone when both of its rims match a declared cylinder,
+  // so the two constructions now leave identical provenance. That is the point:
+  // the idiomatic chamfer and the primitive which draws the same shape should
+  // not export differently, and until now only the hull did.
+  //
+  // A pie slice declares its wall too. Its two flat sides run through the axis
+  // and fit no cylinder, so they are discarded on the fit rather than needing
+  // to be excluded here; the arc between them is a partial cylinder like any
+  // other.
+  //
+  // An apex is not a rim, and it is left undeclared: there is no circle there
+  // to collapse, and a radius of zero would match every other radius of zero.
+  if (!cone && !inverted_cone) {
     polyset->surfaces.push_back(
       std::make_shared<CylinderSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1), r1));
+    if (r2 != r1) {
+      polyset->surfaces.push_back(
+        std::make_shared<CylinderSurface>(Vector3d(0, 0, z2), Vector3d(0, 0, 1), r2));
+    }
   }
 
   return polyset;

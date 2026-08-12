@@ -18,6 +18,7 @@
 #include "geometry/PolySetUtils.h"
 #include "geometry/Polygon2d.h"
 #include "geometry/Barcode1d.h"
+#include "geometry/Surface.h"
 #include "geometry/linalg.h"
 #include "geometry/GeometryEvaluator.h"
 #include "utils/calc.h"
@@ -139,6 +140,63 @@ static std::unique_ptr<PolySet> assemblePolySetForManifold(const Polygon2d& poly
 VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double scaley, double origin_x,
                               double origin_y, double offset_x, double offset_y, double rot);
 
+/*! Record the surfaces of revolution a straight profile edge sweeps out.
+ *
+ * A rotate_extrude of a *line segment* produces exactly what the analytic
+ * exporter already knows how to write: a cylinder where the segment is parallel
+ * to the axis, a frustum where it is tilted. There is no emission work in it at
+ * all, only the statement of intent - which is needed, because a ring of N
+ * quads is equally the mesh of an N sided prism and nothing in the geometry
+ * says which was meant.
+ *
+ * A tilted segment declares the circle at each of its ends, which is how a cone
+ * states its intent everywhere else in this codebase: an exporter accepts one
+ * when both of its rims match a declared cylinder.
+ *
+ * Only for a sweep whose stations are all the same profile in the same place. A
+ * twist, a helical `v`, or a Python `profile_func` makes every station
+ * different, and what comes out is then not a surface of revolution at all -
+ * which is exactly how a screw thread is built, so this is not a corner case.
+ */
+static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
+                                        const std::vector<VectorOfVector2d>& profiles, PolySet& polyset)
+{
+  if (node.v.norm() != 0 || node.twist != 0) return;
+#ifdef ENABLE_PYTHON
+  if (node.profile_func != nullptr || node.twist_func != nullptr) return;
+#endif
+
+  // the profile's x is the radius and its y is the height along the axis
+  const double eps = 1e-12;
+  // One record per radius. A vertex shared by two walls would otherwise be
+  // declared twice, and a record is only ever matched on its radius and axis -
+  // the height it carries says where the circle was, not how far the surface
+  // reaches, since a boolean may since have cut it back.
+  std::vector<double> declared;
+  auto declare = [&](const Vector2d& p) {
+    for (const double r : declared) {
+      if (fabs(r - p[0]) <= eps * std::max(1.0, r)) return;
+    }
+    declared.push_back(p[0]);
+    polyset.surfaces.push_back(
+      std::make_shared<CylinderSurface>(Vector3d(0, 0, p[1]), Vector3d(0, 0, 1), p[0]));
+  };
+
+  for (const auto& profile : profiles) {
+    const std::size_t n = profile.size();
+    for (std::size_t i = 0; i < n; i++) {
+      const Vector2d& a = profile[i];
+      const Vector2d& b = profile[(i + 1) % n];
+      // An edge at one height sweeps a flat annulus, and one touching the axis
+      // sweeps a disc or an apex. Neither is a wall.
+      if (fabs(a[1] - b[1]) < eps) continue;
+      if (a[0] <= eps || b[0] <= eps) continue;
+      declare(a);
+      if (fabs(a[0] - b[0]) > eps) declare(b);
+    }
+  }
+}
+
 std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const Polygon2d& poly,
                                           int fragments, size_t fragstart, size_t fragend,
                                           bool flip_faces)
@@ -168,6 +226,7 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   }
   num_vertices = slice_stride * num_rings;
   std::vector<Vector3d> vertices;
+  std::vector<VectorOfVector2d> first_ring;
   vertices.reserve(num_vertices);
   PolygonIndices indices;
   std::vector<int> color_indices;
@@ -208,6 +267,11 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
         }
         xmid = (xmin + xmax) / 2;
       }
+
+      // The profile as it is actually swept, after alterprofile() has applied
+      // the origin and offset. Kept for the surface records below, which have
+      // to describe where the wall ended up rather than where it was drawn.
+      if (j == fragstart) first_ring.push_back(vertices2d);
 
       for (const auto& v : vertices2d) {
         double tan_pitch = fact / (std::isnan(xmid) ? v[0] : xmid);
@@ -271,8 +335,10 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   // modify vertices, so we technically may end up with broken end caps if we build OpenSCAD without
   // ENABLE_MANIFOLD. Should be fixed, but it's low priority and it's not trivial to come up with a test
   // case for this.
-  return assemblePolySetForManifold(poly, vertices, indices, colors, color_indices, closed,
-                                    node.convexity, slice_stride * num_sections, flip_faces);
+  auto result = assemblePolySetForManifold(poly, vertices, indices, colors, color_indices, closed,
+                                           node.convexity, slice_stride * num_sections, flip_faces);
+  if (result != nullptr) declareSurfacesOfRevolution(node, first_ring, *result);
+  return result;
 }
 
 std::unique_ptr<Geometry> rotatePolygon(const RotateExtrudeNode& node, const Polygon2d& poly)
