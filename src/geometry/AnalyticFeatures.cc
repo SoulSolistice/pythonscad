@@ -894,12 +894,23 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         if (!bands[seed].alive || absorbed[seed] || bands[seed].zone != nullptr) continue;
         if (!bands[seed].closed || !on_torus(seed)) continue;
 
-        // walk the ring until it comes back to the seed
+        // Walk the ring until it comes back to the seed, leaving each band by
+        // the rim it was not entered by.
+        //
+        // Not by its top rim, which is what the sphere pass does. A sphere's
+        // bands stack monotonically along the axis, so every rim is one band's
+        // top and the next one's bottom. A torus's profile turns around at its
+        // widest and narrowest points, and the two bands meeting there meet top
+        // to top: a walk which always follows the top rim comes straight back
+        // to where it started and the run stops two bands long.
         std::vector<std::size_t> run{seed};
         std::size_t cur = seed;
+        std::set<int> came_by(bands[seed].bottom_set.begin(), bands[seed].bottom_set.end());
         bool cyclic = false;
         for (;;) {
-          const std::set<int> level(bands[cur].top_set.begin(), bands[cur].top_set.end());
+          const std::set<int> bottom(bands[cur].bottom_set.begin(), bands[cur].bottom_set.end());
+          const std::set<int> top(bands[cur].top_set.begin(), bands[cur].top_set.end());
+          const std::set<int>& level = bottom == came_by ? top : bottom;
           const auto it = at_rim.find(level);
           if (it == at_rim.end() || it->second.size() != 2) break;
           const std::size_t next = it->second[0] == cur ? it->second[1] : it->second[0];
@@ -909,6 +920,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
           }
           if (absorbed[next] || std::find(run.begin(), run.end(), next) != run.end()) break;
           run.push_back(next);
+          came_by = level;
           cur = next;
         }
         if (!cyclic || run.size() < 3) continue;

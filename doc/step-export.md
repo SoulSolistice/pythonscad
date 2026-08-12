@@ -570,7 +570,7 @@ now last rather than first. Where the trim happens to be a plane perpendicular
 to the axis or parallel with it, the bound is an arc and a line and both are
 exact. Everywhere else, only the generator knows the curve.
 
-### Three traps that will recur
+### Four traps that will recur
 
 - **Never choose the same thing twice from two sets of coordinates.** Both ends
   of a seam were picked independently as the rim vertex of smallest angle;
@@ -589,6 +589,13 @@ exact. Everywhere else, only the generator knows the curve.
   base before computing the height from the old one silently turned a 19.9 mm
   zone into a 0.38 mm one, and only when the run happened to be seeded from its
   top end. Take a copy of both ends, then assign.
+- **A walk that always goes the same way only works on a monotone stack.** The
+  sphere merge steps from band to band by each one's *top* rim, which is sound
+  because a sphere's bands stack along the axis and every rim is one band's top
+  and the next one's bottom. A torus's profile turns around at its widest and
+  narrowest points, so the two bands meeting there meet top to top; the walk
+  turned round, came back to its seed, and every torus fell out as the stack of
+  32 exact cones it also is. Leave a band by the rim you did not enter it by.
 
 ### A rejected surface is invisible
 

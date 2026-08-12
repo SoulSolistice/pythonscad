@@ -773,19 +773,36 @@ def check_cylindrical_faces(entities, problems):
                         "#%d: a toroidal face needs two seam edges each used twice, found %d"
                         % (face.id, len(seams))
                     )
-                # the two seams are the tube's own circle and the circle its
-                # centre traces, so neither may be wider than the torus
-                r_major = surface.floats()[0] if surface.floats() else None
+                # One seam runs round the tube and so has exactly the minor
+                # radius; the other runs round the axis and is a circle of
+                # latitude, anywhere from the throat to the equator. A seam
+                # outside that range is on some other surface than this torus.
+                nums = surface.floats()
+                r_major = nums[0] if nums else None
+                r_minor = nums[1] if len(nums) > 1 else None
+                radii = []
                 for oid in oriented:
                     geom = _edge_geometry(entities, oid)
                     cr = geom.floats()[-1] if geom is not None and geom.floats() else None
                     if cr is None or cr <= 0:
                         problems.append("#%d: seam CIRCLE has no positive radius" % face.id)
-                    elif r_major is not None and cr > r_major * (1 + 1e-6):
+                    else:
+                        radii.append(cr)
+                if r_major is not None and r_minor is not None and radii:
+                    tol = 1e-6 * max(1.0, r_major)
+                    if not any(abs(cr - r_minor) <= tol for cr in radii):
                         problems.append(
-                            "#%d: seam CIRCLE has radius %s, wider than the torus at %s"
-                            % (face.id, cr, r_major)
+                            "#%d: no seam CIRCLE runs round the tube at the minor radius %s"
+                            % (face.id, r_minor)
                         )
+                    for cr in radii:
+                        if abs(cr - r_minor) <= tol:
+                            continue
+                        if not r_major - r_minor - tol <= cr <= r_major + r_minor + tol:
+                            problems.append(
+                                "#%d: seam CIRCLE has radius %s, off the torus at %s +/- %s"
+                                % (face.id, cr, r_major, r_minor)
+                            )
             continue
 
         # A rim is a closed CIRCLE on a periodic face and an arc on a partial
