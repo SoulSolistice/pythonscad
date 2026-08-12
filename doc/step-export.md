@@ -805,7 +805,12 @@ degree wall must be partial. That is worth recording as a method note in itself:
 
 The parse is fixed, and `step-pie-slice` guards it from the STEP side: if
 `angle` is ever dropped again the band comes out closed, and the comment says
-what the report has to read.
+what the report has to read. It now says *1 surface recognised (0 conical, 1
+partial), 31 facets replaced*, taking the slice from 35 faces to 5. Between the
+run that found the defect and the run that confirmed the fix, that one line is
+the **only** thing that changed in the whole suite - every other fixture's
+report and face count is identical, which is the evidence that the parse fix
+touched nothing else.
 
 ### 1. `rotate_extrude` declaring its own surfaces - half done
 
