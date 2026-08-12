@@ -232,6 +232,14 @@ before writing any C++:
   This is what rejects the four short bands under the bayonet's lug ramps: their
   upper rim borders ten separate ramp facets.
 
+A facet only joins a band when it is *wholly* on the surface. Where something
+flat is cut into a faceted wall the boundary facet is a trapezoid with two
+corners on the circle and two inside it - the cutting plane crosses that facet's
+chord, and a chord runs inside its arc. In `step-partial-cylinder` those corners
+sit five thousandths inside a radius 10 wall, so two facets at each arc end stay
+planar and four are collapsed. Taking them would pull the arc's end out onto the
+true circle and open the shell by far more than the modelling tolerance.
+
 Run over the bayonet base's exported mesh, the pass finds 4 such bands and
 replaces 72 facets — measured by the Python prototype, on the same loops the
 exporter sees, not by re-exporting the part.
