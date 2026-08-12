@@ -735,9 +735,11 @@ be next and is not: a torus already collapses 1024 facets to 32 exact cones, so
 the surface itself is worth a factor of 32 on the face count and costs a 2D
 provenance channel that does not exist - see *A torus is already a stack of
 exact cones*. Spheres (3) went the same way as the torus, for the same reason
-and for five lines. What is left is the curve generalisation item 2 needs, and
-then the grid grower `SPHERICAL_SURFACE` and `TOROIDAL_SURFACE` share; 4 and 5
-are blocked for the reasons under each.
+and for five lines. What is left is the grid grower `SPHERICAL_SURFACE` and
+`TOROIDAL_SURFACE` share - and *only* that, since both are bounded by circles
+and need none of item 2's curve generalisation. 2, 4 and 5 are all blocked on
+declaration channels that do not exist, which is one problem wearing three
+hats.
 
 ### 0. The two changes above - done and verified
 
@@ -916,8 +918,31 @@ The gate to watch here is topology, not geometry. Every substitution the
 exporter can currently make replaces straight edges with a **circle**; a fillet
 meets its neighbours along edges which are not circular, so the run and
 whole-loop rules have to be generalised to an arbitrary declared curve before a
-B-spline patch can be bounded at all. That generalisation is the bulk of the
-item, and it is shared with anything else non-circular that follows.
+B-spline patch can be bounded at all.
+
+That generalisation was listed as the bulk of the item and as shared with
+everything non-circular that follows, which put it next on this list. **Both
+halves of that are wrong**, and the way to see it is to ask what would consume
+it:
+
+- **There is no non-circular curve anywhere in the codebase.** `ArcCurve` is the
+  only subclass of `Curve` and `CylinderSurface` the only subclass of `Surface`.
+  The only thing that produces an `ArcCurve` is `import_step.cc`, reading one
+  back off a file, and `build_tri_body()` discards `curves` outright - which
+  costs nothing, because every arc it writes is a rim it derived from the mesh
+  once the band was accepted.
+- **It is shared with nothing that is actually reachable.** The two surface
+  types still worth having, `SPHERICAL_SURFACE` and `TOROIDAL_SURFACE`, are
+  bounded by *circles* - a sphere zone by its two cap rims and a seam, a torus
+  by two seams - so neither needs one line of it. What needs it is splines, and
+  splines need a declaration channel that does not exist: `FilletNode` is
+  Python-only, glyph outlines are inside `text()`, and a 2D curve channel on
+  `Outline2d` is the same blocked work as item 5.
+
+So the generalisation is a mechanism with nothing to drive it, and worse, it
+cannot be *tested*: there is no curve to generalise to, so any rim rule written
+for one would be unexercised code. It belongs behind the declaration work, not
+in front of it. The order in this item was backwards.
 
 ### 3. Spheres - collapsed, without `SPHERICAL_SURFACE`
 

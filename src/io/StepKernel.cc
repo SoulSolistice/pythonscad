@@ -163,10 +163,16 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
                                 const std::vector<Vector4d>& faceNormals, double tol, bool analytic)
 {
   // `curves` and `surfaces` carry the analytic geometry the model was built
-  // from. Writing CIRCLE and CYLINDRICAL_SURFACE instead of the facets needs
-  // them: a ring of N quads is exactly the mesh of an N sided prism, so the
-  // facets alone never say which was meant. Everything is still written as
-  // planes and lines; this only reports what arrived.
+  // from: a ring of N quads is exactly the mesh of an N sided prism, so the
+  // facets alone never say which was meant.
+  //
+  // `surfaces` is what the recogniser matches against. `curves` is deliberately
+  // ignored, and it costs nothing today: the only Curve subclass is ArcCurve,
+  // the only thing which produces one is import_step.cc, and every arc the
+  // exporter writes is a rim it derived from the mesh itself once the band was
+  // accepted. A declared arc would only add something for a circular edge whose
+  // neighbouring wall is *not* recognised - an imported mesh being written back
+  // out - which is a feature nobody has asked for yet.
   (void)curves;
   if (!surfaces.empty()) {
     int cylinders = 0;
