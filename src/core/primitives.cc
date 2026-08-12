@@ -278,6 +278,39 @@ std::unique_ptr<const Geometry> SphereNode::createGeometry() const
     polyset->indices.back().push_back(num_rings * num_fragments - i - 1);
   }
 
+  // Record the circle at each ring, which is what makes a sphere collapse.
+  //
+  // A sphere is not a band and is not going to become one: its facets span many
+  // rings rather than two rims, so the strip walk cannot describe it and a
+  // SPHERICAL_SURFACE would need a grower of its own. But the mesh *between*
+  // two consecutive rings is a band - a frustum whose rims are those two
+  // circles - and an exporter accepts a cone when both of its rims match a
+  // declared cylinder. Declaring the rings therefore collapses the whole sphere
+  // into a stack of exact cones with no new recogniser work at all, which is
+  // the same thing that happens to a torus.
+  //
+  // There are no poles to worry about here. The rings sit at
+  // phi = 180 (i + 0.5) / num_rings, so the first and the last are ordinary
+  // circles closed by a flat cap, not fans of triangles meeting at a point -
+  // every band's outer rim is the complete bound of one face.
+  //
+  // The radii repeat in pairs about the equator, so they are deduplicated: a
+  // record is only ever matched on its radius and axis.
+  std::vector<double> declared;
+  for (auto i = 0; i < num_rings; ++i) {
+    const double phi = (180.0 * (i + 0.5)) / num_rings;
+    const double radius = r * sin_degrees(phi);
+    if (radius <= 0) continue;
+    bool seen = false;
+    for (const double d : declared) {
+      seen = seen || fabs(d - radius) <= 1e-12 * std::max(1.0, d);
+    }
+    if (seen) continue;
+    declared.push_back(radius);
+    polyset->surfaces.push_back(std::make_shared<CylinderSurface>(Vector3d(0, 0, r * cos_degrees(phi)),
+                                                                  Vector3d(0, 0, 1), radius));
+  }
+
   return polyset;
 }
 

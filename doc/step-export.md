@@ -734,9 +734,10 @@ Items 0, 0b and the first half of 1 are done. `TOROIDAL_SURFACE` was going to
 be next and is not: a torus already collapses 1024 facets to 32 exact cones, so
 the surface itself is worth a factor of 32 on the face count and costs a 2D
 provenance channel that does not exist - see *A torus is already a stack of
-exact cones*. What is left, cheapest first, is spheres (3), then the curve
-generalisation item 2 needs, then the torus; 4 and 5 are blocked for the reasons
-under each.
+exact cones*. Spheres (3) went the same way as the torus, for the same reason
+and for five lines. What is left is the curve generalisation item 2 needs, and
+then the grid grower `SPHERICAL_SURFACE` and `TOROIDAL_SURFACE` share; 4 and 5
+are blocked for the reasons under each.
 
 ### 0. The two changes above - done and verified
 
@@ -918,25 +919,36 @@ whole-loop rules have to be generalised to an arbitrary declared curve before a
 B-spline patch can be bounded at all. That generalisation is the bulk of the
 item, and it is shared with anything else non-circular that follows.
 
-### 3. Spheres
+### 3. Spheres - collapsed, without `SPHERICAL_SURFACE`
 
-`SphereNode` builds a `num_rings × num_fragments` lat/long grid, and
-`SPHERICAL_SURFACE` exists. The poles are degenerate triangle fans, so a full
-sphere needs a seam plus two pole singularities.
+Two things this item said were wrong, and finding out which cost one
+measurement.
 
-Two warnings, both learned from the cylinder/prism problem one level up:
+**"The poles are degenerate triangle fans, so a full sphere needs a seam plus
+two pole singularities."** Not in this implementation. `SphereNode` puts its
+rings at `phi = 180 (i + 0.5) / num_rings`, so the first and the last are
+ordinary circles closed by a **flat cap**. OpenSCAD's sphere is a barrel and has
+no poles at all, which removes the hardest part of the item before it starts.
 
-- **A sphere is not a band.** Its facets span many rings, not two rims, so the
-  strip walk does not describe it. It needs its own grower, or the band walk
-  generalised to a grid.
-- **The fit cannot tell a sphere from a stack of cones.** One ring of a lat/long
-  sphere has each of its rims at a constant radius and the two radii differ,
-  which is exactly what a frustum band looks like; the facets are chords of the
-  sphere, but nothing in the current test notices. Today only the intent gate
-  stops a sphere coming out as a pile of cones — no `cylinder()` declared those
-  radii. The moment `SphereNode` declares anything, that protection weakens, so
-  the sphere's own declaration has to be matched *before* the cone rule gets a
-  chance at those bands.
+**"The fit cannot tell a sphere from a stack of cones ... only the intent gate
+stops a sphere coming out as a pile of cones."** True, and the conclusion drawn
+from it - that the sphere's own declaration must be matched *before* the cone
+rule - was the wrong way round. A stack of cones is not a failure mode here. Its
+faces pass through the mesh vertices with zero residual, share every rim, and
+leave the shell watertight; it is not the true surface, but neither is the
+faceted mesh it replaces, and it is 30 times smaller.
+
+So `SphereNode` now declares the circle at each ring, and a sphere collapses
+with no recogniser work at all. At `$fn = 32`: 16 rings, 480 quads and two caps,
+**482 faces down to 17** - 8 declared radii, 15 bands, of which the one
+straddling the equator is a cylinder and the other 14 are cones.
+`step-sphere.scad` is the fixture.
+
+What is left of the item is `SPHERICAL_SURFACE` itself, worth a further 17 faces
+to 3, and needing the grid grower a torus also needs. The argument for it is the
+same one the torus has - a stack of cones has tangent discontinuities where the
+true surface is smooth - and it is now the second half of a shared piece of work
+rather than an item of its own.
 
 ### 4. Trimmed faces
 
