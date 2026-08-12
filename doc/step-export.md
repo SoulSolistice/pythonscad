@@ -730,9 +730,13 @@ elsewhere in this file still resolve; only the order changed. Item 4 moved from
 first to last, and item 5 is new and did not previously exist as work at all —
 it is the largest thing in the bayonet and the only item that unblocks another.
 
-Items 0, 0b and the first half of 1 are done. What is left, cheapest first, is
-`TOROIDAL_SURFACE` (the rest of 1), then spheres (3), then the generalisation
-that item 2 needs; 4 and 5 are blocked for the reasons under each.
+Items 0, 0b and the first half of 1 are done. `TOROIDAL_SURFACE` was going to
+be next and is not: a torus already collapses 1024 facets to 32 exact cones, so
+the surface itself is worth a factor of 32 on the face count and costs a 2D
+provenance channel that does not exist - see *A torus is already a stack of
+exact cones*. What is left, cheapest first, is spheres (3), then the curve
+generalisation item 2 needs, then the torus; 4 and 5 are blocked for the reasons
+under each.
 
 ### 0. The two changes above - done and verified
 
@@ -841,9 +845,54 @@ Two things it deliberately does not do:
   is not a surface of revolution at all. That is not a corner case: it is how a
   screw thread is built, and it is the same fact that sinks item 5.
 
-`TOROIDAL_SURFACE` is what is left, and it is the real work: emission rather
-than provenance, doubly periodic, needing two seams, so the loop is not the four
-edge one every face has used so far.
+### A torus is already a stack of exact cones
+
+`TOROIDAL_SURFACE` was next on this list until it was measured, and the
+measurement moved it a long way down.
+
+`rotate_extrude()` meshes a circular profile as a grid: one ring per profile
+edge, every quad with its four corners at two radii and two heights. That is
+exactly a frustum band, and now that a straight profile edge declares the circle
+at each of its ends, **every ring of a torus has both of its rims declared**. A
+torus therefore already collapses - into a stack of cones, each passing through
+the mesh vertices with zero residual, each sharing its rim circle with the ring
+above and below.
+
+At `$fn = 32` that is **1024 facets down to 32 faces**, and the profile's 32
+radii deduplicate to 17 records because they repeat in pairs about the widest
+and narrowest points. A real `TOROIDAL_SURFACE` would be 1 face. So the item is
+worth a further factor of 32 on the face count, against the factor of 32 already
+collected for nothing - and it costs three hard pieces to get:
+
+- **The declaration has nowhere to live.** `Outline2d` carries vertices, a
+  winding flag and a colour, and nothing else; `circle()` leaves no record that
+  it was a circle. `ArcCurve` exists but it is a 3D channel hanging off
+  `PolySet`, not off `Polygon2d`. Declaring a torus honestly means adding a
+  curve channel to 2D geometry and carrying it through `translate`, `offset` and
+  the Clipper booleans - a bigger change than all the exporter work here, and
+  the same shape of problem as item 5. Fitting the profile instead is not a way
+  out: a 32-gon profile revolved gives *exactly* the mesh a circle profile
+  revolved gives, so it is the cylinder-and-prism ambiguity again, one dimension
+  down.
+- **A torus is not a band.** Its facets span many rings rather than two rims, so
+  the strip walk does not describe it. It needs a grid grower, which it shares
+  with spheres (item 3).
+- **A full torus face is bounded by two seams**, not by rims at all - the loop
+  is not the four-edge one every face so far has used.
+
+The practical case for it is quality rather than count: a fillet that comes out
+as 32 conical bands has tangent discontinuities where the true surface is
+smooth, which matters to whatever the importing CAD system does next. That is a
+real argument, and it is a different argument from the one that put the item
+high on this list.
+
+`step-torus.scad` is the fixture, and it earns its place for a second reason:
+it is the first thing to chain more than three closed bands through shared
+rims - the bayonet's longest chain is a wall on a chamfer on a wall. The seam
+pass is a single pass, each band taking whichever rim another has already
+settled and deriving the other along a ruling, which stays consistent only while
+the chain does not fork. Thirty-two rings closing back on themselves is the
+first real test of that, and a fork would show as `EDGE_LOOP does not close`.
 
 ### 2. Fillet Bézier patches
 
