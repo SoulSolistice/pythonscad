@@ -285,6 +285,36 @@ base from 72 facets replaced to 312. What still resists is the 8 bands whose
 other rim borders a bayonet ramp, one facet at a time — a ramp is not a surface
 of revolution, so there is nothing to share the rim with.
 
+### Two defects the fixtures found
+
+Both left a wall faceted that fits its axis to machine precision, and neither
+was visible in the output - a band that is never recognised looks exactly like
+one that was never there. They are worth recording because both are traps that
+any future surface type will walk into.
+
+**A band walked off its own surface.** It was grown by crossing ruling edges
+into any quad, and a rib welded to a tube has quads for side faces: the walk
+crossed a vertical edge into the rib, through it, and back into the next arc.
+The ring then came out as one band which was never a band, fit nothing, and was
+discarded before it could even be reported - `step-partial-cylinder` produced no
+candidate at all. The walk now runs twice: once freely, purely to pin down which
+surface the seed sits on, then again admitting only facets which lie on it.
+
+**The seam fell on `atan2`'s branch cut.** A periodic face needs a seam along a
+ruling, both ends on one radial direction. Choosing each end independently as
+the rim vertex of smallest angle looks obvious and is wrong: the cut is at pi, a
+polygon with an even number of facets has a vertex sitting exactly there, and
+which side it lands on is decided by the sign of a coordinate which is zero to
+fifteen digits. In `step-nested-rings` the two rims of the r=38 wall disagreed
+on that sign, so its seam ends came out on different rulings and that one wall
+was dropped while the other four were kept. Only one end is chosen now and the
+other is derived from it along the ruling; where two bands share a rim, one
+takes the vertex the other settled, which they must, since the CIRCLE between
+them is one edge.
+
+The lesson for the next surface: **do not choose the same thing twice from two
+sets of coordinates.** Derive the second from the first.
+
 ### What SolidWorks said
 
 It imported the file and re-saved it. The round trip confirms three things:
