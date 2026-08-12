@@ -3,9 +3,13 @@
 Notes on the STEP exporter: the defects that were fixed and why they happened,
 the checks that now guard them, and what a next round of work would look like.
 
-Written after a session that started from "the STEP output has gaps and
-degenerated faces" and ended with files SolidWorks reads as solids, with
-cylinders optionally written as real cylinders.
+Written over two sessions. The first started from "the STEP output has gaps and
+degenerated faces" and ended with files SolidWorks reads as solids, with full
+cylinders optionally written as real cylinders. The second started from "the
+exporter recognised the inner circles but not the outer ones" and ended with
+partial cylinders, cones, and rims shared between two curved faces - a chamfered
+body now round trips through SolidWorks as a chamfered body. *What generalises*,
+below, is the part worth reading before starting a third.
 
 ## Orientation
 
@@ -131,10 +135,14 @@ above:
 
 `tests/stepexportsanitytest.py` drives it: export a fixture, validate, then
 **re-export under a locale with a comma decimal separator and require the two
-files to be identical**. Five fixtures in `tests/data/scad/step-export/` each
-target one defect — `step-cube` (sharing), `step-bore` (holes and number
-formatting), `step-disjoint` (shell splitting), `step-concave` (face normals),
-`step-nested-rings` (the membrane).
+files to be identical**, then a third time with `PYTHONSCAD_STEP_ANALYTIC=1` so
+the analytic path is covered by the same invariants as the faceted one. Seven
+fixtures in `tests/data/scad/step-export/` each target one defect or one
+construction — `step-cube` (sharing), `step-bore` (holes and number formatting),
+`step-disjoint` (shell splitting), `step-concave` (face normals),
+`step-nested-rings` (the membrane), `step-partial-cylinder` (a wall interrupted
+by ribs), `step-chamfered-cylinder` (a cone, and a rim shared by two curved
+faces).
 
 The driver returns non-zero on failure and the `-expected` files are empty, in
 the same shape as the existing `export-stl-sanitytest`.
@@ -427,11 +435,113 @@ the mesh only approximates, and those can stay planar.
 That case is now handled, and the two which are not tell you what to build next:
 see *Partial cylinders* below, then item 4.
 
+## What generalises
+
+Two rounds of this work — cylinders, then partial cylinders, cones and shared
+rims — have converged on a shape that is worth stating before the next surface
+type is attempted, because almost none of the difficulty was in the surfaces.
+
+### Three gates, and they fail independently
+
+Every analytic face has to pass all three:
+
+| gate | question | where it lives |
+| --- | --- | --- |
+| geometry | do these facets fit the surface exactly? | the fit and its residual |
+| intent | did the model mean this surface, or is it a prism? | the declared records |
+| topology | will every face using these edges agree to the substitution? | the rim rules |
+
+They are independent, and **the third is where the work is**. The measurement
+that settled this: the bayonet lid has 11 exact cylinder fits in it, 26% of its
+faces, every one of them declared — and it produced *no* analytic surface at
+all. All eleven failed the rim rules. Any estimate of a new surface type which
+only counts how hard the surface is will be wrong by the same margin.
+
+### Intent can be assembled from more than one primitive
+
+A frustum has no declaration of its own: `hull()` of two coaxial cylinders — the
+standard chamfer — declares the two cylinders and never the cone between them.
+Accepting a cone when **both of its rims match a declared cylinder** is the same
+statement of intent, made by two primitives instead of one.
+
+That pattern is worth reaching for before adding a declaration to a node. The
+question is not "does something declare this surface" but "is there a
+combination of declarations which can only mean this surface".
+
+### Every operation that can preserve a surface has to carry the record
+
+Transforms and booleans carried them; `hull()` did not, and a chamfered body
+therefore lost its wall however exactly the wall fit. Any new operation has to
+make that decision explicitly. The test is not "does the geometry survive" but
+"can the record still be wrong" — and because a record is only ever a *hint*
+which the exporter re-checks against the mesh, carrying one through an operation
+that may have destroyed the surface is safe, while dropping one is not. Note the
+asymmetry: `minkowski()` is left alone deliberately, because it changes the
+radius and would make a hint that is wrong in a way the fit cannot catch.
+
+### The substitution machinery is shared, not per surface
+
+Collapsing N straight edges into one curve rewrites every loop which used them,
+so it is only legal when everything agrees. Three cases exist now:
+
+- the rim is the complete bound of one neighbouring face
+- the rim is a consecutive **run** of edges inside one such loop
+- the rim is **shared with another band** which is being collapsed too
+
+A new surface type should extend this list rather than invent its own — and
+should expect to need to. Cones were blocked on the third case, not on
+`CONICAL_SURFACE`.
+
+### A facet belongs to a band only if it lies *wholly* on the surface
+
+Where anything flat is cut into a faceted wall, the boundary facet is a
+trapezoid with two corners on the circle and two inside it: the cutting plane
+crosses that facet's chord, and a chord runs inside the arc it subtends. On a
+radius 10 wall at $fn=32 those corners sit five thousandths inside. They have to
+stay planar; taking them would pull the face's boundary out onto the true circle
+and open the shell by far more than the modelling tolerance.
+
+This is a hard ceiling on what recognition can ever achieve from a faceted mesh,
+and it is the same fact that makes item 4 below a project: **the trim curve is
+not in the mesh**. Where the trim happens to be a plane perpendicular to the
+axis or parallel with it, the bound is an arc and a line and both are exact.
+Everywhere else, only the generator knows the curve.
+
+### Two traps that will recur
+
+- **Never choose the same thing twice from two sets of coordinates.** Both ends
+  of a seam were picked independently as the rim vertex of smallest angle;
+  `atan2` has its branch cut at pi, an even sided polygon has a vertex exactly
+  there, and the sign of a coordinate which is zero to fifteen digits decided
+  which side it fell on. One wall of five was dropped. Derive the second from
+  the first.
+- **Grow a region by the surface, not by adjacency.** A band grown by crossing
+  edges into any quad walks straight through a rib welded to the wall and out
+  the far side. Fit the surface from the seed's neighbourhood first, then admit
+  only facets which lie on it.
+
+### A rejected surface is invisible
+
+A wall that was never recognised looks exactly like a wall that was never there.
+Both of this round's defects sat unnoticed in output that validated cleanly, and
+both were found within one run of making the exporter print the rule that
+rejected each band. Ship the diagnostic with the feature, not after it.
+
+### They are all one surface
+
+Cylinders, cones, spheres, tori and everything `rotate_extrude` can make are the
+same object: a profile revolved about an axis. The band machinery — strip walk,
+axis from the chords, per rim circle fit, rim substitution, seam along a ruling —
+is most of that recogniser already. What remains per type is which STEP surface
+to write and how to bound the degenerate cases. Treating the next item as "add a
+recogniser for X" rather than "extend the profile of revolution" is the way to
+end up with four of them.
+
 ## How to continue
 
-Ordered by value per unit of work. Each of the first four is independently
-shippable behind the same flag, and each extends `validatestep.py` with its own
-surface checks.
+Ordered by value per unit of work. Each is independently shippable behind the
+same flag, and each extends `validatestep.py` with its own surface checks. Cost
+each of them against all three gates above, not just the surface.
 
 ### 1. `rotate_extrude` declaring its own surfaces
 
@@ -440,8 +550,15 @@ profile is a circle (torus) or a line segment (cylinder or cone) and declare the
 surface directly. This is provenance work rather than geometry work, and it
 widens coverage well beyond the `cylinder()` primitive.
 
-`TOROIDAL_SURFACE` is doubly periodic and needs two seams, so the emission side
-is more work than the declaration side.
+Half of this is now free. A `rotate_extrude` of a **line segment** produces
+exactly the band the recogniser already handles - a cylinder when the segment is
+parallel to the axis, a frustum when it is not - so for that case there is no
+emission work at all, only the declaration. Start there: it is a few lines and
+it widens coverage past `cylinder()` immediately.
+
+`TOROIDAL_SURFACE` is the real work in this item, and it is emission work: it is
+doubly periodic and needs two seams, so the loop is not the four edge one every
+face has used so far.
 
 ### 2. Fillet Bézier patches
 
@@ -460,12 +577,32 @@ have the generator declare it. The same applies to glyph outlines
 `FrepNode` is the one place nothing is possible — marching-cubes output has no
 analytic surface to recover, by construction.
 
+The gate to watch here is topology, not geometry. Every substitution the
+exporter can currently make replaces straight edges with a **circle**; a fillet
+meets its neighbours along edges which are not circular, so the run and
+whole-loop rules have to be generalised to an arbitrary declared curve before a
+B-spline patch can be bounded at all. That generalisation is the bulk of the
+item, and it is shared with anything else non-circular that follows.
+
 ### 3. Spheres
 
 `SphereNode` builds a `num_rings × num_fragments` lat/long grid, and
 `SPHERICAL_SURFACE` exists. The poles are degenerate triangle fans, so a full
-sphere needs a seam plus two pole singularities. Common primitive, moderate
-work, no new concepts beyond the pole handling.
+sphere needs a seam plus two pole singularities.
+
+Two warnings, both learned from the cylinder/prism problem one level up:
+
+- **A sphere is not a band.** Its facets span many rings, not two rims, so the
+  strip walk does not describe it. It needs its own grower, or the band walk
+  generalised to a grid.
+- **The fit cannot tell a sphere from a stack of cones.** One ring of a lat/long
+  sphere has each of its rims at a constant radius and the two radii differ,
+  which is exactly what a frustum band looks like; the facets are chords of the
+  sphere, but nothing in the current test notices. Today only the intent gate
+  stops a sphere coming out as a pile of cones — no `cylinder()` declared those
+  radii. The moment `SphereNode` declares anything, that protection weakens, so
+  the sphere's own declaration has to be matched *before* the cone rule gets a
+  chance at those bands.
 
 ### 4. Trimmed faces
 
@@ -502,6 +639,16 @@ Two habits earned their keep and are worth repeating on this code:
 each fix, and confirming the new check rejects that output, is cheap and turns
 "this test looks right" into evidence. It caught a validator that silently
 missed two of the seven mutations it was supposed to detect.
+
+**Prototype the pass in Python over an already exported file.** Both rounds did
+this and both times it paid for itself before any C++ existed: it caught the
+centroid of an arc not lying on the axis, and it proved the strip walk finds a
+frustum where the old growth could not. An exported STEP file is a complete
+description of the merged mesh, so a hundred lines of parsing gives the same
+input the exporter sees, with none of the build.
+
+**Make the exporter say why it refused.** See *A rejected surface is invisible*
+above.
 
 **Prefer the cheapest experiment that discriminates.** The question "can
 cylinders be recognised in post-boolean meshes?" was answered by a
