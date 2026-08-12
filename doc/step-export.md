@@ -336,6 +336,22 @@ It imported the file and re-saved it. The round trip confirms three things:
   but the two-half construction is the more conservative one if a stricter
   importer ever objects.
 
+The chamfered cylinder was round tripped separately, once cones and shared rims
+landed, and it settles the two constructions nothing else had exercised:
+
+- It **kept the cone**. Its `CONICAL_SURFACE` carries our half angle to sixteen
+  digits (0.7853981633974483) and our radius to fifteen, so the cone was
+  re-derived from what we wrote rather than refitted from anything.
+- It **kept the rim between the cone and the cylinder** — one `CIRCLE` bounding
+  two *curved* faces, with no planar face anywhere along it. Parasolid took it,
+  left it circular, and split it into two half circles along with the faces it
+  bounds. A chamfered body round trips as a chamfered body.
+- Four faces came back as six, by the same halving as before.
+
+`validatestep.py` passes on that file unchanged, and its half faces are the only
+thing which exercises the partial branch of `check_cylindrical_faces` from a
+source other than this exporter.
+
 ## Running the tests on Windows
 
 Four environment problems cost more time in this session than the exporter did.
