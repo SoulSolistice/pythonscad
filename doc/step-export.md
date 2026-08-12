@@ -15,7 +15,9 @@ smaller things the measurement turned up instead, and lifted the recogniser out
 of the exporter so it can be reused and tested on its own.
 
 *What generalises* and *What is actually left in the bayonet*, below, are the
-parts worth reading before starting a fourth.
+parts worth reading before starting a fourth. *What a model can do about it* is
+for the other audience - someone writing the SCAD rather than the exporter,
+which on this part turns out to be the side with more leverage.
 
 ## Orientation
 
@@ -849,6 +851,71 @@ swept surfaces":
 Until one of those lands, the honest statement about this part is that
 **39% of it can be analytic and 59% cannot**, and the exporter is now within 36
 facets of the first number.
+
+## What a model can do about it
+
+The exporter's three gates are all things a model author influences, and on the
+bayonet the model decides far more than the exporter does. This is the practical
+counterpart to item 5: where the generator cannot declare a surface, the script
+can often avoid needing one.
+
+### Where this part's 59% comes from
+
+Attributing the 999 faces by height settles it: **991 of them are the hose
+thread**, spread evenly at about 72 faces per 5 mm over z = 0..75, which is
+exactly `pitch x turns`. The four bayonet lugs contribute 8. Everything else in
+the part is already recognised.
+
+So the single largest exportability lever in this model is a switch it already
+has: `_hoseThread = false`.
+
+### A helical thread can never be analytic, and it takes the bore with it
+
+This is geometry, not modelling style. A helix is not a surface of revolution,
+so no band recogniser will ever describe the ridge. Less obviously, a
+single-start thread running the length of a bore **slices the bore itself into a
+helical ribbon**: between two turns the socket wall survives, but as a strip
+with no rim at constant height, which is not a band either. The socket is built
+entirely from `cylinder()` and would export as a cone and a cylinder on its own;
+unioning the thread onto it costs both.
+
+It also blocks one face beyond its own. The socket's parallel section (r = 78.1,
+z = 65..75, a 216 degree arc of 36 facets) fits exactly and is declared, and is
+left faceted because its lower rim - the boundary between the tapered and the
+parallel section - is crossed by 36 separate faces of the thread running through
+it. That is the model doing exactly what it says it does: *"it follows the
+socket through both the tapered and the parallel section, so the hose stays
+engaged right up to the seat"*. The intent is right and the cost is real.
+
+### Rules that generalise
+
+Cheapest first, and all of them are about the topology gate, because that is
+where the losses are:
+
+- **Prefer primitives and booleans to `polyhedron()`.** `cylinder()`, `hull()`,
+  `difference()`, `union()` and transforms all carry provenance;
+  `polyhedron()` carries none and never can. A shape hand-built from a list
+  comprehension is opaque to the exporter in the same way a pasted STL is.
+  `smallArc()` in this model is the good pattern: a `difference()` of two
+  cylinders by two cubes, which declares both radii and cuts them with planes.
+- **Interrupt a wall with planes, not with features.** A plane through the axis
+  or perpendicular to it leaves an exact arc and an exact straight edge. Any
+  other cut leaves a trim curve the mesh only approximates, and the wall stays
+  faceted - see item 4.
+- **Let a wall end against one face, not against many.** This is the rule that
+  costs the most. A rim bordering a single planar face, or a single chamfer that
+  is itself a surface of revolution, collapses; a rim bordering one facet per
+  segment does not. In practice: run a chamfer or a fillet all the way round
+  rather than stopping it against something small, and keep ribs, ramps and
+  threads clear of the rim where two walls meet.
+- **Chamfer by hulling with a coaxial copy.** `hull()` of two coaxial cylinders
+  is recognised as a cone because both of its rims match a declared cylinder,
+  and the rim between the chamfer and the wall is written once and shared. This
+  is the idiom the exporter was taught; `roundCylinder()` and `thinRelief()` in
+  this model both use it and both come out analytic.
+- **A feature that must be non-analytic is cheaper if it is bounded by planes.**
+  A thread or a ramp will stay faceted whatever happens, but where it *ends*
+  decides whether it also spoils its neighbours.
 
 ## Method notes
 
