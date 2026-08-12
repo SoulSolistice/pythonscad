@@ -239,10 +239,51 @@ exporter sees, not by re-exporting the part.
 `validatestep.py` gained `check_cylindrical_faces()` for the two shapes a
 cylindrical face may have, and `check_hole_nesting()` now skips loops carrying
 an arc — an arc bulges away from its chord, so projecting the loop as a polygon
-would understate the face. `tests/data/scad/step-export/step-partial-cylinder.scad`
-is the fixture, and the sanity driver now exports every fixture a third time
-with `PYTHONSCAD_STEP_ANALYTIC=1` and validates that too, so the analytic path
-is covered by the same invariants as the faceted one.
+would understate the face. `step-partial-cylinder.scad` and `step-chamfered-cylinder.scad` are the
+fixtures, and the sanity driver now exports every fixture a third time with
+`PYTHONSCAD_STEP_ANALYTIC=1` and validates that too, so the analytic path is
+covered by the same invariants as the faceted one.
+
+### Cones, and rims shared between two bands
+
+The lid of the bayonet container had 11 exact cylinder fits in it, 26% of its
+faces, and produced not one analytic surface. Every one was rejected by the same
+rule, and always with the same shape of neighbour: a rim bordering *one face per
+facet* rather than a single face. The lid is a "round thin" part, so every wall
+is separated from the next by a taper — the bottom chamfer, the two run-outs of
+`thinRelief()` — and a taper is a band, not a face.
+
+So a rim gained a third case beside "the complete bound of a face" and "a run
+inside one": **shared with another band that is also being collapsed**, written
+as one `CIRCLE` used by both faces, once in each direction. That is what lets a
+wall stand on a chamfer.
+
+It only pays off with frusta, and two things had to change for those:
+
+- **The band walk could not find one.** It grew across edges parallel to the
+  axis; a frustum's rulings are tilted, each one differently, so a chamfer was
+  never even a candidate. It now walks a strip: entering a quad through one
+  ruling fixes which pair of its edges are rulings, which needs no axis at all
+  and is unambiguous on a cylinder too, where both pairs are parallel. The axis
+  then comes out of the chords — they all lie in a plane perpendicular to it, so
+  two that are not parallel fix it exactly.
+- **A frustum has no analytic record.** `CylinderNode` declares cylinders, and
+  the shape that actually produces a chamfer — `hull()` of two coaxial
+  cylinders — declares the two cylinders, never the cone between them. A cone
+  band is therefore accepted when **both of its rims match a declared
+  cylinder**: the same statement of intent, made by two primitives instead of
+  one. This is what the `hull()` provenance is for, and neither is any use
+  without the other.
+
+`CONICAL_SURFACE` takes the same placement as a cylinder plus a half angle,
+which ISO 10303 wants in (0, pi/2) — so a cone that narrows along its axis is
+written from its other end rather than with a negative angle.
+
+Measured on the two parts, by the Python prototype over their exported meshes:
+the lid goes from nothing to the chamfer and the body wall above it, and the
+base from 72 facets replaced to 312. What still resists is the 8 bands whose
+other rim borders a bayonet ramp, one facet at a time — a ramp is not a surface
+of revolution, so there is nothing to share the rim with.
 
 ### What SolidWorks said
 
@@ -330,7 +371,7 @@ axis. Only the 8 pentagons touch a ramp, whose trace on the cylinder is a curve
 the mesh only approximates, and those can stay planar.
 
 That case is now handled, and the two which are not tell you what to build next:
-see *Partial cylinders* below, then items 1 and 5.
+see *Partial cylinders* below, then item 4.
 
 ## How to continue
 
@@ -338,34 +379,7 @@ Ordered by value per unit of work. Each of the first four is independently
 shippable behind the same flag, and each extends `validatestep.py` with its own
 surface checks.
 
-### 1. Cones
-
-`CylinderNode::createGeometry()` already produces them (`r1 != r2`); the
-provenance guard excludes them today. A cone ring is topologically identical to
-a cylinder ring — N quads, two circular rims perpendicular to the axis — and
-`CONICAL_SURFACE` takes the same `AXIS2_PLACEMENT_3D` plus a half-angle. Seam
-construction and `same_sense` are reused unchanged. The fit generalises from
-"all vertices equidistant from the axis" to "radius varies linearly with
-height". Roughly 150 lines.
-
-Rim collapse is **not** reused unchanged, which the worked example above
-corrects: a cylinder stacked on a chamfer shares a rim which is the complete
-bound of neither face. The run substitution added for partial cylinders does not
-help here — a run of one edge per neighbouring facet is not a run — so the rule
-needs a third case: **a rim shared between two recognised rings**, collapsed
-into one `CIRCLE` used by both. That is a small addition to a rule that already
-exists, but it has to be made deliberately, and until it is, a chamfered body
-keeps its faceted wall no matter how well the wall itself fits.
-
-Provenance is no longer the obstacle there: `hull()` now carries the surfaces
-its children declared, so `hull(cylinder(r=R), cylinder(r=R-c))` — the standard
-chamfer idiom — declares its wall. That change alone adds nothing to the output
-until this rim case lands, which is worth knowing before measuring it.
-
-Exclude a true cone (`r2 = 0`) at first: its apex is a degenerate rim needing a
-`VERTEX_LOOP`. Chamfers and countersinks are frusta and do not hit this.
-
-### 2. `rotate_extrude` declaring its own surfaces
+### 1. `rotate_extrude` declaring its own surfaces
 
 `RotateExtrudeNode` keeps its `profile_func`, so it can recognise that its own
 profile is a circle (torus) or a line segment (cylinder or cone) and declare the
@@ -375,7 +389,7 @@ widens coverage well beyond the `cylinder()` primitive.
 `TOROIDAL_SURFACE` is doubly periodic and needs two seams, so the emission side
 is more work than the declaration side.
 
-### 3. Fillet Bézier patches
+### 2. Fillet Bézier patches
 
 `FilletNode.cc` builds surfaces from explicit quadratic Bézier control points
 (`Bezier(t, a, b, c)`, `bezier_patch()`) and then tessellates them. The control
@@ -392,14 +406,14 @@ have the generator declare it. The same applies to glyph outlines
 `FrepNode` is the one place nothing is possible — marching-cubes output has no
 analytic surface to recover, by construction.
 
-### 4. Spheres
+### 3. Spheres
 
 `SphereNode` builds a `num_rings × num_fragments` lat/long grid, and
 `SPHERICAL_SURFACE` exists. The poles are degenerate triangle fans, so a full
 sphere needs a seam plus two pole singularities. Common primitive, moderate
 work, no new concepts beyond the pole handling.
 
-### 5. Trimmed faces
+### 4. Trimmed faces
 
 The real prize, and a project rather than a step.
 
@@ -424,7 +438,7 @@ What stays here is the genuinely hard remainder: a trim curve which exists only
 as a polyline in the mesh. Putting that approximation on an analytic face would
 open the shell against its planar neighbour, so those walls stay faceted, and no
 amount of care over the surface changes that — the curve has to come from the
-generator, as with the splines in item 3.
+generator, as with the splines in item 2.
 
 ## Method notes
 

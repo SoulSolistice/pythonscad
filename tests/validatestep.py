@@ -590,7 +590,7 @@ def check_hole_nesting(entities, problems):
 
 
 def check_cylindrical_faces(entities, problems):
-    """A CYLINDRICAL_SURFACE face has one of exactly two shapes.
+    """A CYLINDRICAL_SURFACE or CONICAL_SURFACE face has one of exactly two shapes.
 
     A wall which closes on itself is periodic and cannot be bounded by its two
     rims alone, so it walks up a seam and back down it: two full CIRCLEs (an
@@ -606,13 +606,22 @@ def check_cylindrical_faces(entities, problems):
             continue
         refs = face.refs()
         surface = entities.get(refs[-1]) if refs else None
-        if surface is None or surface.name != "CYLINDRICAL_SURFACE":
+        if surface is None or surface.name not in ("CYLINDRICAL_SURFACE", "CONICAL_SURFACE"):
             continue
 
-        radius = surface.floats()[-1] if surface.floats() else None
+        # CONICAL_SURFACE carries the half angle after the radius
+        numbers = surface.floats()
+        radius = numbers[0] if numbers else None
         if radius is None or radius <= 0:
-            problems.append("#%d: CYLINDRICAL_SURFACE without a positive radius" % surface.id)
+            problems.append("#%d: %s without a positive radius" % (surface.id, surface.name))
             continue
+        if surface.name == "CONICAL_SURFACE":
+            angle = numbers[1] if len(numbers) > 1 else None
+            if angle is None or not 0 < angle < math.pi / 2:
+                problems.append(
+                    "#%d: CONICAL_SURFACE half angle %s is not in (0, pi/2)" % (surface.id, angle)
+                )
+                continue
 
         bounds = [b for b in refs[:-1] if entities.get(b) is not None]
         if len(bounds) != 1:
@@ -646,15 +655,17 @@ def check_cylindrical_faces(entities, problems):
         else:
             if len(circles) != 2:
                 problems.append(
-                    "#%d: cylindrical face is bounded by %d circular edges, expected 2"
-                    % (face.id, len(circles))
+                    "#%d: %s face is bounded by %d circular edges, expected 2"
+                    % (face.id, surface.name, len(circles))
                 )
                 continue
             for _, geom, _ends in circles:
                 cr = geom.floats()[-1] if geom.floats() else None
-                if cr is None or abs(cr - radius) > 1e-6 * max(1.0, radius):
+                if cr is None or cr <= 0:
+                    problems.append("#%d: rim CIRCLE #%d has no positive radius" % (face.id, geom.id))
+                elif surface.name == "CYLINDRICAL_SURFACE" and abs(cr - radius) > 1e-6 * max(1.0, radius):
                     problems.append(
-                        "#%d: rim CIRCLE #%d has radius %s, but its surface has %s"
+                        "#%d: rim CIRCLE #%d has radius %s, but its cylinder has %s"
                         % (face.id, geom.id, cr, radius)
                     )
             if closed not in (0, 2):

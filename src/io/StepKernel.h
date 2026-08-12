@@ -336,6 +336,53 @@ public:
     Axis2Placement *axis;
   };
 
+  /*! A cone, given by the radius in the placement's plane and the half angle it
+   * opens by along the placement's axis. ISO 10303 wants the half angle in
+   * (0, pi/2), so a cone which narrows along its axis has to be written from
+   * its other end rather than with a negative angle. */
+  class ConicalSurface : public SurfaceType
+  {
+  public:
+    ConicalSurface(std::vector<Entity *>& ent_list) : SurfaceType(ent_list)
+    {
+      axis = 0;
+      r = 0;
+      half_angle = 0;
+    }
+
+    ConicalSurface(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+                   double r_in, double half_angle_in)
+      : SurfaceType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      r = r_in;
+      half_angle = half_angle_in;
+    }
+    virtual ~ConicalSurface() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = CONICAL_SURFACE('" << label << "',#" << axis->id << ","
+                << step_real(r) << "," << step_real(half_angle) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> r >> half_angle;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double r;
+    double half_angle;
+    Axis2Placement *axis;
+  };
+
   class RoundType : public Entity
   {
   public:

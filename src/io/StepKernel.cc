@@ -122,41 +122,44 @@ bool pointInLoop2d(const std::vector<std::array<double, 2>>& poly, const std::ar
   return inside;
 }
 
-/*! A ring of facets recognised as one cylinder.
+/*! A band of facets around a common axis: a cylinder when both rims have the
+ * same radius, a frustum when they do not.
  *
- * `walls` are the loops the ring is made of, which are dropped in favour of a
- * single CYLINDRICAL_SURFACE face. `bottom_loop`/`top_loop` are the loops of
- * the neighbouring faces that bound the same rims - a disc or the hole of an
- * annulus - and their N straight edges collapse into one CIRCLE each. */
-struct CylinderRing {
+ * `walls` are the loops it is made of, dropped in favour of a single face.
+ * Whether that face can be written depends on what each rim borders, which is
+ * decided later - see RimRef. */
+struct Band {
   std::vector<std::size_t> walls;
   Vector3d axis, base;  // base is the centre of the bottom rim
-  double radius = 0;
+  double r_bottom = 0, r_top = 0;
   double height = 0;
-  std::size_t bottom_loop = 0, top_loop = 0;
-  bool bottom_ccw = false, top_ccw = false;  // rim traversal, right handed about axis
-  bool outward = false;                      // wall normals point away from the axis
-  int seam_bottom = -1, seam_top = -1;       // the vertices the seam runs between
+  bool closed = false;   // covers the full turn, so the face is periodic
+  bool outward = false;  // wall normals point away from the axis
+  std::vector<int> bottom_set, top_set;
+  int seam_bottom = -1, seam_top = -1;  // the ruling the seam runs along
+  bool alive = true;
 };
 
-/*! A band of facets recognised as part of one cylinder, cut short of a full
- * turn - a wall interrupted by a channel, a slot or a lug.
+/*! What lies on the other side of one rim of a band.
  *
- * Unlike a full ring it is not periodic, so it needs no seam: the face is
- * bounded by an arc at either rim and the band's two end edges. Each arc
- * replaces a *run* of edges inside the neighbouring face's loop rather than the
- * whole loop, which is the only structural difference to CylinderRing. */
-struct CylinderArc {
-  std::vector<std::size_t> walls;
-  Vector3d axis, base;  // base is the centre of the bottom rim
-  double radius = 0;
-  double height = 0;
-  bool outward = false;  // wall normals point away from the axis
-  std::size_t bottom_loop = 0, top_loop = 0;
-  // the run of edges each rim occupies in its neighbour, as a start index into
-  // that loop and a number of edges
-  std::size_t bottom_start = 0, bottom_count = 0;
-  std::size_t top_start = 0, top_count = 0;
+ * A rim can only be collapsed into a CIRCLE when everything using its edges
+ * agrees to the substitution. Three cases do:
+ *
+ *   WHOLE_LOOP  the rim is the complete bound of one neighbouring face
+ *   LOOP_RUN    the rim is a consecutive run of edges inside one such loop
+ *   OTHER_BAND  the rim is shared with another band, which is being collapsed
+ *               too - a wall standing on a chamfer, and the case that keeps a
+ *               chamfered body faceted until both halves can be written
+ *
+ * Anything else - most often one neighbouring face per facet - leaves the band
+ * faceted. */
+struct RimRef {
+  enum Kind { UNRESOLVED, WHOLE_LOOP, LOOP_RUN, OTHER_BAND };
+  Kind kind = UNRESOLVED;
+  std::size_t loop = 0;              // WHOLE_LOOP, LOOP_RUN
+  std::size_t start = 0, count = 0;  // LOOP_RUN
+  std::size_t band = 0;              // OTHER_BAND
+  bool wall_ccw = false;             // the wall facets run counter clockwise
 };
 
 /*! One run of loop edges replaced by a single arc. */
@@ -205,32 +208,6 @@ bool fitCircleCentre(const std::vector<Vector3d>& vertices, const std::vector<in
   centre = origin + sol[0] * u + sol[1] * w;
   centre -= axis * (axis.dot(centre) - level);
   return true;
-}
-
-/*! The vertex of `level` which sits directly above `v` along `axis`. */
-int vertexAbove(int v, const std::vector<int>& level, const Vector3d& axis, double tol,
-                const std::vector<Vector3d>& vertices)
-{
-  for (const int candidate : level) {
-    const Vector3d rel = vertices[candidate] - vertices[v];
-    if ((rel - axis * axis.dot(rel)).norm() < tol) return candidate;
-  }
-  return -1;
-}
-
-/*! Signed rotation of a loop about an axis: positive when it runs counter
- * clockwise in the right handed sense. */
-double loopTurnDirection(const std::vector<Vector3d>& vertices, const std::vector<int>& loop,
-                         const Vector3d& axis, const Vector3d& centre)
-{
-  double total = 0;
-  const std::size_t n = loop.size();
-  for (std::size_t i = 0; i < n; i++) {
-    const Vector3d a = vertices[loop[i]] - centre;
-    const Vector3d b = vertices[loop[(i + 1) % n]] - centre;
-    total += axis.dot(a.cross(b));
-  }
-  return total;
 }
 
 /*! Distance from a point to the line through `base` along `axis`. */
@@ -446,20 +423,17 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   std::map<std::pair<int, int>, EdgeCurve *> edge_map;
   int merged_edge_cnt = 0;
 
-  // Recognise rings of facets that were modelled as a cylinder.
+  // Recognise bands of facets that were modelled as a surface of revolution.
   //
   // The fit alone can never decide this: a ring of N quads is exactly the mesh
   // of an N sided prism, and a cube's four sides fit a cylinder through its
-  // corners with zero residual. So a ring is only accepted when the model also
-  // declared a matching CylinderSurface - geometry from the mesh, intent from
-  // the primitive that produced it.
-  std::vector<CylinderRing> rings;
-  std::vector<CylinderArc> arc_runs;
+  // corners with zero residual. So a band is only accepted when the model also
+  // declared the matching surface - geometry from the mesh, intent from the
+  // primitive that produced it.
+  std::vector<Band> bands;
   std::vector<char> consumed(face_cnt, 0);
-  std::map<std::size_t, std::size_t> rim_of_loop;  // rim loop -> index into rings
-  // runs of a loop's edges already claimed by a partial cylinder, as
-  // (start, count); two bands must never rewrite the same edge
-  std::map<std::size_t, std::vector<std::pair<std::size_t, std::size_t>>> claimed_runs;
+  std::vector<std::size_t> band_of_loop(face_cnt, std::size_t(-1));
+  std::vector<std::pair<RimRef, RimRef>> rims;  // bottom, top - one per band
 
   if (analytic && !surfaces.empty()) {
     std::map<std::pair<int, int>, std::vector<std::size_t>> loop_edges_map;
@@ -472,122 +446,97 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       }
     }
 
-    // The rim of a band which does not close: find the single neighbouring
-    // loop it borders and the consecutive run of that loop's edges it covers.
-    auto resolve_rim_run = [&](const std::vector<std::size_t>& ring,
-                               const std::set<std::size_t>& in_ring, const std::vector<int>& level,
-                               std::size_t& nb_out, std::size_t& start_out,
-                               std::size_t& count_out) -> bool {
-      const std::set<int> level_set(level.begin(), level.end());
-      std::set<std::pair<int, int>> rim_edges;
-      for (const std::size_t f : ring) {
-        const auto& loop = loops[f];
-        for (std::size_t j = 0; j < loop.size(); j++) {
-          const int a = loop[j], b = loop[(j + 1) % loop.size()];
-          if (level_set.count(a) && level_set.count(b)) {
-            rim_edges.insert({std::min(a, b), std::max(a, b)});
-          }
-        }
-      }
-      if (rim_edges.empty()) return false;
+    auto edge_key = [](int a, int b) { return std::make_pair(std::min(a, b), std::max(a, b)); };
 
-      std::size_t nb = face_cnt;
-      for (const auto& edge : rim_edges) {
-        const auto it = loop_edges_map.find(edge);
-        if (it == loop_edges_map.end()) return false;
-        std::size_t other = face_cnt;
-        int outside = 0;
-        for (const std::size_t user : it->second) {
-          if (in_ring.count(user)) continue;
-          outside++;
-          other = user;
-        }
-        // one face on the far side of every rim edge, and the same one
-        if (outside != 1) return false;
-        if (nb == face_cnt) nb = other;
-        else if (nb != other) return false;
-      }
-      if (nb == face_cnt || !loop_valid[nb] || consumed[nb] || rim_of_loop.count(nb)) return false;
-
-      const std::vector<int>& nb_loop = loops[nb];
-      const std::size_t n = nb_loop.size();
-      std::vector<char> on_rim(n, 0);
-      std::size_t cnt = 0;
-      for (std::size_t j = 0; j < n; j++) {
-        const int a = nb_loop[j], b = nb_loop[(j + 1) % n];
-        if (rim_edges.count({std::min(a, b), std::max(a, b)}) != 0) {
-          on_rim[j] = 1;
-          cnt++;
-        }
-      }
-      // the neighbour has to use every rim edge, and they have to sit together:
-      // an arc can only replace edges which are consecutive in the loop
-      if (cnt != rim_edges.size() || cnt >= n) return false;
-      std::size_t start = n;
-      for (std::size_t j = 0; j < n; j++) {
-        if (on_rim[j] == 0 || on_rim[(j + n - 1) % n] != 0) continue;
-        if (start != n) return false;
-        start = j;
-      }
-      if (start == n) return false;
-
-      nb_out = nb;
-      start_out = start;
-      count_out = cnt;
-      return true;
-    };
-
-    auto run_overlaps = [&](std::size_t loop, std::size_t start, std::size_t count) {
-      const auto it = claimed_runs.find(loop);
-      if (it == claimed_runs.end()) return false;
-      const std::size_t n = loops[loop].size();
-      for (const auto& claimed : it->second) {
-        for (std::size_t a = 0; a < count; a++) {
-          for (std::size_t b = 0; b < claimed.second; b++) {
-            if ((start + a) % n == (claimed.first + b) % n) return true;
-          }
-        }
+    // Did the model declare a cylinder of this radius about this axis?
+    auto declared_cylinder = [&](double radius, const Vector3d& axis, const Vector3d& base) {
+      for (const auto& surface : surfaces) {
+        const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
+        if (cyl == nullptr) continue;
+        if (fabs(cyl->r - radius) > 1e-7 * radius) continue;
+        if (fabs(fabs(cyl->normdir.normalized().dot(axis)) - 1.0) > 1e-7) continue;
+        if (distanceToAxis(cyl->refpt, base, axis) > 1e-7 * radius) continue;
+        return true;
       }
       return false;
+    };
+
+    // Walk the strip of quads reached by crossing ruling edges.
+    //
+    // The previous version grew across edges parallel to the axis, which finds
+    // a cylinder and never a frustum: a cone's rulings are tilted, each one
+    // differently. Entering a quad through one ruling fixes which pair of its
+    // edges are rulings, so the walk needs no axis and is unambiguous even on a
+    // cylinder, where both pairs are parallel.
+    auto walk_strip = [&](std::size_t seed, int entry_side, std::vector<std::size_t>& walls,
+                          std::map<std::size_t, int>& entry) {
+      walls.clear();
+      entry.clear();
+      std::vector<std::pair<std::size_t, int>> stack{{seed, entry_side}};
+      while (!stack.empty()) {
+        const auto cur = stack.back();
+        stack.pop_back();
+        if (entry.count(cur.first)) continue;
+        entry.emplace(cur.first, cur.second);
+        walls.push_back(cur.first);
+        const auto& loop = loops[cur.first];
+        for (const int side : {cur.second, (cur.second + 2) % 4}) {
+          const int a = loop[side], b = loop[(side + 1) % 4];
+          const auto it = loop_edges_map.find(edge_key(a, b));
+          if (it == loop_edges_map.end()) continue;
+          for (const std::size_t nb : it->second) {
+            if (nb == cur.first || entry.count(nb) || consumed[nb]) continue;
+            if (!loop_valid[nb] || loop_is_hole[nb] || loops[nb].size() != 4) continue;
+            for (int j = 0; j < 4; j++) {
+              if (edge_key(loops[nb][j], loops[nb][(j + 1) % 4]) == edge_key(a, b)) {
+                stack.emplace_back(nb, j);
+                break;
+              }
+            }
+          }
+        }
+      }
     };
 
     for (std::size_t seed = 0; seed < face_cnt; seed++) {
       if (!loop_valid[seed] || consumed[seed] || loop_is_hole[seed]) continue;
       if (loops[seed].size() != 4) continue;
 
-      for (int k = 0; k < 2; k++) {
-        const Vector3d d0 = (vertices[loops[seed][(k + 1) % 4]] - vertices[loops[seed][k]]).normalized();
-        const Vector3d d2 =
-          (vertices[loops[seed][(k + 3) % 4]] - vertices[loops[seed][(k + 2) % 4]]).normalized();
-        if (fabs(fabs(d0.dot(d2)) - 1.0) > 1e-9) continue;
-        const Vector3d axis = (d0[2] < 0 || (d0[2] == 0 && d0[0] < 0)) ? Vector3d(-d0) : d0;
+      for (int side = 0; side < 4; side++) {
+        std::vector<std::size_t> walls;
+        std::map<std::size_t, int> entry;
+        walk_strip(seed, side, walls, entry);
+        if (walls.size() < 3) continue;
 
-        // grow the ring across the edges that run along the axis
-        std::vector<std::size_t> ring;
-        std::vector<std::size_t> stack{seed};
-        std::set<std::size_t> in_ring;
-        while (!stack.empty()) {
-          const std::size_t cur = stack.back();
-          stack.pop_back();
-          if (in_ring.count(cur)) continue;
-          in_ring.insert(cur);
-          ring.push_back(cur);
-          const auto& loop = loops[cur];
-          for (std::size_t j = 0; j < loop.size(); j++) {
-            const int a = loop[j], b = loop[(j + 1) % loop.size()];
-            const Vector3d dir = (vertices[b] - vertices[a]).normalized();
-            if (fabs(fabs(dir.dot(axis)) - 1.0) > 1e-9) continue;
-            for (const std::size_t nb : loop_edges_map[{std::min(a, b), std::max(a, b)}]) {
-              if (nb == cur || in_ring.count(nb) || consumed[nb]) continue;
-              if (loops[nb].size() == 4 && !loop_is_hole[nb]) stack.push_back(nb);
-            }
+        // The chords - the edges which are not rulings - all lie in a plane
+        // perpendicular to the axis, so two of them which are not parallel fix
+        // the axis exactly.
+        std::vector<Vector3d> chords;
+        for (const std::size_t f : walls) {
+          const int r = entry[f];
+          for (const int c : {(r + 1) % 4, (r + 3) % 4}) {
+            const Vector3d dir = vertices[loops[f][(c + 1) % 4]] - vertices[loops[f][c]];
+            if (dir.norm() > 1e-12) chords.push_back(dir.normalized());
           }
         }
-        if (ring.size() < 3) continue;
+        if (chords.size() < 2) continue;
+        Vector3d axis(0, 0, 0);
+        for (std::size_t c = 1; c < chords.size(); c++) {
+          const Vector3d n = chords[0].cross(chords[c]);
+          if (n.norm() > 1e-9) {
+            axis = n.normalized();
+            break;
+          }
+        }
+        if (axis.norm() < 0.5) continue;
+        if (axis[2] < 0 || (axis[2] == 0 && axis[0] < 0)) axis = -axis;
+        bool perpendicular_ok = true;
+        for (const Vector3d& c : chords) perpendicular_ok = perpendicular_ok && fabs(c.dot(axis)) < 1e-9;
+        if (!perpendicular_ok) continue;
 
         // every wall vertex has to sit on one of the two rims
         std::map<int, double> along;
-        for (const std::size_t f : ring) {
+        for (const std::size_t f : walls) {
           for (const int v : loops[f]) along[v] = axis.dot(vertices[v]);
         }
         double lo = along.begin()->second, hi = lo;
@@ -608,293 +557,455 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
 
         // A band which closes on itself has one rim vertex per facet; one which
         // stops short of a full turn has one more, the far end of the last
-        // facet. Anything else is not a band of quads around a common axis.
-        const bool full_turn =
-          bottom_set.size() == ring.size() && top_set.size() == ring.size();
+        // facet. Anything else is not a band around a common axis.
+        const bool full_turn = bottom_set.size() == walls.size() && top_set.size() == walls.size();
         const bool part_turn =
-          bottom_set.size() == ring.size() + 1 && top_set.size() == ring.size() + 1;
+          bottom_set.size() == walls.size() + 1 && top_set.size() == walls.size() + 1;
         if (!full_turn && !part_turn) continue;
 
-        // fit: one axis line, one radius
-        Vector3d base;
-        if (full_turn) {
-          Vector3d centroid(0, 0, 0);
-          for (const auto& kv : along) centroid += vertices[kv.first];
-          centroid /= double(along.size());
-          base = centroid - axis * (axis.dot(centroid) - lo);
-        } else if (!fitCircleCentre(vertices, bottom_set, axis, lo, base)) {
+        // Fit each rim on its own: the centroid of a full rim lies on the axis
+        // but the centroid of an arc sits inside its chord, and the two rims of
+        // a frustum have different radii anyway.
+        Vector3d base, top_centre;
+        if (!fitCircleCentre(vertices, bottom_set, axis, lo, base)) continue;
+        if (!fitCircleCentre(vertices, top_set, axis, hi, top_centre)) continue;
+        if (distanceToAxis(top_centre, base, axis) > 1e-6) continue;  // coaxial
+
+        double r_bottom = 0, r_top = 0;
+        for (const int v : bottom_set) r_bottom += distanceToAxis(vertices[v], base, axis);
+        for (const int v : top_set) r_top += distanceToAxis(vertices[v], base, axis);
+        r_bottom /= double(bottom_set.size());
+        r_top /= double(top_set.size());
+        const double scale = std::max(r_bottom, r_top);
+        if (scale < model_tol) continue;
+        double dev = 0;
+        for (const int v : bottom_set) {
+          dev = std::max(dev, fabs(distanceToAxis(vertices[v], base, axis) - r_bottom));
+        }
+        for (const int v : top_set) {
+          dev = std::max(dev, fabs(distanceToAxis(vertices[v], base, axis) - r_top));
+        }
+        if (dev > 1e-7 * scale) continue;
+
+        // Intent. A cylinder needs its own record; a frustum has none, because
+        // the shape that produces one - hull() of two coaxial cylinders, the
+        // standard chamfer - declares the two cylinders rather than the cone
+        // between them. Both of its rims matching a declared cylinder is the
+        // same statement of intent, made by two primitives instead of one.
+        const bool is_cone = fabs(r_bottom - r_top) > 1e-9 * scale;
+        if (is_cone) {
+          if (!declared_cylinder(r_bottom, axis, base)) continue;
+          if (!declared_cylinder(r_top, axis, base)) continue;
+        } else if (!declared_cylinder(r_bottom, axis, base)) {
           continue;
         }
-        double r_sum = 0;
-        for (const auto& kv : along) r_sum += distanceToAxis(vertices[kv.first], base, axis);
-        const double radius = r_sum / double(along.size());
-        if (radius < model_tol) continue;
-        double dev = 0;
-        for (const auto& kv : along) {
-          dev = std::max(dev, fabs(distanceToAxis(vertices[kv.first], base, axis) - radius));
-        }
-        if (dev > 1e-7 * radius) continue;
 
-        // and the model has to have declared a cylinder here
-        bool declared = false;
-        for (const auto& surface : surfaces) {
-          const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
-          if (cyl == nullptr) continue;
-          if (fabs(cyl->r - radius) > 1e-7 * radius) continue;
-          if (fabs(fabs(cyl->normdir.normalized().dot(axis)) - 1.0) > 1e-7) continue;
-          if (distanceToAxis(cyl->refpt, base, axis) > 1e-7 * radius) continue;
-          declared = true;
-          break;
-        }
-        if (!declared) continue;
-
-        if (part_turn) {
-          // A band which stops short of a full turn is bounded by an arc at
-          // either rim, and an arc replaces a *run* of edges inside the
-          // neighbouring loop instead of the whole of it. Both rims still have
-          // to belong to exactly one neighbouring face - a rim which borders
-          // one face per facet, as a wall standing on a chamfer does, has no
-          // single loop to rewrite.
-          CylinderArc info;
-          if (!resolve_rim_run(ring, in_ring, bottom_set, info.bottom_loop, info.bottom_start,
-                               info.bottom_count) ||
-              !resolve_rim_run(ring, in_ring, top_set, info.top_loop, info.top_start,
-                               info.top_count)) {
-            continue;
-          }
-          if (info.bottom_loop == info.top_loop) continue;
-          if (info.bottom_count != ring.size() || info.top_count != ring.size()) continue;
-          if (run_overlaps(info.bottom_loop, info.bottom_start, info.bottom_count) ||
-              run_overlaps(info.top_loop, info.top_start, info.top_count)) {
-            continue;
-          }
-
-          // The wall traverses each rim opposite to its neighbour, so the two
-          // ends have to line up: the vertex above the start of the bottom run
-          // is the end of the top run, and the other way round.
-          const std::vector<int>& nb_bottom = loops[info.bottom_loop];
-          const std::vector<int>& nb_top = loops[info.top_loop];
-          const int b_first = nb_bottom[info.bottom_start];
-          const int b_last = nb_bottom[(info.bottom_start + info.bottom_count) % nb_bottom.size()];
-          const int t_first = nb_top[info.top_start];
-          const int t_last = nb_top[(info.top_start + info.top_count) % nb_top.size()];
-          if (vertexAbove(b_first, top_set, axis, model_tol, vertices) != t_last) continue;
-          if (vertexAbove(b_last, top_set, axis, model_tol, vertices) != t_first) continue;
-
-          info.walls = ring;
-          info.axis = axis;
-          info.base = base;
-          info.radius = radius;
-          info.height = hi - lo;
-          const Vector3d probe = vertices[loops[ring[0]][0]];
-          const Vector3d radial = (probe - base) - axis * axis.dot(probe - base);
-          info.outward = radial.normalized().dot(loop_normals[ring[0]]) > 0;
-
-          for (const std::size_t f : ring) consumed[f] = 1;
-          claimed_runs[info.bottom_loop].push_back({info.bottom_start, info.bottom_count});
-          claimed_runs[info.top_loop].push_back({info.top_start, info.top_count});
-          arc_runs.push_back(info);
-          break;
-        }
-
-        // both rims have to be a complete bound of a neighbouring face, so that
-        // collapsing them to a CIRCLE leaves that face's loop intact
-        const std::set<int> bottom_key(bottom_set.begin(), bottom_set.end());
-        const std::set<int> top_key(top_set.begin(), top_set.end());
-        std::size_t bottom_loop = face_cnt, top_loop = face_cnt;
-        for (std::size_t i = 0; i < face_cnt; i++) {
-          if (!loop_valid[i] || consumed[i] || in_ring.count(i) || rim_of_loop.count(i)) continue;
-          const std::set<int> key(loops[i].begin(), loops[i].end());
-          if (key.size() != loops[i].size()) continue;
-          if (key == bottom_key) bottom_loop = i;
-          else if (key == top_key) top_loop = i;
-        }
-        if (bottom_loop == face_cnt || top_loop == face_cnt) continue;
-
-        CylinderRing info;
-        info.walls = ring;
+        Band info;
+        info.walls = walls;
         info.axis = axis;
         info.base = base;
-        info.radius = radius;
+        info.r_bottom = r_bottom;
+        info.r_top = r_top;
         info.height = hi - lo;
-        info.bottom_loop = bottom_loop;
-        info.top_loop = top_loop;
-        info.bottom_ccw = loopTurnDirection(vertices, loops[bottom_loop], axis, base) > 0;
-        info.top_ccw = loopTurnDirection(vertices, loops[top_loop], axis, base) > 0;
-        info.seam_bottom = loops[bottom_loop][0];
-        for (const int v : top_set) {
-          const Vector3d rel = vertices[v] - vertices[info.seam_bottom];
-          if ((rel - axis * axis.dot(rel)).norm() < model_tol) info.seam_top = v;
-        }
-        if (info.seam_top == -1) continue;
+        info.closed = full_turn;
+        info.bottom_set = bottom_set;
+        info.top_set = top_set;
 
-        const Vector3d probe = vertices[loops[ring[0]][0]];
+        const Vector3d probe = vertices[loops[walls[0]][0]];
         const Vector3d radial = (probe - base) - axis * axis.dot(probe - base);
-        info.outward = radial.normalized().dot(loop_normals[ring[0]]) > 0;
+        info.outward = radial.normalized().dot(loop_normals[walls[0]]) > 0;
 
-        for (const std::size_t f : ring) consumed[f] = 1;
-        rim_of_loop[bottom_loop] = rings.size();
-        rim_of_loop[top_loop] = rings.size();
-        rings.push_back(info);
+        for (const std::size_t f : walls) {
+          consumed[f] = 1;
+          band_of_loop[f] = bands.size();
+        }
+        bands.push_back(info);
         break;
       }
     }
 
-    if (!rings.empty() || !arc_runs.empty()) {
-      std::size_t collapsed = 0;
-      for (const auto& ring : rings) collapsed += ring.walls.size();
-      for (const auto& arc : arc_runs) collapsed += arc.walls.size();
-      const std::size_t total = rings.size() + arc_runs.size();
-      printf("STEP export: %d cylinder%s recognised (%d partial), %d facets replaced\n", int(total),
-             total == 1 ? "" : "s", int(arc_runs.size()), int(collapsed));
+    // ---- what each rim borders -------------------------------------------
+    //
+    // A band whose rim cannot be resolved is dropped, which can leave a
+    // neighbour's shared rim unresolvable in turn, so this runs to a fixed
+    // point. Dropping is monotone, so it terminates.
+    rims.assign(bands.size(), {RimRef(), RimRef()});
+
+    auto rim_edges = [&](std::size_t bi, bool bottom) {
+      const Band& band = bands[bi];
+      const std::vector<int>& level_v = bottom ? band.bottom_set : band.top_set;
+      const std::set<int> level(level_v.begin(), level_v.end());
+      std::set<std::pair<int, int>> out;
+      for (const std::size_t f : band.walls) {
+        const auto& loop = loops[f];
+        for (std::size_t j = 0; j < loop.size(); j++) {
+          const int a = loop[j], b = loop[(j + 1) % loop.size()];
+          if (level.count(a) && level.count(b)) out.insert(edge_key(a, b));
+        }
+      }
+      return out;
+    };
+
+    // The direction the wall facets traverse a rim edge is the direction the
+    // collapsed face has to traverse the whole rim: the face replaces those
+    // facets, so its boundary is theirs.
+    auto wall_runs_ccw = [&](std::size_t bi, const std::pair<int, int>& edge) {
+      const Band& band = bands[bi];
+      for (const std::size_t f : band.walls) {
+        const auto& loop = loops[f];
+        for (std::size_t j = 0; j < loop.size(); j++) {
+          const int a = loop[j], b = loop[(j + 1) % loop.size()];
+          if (edge_key(a, b) != edge) continue;
+          const Vector3d va = vertices[a] - band.base;
+          const Vector3d vb = vertices[b] - band.base;
+          return band.axis.dot(va.cross(vb)) > 0;
+        }
+      }
+      return true;
+    };
+
+    auto resolve_rim = [&](std::size_t bi, bool bottom, RimRef& out) {
+      const Band& band = bands[bi];
+      const auto edges = rim_edges(bi, bottom);
+      if (edges.empty()) return false;
+      const std::set<std::size_t> in_band(band.walls.begin(), band.walls.end());
+
+      std::set<std::size_t> others;
+      for (const auto& edge : edges) {
+        const auto it = loop_edges_map.find(edge);
+        if (it == loop_edges_map.end()) return false;
+        std::size_t outside = face_cnt;
+        int count = 0;
+        for (const std::size_t user : it->second) {
+          if (in_band.count(user)) continue;
+          count++;
+          outside = user;
+        }
+        if (count != 1) return false;
+        others.insert(outside);
+      }
+
+      out.wall_ccw = wall_runs_ccw(bi, *edges.begin());
+
+      if (others.size() == 1) {
+        const std::size_t nb = *others.begin();
+        if (band_of_loop[nb] != std::size_t(-1)) return false;  // a one facet band
+        if (!loop_valid[nb] || consumed[nb]) return false;
+        const std::vector<int>& nb_loop = loops[nb];
+        const std::set<int> key(nb_loop.begin(), nb_loop.end());
+        if (key.size() == nb_loop.size() && edges.size() == nb_loop.size()) {
+          out.kind = RimRef::WHOLE_LOOP;
+          out.loop = nb;
+          return true;
+        }
+        // a run inside the loop, which an arc can replace only when its edges
+        // are consecutive there
+        const std::size_t n = nb_loop.size();
+        std::vector<char> on_rim(n, 0);
+        std::size_t cnt = 0;
+        for (std::size_t j = 0; j < n; j++) {
+          if (edges.count(edge_key(nb_loop[j], nb_loop[(j + 1) % n])) == 0) continue;
+          on_rim[j] = 1;
+          cnt++;
+        }
+        if (cnt != edges.size() || cnt >= n) return false;
+        std::size_t start = n;
+        for (std::size_t j = 0; j < n; j++) {
+          if (on_rim[j] == 0 || on_rim[(j + n - 1) % n] != 0) continue;
+          if (start != n) return false;
+          start = j;
+        }
+        if (start == n) return false;
+        out.kind = RimRef::LOOP_RUN;
+        out.loop = nb;
+        out.start = start;
+        out.count = cnt;
+        return true;
+      }
+
+      // shared with another band, which has to be collapsed too
+      std::set<std::size_t> nb_bands;
+      for (const std::size_t f : others) nb_bands.insert(band_of_loop[f]);
+      if (nb_bands.size() != 1 || *nb_bands.begin() == std::size_t(-1)) return false;
+      const std::size_t other = *nb_bands.begin();
+      if (!bands[other].alive) return false;
+      // only between two full turns: a shared rim covered by several partial
+      // bands would have to be split into arcs on both sides at once
+      if (!band.closed || !bands[other].closed) return false;
+      if (others.size() != bands[other].walls.size()) return false;
+      out.kind = RimRef::OTHER_BAND;
+      out.band = other;
+      return true;
+    };
+
+    // The end edges of a partial band have to be edges the mesh already has.
+    auto ends_line_up = [&](const RimRef& bottom, const RimRef& top) {
+      const std::vector<int>& nb_bottom = loops[bottom.loop];
+      const std::vector<int>& nb_top = loops[top.loop];
+      const int b_first = nb_bottom[bottom.start];
+      const int b_last = nb_bottom[(bottom.start + bottom.count) % nb_bottom.size()];
+      const int t_first = nb_top[top.start];
+      const int t_last = nb_top[(top.start + top.count) % nb_top.size()];
+      return loop_edges_map.count(edge_key(b_first, t_last)) != 0 &&
+             loop_edges_map.count(edge_key(t_first, b_last)) != 0;
+    };
+
+    // Two bands must not rewrite the same planar loop, or the same run of it.
+    for (bool changed = true; changed;) {
+      changed = false;
+      std::set<std::size_t> whole_taken;
+      std::map<std::size_t, std::vector<std::pair<std::size_t, std::size_t>>> runs_taken;
+
+      for (std::size_t i = 0; i < bands.size(); i++) {
+        if (!bands[i].alive) continue;
+        RimRef bottom, top;
+        if (!resolve_rim(i, true, bottom) || !resolve_rim(i, false, top)) {
+          bands[i].alive = false;
+          changed = true;
+          continue;
+        }
+
+        // A full turn collapses each rim into a closed CIRCLE, which can only
+        // replace a whole loop or the matching rim of another band; a partial
+        // band collapses each rim into an arc, which only ever replaces a run.
+        // Anything else would put a closed circle in the middle of a loop.
+        const bool shapes_ok =
+          bands[i].closed ? (bottom.kind != RimRef::LOOP_RUN && top.kind != RimRef::LOOP_RUN)
+                          : (bottom.kind == RimRef::LOOP_RUN && top.kind == RimRef::LOOP_RUN);
+        if (!shapes_ok) {
+          bands[i].alive = false;
+          changed = true;
+          continue;
+        }
+
+        // The two ends of a partial band are ordinary edges of the mesh. If the
+        // runs do not line up - the vertex ending one rim's run sitting on the
+        // same ruling as the vertex starting the other's - the face would be
+        // closed with a diagonal that is not an edge at all, which opens the
+        // shell against every face that shares the real one.
+        if (!bands[i].closed && !ends_line_up(bottom, top)) {
+          bands[i].alive = false;
+          changed = true;
+          continue;
+        }
+
+        bool clash = false;
+        for (const RimRef *rim : {&bottom, &top}) {
+          if (rim->kind == RimRef::WHOLE_LOOP) {
+            if (!whole_taken.insert(rim->loop).second) clash = true;
+          } else if (rim->kind == RimRef::LOOP_RUN) {
+            const std::size_t n = loops[rim->loop].size();
+            for (const auto& taken : runs_taken[rim->loop]) {
+              for (std::size_t a = 0; a < rim->count && !clash; a++) {
+                for (std::size_t b = 0; b < taken.second; b++) {
+                  if ((rim->start + a) % n == (taken.first + b) % n) clash = true;
+                }
+              }
+            }
+            runs_taken[rim->loop].push_back({rim->start, rim->count});
+          }
+        }
+        if (clash) {
+          bands[i].alive = false;
+          changed = true;
+          continue;
+        }
+        rims[i] = {bottom, top};
+      }
+    }
+
+    // A periodic face needs a seam, and the seam has to be a ruling: both ends
+    // at the same angle about the axis. Picking the rim vertex with the
+    // smallest angle from a fixed reference gives the same choice at both rims
+    // of a band, and at both sides of a shared rim, without any propagation.
+    for (std::size_t i = 0; i < bands.size(); i++) {
+      Band& band = bands[i];
+      if (!band.alive || !band.closed) continue;
+      const Vector3d ref = perpendicular(band.axis);
+      const Vector3d ref2 = band.axis.cross(ref);
+      auto pick = [&](const std::vector<int>& level) {
+        int best = -1;
+        double best_angle = 0;
+        for (const int v : level) {
+          const Vector3d rel = vertices[v] - band.base;
+          const double angle = atan2(rel.dot(ref2), rel.dot(ref));
+          if (best == -1 || angle < best_angle) {
+            best = v;
+            best_angle = angle;
+          }
+        }
+        return best;
+      };
+      band.seam_bottom = pick(band.bottom_set);
+      band.seam_top = pick(band.top_set);
+      if (band.seam_bottom == -1 || band.seam_top == -1) {
+        band.alive = false;
+        continue;
+      }
+      // the two ends have to lie on one ruling, or the seam would cut through
+      // the surface instead of lying on it
+      const Vector3d a = vertices[band.seam_bottom] - band.base;
+      const Vector3d b = vertices[band.seam_top] - band.base;
+      const Vector3d ra = (a - band.axis * band.axis.dot(a)).normalized();
+      const Vector3d rb = (b - band.axis * band.axis.dot(b)).normalized();
+      if ((ra - rb).norm() > 1e-6) band.alive = false;
+    }
+
+    // dropping a band puts its facets back
+    for (std::size_t i = 0; i < bands.size(); i++) {
+      if (bands[i].alive) continue;
+      for (const std::size_t f : bands[i].walls) {
+        consumed[f] = 0;
+        band_of_loop[f] = std::size_t(-1);
+      }
+    }
+
+    std::size_t collapsed = 0, alive = 0, cones = 0, partial = 0;
+    for (const auto& band : bands) {
+      if (!band.alive) continue;
+      alive++;
+      collapsed += band.walls.size();
+      if (fabs(band.r_bottom - band.r_top) > 1e-9 * std::max(band.r_bottom, band.r_top)) cones++;
+      if (!band.closed) partial++;
+    }
+    if (alive > 0) {
+      printf("STEP export: %d surface%s recognised (%d conical, %d partial), %d facets replaced\n",
+             int(alive), alive == 1 ? "" : "s", int(cones), int(partial), int(collapsed));
     }
   }
 
-  // Emit the recognised cylinders: one CYLINDRICAL_SURFACE face each, bounded
-  // by a CIRCLE at either rim and a seam running between them.
+  // Emit the recognised bands: one CYLINDRICAL_SURFACE or CONICAL_SURFACE face
+  // each, bounded by a circle or an arc at either rim.
   //
-  // A cylinder is periodic, so a face covering the full turn cannot be bounded
-  // by the rims alone - the loop has to walk up one seam and back down it, the
-  // same edge used once in each direction. The two CIRCLE edges are shared with
-  // the neighbouring disc or annulus, which is why both rims had to be a
-  // complete bound of one of those faces.
-  std::vector<FaceBound *> ring_bounds(rings.size(), nullptr);
-  std::vector<std::pair<EdgeCurve *, EdgeCurve *>> ring_circles(rings.size(), {nullptr, nullptr});
+  // A band which covers the full turn is periodic, so it cannot be bounded by
+  // the rims alone - the loop walks up a seam and back down it, the same edge
+  // used once in each direction. One which does not is bounded by an arc at
+  // either rim and the band's two end edges, and needs no seam.
+  std::map<std::size_t, std::pair<EdgeCurve *, bool>> rim_of_loop;  // whole loop -> circle
+  std::map<std::size_t, std::vector<ArcSubstitution>> arc_subs;     // runs inside a loop
+  std::map<std::set<int>, EdgeCurve *> shared_rim_edges;            // rim vertices -> circle
 
-  for (std::size_t i = 0; i < rings.size(); i++) {
-    const CylinderRing& ring = rings[i];
-    const Vector3d top_centre = ring.base + ring.axis * ring.height;
-    const Vector3d ref = (vertices[ring.seam_bottom] - ring.base).normalized();
+  for (std::size_t i = 0; i < bands.size(); i++) {
+    const Band& band = bands[i];
+    if (!band.alive) continue;
+    const Vector3d top_centre = band.base + band.axis * band.height;
+    const bool is_cone =
+      fabs(band.r_bottom - band.r_top) > 1e-9 * std::max(band.r_bottom, band.r_top);
 
-    auto make_placement = [&](const Vector3d& origin) {
+    auto placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
       auto point = new Point(entities, origin);
-      auto dir_axis = new Direction(entities, ring.axis);
-      auto dir_ref = new Direction(entities, ref);
+      auto dir_axis = new Direction(entities, dir);
+      auto dir_ref = new Direction(entities, towards);
       return new Axis2Placement(entities, dir_axis, dir_ref, point);
     };
 
-    auto surface = new CylindricalSurface(entities, "", make_placement(ring.base), ring.radius);
-    auto circle_bottom = new Circle(entities, "", make_placement(ring.base), ring.radius);
-    auto circle_top = new Circle(entities, "", make_placement(top_centre), ring.radius);
+    // a radial direction to measure the surface's own parameterisation from
+    const int ref_vertex = band.closed ? band.seam_bottom : band.bottom_set.front();
+    const Vector3d rel = vertices[ref_vertex] - band.base;
+    const Vector3d ref = (rel - band.axis * band.axis.dot(rel)).normalized();
 
-    Vertex *vert_bottom = get_vertex(ring.seam_bottom);
-    Vertex *vert_top = get_vertex(ring.seam_top);
+    SurfaceType *surface = nullptr;
+    if (!is_cone) {
+      surface = new CylindricalSurface(entities, "", placement(band.base, band.axis, ref),
+                                       band.r_bottom);
+    } else {
+      // ISO 10303 wants a half angle in (0, pi/2), so a cone which narrows
+      // along the axis is written from its other end instead.
+      const bool widens = band.r_top > band.r_bottom;
+      const Vector3d origin = widens ? band.base : top_centre;
+      const Vector3d dir = widens ? band.axis : Vector3d(-band.axis);
+      const double r0 = widens ? band.r_bottom : band.r_top;
+      const double half_angle = atan(fabs(band.r_top - band.r_bottom) / band.height);
+      surface = new ConicalSurface(entities, "", placement(origin, dir, ref), r0, half_angle);
+    }
 
-    // a full circle is one edge whose two ends are the same vertex
-    auto edge_bottom = new EdgeCurve(entities, vert_bottom, vert_bottom, circle_bottom, true);
-    auto edge_top = new EdgeCurve(entities, vert_top, vert_top, circle_top, true);
-    auto edge_seam = create_line_edge_curve(vert_bottom, vert_top, true);
-    ring_circles[i] = {edge_bottom, edge_top};
+    // the rims
+    EdgeCurve *rim_edge[2] = {nullptr, nullptr};
+    bool rim_sense[2] = {true, true};
+    for (int side = 0; side < 2; side++) {
+      const bool bottom = side == 0;
+      const RimRef& rim = bottom ? rims[i].first : rims[i].second;
+      const std::vector<int>& level = bottom ? band.bottom_set : band.top_set;
+      const Vector3d centre = bottom ? band.base : top_centre;
+      const double radius = bottom ? band.r_bottom : band.r_top;
+      const std::set<int> key(level.begin(), level.end());
 
-    // A CIRCLE runs counter clockwise about its axis. The wall has to traverse
-    // each rim opposite to the neighbouring face, so take the direction from
-    // the rim loop that face will use and flip it.
-    std::vector<OrientedEdge *> loop;
-    loop.push_back(new OrientedEdge(entities, edge_bottom, !ring.bottom_ccw));
-    loop.push_back(new OrientedEdge(entities, edge_seam, true));
-    loop.push_back(new OrientedEdge(entities, edge_top, !ring.top_ccw));
-    loop.push_back(new OrientedEdge(entities, edge_seam, false));
-
-    auto edge_loop = new EdgeLoop(entities, loop);
-    ring_bounds[i] = new FaceBound(entities, edge_loop, true, true);
-
-    // The surface normal of a CYLINDRICAL_SURFACE points away from its axis, so
-    // a bore - where the material is outside the cylinder - is the opposite
-    // sense.
-    std::vector<FaceBound *> bounds{ring_bounds[i]};
-    sfaces_extra.push_back(new Face(entities, bounds, surface, ring.outward));
-    face_edges_extra.push_back({edge_bottom, edge_top, edge_seam});
-  }
-
-  // Emit the partial cylinders: one CYLINDRICAL_SURFACE face bounded by an arc
-  // at either rim and the band's two end edges - arc, line, arc, line, which is
-  // also the construction SolidWorks writes when it splits a full cylinder in
-  // half. No seam: a face which does not close is not periodic.
-  //
-  // Each arc replaces a run of edges inside its neighbour's loop, recorded here
-  // and applied when that loop is built below.
-  std::map<std::size_t, std::vector<ArcSubstitution>> arc_subs;
-
-  for (const CylinderArc& arc : arc_runs) {
-    const Vector3d top_centre = arc.base + arc.axis * arc.height;
-
-    // A rim as its neighbour traverses it, from `first` to `last`.
-    struct RimEdge {
-      EdgeCurve *edge = nullptr;
-      bool neighbour_sense = true;
-    };
-    auto make_rim = [&](std::size_t loop_ind, std::size_t start, std::size_t count,
-                        const Vector3d& centre) {
-      const std::vector<int>& loop = loops[loop_ind];
-      const std::size_t n = loop.size();
-      const int first = loop[start];
-      const int last = loop[(start + count) % n];
-
-      // Which way round the axis does the neighbour run? A CIRCLE is counter
-      // clockwise about its own axis, so an arc traversed the other way is the
-      // same curve used in reverse rather than a different one.
-      double sweep = 0;
-      for (std::size_t j = 0; j < count; j++) {
-        const Vector3d a = vertices[loop[(start + j) % n]] - centre;
-        const Vector3d b = vertices[loop[(start + j + 1) % n]] - centre;
-        sweep += arc.axis.dot(a.cross(b));
+      const auto shared = shared_rim_edges.find(key);
+      if (shared != shared_rim_edges.end()) {
+        // the other side of a shared rim already made the circle
+        rim_edge[side] = shared->second;
+        rim_sense[side] = rim.wall_ccw;
+        continue;
       }
-      const bool ccw = sweep > 0;
-      const int from = ccw ? first : last;
-      const int to = ccw ? last : first;
 
-      auto point = new Point(entities, centre);
-      auto dir_axis = new Direction(entities, arc.axis);
-      auto dir_ref = new Direction(entities, (vertices[from] - centre).normalized());
-      auto placement = new Axis2Placement(entities, dir_axis, dir_ref, point);
-      auto circle = new Circle(entities, "", placement, arc.radius);
-
-      RimEdge rim;
-      rim.edge = new EdgeCurve(entities, get_vertex(from), get_vertex(to), circle, true);
-      rim.neighbour_sense = ccw;
-      arc_subs[loop_ind].push_back({start, count, rim.edge, ccw});
-      return rim;
-    };
-
-    const RimEdge bottom = make_rim(arc.bottom_loop, arc.bottom_start, arc.bottom_count, arc.base);
-    const RimEdge top = make_rim(arc.top_loop, arc.top_start, arc.top_count, top_centre);
-
-    // The two end edges are ordinary straight edges, shared with whatever face
-    // stands beyond the end of the band.
-    const std::vector<int>& nb_bottom = loops[arc.bottom_loop];
-    const std::vector<int>& nb_top = loops[arc.top_loop];
-    const int b_first = nb_bottom[arc.bottom_start];
-    const int b_last = nb_bottom[(arc.bottom_start + arc.bottom_count) % nb_bottom.size()];
-    const int t_first = nb_top[arc.top_start];
-    const int t_last = nb_top[(arc.top_start + arc.top_count) % nb_top.size()];
-
-    bool up_dir = true, down_dir = true;
-    EdgeCurve *edge_up = get_line_from_map(edge_map, b_first, t_last, get_vertex(b_first),
-                                           get_vertex(t_last), up_dir, merged_edge_cnt);
-    EdgeCurve *edge_down = get_line_from_map(edge_map, t_first, b_last, get_vertex(t_first),
-                                             get_vertex(b_last), down_dir, merged_edge_cnt);
-
-    // Walk the wall: back along the bottom rim, up the end edge, back along the
-    // top rim, down the other end edge. Each rim is traversed opposite to its
-    // neighbour, so the shared arc is used once in each direction.
-    auto placement_surface = [&]() {
-      auto point = new Point(entities, arc.base);
-      auto dir_axis = new Direction(entities, arc.axis);
-      auto dir_ref = new Direction(entities, (vertices[b_first] - arc.base).normalized());
-      return new Axis2Placement(entities, dir_axis, dir_ref, point);
-    };
-    auto surface = new CylindricalSurface(entities, "", placement_surface(), arc.radius);
+      if (band.closed) {
+        const int seam = bottom ? band.seam_bottom : band.seam_top;
+        const Vector3d seam_rel = vertices[seam] - centre;
+        auto circle = new Circle(entities, "", placement(centre, band.axis, seam_rel.normalized()),
+                                 radius);
+        Vertex *vert = get_vertex(seam);
+        // a full circle is one edge whose two ends are the same vertex
+        rim_edge[side] = new EdgeCurve(entities, vert, vert, circle, true);
+        rim_sense[side] = rim.wall_ccw;
+        if (rim.kind == RimRef::OTHER_BAND) shared_rim_edges.emplace(key, rim_edge[side]);
+        else rim_of_loop.emplace(rim.loop, std::make_pair(rim_edge[side], !rim.wall_ccw));
+      } else {
+        // an arc, from one end of the run to the other
+        const std::vector<int>& nb_loop = loops[rim.loop];
+        const std::size_t n = nb_loop.size();
+        const int first = nb_loop[rim.start];
+        const int last = nb_loop[(rim.start + rim.count) % n];
+        // the neighbour runs opposite to the wall, and a CIRCLE is counter
+        // clockwise about its own axis
+        const int from = rim.wall_ccw ? last : first;
+        const int to = rim.wall_ccw ? first : last;
+        auto circle = new Circle(
+          entities, "", placement(centre, band.axis, (vertices[from] - centre).normalized()), radius);
+        rim_edge[side] = new EdgeCurve(entities, get_vertex(from), get_vertex(to), circle, true);
+        rim_sense[side] = rim.wall_ccw;
+        arc_subs[rim.loop].push_back({rim.start, rim.count, rim_edge[side], !rim.wall_ccw});
+      }
+    }
 
     std::vector<OrientedEdge *> loop;
-    loop.push_back(new OrientedEdge(entities, bottom.edge, !bottom.neighbour_sense));
-    loop.push_back(new OrientedEdge(entities, edge_up, up_dir));
-    loop.push_back(new OrientedEdge(entities, top.edge, !top.neighbour_sense));
-    loop.push_back(new OrientedEdge(entities, edge_down, down_dir));
+    std::vector<EdgeCurve *> face_edges_here;
+    if (band.closed) {
+      auto edge_seam = create_line_edge_curve(get_vertex(band.seam_bottom),
+                                              get_vertex(band.seam_top), true);
+      loop.push_back(new OrientedEdge(entities, rim_edge[0], rim_sense[0]));
+      loop.push_back(new OrientedEdge(entities, edge_seam, true));
+      loop.push_back(new OrientedEdge(entities, rim_edge[1], rim_sense[1]));
+      loop.push_back(new OrientedEdge(entities, edge_seam, false));
+      face_edges_here = {rim_edge[0], rim_edge[1], edge_seam};
+    } else {
+      // walk back along the bottom rim, up the end edge, back along the top
+      // rim, down the other end edge
+      const std::vector<int>& nb_bottom = loops[rims[i].first.loop];
+      const std::vector<int>& nb_top = loops[rims[i].second.loop];
+      const int b_first = nb_bottom[rims[i].first.start];
+      const int b_last = nb_bottom[(rims[i].first.start + rims[i].first.count) % nb_bottom.size()];
+      const int t_first = nb_top[rims[i].second.start];
+      const int t_last = nb_top[(rims[i].second.start + rims[i].second.count) % nb_top.size()];
+
+      bool up_dir = true, down_dir = true;
+      EdgeCurve *edge_up = get_line_from_map(edge_map, b_first, t_last, get_vertex(b_first),
+                                             get_vertex(t_last), up_dir, merged_edge_cnt);
+      EdgeCurve *edge_down = get_line_from_map(edge_map, t_first, b_last, get_vertex(t_first),
+                                               get_vertex(b_last), down_dir, merged_edge_cnt);
+      loop.push_back(new OrientedEdge(entities, rim_edge[0], rim_sense[0]));
+      loop.push_back(new OrientedEdge(entities, edge_up, up_dir));
+      loop.push_back(new OrientedEdge(entities, rim_edge[1], rim_sense[1]));
+      loop.push_back(new OrientedEdge(entities, edge_down, down_dir));
+      face_edges_here = {rim_edge[0], rim_edge[1], edge_up, edge_down};
+    }
 
     auto edge_loop = new EdgeLoop(entities, loop);
     std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
-    sfaces_extra.push_back(new Face(entities, bounds, surface, arc.outward));
-    face_edges_extra.push_back({bottom.edge, top.edge, edge_up, edge_down});
+
+    // The surface normal of a cylinder or a cone points away from its axis, so
+    // a bore - where the material is outside it - is the opposite sense.
+    sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
+    face_edges_extra.push_back(face_edges_here);
   }
 
   // Build the loops, their edges and the carrier planes.
@@ -909,19 +1020,15 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
 
     std::vector<OrientedEdge *> oriented_edges;
 
-    // a rim of a recognised cylinder is one circular edge instead of n straight
-    // ones, shared with the cylindrical face
+    // a rim of a recognised band is one circular edge instead of n straight
+    // ones, shared with the band's face
     const auto rim = rim_of_loop.find(i);
     if (rim != rim_of_loop.end()) {
-      const CylinderRing& ring = rings[rim->second];
-      const bool bottom = (i == ring.bottom_loop);
-      EdgeCurve *circle = bottom ? ring_circles[rim->second].first : ring_circles[rim->second].second;
-      const bool ccw = bottom ? ring.bottom_ccw : ring.top_ccw;
-      oriented_edges.push_back(new OrientedEdge(entities, circle, ccw));
-      loop_edges[i].push_back(circle);
+      oriented_edges.push_back(new OrientedEdge(entities, rim->second.first, rim->second.second));
+      loop_edges[i].push_back(rim->second.first);
     } else if (arc_subs.count(i) != 0) {
-      // one or more runs of this loop's edges belong to a partial cylinder and
-      // are replaced, in place, by the single arc that cylinder is bounded by
+      // one or more runs of this loop's edges belong to a partial band and are
+      // replaced, in place, by the single arc that band is bounded by
       const std::vector<ArcSubstitution>& subs = arc_subs[i];
       std::vector<int> starts_here(n, -1);
       std::vector<char> covered(n, 0);
@@ -1198,6 +1305,7 @@ void StepKernel::read_step(std::string file_name)
       else if (func_name == "LINE") ent = new Line(entities);
       else if (func_name == "CIRCLE") ent = new Circle(entities);
       else if (func_name == "CYLINDRICAL_SURFACE") ent = new CylindricalSurface(entities);
+      else if (func_name == "CONICAL_SURFACE") ent = new ConicalSurface(entities);
       else if (func_name == "PCURVE") unimplemented = true;
       else if (func_name == "DEFINITIONAL_REPRESENTATION") unimplemented = true;
       else if (func_name == "UNCERTAINTY_MEASURE_WITH_UNIT") unimplemented = true;
