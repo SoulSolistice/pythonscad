@@ -12,6 +12,7 @@
 #include "core/BaseVisitable.h"
 #include "core/CgalAdvNode.h"
 #include "core/ColorNode.h"
+#include "core/DeclareSurfaceNode.h"
 #include "core/CsgOpNode.h"
 #include "core/CurveDiscretizer.h"
 #include "core/LinearExtrudeNode.h"
@@ -2019,6 +2020,41 @@ Response GeometryEvaluator::visit(State& state, const ColorNode& node)
       if ((geom = res.constptr())) {
         auto mutableGeom = res.asMutableGeometry();
         if (mutableGeom) mutableGeom->setColor(node.color);
+        geom = mutableGeom;
+      }
+    } else {
+      geom = smartCacheGet(node, state.preferNef());
+    }
+    addToParent(state, node, geom);
+    node.progress_report();
+  }
+  return Response::ContinueTraversal;
+}
+
+/*!
+   Attaches the surfaces the model declared to the geometry of its children.
+
+   The same shape as the ColorNode above: union the children, then annotate the
+   result. Being a node is what makes the coordinates right - the records are in
+   world coordinates and a transform above this node moves geometry and records
+   together - and the geometry carries them from here through every later
+   boolean, hull and transform on its own.
+ */
+Response GeometryEvaluator::visit(State& state, const DeclareSurfaceNode& node)
+{
+  if (state.isPrefix() && isSmartCached(node)) return Response::PruneTraversal;
+  if (state.isPostfix()) {
+    std::shared_ptr<const Geometry> geom;
+    if (!isSmartCached(node)) {
+      ResultObject res = applyToChildren(node, OpenSCADOperator::UNION);
+      if ((geom = res.constptr())) {
+        auto mutableGeom = res.asMutableGeometry();
+        if (mutableGeom) {
+          // Clone: the node outlives this geometry and may be evaluated again,
+          // and a record handed out twice would be moved twice by the first
+          // transform to reach either copy.
+          for (const auto& surface : node.surfaces) mutableGeom->addSurface(surface->clone());
+        }
         geom = mutableGeom;
       }
     } else {

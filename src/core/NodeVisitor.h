@@ -33,6 +33,7 @@ class NodeVisitor : public BaseVisitor,
                     public Visitor<class SheetNode>,
                     public Visitor<class TransformNode>,
                     public Visitor<class ColorNode>,
+                    public Visitor<class DeclareSurfaceNode>,
                     public Visitor<class OffsetNode>
 {
 public:
@@ -97,6 +98,12 @@ public:
   Response visit(State& state, const DebugNode& node) override
   {
     return visit(state, (const AbstractPolyNode&)node);
+  }
+  // A visitor which does not care about surface declarations sees the implicit
+  // union of the children, which is what the node is apart from them.
+  Response visit(State& state, const DeclareSurfaceNode& node) override
+  {
+    return visit(state, (const AbstractNode&)node);
   }
   Response visit(State& state, const RepairNode& node) override
   {

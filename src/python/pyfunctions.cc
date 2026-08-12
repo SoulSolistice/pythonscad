@@ -987,6 +987,19 @@ PyMethodDef PyOpenSCADFunctions[] = {
   {"vector", (PyCFunction)python_vector, METH_VARARGS | METH_KEYWORDS,
    "Create a 3D vector object.\n"
    "vector(x, y, z)"},
+  {"declare_cylinder", (PyCFunction)python_declare_cylinder, METH_VARARGS | METH_KEYWORDS,
+   "Declare that part of an object was meant to be a cylinder, so that an exporter\n"
+   "which can write analytic surfaces may write one. Only a hint: it is acted on\n"
+   "where it also fits the mesh exactly.\n"
+   "declare_cylinder(obj, r=5, center=[0, 0, 0], axis=[0, 0, 1])\n"
+   "declare_cylinder(obj, d=10)"},
+  {"declare_sphere", (PyCFunction)python_declare_sphere, METH_VARARGS | METH_KEYWORDS,
+   "Declare that part of an object was meant to be a sphere.\n"
+   "declare_sphere(obj, r=5, center=[0, 0, 0])\n"
+   "declare_sphere(obj, d=10)"},
+  {"declare_torus", (PyCFunction)python_declare_torus, METH_VARARGS | METH_KEYWORDS,
+   "Declare that part of an object was meant to be a torus.\n"
+   "declare_torus(obj, r_major=10, r_minor=3, center=[0, 0, 0], axis=[0, 0, 1])"},
   {NULL, NULL, 0, NULL}};
 
 #define OO_METHOD_ENTRY(name, desc) \
@@ -1020,31 +1033,37 @@ PyMethodDef PyOpenSCADMethods[] = {
                         OO_METHOD_ENTRY(explode, "Explode a solid with a vector") OO_METHOD_ENTRY(
                           mesh, "Mesh Object") OO_METHOD_ENTRY(inside, "check if given point is inside")
                           OO_METHOD_ENTRY(bbox, "Evaluate Bound Box of object")
-                            OO_METHOD_ENTRY(faces, "Create Faces list")
-                              OO_METHOD_ENTRY(children, "Return Tupple from solid children")
-                                OO_METHOD_ENTRY(edges, "Create Edges list") OO_METHOD_ENTRY(
-                                  oversample, "Oversample Object") OO_METHOD_ENTRY(debug,
-                                                                                   "Debug Object Faces")
-                                  OO_METHOD_ENTRY(repair, "Make solid watertight") OO_METHOD_ENTRY(
-                                    fillet, "Fillet Object") OO_METHOD_ENTRY(align,
-                                                                             "Align Object to another")
+                            OO_METHOD_ENTRY(faces, "Create Faces list") OO_METHOD_ENTRY(
+                              children, "Return Tupple from solid children")
+                              OO_METHOD_ENTRY(edges, "Create Edges list") OO_METHOD_ENTRY(
+                                oversample, "Oversample Object") OO_METHOD_ENTRY(debug,
+                                                                                 "Debug Object Faces")
+                                OO_METHOD_ENTRY(repair, "Make solid watertight") OO_METHOD_ENTRY(
+                                  fillet, "Fillet Object") OO_METHOD_ENTRY(align,
+                                                                           "Align Object to another")
 
-                                    OO_METHOD_ENTRY(highlight, "Highlight Object")
-                                      OO_METHOD_ENTRY(background, "Background Object") OO_METHOD_ENTRY(
-                                        only, "Only Object") OO_METHOD_ENTRY(show, "Show Object")
-                                        OO_METHOD_ENTRY(projection, "Projection Object")
-                                          OO_METHOD_ENTRY(pull, "Pull Obejct apart") OO_METHOD_ENTRY(
-                                            wrap, "Wrap Object around Cylinder")
-                                            OO_METHOD_ENTRY(render, "Render Object")
-                                              OO_METHOD_ENTRY(clone, "Clone Object") OO_METHOD_ENTRY(
-                                                hasattr, "Check if an attribute exists")
-                                                OO_METHOD_ENTRY(setattr, "Sets an attribute on a solid")
-                                                  OO_METHOD_ENTRY(getattr,
-                                                                  "Gets an attribute from a solid")
-                                                    OO_METHOD_ENTRY(_repr_mimebundle_,
-                                                                    "Jupyter display hook")
-                                                      OO_METHOD_ENTRY(dict, "return all dictionary"){
-                                                        NULL, NULL, 0, NULL}};
+                                  OO_METHOD_ENTRY(highlight, "Highlight Object")
+                                    OO_METHOD_ENTRY(background, "Background Object") OO_METHOD_ENTRY(
+                                      only, "Only Object") OO_METHOD_ENTRY(show, "Show Object")
+                                      OO_METHOD_ENTRY(projection, "Projection Object")
+                                        OO_METHOD_ENTRY(pull, "Pull Obejct apart") OO_METHOD_ENTRY(
+                                          wrap, "Wrap Object around Cylinder")
+                                          OO_METHOD_ENTRY(render, "Render Object")
+                                            OO_METHOD_ENTRY(clone, "Clone Object") OO_METHOD_ENTRY(
+                                              hasattr, "Check if an attribute exists")
+                                              OO_METHOD_ENTRY(setattr, "Sets an attribute on a solid")
+                                                OO_METHOD_ENTRY(getattr,
+                                                                "Gets an attribute from a solid")
+                                                  OO_METHOD_ENTRY(_repr_mimebundle_,
+                                                                  "Jupyter display hook")
+                                                    OO_METHOD_ENTRY(dict, "return all dictionary")
+                                                      OO_METHOD_ENTRY(declare_cylinder,
+                                                                      "Declare a cylindrical surface")
+                                                        OO_METHOD_ENTRY(declare_sphere,
+                                                                        "Declare a spherical surface")
+                                                          OO_METHOD_ENTRY(declare_torus,
+                                                                          "Declare a toroidal surface"){
+                                                            NULL, NULL, 0, NULL}};
 
 PyNumberMethods PyOpenSCADNumbers = {
   python_nb_add,        // binaryfunc nb_add

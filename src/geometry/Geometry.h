@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 
+#include "geometry/Surface.h"
 #include "geometry/linalg.h"
 
 class AbstractNode;
@@ -43,6 +44,16 @@ public:
   [[nodiscard]] unsigned int getConvexity() const { return convexity; }
   void setConvexity(int c) { this->convexity = c; }
   virtual void setColor(const Color4f& c) {}
+
+  /*! Attach an analytic surface declaration to this geometry.
+   *
+   * A declaration is a statement of intent - "this wall was meant to be a
+   * cylinder" - which an exporter acts on only after finding an exact fit in
+   * the mesh, so attaching a wrong one costs nothing but a candidate. The
+   * representations which can hold one (PolySet, ManifoldGeometry,
+   * CGALNefGeometry) override this; the rest ignore it, since a 2D outline has
+   * nowhere to put it. */
+  virtual void addSurface(const std::shared_ptr<Surface>& /*surface*/) {}
 
   virtual void transform(const Transform3d& /*mat*/) { assert(!"transform not implemented!"); }
   virtual void resize(const Vector3d& /*newsize*/, const Eigen::Matrix<bool, 3, 1>& /*autosize*/)

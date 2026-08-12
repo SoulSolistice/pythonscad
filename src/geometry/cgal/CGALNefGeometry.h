@@ -43,6 +43,10 @@ public:
   CGALNefGeometry& operator-=(const CGALNefGeometry& other);
   CGALNefGeometry& minkowski(const CGALNefGeometry& other);
   void transform(const Transform3d& matrix) override;
+  void addSurface(const std::shared_ptr<Surface>& surface) override
+  {
+    if (!containsSurface(surfaces, surface)) surfaces.push_back(surface);
+  }
   void resize(const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize) override;
 
   std::shared_ptr<const CGAL_Nef_polyhedron3> p3;

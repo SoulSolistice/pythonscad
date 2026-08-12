@@ -104,6 +104,9 @@ step-analytic-surfaces, ai-features, python-engine, add-parameter-pure-function.
 .TP
 \fB\-\-backend\fP \fIbackend\fP
 3D rendering backend to use: 'CGAL' (old/slow) or 'Manifold' (new/fast) [default].
+Use the default backend when exporting STEP with 'step-analytic-surfaces': a
+boolean on the CGAL backend splits the walls of bodies it did not touch, and
+those walls are then written faceted rather than as cylinders.
 
 .SS Image Export Options
 .TP

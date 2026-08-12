@@ -78,6 +78,10 @@ public:
 
   /*! The analytic surfaces this geometry carries. See surfaces_ below. */
   [[nodiscard]] const std::vector<std::shared_ptr<Surface>>& getSurfaces() const { return surfaces_; }
+  void addSurface(const std::shared_ptr<Surface>& surface) override
+  {
+    if (!containsSurface(surfaces_, surface)) surfaces_.push_back(surface);
+  }
 
 private:
   ManifoldGeometry binOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs,

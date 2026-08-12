@@ -163,6 +163,7 @@ set(TEST_PYTHONSCAD_OVERLAY_DIR "${CCSD}/data/pythonscad-overlay")
 set(TEST_PYTHONSCAD_OVERLAY_ECHO_DIR "${CCSD}/data/pythonscad-overlay-echo")
 set(TEST_CUSTOMIZER_DIR "${CCSD}/data/scad/customizer")
 set(TEST_STEP_EXPORT_DIR "${CCSD}/data/scad/step-export")
+set(TEST_STEP_EXPORT_PY_DIR "${CCSD}/data/pythonscad-step-export")
 set(TEST_PYTHON_DIR     "${CCSD}/data/python")
 # Test runner Python scripts
 set(STLEXPORTSANITYTEST_PY   "${CCSD}/stlexportsanitytest.py")
@@ -1158,6 +1159,8 @@ add_cmdline_test(export-stl-sanitytest  SCRIPT ${STLEXPORTSANITYTEST_PY} SUFFIX 
 # guards a defect the STEP exporter has had; see tests/validatestep.py.
 file(GLOB STEP_EXPORT_FILES ${TEST_STEP_EXPORT_DIR}/*.scad)
 add_cmdline_test(export-step-sanitytest SCRIPT ${STEPEXPORTSANITYTEST_PY} SUFFIX txt FILES ${STEP_EXPORT_FILES} ARGS ${OPENSCAD_EXE_ARG} --trust-python)
+file(GLOB STEP_EXPORT_PY_FILES ${TEST_STEP_EXPORT_PY_DIR}/*.py)
+add_cmdline_test(export-step-py-sanitytest SCRIPT ${STEPEXPORTSANITYTEST_PY} SUFFIX txt FILES ${STEP_EXPORT_PY_FILES} ARGS ${OPENSCAD_EXE_ARG} --trust-python)
 
 # Export/import color support
 add_cmdline_test(offcolorpngtest EXPERIMENTAL SCRIPT ${EXPORT_IMPORT_PNGTEST_PY} SUFFIX png FILES ${COLOR_3D_TEST_FILES} EXPECTEDDIR render-manifold ARGS ${OPENSCAD_EXE_ARG} --format=OFF --backend=manifold --render --trust-python)

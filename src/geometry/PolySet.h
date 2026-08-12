@@ -49,6 +49,10 @@ public:
   void transform(const Transform3d& mat) override;
   void resize(const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize) override;
   void setColor(const Color4f& c) override;
+  void addSurface(const std::shared_ptr<Surface>& surface) override
+  {
+    if (!containsSurface(surfaces, surface)) surfaces.push_back(surface);
+  }
 
   bool isConvex() const;
   boost::tribool convexValue() const { return convex_; }

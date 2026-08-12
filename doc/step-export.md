@@ -1198,6 +1198,105 @@ where the losses are:
   A thread or a ramp will stay faceted whatever happens, but where it *ends*
   decides whether it also spoils its neighbours.
 
+## Declaring a surface from the model
+
+Everything above depends on a declaration, and until now only a primitive could
+make one. `cylinder()`, `sphere()` and `rotate_extrude()` say what they drew;
+`linear_extrude()`, `polyhedron()` and anything a user assembles by hand say
+nothing, and there is no generator in the pipeline that could speak for them.
+That is what kept item 5 - the bayonet's threads and ramps, 59% of its faces -
+blocked. A swept thread exists only as a list comprehension.
+
+So the model says it:
+
+```openscad
+declare_cylinder(r = 10)
+  linear_extrude(height = 20) circle(r = 10);
+```
+
+```python
+wall = linear_extrude(circle(r=10, fn=32), height=20)
+wall.declare_cylinder(r=10).show()
+```
+
+`declare_cylinder`, `declare_sphere` and `declare_torus`, in both languages -
+a module wrapping its children in SCAD, a method on the object in Python, both
+building the same `DeclareSurfaceNode`. Radii take `r` or `d`, and `center` and
+`axis` default to the origin and Z.
+
+**It is a node, not a call that annotates a geometry.** There is no geometry yet
+when the model is written, and being a node is what makes the coordinates come
+out right: records live in world coordinates, and a transform above the node
+moves the geometry and its declarations together. Every later boolean, hull and
+transform then carries the record the way it carries a primitive's own, because
+it is the same channel and the same records.
+
+**A wrong declaration is bounded.** The exporter re-checks every record against
+the mesh and against the topology before acting on it, so `declare_cylinder(r =
+9)` on the wall above leaves the body faceted and valid rather than wrong. The
+one thing the check cannot catch is a declaration which happens to fit some
+*other* feature of the model exactly - the same reason `minkowski()` drops
+records instead of scaling them. Bounded, not zero, and it is the model's
+statement to make.
+
+A declaration that cannot be read - no radius, a radius of zero, an axis with no
+direction - warns and is dropped, and the children are kept. A model missing a
+hint exports the same body with faceted walls; it should not fail to export.
+
+## Known quality gaps
+
+Everything here is measured, and none of it is a lost declaration or an invalid
+file. These are places where the exporter writes a correct but faceted body
+where it could have written a surface.
+
+### A boolean on the CGAL backend splits the walls it did not touch
+
+Exactly the four fixtures whose top level object is a Nef polyhedron - the ones
+with a boolean in them - recognise differently on the two backends. Every
+fixture that stays a PolySet is identical on both, down to the entity count.
+
+| fixture | Manifold | CGAL | what is lost |
+| --- | --- | --- | --- |
+| step-bore | 2 | 1 | the outer wall; the bore survives |
+| step-nested-rings | 5 whole | 17 partial | every ring, cut into arcs |
+| step-partial-cylinder | 4 | 0 | all four arcs |
+| step-shared-arc | 2 | 0 | both walls |
+
+Same declarations - the two runs report the same count available, which is what
+the sanity test asserts - and the same number of faces in the faceted export.
+`step-nested-rings` gives the mechanism away: five closed rings become seventeen
+arcs. A Nef polyhedron records the boolean's seams, so the wall of a ring the
+operand never reached still gets cut where the operand's plane passed through
+it, and a wall in several pieces is a wall whose rims no longer bound a single
+face. The rim rules then reject it, correctly, for the mesh they were given.
+
+Two of the four fall all the way to zero rather than to more arcs, because those
+are the fixtures whose arcs already depend on each rim bordering exactly one
+face; splitting them once more leaves nothing that qualifies.
+
+**What to do about it today:** export analytic STEP on the default Manifold
+backend. The gap is entirely on `--backend=CGAL`, which is the old and slow path
+anyway.
+
+**What would close it:** merging runs of bands that are coplanar in their rims
+and cocylindrical in their walls back into one band, before the rim rules are
+applied. That is roadmap item 5 below, and it would also pick up seams left by a
+Manifold boolean wherever those occur.
+
+### The gaps that are by design
+
+Two more places produce a faceted body on purpose, and should not be read as
+defects to fix:
+
+- **`minkowski()` drops every record.** It changes each radius it touches, so a
+  surviving declaration would be wrong in a way the fit gate cannot always
+  catch - the one case where a record could still match some other feature of
+  the result and be acted on. Both backends drop them.
+- **A non uniform scale drops the records it cannot express.** A cylinder under
+  `scale([2,1,1])` is an ellipse, and no `Surface` subclass describes one.
+  `Surface::transform` returns false and the record is discarded rather than
+  kept wrong.
+
 ## What the blocked items actually need
 
 Three items on this list have been described as blocked on "a declaration
@@ -1243,29 +1342,9 @@ time under `--backend=CGAL` and compares **how many declarations reached the
 exporter**, which both runs report. Every fixture agrees, from 1 to 18.
 
 Not how many were *written*, which was the first thing this test asserted and
-was wrong. Those are different quantities and only the first is the channel.
-
-### The two backends do not recognise the same surfaces
-
-The measurement that followed from getting that assertion wrong is worth
-keeping. Exactly the four fixtures whose top level object is a Nef polyhedron -
-the ones with a boolean in them - come out differently; every fixture that stays
-a PolySet is identical on both backends, down to the entity count.
-
-| fixture | Manifold | CGAL |
-| --- | --- | --- |
-| step-bore | 2 | 1 |
-| step-nested-rings | 5 whole | 17 partial |
-| step-partial-cylinder | 4 | 0 |
-| step-shared-arc | 2 | 0 |
-
-Same declarations, same number of faces in the faceted export, different
-recognition. `step-nested-rings` gives it away: five closed rings become
-seventeen arcs, so the Nef boolean is splitting wall loops at the seams where
-its operands met, and a wall in several pieces is a wall whose rims no longer
-border a single face. That is not a lost declaration, it is a mesh the
-recogniser reads differently, and it is a real quality gap for anyone on
-`--backend=CGAL` - just a separate one from the channel this item fixed.
+was wrong. Those are different quantities and only the first is the channel -
+the two backends genuinely do not write the same surfaces, which is measured
+under *Known quality gaps* above.
 
 ### Only one item is short of a channel
 
@@ -1322,17 +1401,18 @@ prism elsewhere in the part. Bounded, but not zero.
    `TOROIDAL_SURFACE`.
 2. ~~**Fix the CGAL backend dropping records through booleans.**~~ Done, with
    the two neighbouring leaks above.
-3. **A user-facing `declare_*` in the Python API.** The largest of the three,
-   and the only thing that reaches item 5 - which is 59% of the bayonet.
+3. ~~**A user-facing `declare_*` in the Python API.**~~ Done, and in SCAD too:
+   see *Declaring a surface from the model* below.
 4. **`FilletNode` declaring a B-spline.** No channel work at all: a surface
    type, the matching, the emission, and the rim generalisation that item 2 has
    been carrying all along.
-5. **A wall split by a Nef boolean.** New, and measured above: on
-   `--backend=CGAL` a boolean leaves the wall of an untouched ring cut into arcs
-   at the seams where the operands met, and the recogniser then sees several
-   walls where there is one. Merging runs of coplanar-and-cocylindrical bands
-   back together before the rim rules are applied would recover it, and would
-   also help the seams a Manifold boolean leaves behind.
+5. **A wall split by a Nef boolean.** Measured under *Known quality gaps*
+   above: on `--backend=CGAL` a boolean leaves the wall of a ring it never
+   touched cut into arcs at the seams where the operands met, and the recogniser
+   then sees several walls where there is one. Merging runs of
+   coplanar-and-cocylindrical bands back together before the rim rules are
+   applied would recover it, and would also help the seams a Manifold boolean
+   leaves behind.
 
 ## Method notes
 
