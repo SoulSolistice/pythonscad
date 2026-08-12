@@ -1468,6 +1468,20 @@ cylinders be recognised in post-boolean meshes?" was answered by a
 1685-face model) before any C++ was written. The same script, run on a cube,
 produced the zero-residual false positive that reframed the whole feature.
 
+**Check what you assume you cannot build.** Several rounds of this work were
+done by extracting new functions into standalone translation units with the
+project's headers stubbed out, on the belief that nothing here would compile.
+Most of it does: `glib`, `Eigen` and the Python headers are all present, and
+`src/io/StepKernel.cc`, `src/io/export_step.cc`, `src/geometry/AnalyticFeatures.cc`,
+`src/core/primitives.cc` and `src/python/pyfunctions.cc` all pass
+`g++ -fsyntax-only` with `-I . -I src -I src/core -I src/geometry` and
+`pkg-config --cflags glib-2.0`. Only the files reaching CGAL, clipper2 or
+manifold genuinely cannot be built. The cost of not checking was a new source
+file that referenced `BuiltinModule` without including `core/module.h`, which a
+one-second syntax check would have caught and which instead cost a full build
+and test cycle. `src/geometry/rotate_extrude.cc` does not compile with
+`ENABLE_MANIFOLD` off, at HEAD and before it - that one is pre-existing.
+
 Two diagnoses in this session were confidently wrong and were corrected by data
 rather than by argument — the orphaned-hole theory of the membrane, and a
 missing UCRT DLL that was never missing. Both times the correction came from the
