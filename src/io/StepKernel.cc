@@ -35,6 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <utility>
 #include <array>
 #include <set>
+#include <functional>
 #include <iomanip>  // put_time
 StepKernel::StepKernel()
 {
@@ -469,8 +470,12 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // differently. Entering a quad through one ruling fixes which pair of its
     // edges are rulings, so the walk needs no axis and is unambiguous even on a
     // cylinder, where both pairs are parallel.
+    // Does this facet lie on the surface the band started on? Passing nullptr
+    // admits every quad, which is only used for the first, exploratory walk.
+    using OnSurface = std::function<bool(std::size_t)>;
+
     auto walk_strip = [&](std::size_t seed, int entry_side, std::vector<std::size_t>& walls,
-                          std::map<std::size_t, int>& entry) {
+                          std::map<std::size_t, int>& entry, const OnSurface *on_surface) {
       walls.clear();
       entry.clear();
       std::vector<std::pair<std::size_t, int>> stack{{seed, entry_side}};
@@ -488,6 +493,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
           for (const std::size_t nb : it->second) {
             if (nb == cur.first || entry.count(nb) || consumed[nb]) continue;
             if (!loop_valid[nb] || loop_is_hole[nb] || loops[nb].size() != 4) continue;
+            if (on_surface != nullptr && !(*on_surface)(nb)) continue;
             for (int j = 0; j < 4; j++) {
               if (edge_key(loops[nb][j], loops[nb][(j + 1) % 4]) == edge_key(a, b)) {
                 stack.emplace_back(nb, j);
@@ -506,7 +512,12 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       for (int side = 0; side < 4; side++) {
         std::vector<std::size_t> walls;
         std::map<std::size_t, int> entry;
-        walk_strip(seed, side, walls, entry);
+        // First walk freely, only to pin down which surface the seed sits on.
+        // Left unconstrained this runs off the wall wherever something flat is
+        // attached to it - a rib welded to a tube has quads for side faces, so
+        // the strip crosses through the rib and back into the next arc, and the
+        // whole ring then fails the fit as one band that was never a band.
+        walk_strip(seed, side, walls, entry, nullptr);
         if (walls.size() < 3) continue;
 
         // The chords - the edges which are not rulings - all lie in a plane
@@ -534,6 +545,52 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         bool perpendicular_ok = true;
         for (const Vector3d& c : chords) perpendicular_ok = perpendicular_ok && fabs(c.dot(axis)) < 1e-9;
         if (!perpendicular_ok) continue;
+
+        // Fit the surface from the seed and its first two neighbours - four
+        // vertices on each rim, which is enough - and walk again, this time
+        // admitting only facets which sit on it.
+        {
+          std::map<int, double> probe_along;
+          for (std::size_t f = 0; f < 3 && f < walls.size(); f++) {
+            for (const int v : loops[walls[f]]) probe_along[v] = axis.dot(vertices[v]);
+          }
+          double probe_lo = probe_along.begin()->second, probe_hi = probe_lo;
+          for (const auto& kv : probe_along) {
+            probe_lo = std::min(probe_lo, kv.second);
+            probe_hi = std::max(probe_hi, kv.second);
+          }
+          std::vector<int> probe_bottom, probe_top;
+          for (const auto& kv : probe_along) {
+            if (fabs(kv.second - probe_lo) < model_tol) probe_bottom.push_back(kv.first);
+            else if (fabs(kv.second - probe_hi) < model_tol) probe_top.push_back(kv.first);
+          }
+          Vector3d probe_base, probe_top_centre;
+          if (!fitCircleCentre(vertices, probe_bottom, axis, probe_lo, probe_base)) continue;
+          if (!fitCircleCentre(vertices, probe_top, axis, probe_hi, probe_top_centre)) continue;
+          double probe_r0 = 0, probe_r1 = 0;
+          for (const int v : probe_bottom) probe_r0 += distanceToAxis(vertices[v], probe_base, axis);
+          for (const int v : probe_top) probe_r1 += distanceToAxis(vertices[v], probe_base, axis);
+          probe_r0 /= double(probe_bottom.size());
+          probe_r1 /= double(probe_top.size());
+          const double probe_scale = std::max(probe_r0, probe_r1);
+          if (probe_scale < model_tol) continue;
+
+          const OnSurface on_surface = [&](std::size_t f) {
+            for (const int v : loops[f]) {
+              const double t = axis.dot(vertices[v]);
+              const double want = fabs(t - probe_lo) < model_tol
+                                    ? probe_r0
+                                    : (fabs(t - probe_hi) < model_tol ? probe_r1 : -1.0);
+              if (want < 0) return false;
+              if (fabs(distanceToAxis(vertices[v], probe_base, axis) - want) > 1e-7 * probe_scale) {
+                return false;
+              }
+            }
+            return true;
+          };
+          walk_strip(seed, side, walls, entry, &on_surface);
+          if (walls.size() < 3) continue;
+        }
 
         // every wall vertex has to sit on one of the two rims
         std::map<int, double> along;
@@ -820,45 +877,64 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       }
     }
 
-    // A periodic face needs a seam, and the seam has to be a ruling: both ends
-    // at the same angle about the axis. Picking the rim vertex with the
-    // smallest angle from a fixed reference gives the same choice at both rims
-    // of a band, and at both sides of a shared rim, without any propagation.
+    // A periodic face needs a seam, and the seam has to be a ruling: both of
+    // its ends on the same radial direction, or the line would cut through the
+    // surface instead of lying on it.
+    //
+    // Picking each end independently by angle does not work, however obvious it
+    // looks. atan2 has its branch cut at pi, a polygon with an even number of
+    // facets has a vertex sitting exactly there, and which side of the cut it
+    // lands on is decided by the sign of a y coordinate which is zero to
+    // fifteen digits. Two rims of one wall disagreed on that sign, their seams
+    // came out on different rulings, and a cylinder that was otherwise perfect
+    // was dropped.
+    //
+    // So only one end is chosen, and the other is *derived* from it. Where two
+    // bands share a rim they have to use the same vertex - the CIRCLE between
+    // them is one edge - so a band takes whichever of its rims is already
+    // settled and derives the other; a single pass suffices, because a band
+    // which finds neither settled settles both.
+    std::map<std::set<int>, int> rim_seam;
+
+    auto vertex_on_ruling = [&](int from, const std::vector<int>& level, const Vector3d& axis,
+                                const Vector3d& centre) {
+      const Vector3d a = vertices[from] - centre;
+      const Vector3d ra = (a - axis * axis.dot(a)).normalized();
+      for (const int v : level) {
+        const Vector3d b = vertices[v] - centre;
+        const Vector3d rb = (b - axis * axis.dot(b)).normalized();
+        if ((ra - rb).norm() < 1e-6) return v;
+      }
+      return -1;
+    };
+
     for (std::size_t i = 0; i < bands.size(); i++) {
       Band& band = bands[i];
       if (!band.alive || !band.closed) continue;
-      const Vector3d ref = perpendicular(band.axis);
-      const Vector3d ref2 = band.axis.cross(ref);
-      auto pick = [&](const std::vector<int>& level) {
-        int best = -1;
-        double best_angle = 0;
-        for (const int v : level) {
-          const Vector3d rel = vertices[v] - band.base;
-          const double angle = atan2(rel.dot(ref2), rel.dot(ref));
-          if (best == -1 || angle < best_angle) {
-            best = v;
-            best_angle = angle;
-          }
-        }
-        return best;
-      };
-      band.seam_bottom = pick(band.bottom_set);
-      band.seam_top = pick(band.top_set);
+      const std::set<int> bottom_key(band.bottom_set.begin(), band.bottom_set.end());
+      const std::set<int> top_key(band.top_set.begin(), band.top_set.end());
+      const Vector3d top_centre = band.base + band.axis * band.height;
+
+      const auto settled_bottom = rim_seam.find(bottom_key);
+      const auto settled_top = rim_seam.find(top_key);
+      if (settled_bottom != rim_seam.end()) {
+        band.seam_bottom = settled_bottom->second;
+        band.seam_top = vertex_on_ruling(band.seam_bottom, band.top_set, band.axis, band.base);
+      } else if (settled_top != rim_seam.end()) {
+        band.seam_top = settled_top->second;
+        band.seam_bottom = vertex_on_ruling(band.seam_top, band.bottom_set, band.axis, top_centre);
+      } else {
+        band.seam_bottom = band.bottom_set.front();
+        band.seam_top = vertex_on_ruling(band.seam_bottom, band.top_set, band.axis, band.base);
+      }
+
       if (band.seam_bottom == -1 || band.seam_top == -1) {
         band.alive = false;
-        band.dropped = "no seam vertex";
+        band.dropped = "the two rims have no ruling in common to run a seam along";
         continue;
       }
-      // the two ends have to lie on one ruling, or the seam would cut through
-      // the surface instead of lying on it
-      const Vector3d a = vertices[band.seam_bottom] - band.base;
-      const Vector3d b = vertices[band.seam_top] - band.base;
-      const Vector3d ra = (a - band.axis * band.axis.dot(a)).normalized();
-      const Vector3d rb = (b - band.axis * band.axis.dot(b)).normalized();
-      if ((ra - rb).norm() > 1e-6) {
-        band.alive = false;
-        band.dropped = "the seam would not run along a ruling";
-      }
+      rim_seam[bottom_key] = band.seam_bottom;
+      rim_seam[top_key] = band.seam_top;
     }
 
     // dropping a band puts its facets back
