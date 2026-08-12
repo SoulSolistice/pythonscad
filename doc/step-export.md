@@ -3,23 +3,32 @@
 Notes on the STEP exporter: the defects that were fixed and why they happened,
 the checks that now guard them, and what a next round of work would look like.
 
-Written over two sessions. The first started from "the STEP output has gaps and
-degenerated faces" and ended with files SolidWorks reads as solids, with full
-cylinders optionally written as real cylinders. The second started from "the
-exporter recognised the inner circles but not the outer ones" and ended with
-partial cylinders, cones, and rims shared between two curved faces - a chamfered
-body now round trips through SolidWorks as a chamfered body. *What generalises*,
-below, is the part worth reading before starting a third.
+Written over three sessions. The first started from "the STEP output has gaps
+and degenerated faces" and ended with files SolidWorks reads as solids, with
+full cylinders optionally written as real cylinders. The second started from
+"the exporter recognised the inner circles but not the outer ones" and ended
+with partial cylinders, cones, and rims shared between two curved faces - a
+chamfered body now round trips through SolidWorks as a chamfered body. The third
+was meant to start item 4 of the roadmap and instead measured it, found it was
+worth eleven faces of the part it was supposed to rescue, and lifted the
+recogniser out of the exporter so it can be reused and tested on its own.
+
+*What generalises* and *What is actually left in the bayonet*, below, are the
+parts worth reading before starting a fourth.
 
 ## Orientation
 
-The exporter lives in three files:
+The exporter lives in four files:
 
 | File | Role |
 | --- | --- |
 | `src/io/export_step.cc` | entry point: mesh to `StepKernel`, then the ISO-10303-21 header |
-| `src/io/StepKernel.cc/.h` | the entity model and everything that decides what gets written |
+| `src/io/StepKernel.cc/.h` | the entity model, and turning recognised surfaces into entities |
+| `src/geometry/AnalyticFeatures.cc/.h` | the recogniser: which facets were modelled as a surface of revolution |
 | `src/io/import_step.cc` | the reader, useful as a round-trip oracle |
+
+`AnalyticFeatures` knows nothing about STEP and is not reached through the
+exporter — see *The recogniser is not part of the exporter* below.
 
 The mesh arrives already merged: `export_step.cc` calls `mergeTriangles()`
 (`src/geometry/GeometryEvaluator.cc`), which fuses coplanar triangles into
@@ -433,13 +442,16 @@ axis. Only the 8 pentagons touch a ramp, whose trace on the cylinder is a curve
 the mesh only approximates, and those can stay planar.
 
 That case is now handled, and the two which are not tell you what to build next:
-see *Partial cylinders* below, then item 4.
+see *Partial cylinders* below. The remaining two are measured in *What is
+actually left in the bayonet*, which is also where the estimate that sent this
+work at item 4 is corrected.
 
 ## What generalises
 
-Two rounds of this work — cylinders, then partial cylinders, cones and shared
-rims — have converged on a shape that is worth stating before the next surface
-type is attempted, because almost none of the difficulty was in the surfaces.
+Three rounds of this work — cylinders, then partial cylinders, cones and shared
+rims, then measuring what is left — have converged on a shape that is worth
+stating before the next surface type is attempted, because almost none of the
+difficulty was in the surfaces.
 
 ### Three gates, and they fail independently
 
@@ -502,10 +514,11 @@ stay planar; taking them would pull the face's boundary out onto the true circle
 and open the shell by far more than the modelling tolerance.
 
 This is a hard ceiling on what recognition can ever achieve from a faceted mesh,
-and it is the same fact that makes item 4 below a project: **the trim curve is
-not in the mesh**. Where the trim happens to be a plane perpendicular to the
-axis or parallel with it, the bound is an arc and a line and both are exact.
-Everywhere else, only the generator knows the curve.
+and it is the fact behind item 4 below: **the trim curve is not in the mesh**.
+On the bayonet that turns out to bind on eleven faces, which is why item 4 is
+now last rather than first. Where the trim happens to be a plane perpendicular
+to the axis or parallel with it, the bound is an arc and a line and both are
+exact. Everywhere else, only the generator knows the curve.
 
 ### Two traps that will recur
 
@@ -527,6 +540,35 @@ Both of this round's defects sat unnoticed in output that validated cleanly, and
 both were found within one run of making the exporter print the rule that
 rejected each band. Ship the diagnostic with the feature, not after it.
 
+### The recogniser is not part of the exporter
+
+The recognition code and the entity-writing code had grown up interleaved, in
+one 530-line stretch of `StepKernel::build_tri_body`. Nothing in that stretch
+was about STEP. It answers a question any format with analytic surfaces has to
+ask — *which runs of facets were modelled as a surface of revolution, and will
+every face sharing their edges accept the substitution* — and the answer is
+plain data: bands, their resolved rims, and the rule that rejected each band
+that was left faceted.
+
+It now lives in `src/geometry/AnalyticFeatures`, which takes the merged loops
+and the declared surfaces and returns that data. `StepKernel` keeps only the
+half that writes `CYLINDRICAL_SURFACE` and `CIRCLE`. A FreeCAD or IGES writer
+can call the recogniser without taking the STEP entity model with it, and the
+`Result` it returns is the natural place to hang a unit test, which the old
+shape had no seam for.
+
+Two things about the split are worth keeping:
+
+- **The report is data, not `printf`.** The recogniser returns the lines and the
+  caller prints them. *A rejected surface is invisible* above is the reason
+  those lines exist at all, and a second consumer must not have to reinvent
+  them or, worse, swallow them.
+- **`Mesh` is the loops, not a `PolySet`.** The recogniser wants cleaned,
+  canonicalised loops with their hole flags and normals — the form the exporter
+  had already built for its own reasons. Handing it a geometry object instead
+  would drag the whole merge-and-reparent pass in behind it, and that pass is
+  genuinely exporter business.
+
 ### They are all one surface
 
 Cylinders, cones, spheres, tori and everything `rotate_extrude` can make are the
@@ -537,11 +579,99 @@ to write and how to bound the degenerate cases. Treating the next item as "add a
 recogniser for X" rather than "extend the profile of revolution" is the way to
 end up with four of them.
 
+## What is actually left in the bayonet
+
+Item 4 below was carrying the note "the real prize", and the obvious next move
+was to start it. Measuring first says otherwise, and the measurement is cheap
+enough that there was no reason not to:
+`examples/step_test/bayonet_container_v1-2.stp` is a faceted export of the whole
+model at `$fn = 60`, and a hundred lines of Python over it gives exactly the
+loops the recogniser sees.
+
+**1693 faces. 664 of them — 39% — are facets of one of 14 surfaces of
+revolution.** That is the ceiling: no recogniser of any sophistication can
+collapse a face that does not lie on such a surface. Everything else is the
+bayonet ramps, the hose thread and the transition polygons between them.
+
+| | facets | faces after collapsing |
+| --- | --- | --- |
+| on a surface of revolution | 664 | — |
+| collapsed by the shipped rules | 568 | 13 |
+| collapsed with the two changes below | 628 | 25 |
+| still faceted after both | 36 | — |
+
+So the remaining headroom in the whole recognisable part of this model is 96
+facets, and 60 of them come from two small changes that have nothing to do with
+trim curves. The last 36 are one band whose rim borders 36 separate pentagons of
+the thread relief; there is no surface on the other side to share an edge with,
+and there will not be one until the thread itself is analytic.
+
+**Item 4's literal remainder is 11 faces.** Counting the faces of this model
+which lie exactly on a cylinder but whose boundary is *not* a plane
+perpendicular to or parallel with the axis — the case that needs a
+`SURFACE_CURVE` because the trim curve is only a polyline in the mesh — gives
+eleven, out of 1693. The planar-trimmed subset that got split off and done was
+not a subset; it was very nearly the whole of it.
+
+One caveat on all of these numbers: the prototype has no provenance, so it
+measures the geometry and topology gates only. The intent gate can lower them,
+never raise them, which is what makes them a ceiling.
+
+### The two changes worth making
+
+Both were found by the same run, and both are small.
+
+**The axis is derived from a walk that has not been constrained yet.** The band
+walk runs twice — once freely to pin down the surface, then again admitting only
+facets on it — but the axis is still taken from the chords of the *first* walk.
+Where that walk runs off the surface it drags foreign chords in, the
+perpendicularity test rejects them, and the candidate is thrown away before the
+constrained walk ever gets to clean it up. This is the trap recorded under *Grow
+a region by the surface, not by adjacency*, surviving in the one place the
+earlier fix did not reach.
+
+It costs the bayonet four lug chamfers and the four walls above them. Replaying
+the walk on the lug's chamfer facet at r=78..79.5: the free walk crosses the end
+of the 5-quad strip into the lug's side face, turns through 90° there because
+entering a quad by a different edge redefines which pair are rulings, and comes
+back with 7 facets spanning z=89.25..95 and 4 of 14 chords not perpendicular to
+anything. The fix is to take the axis from the seed and the facets directly
+joined to it across a ruling — two chord directions is all it needs — and then
+re-check perpendicularity against the final, confined wall set. With that alone
+the recogniser finds 26 bands covering all 664 facets, up from 18 covering 624.
+
+**A rim can be shared between two *partial* bands.** `OTHER_BAND` requires both
+bands to cover the full turn, deliberately: a shared rim covered by several
+partial bands has to be split into arcs on both sides at once. But the bayonet's
+lugs are exactly that shape — a 30° wall at r=78 standing on a 30° chamfer
+running out to r=79.5, standing on a 30° wall at r=79.5 — and each of those
+joints is one circular arc wanted by two curved faces. It is the same
+substitution the closed case already makes, with an arc in place of the circle,
+and it is safe under the same condition, strengthened: the two bands must meet
+along the *whole* of the rim, so neither has rim edges the other lacks.
+
+Together the two take the bayonet from 568 facets replaced to 628, and from 13
+analytic faces to 25.
+
+Neither is a new surface type, and neither needs a curve the mesh does not
+already contain exactly.
+
 ## How to continue
 
 Ordered by value per unit of work. Each is independently shippable behind the
 same flag, and each extends `validatestep.py` with its own surface checks. Cost
-each of them against all three gates above, not just the surface.
+each of them against all three gates, not just the surface.
+
+The numbering is the one the previous round used, so that the cross-references
+elsewhere in this file still resolve; only the order changed. Item 4 moved from
+first to last, and item 5 is new and did not previously exist as work at all —
+it is the largest thing in the bayonet and the only item that unblocks another.
+
+### 0. The two changes above
+
+Measured, prototyped, not yet written in C++. They are the cheapest remaining
+work on this list by a wide margin and they are the only items whose gain on a
+real part has been measured rather than estimated. Do these first.
 
 ### 1. `rotate_extrude` declaring its own surfaces
 
@@ -606,30 +736,55 @@ Two warnings, both learned from the cylinder/prism problem one level up:
 
 ### 4. Trimmed faces
 
-The real prize, and a project rather than a step.
+Last, not first. This item carried the note "the real prize" for two rounds and
+it is worth saying plainly why that is no longer true: **most of the prize has
+already been collected by other items**, and what is left of it cannot be won
+from the mesh at all.
 
 Provenance survives booleans but the geometry gets *cut*. A cylinder intersected
 by another produces a partial cylindrical face bounded by an intersection curve
-— in STEP a `SURFACE_CURVE`, usually approximated by a B-spline. The current
-implementation sidesteps this by accepting only full closed rings whose rims are
-complete face bounds.
+— in STEP a `SURFACE_CURVE`, usually approximated by a B-spline.
 
-In the bayonet container, 6 of the 15 detected cylindrical rings are full rings;
-the other 9 are walls interrupted by the bayonet channels. Handling those is
-what separates "cylinders survive if nothing touched them" from "analytic
-geometry survives modelling", and it is a larger jump than cones, spheres and
-tori combined.
+The planar-trimmed subset has been split off and done — see *Partial cylinders*
+above. Where the trim is a plane perpendicular to the axis or parallel with it,
+the bound is an arc and a straight line, both exact, and no `SURFACE_CURVE`
+appears at all. That turned out to be very nearly all of it: of the bayonet's
+1693 faces, **eleven** lie on a cylinder with a trim that is neither.
 
-The planar-trimmed subset of this has been split off and done — see *Partial
-cylinders* above. Where the trim is a plane perpendicular to the axis or
-parallel with it, the bound is an arc and a straight line, both exact, and no
-`SURFACE_CURVE` appears at all.
+What stays is the genuinely hard remainder: a trim curve which exists only as a
+polyline in the mesh. Putting that approximation on an analytic face would open
+the shell against its planar neighbour by far more than the modelling tolerance,
+so those walls stay faceted, and no amount of care over the surface changes that
+— the curve has to come from the generator, as with the splines in item 2.
 
-What stays here is the genuinely hard remainder: a trim curve which exists only
-as a polyline in the mesh. Putting that approximation on an analytic face would
-open the shell against its planar neighbour, so those walls stay faceted, and no
-amount of care over the surface changes that — the curve has to come from the
-generator, as with the splines in item 2.
+Two lessons are worth more than the item:
+
+- **The earlier estimate counted rings, not faces.** "6 of the 15 detected
+  cylindrical rings are full rings, the other 9 are interrupted" was true and
+  led to the wrong conclusion, because the nine interrupted ones were interrupted
+  by *planar* cuts. The unit that predicts effort is the trim, not the ring.
+- **The blocker in front of a hard item is usually not the hard part.** Every
+  wall this item was supposed to rescue was in fact blocked on a rim rule or on
+  an axis derived from the wrong set of facets. Measure which gate a face
+  actually fails before costing the surface behind it.
+
+### 5. Ramps, threads and other swept surfaces
+
+Not previously on this list, and on the bayonet it is larger than items 1 to 4
+put together: **57% of that model** is bayonet ramps, the hose thread and the
+polygons that transition into them. None of it lies on a surface of revolution,
+so none of it is reachable by any extension of the band machinery.
+
+It is also what pins the last recognisable band in the model, since a wall whose
+rim borders a ramp one facet at a time has nothing to share that rim with. That
+makes this item worth *scoping* early even though it is the largest, because it
+is the only one that unblocks anything else.
+
+The shape of the work is item 2's, not item 1's: a swept or helical surface has
+no fit worth attempting from a mesh, and the generator — `hull()` of arcs at
+different heights, or whatever produces the thread — knows the sweep before it
+tessellates. Expect the topology gate to dominate here too, and expect to need
+the arbitrary-declared-curve generalisation that item 2 also needs.
 
 ## Method notes
 
@@ -649,6 +804,16 @@ input the exporter sees, with none of the build.
 
 **Make the exporter say why it refused.** See *A rejected surface is invisible*
 above.
+
+**Measure an item before starting it, not after.** Item 4 sat at the top of this
+list for two rounds on an estimate that counted rings rather than trims. The
+measurement that corrected it took under an hour, reused the parser from the
+habit above, and changed the order of everything below it — and the first thing
+it turned up was not a missing feature but a defect in code that already
+shipped. The reproduction is a faceted export of the part, the recogniser's own
+rules replayed in Python, and one line printed per rejected band naming the rule
+that rejected it; the numbers in *What is actually left in the bayonet* all come
+from that one run over `examples/step_test/bayonet_container_v1-2.stp`.
 
 **Prefer the cheapest experiment that discriminates.** The question "can
 cylinders be recognised in post-boolean meshes?" was answered by a
