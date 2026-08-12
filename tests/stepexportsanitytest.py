@@ -133,10 +133,9 @@ elif ok:
 # anything to look at here.
 if ok:
     analyticfile = stepfile.replace(".stp", "-analytic.stp")
-    env = dict(os.environ)
-    env["PYTHONSCAD_STEP_ANALYTIC"] = "1"
-    print("Re-exporting with PYTHONSCAD_STEP_ANALYTIC=1", file=sys.stderr)
-    export(args.openscad, inputfile, analyticfile, remaining_args, env=env)
+    analytic_flag = "--enable=step-analytic-surfaces"
+    print("Re-exporting with " + analytic_flag, file=sys.stderr)
+    export(args.openscad, inputfile, analyticfile, remaining_args + [analytic_flag])
     if not validateSTEP(analyticfile):
         print("the analytic export is not valid", file=sys.stderr)
         ok = False

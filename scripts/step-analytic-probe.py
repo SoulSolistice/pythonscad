@@ -7,7 +7,7 @@ sees, with none of the build. That makes this the cheapest way to answer "how
 much of this part could ever become analytic, and which rule is stopping each
 piece that does not" - see doc/step-export.md, *Method notes*.
 
-Run it on a *faceted* export (no `PYTHONSCAD_STEP_ANALYTIC`). The recogniser is
+Run it on a *faceted* export (without `step-analytic-surfaces`). The recogniser is
 replayed here in full, so an analytic export would be measuring the answer
 rather than the question.
 

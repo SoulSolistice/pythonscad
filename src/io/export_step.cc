@@ -24,11 +24,11 @@
  */
 
 #include "export.h"
+#include "Feature.h"
 #include "StepKernel.h"
 #include "src/geometry/PolySet.h"
 #include "src/geometry/cgal/cgalutils.h"
 #include "src/geometry/PolySetUtils.h"
-#include <cstdlib>
 #include <unordered_map>
 #include "src/utils/boost-utils.h"
 #include <src/utils/hash.h>
@@ -57,11 +57,12 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   // the loop, which points the wrong way at a concave corner and collapses
   // completely when those points are collinear.
   // Writing CYLINDRICAL_SURFACE and CIRCLE instead of the facets is still
-  // provisional: the seam and orientation of a periodic face have to satisfy
-  // importers this has not been tried against yet, and a malformed analytic
-  // face is worse than a correct faceted one. Opt in with
-  // PYTHONSCAD_STEP_ANALYTIC=1 until it has had that exposure.
-  const bool analytic = getenv("PYTHONSCAD_STEP_ANALYTIC") != nullptr;
+  // provisional: a malformed analytic face is worse than a correct faceted one,
+  // and only a few importers have been tried. Opt in with the
+  // step-analytic-surfaces feature - the checkbox in Preferences, or
+  // --enable=step-analytic-surfaces on the command line - until it has had that
+  // exposure.
+  const bool analytic = Feature::ExperimentalStepAnalyticSurfaces.is_enabled();
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
                     faceParents, newNormals, 1e-5, analytic);

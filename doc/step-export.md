@@ -148,8 +148,9 @@ above:
 
 `tests/stepexportsanitytest.py` drives it: export a fixture, validate, then
 **re-export under a locale with a comma decimal separator and require the two
-files to be identical**, then a third time with `PYTHONSCAD_STEP_ANALYTIC=1` so
-the analytic path is covered by the same invariants as the faceted one. Seven
+files to be identical**, then a third time with
+`--enable=step-analytic-surfaces` so the analytic path is covered by the same
+invariants as the faceted one. Seven
 fixtures in `tests/data/scad/step-export/` each target one defect or one
 construction — `step-cube` (sharing), `step-bore` (holes and number formatting),
 `step-disjoint` (shell splitting), `step-concave` (face normals),
@@ -207,10 +208,15 @@ faces is caught by the edge-use rule.
 
 ## Analytic geometry
 
-Behind `PYTHONSCAD_STEP_ANALYTIC=1`, a ring of facets is written as one
+Behind the `step-analytic-surfaces` feature, a ring of facets is written as one
 `ADVANCED_FACE` on a `CYLINDRICAL_SURFACE` bounded by a `CIRCLE` at either rim.
-A tube of 34 faceted faces comes out as 4. Without the variable the output is
+A tube of 34 faceted faces comes out as 4. With the feature off the output is
 unchanged, byte for byte.
+
+It is off by default because a malformed analytic face is worse than a correct
+faceted one and only a few importers have been tried against it. Turn it on
+with the checkbox in *Preferences → Features*, or with
+`--enable=step-analytic-surfaces` on the command line.
 
 Two findings shaped how this works.
 
@@ -293,8 +299,8 @@ cylindrical face may have, and `check_hole_nesting()` now skips loops carrying
 an arc — an arc bulges away from its chord, so projecting the loop as a polygon
 would understate the face. `step-partial-cylinder.scad` and `step-chamfered-cylinder.scad` are the
 fixtures, and the sanity driver now exports every fixture a third time with
-`PYTHONSCAD_STEP_ANALYTIC=1` and validates that too, so the analytic path is
-covered by the same invariants as the faceted one.
+`--enable=step-analytic-surfaces` and validates that too, so the analytic path
+is covered by the same invariants as the faceted one.
 
 ### Cones, and rims shared between two bands
 
@@ -432,7 +438,7 @@ All are recorded in `doc/testing.md`; the short version:
 
 A user exported the bayonet container's base
 (`bayonet_container_v12.scad`, `_part = "base"`, shipped defaults, `$fn = 120`)
-with `PYTHONSCAD_STEP_ANALYTIC=1` and asked why the bore came out as a cylinder
+with the analytic feature on and asked why the bore came out as a cylinder
 and none of the outer walls did. The file is a good measurement of where the
 current restrictions actually bite, because the part is nothing but coaxial
 cylinders.
