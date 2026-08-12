@@ -46,14 +46,14 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       if (!item.second) continue;
       auto& chgeom = item.second;
       if (const auto *mani = dynamic_cast<const ManifoldGeometry *>(chgeom.get())) {
-        ManifoldGeometry::mergeSurfaces(surfaces, mani->getSurfaces());
+        mergeSurfaces(surfaces, mani->getSurfaces());
         pts.reserve(pts.size() + mani->numVertices());
         mani->foreachVertexUntilTrue([&](auto& p) {
           pts.push_back(p);
           return false;
         });
       } else if (const auto *ps = dynamic_cast<const PolySet *>(chgeom.get())) {
-        ManifoldGeometry::mergeSurfaces(surfaces, ps->surfaces);
+        mergeSurfaces(surfaces, ps->surfaces);
         pts.reserve(pts.size() + ps->indices.size() * 3);
         for (const auto& p : ps->indices) {
           for (const auto& ind : p) {
@@ -64,7 +64,7 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       } else {
         auto chN = createManifoldFromGeometry(chgeom);
         if (chN && !chN->isEmpty()) {
-          ManifoldGeometry::mergeSurfaces(surfaces, chN->getSurfaces());
+          mergeSurfaces(surfaces, chN->getSurfaces());
           chN->foreachVertexUntilTrue([&](auto& p) {
             pts.push_back(p);
             return false;

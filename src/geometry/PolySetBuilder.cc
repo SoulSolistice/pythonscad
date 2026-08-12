@@ -106,6 +106,7 @@ void PolySetBuilder::appendGeometry(const std::shared_ptr<const Geometry>& geom)
 #ifdef ENABLE_CGAL
   } else if (const auto N = std::dynamic_pointer_cast<const CGALNefGeometry>(geom)) {
     if (const auto ps = CGALUtils::createPolySetFromNefPolyhedron3(*(N->p3))) {
+      for (const auto& surface : N->surfaces) addSurface(surface);
       appendPolySet(*ps);
     } else {
       LOG(message_group::Error, "Nef->PolySet failed");
@@ -209,6 +210,11 @@ void PolySetBuilder::appendPolySet(const PolySet& ps)
     // If we already built color_indices_ but don't have colors with this ps, fill with -1.
     color_indices_.resize(color_indices_.size() + ps.indices.size(), -1);
   }
+
+  // Flattening several geometries into one mesh must not lose what they
+  // declared: two disjoint cylinders arrive here as a GeometryList, and without
+  // this the exporter sees a mesh with no declarations at all.
+  for (const auto& surface : ps.surfaces) addSurface(surface);
 
   reserve(numVertices() + ps.vertices.size(), numPolygons() + ps.indices.size());
   for (const auto& poly : ps.indices) {

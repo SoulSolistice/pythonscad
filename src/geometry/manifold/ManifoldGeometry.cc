@@ -267,42 +267,6 @@ template std::shared_ptr<CGAL::Polyhedron_3<CGAL_Kernel3>> ManifoldGeometry::toP
 
 #endif
 
-namespace {
-
-/*! Surface::operator== is not usable through the base class (the virtual
- * overload always returns 0), so compare the parameters directly. Only used to
- * stop the list growing without bound through a deep boolean tree. */
-bool sameSurface(const std::shared_ptr<Surface>& a, const std::shared_ptr<Surface>& b)
-{
-  if (a == b) return true;
-  if (!a || !b) return false;
-  const auto *ca = dynamic_cast<const CylinderSurface *>(a.get());
-  const auto *cb = dynamic_cast<const CylinderSurface *>(b.get());
-  if ((ca == nullptr) != (cb == nullptr)) return false;
-  if (ca != nullptr && fabs(ca->r - cb->r) > 1e-9) return false;
-  if ((a->refpt - b->refpt).norm() > 1e-9) return false;
-  return fabs(fabs(a->normdir.dot(b->normdir)) - 1.0) < 1e-9;
-}
-
-bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
-                     const std::shared_ptr<Surface>& surface)
-{
-  for (const auto& s : list) {
-    if (sameSurface(s, surface)) return true;
-  }
-  return false;
-}
-
-}  // namespace
-
-void ManifoldGeometry::mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
-                                     const std::vector<std::shared_ptr<Surface>>& from)
-{
-  for (const auto& surface : from) {
-    if (!containsSurface(into, surface)) into.push_back(surface);
-  }
-}
-
 ManifoldGeometry ManifoldGeometry::binOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs,
                                          manifold::OpType opType) const
 {

@@ -1213,12 +1213,36 @@ the mechanism `cylinder()`, `sphere()` and `rotate_extrude()` use.
 Transforms move the records, `hull()` keeps them on both backends, and
 `minkowski()` deliberately drops them.
 
-One real gap, found while writing this down: **`CGALNefGeometry` carries no
-surfaces at all.** On the Manifold backend `binOp()` merges them, but a
-union or difference on `--backend=CGAL` converts to a Nef polyhedron and every
-record is lost on the way. Manifold is the default so this is mostly latent, but
-an analytic export under the CGAL backend silently comes out faceted, and that
-is a bug rather than a design decision.
+One real gap, found while writing this down and since fixed: **`CGALNefGeometry`
+carried no surfaces at all.** On the Manifold backend `binOp()` merges them, but
+a union or difference on `--backend=CGAL` converts both operands to Nef
+polyhedra, and every record was lost on the way in. Manifold is the default so
+this was mostly latent, but an analytic export under the CGAL backend silently
+came out faceted.
+
+A Nef polyhedron is a set of half-spaces and can express none of this, but it
+does not have to: it only has to *carry* the records between the one conversion
+in and the one conversion out. `CGALNefGeometry` now holds the same list the
+other two representations hold, `createNefPolyhedronFromPolySet` fills it,
+`getGeometryAsPolySet` hands it back, and the four operators merge or - for
+minkowski - deliberately drop it.
+
+Two smaller leaks of the same kind turned up alongside it. `PolySetBuilder`
+flattens a `GeometryList` into one mesh and was keeping no declarations from its
+inputs, so two disjoint cylinders lost both. And the comparison used to
+deduplicate records lived privately inside `ManifoldGeometry.cc` and tested only
+whether each side was a cylinder: a sphere and a torus about the same axis
+through the same point compared *equal*, and merging them kept one. That
+comparison is now `Surface::sameAs`, virtual, checking the dynamic type first,
+and shared by all three backends' merge paths.
+
+All three were invisible in the same way the recogniser's own failures are: the
+output validates, and a file with no analytic surfaces looks exactly like a
+model that declared none. So the sanity test now exports every fixture a third
+time under `--backend=CGAL` and fails if the Manifold run recognised surfaces
+and the CGAL run recognised none. Not that they recognise the *same* ones - the
+backends mesh differently, and recognition depends on the topology as well as
+the declarations - only that the channel is not empty.
 
 ### Only one item is short of a channel
 
@@ -1271,10 +1295,10 @@ prism elsewhere in the part. Bounded, but not zero.
 
 ### Ordered by value per unit of work
 
-1. **`rotate_extrude` reading its child node.** Small, and it turns the torus
-   from blocked into merely unfinished.
-2. **Fix the CGAL backend dropping records through booleans.** A bug, not a
-   feature, and invisible until someone changes backend.
+1. ~~**`rotate_extrude` reading its child node.**~~ Done: a torus is one
+   `TOROIDAL_SURFACE`.
+2. ~~**Fix the CGAL backend dropping records through booleans.**~~ Done, with
+   the two neighbouring leaks above.
 3. **A user-facing `declare_*` in the Python API.** The largest of the three,
    and the only thing that reaches item 5 - which is 59% of the bayonet.
 4. **`FilletNode` declaring a B-spline.** No channel work at all: a surface

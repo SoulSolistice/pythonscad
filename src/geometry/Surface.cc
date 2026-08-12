@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <typeinfo>
 #include <vector>
 #include "geometry/linalg.h"
 #include "geometry/Surface.h"
@@ -60,6 +61,36 @@ int Surface::operator==(const Surface& other)
   return 0;
 }
 
+bool Surface::sameAs(const Surface& other) const
+{
+  // The type first: a sphere and a torus drawn about the same axis through the
+  // same point agree on everything the base class holds, and dropping one of
+  // them for the other loses a surface no measurement can recover.
+  if (typeid(*this) != typeid(other)) return false;
+  if ((refpt - other.refpt).norm() > 1e-9) return false;
+  // antiparallel axes describe the same surface, only parameterised the other
+  // way round
+  return fabs(fabs(normdir.dot(other.normdir)) - 1.0) < 1e-9;
+}
+
+bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
+                     const std::shared_ptr<Surface>& surface)
+{
+  for (const auto& s : list) {
+    if (s == surface) return true;
+    if (s && surface && s->sameAs(*surface)) return true;
+  }
+  return false;
+}
+
+void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
+                   const std::vector<std::shared_ptr<Surface>>& from)
+{
+  for (const auto& surface : from) {
+    if (!containsSurface(into, surface)) into.push_back(surface);
+  }
+}
+
 SphereSurface::SphereSurface(Vector3d refpt, Vector3d normdir, double r)
 {
   this->refpt = refpt;
@@ -92,6 +123,12 @@ int SphereSurface::operator==(const SphereSurface& other)
   if ((refpt - other.refpt).norm() > 1e-6) return 0;
   if (fabs(r - other.r) > 1e-6) return 0;
   return 1;
+}
+
+bool SphereSurface::sameAs(const Surface& other) const
+{
+  if (!Surface::sameAs(other)) return false;
+  return fabs(r - static_cast<const SphereSurface&>(other).r) < 1e-9;
 }
 
 int SphereSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
@@ -138,6 +175,13 @@ int TorusSurface::operator==(const TorusSurface& other)
   if (fabs(r_major - other.r_major) > 1e-6) return 0;
   if (fabs(r_minor - other.r_minor) > 1e-6) return 0;
   return 1;
+}
+
+bool TorusSurface::sameAs(const Surface& other) const
+{
+  if (!Surface::sameAs(other)) return false;
+  const auto& o = static_cast<const TorusSurface&>(other);
+  return fabs(r_major - o.r_major) < 1e-9 && fabs(r_minor - o.r_minor) < 1e-9;
 }
 
 int TorusSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
@@ -189,6 +233,12 @@ int CylinderSurface::operator==(const CylinderSurface& other)
   if ((refpt - other.refpt).norm() > 1e-6) return 0;
   if (fabs(r - other.r) > 1e-6) return 0;
   return 1;
+}
+
+bool CylinderSurface::sameAs(const Surface& other) const
+{
+  if (!Surface::sameAs(other)) return false;
+  return fabs(r - static_cast<const CylinderSurface&>(other).r) < 1e-9;
 }
 
 int CylinderSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)

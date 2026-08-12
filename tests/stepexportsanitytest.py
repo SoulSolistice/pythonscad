@@ -131,6 +131,21 @@ elif ok:
 # CYLINDRICAL_SURFACE still has to leave the shell watertight, its rims still
 # have to be used once in each direction - and the surface checks only have
 # anything to look at here.
+ANALYTIC_ENTITIES = (
+    "CYLINDRICAL_SURFACE",
+    "CONICAL_SURFACE",
+    "SPHERICAL_SURFACE",
+    "TOROIDAL_SURFACE",
+)
+
+
+def count_analytic(path):
+    """How many analytic surfaces the file was written with."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    return sum(text.count(name) for name in ANALYTIC_ENTITIES)
+
+
 if ok:
     analyticfile = stepfile.replace(".stp", "-analytic.stp")
     analytic_flag = "--enable=step-analytic-surfaces"
@@ -140,7 +155,43 @@ if ok:
         print("the analytic export is not valid", file=sys.stderr)
         ok = False
     else:
+        recognised = count_analytic(analyticfile)
         os.unlink(analyticfile)
+
+        # Once more on the CGAL backend. A surface declaration is carried by the
+        # geometry it describes, and each backend has its own representation to
+        # carry it through: a model which exports with analytic surfaces under
+        # Manifold and comes out faceted under CGAL has lost them in a
+        # conversion, which is a bug that is otherwise invisible - both files
+        # validate, and the faceted one looks exactly like a model that never
+        # declared anything.
+        #
+        # The two are not required to recognise the *same* surfaces. The
+        # backends mesh differently, and recognition depends on the topology of
+        # the mesh as well as on the declarations. Losing all of them is the
+        # defect this guards against.
+        if recognised:
+            cgalfile = stepfile.replace(".stp", "-cgal.stp")
+            print("Re-exporting with " + analytic_flag + " --backend=CGAL", file=sys.stderr)
+            export(
+                args.openscad,
+                inputfile,
+                cgalfile,
+                remaining_args + [analytic_flag, "--backend=CGAL"],
+            )
+            if not validateSTEP(cgalfile):
+                print("the analytic export on the CGAL backend is not valid", file=sys.stderr)
+                ok = False
+            elif not count_analytic(cgalfile):
+                print(
+                    "%d analytic surfaces on the Manifold backend and none on CGAL: the "
+                    "declarations did not survive the conversion to a Nef polyhedron"
+                    % recognised,
+                    file=sys.stderr,
+                )
+                ok = False
+            else:
+                os.unlink(cgalfile)
 
 if ok:
     os.unlink(stepfile)

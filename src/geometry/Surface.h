@@ -24,7 +24,36 @@ public:
    * under a non uniform scale becomes elliptical - in which case the caller has
    * to drop the surface rather than keep a wrong one. */
   virtual bool transform(const Transform3d& mat);
+
+  /*! Whether two records describe the same surface. For deduplication only.
+   *
+   * Not `operator==`: that one is declared per subclass, taking that subclass,
+   * so it never overrides anything, and the base version always returns 0. It
+   * cannot answer this question about two `shared_ptr<Surface>`. This can.
+   *
+   * Deliberately conservative in one direction only. Two records describing one
+   * surface but differing - the same infinite cylinder referred to from two
+   * heights - are both kept, which costs one more candidate for a fit that
+   * would have accepted either. Two records describing *different* surfaces
+   * that compared equal would lose one, so the dynamic type is checked before
+   * anything else. */
+  [[nodiscard]] virtual bool sameAs(const Surface& other) const;
 };
+
+/*! Whether `list` already holds a record for the same surface. */
+[[nodiscard]] bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
+                                   const std::shared_ptr<Surface>& surface);
+
+/*! Append the records of `from` that `into` does not already hold.
+ *
+ * Every boolean keeps both operands' declarations, including the subtracted
+ * one: a bore is declared by the cylinder that cut it, and that record is the
+ * only statement that the hole was meant to be round. Keeping a record which no
+ * longer matches any facet is harmless, because a record is only ever a hint
+ * and the exporter re-checks it against the mesh. Deduplication is here only to
+ * stop the list growing without bound through a deep boolean tree. */
+void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
+                   const std::vector<std::shared_ptr<Surface>>& from);
 
 /*! A sphere, declared by the primitive that drew it.
  *
@@ -43,6 +72,7 @@ public:
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
+  [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   double r;
 
@@ -66,6 +96,7 @@ public:
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
+  [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   double r_major, r_minor;
 
@@ -83,6 +114,7 @@ public:
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
+  [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   double r;
 
