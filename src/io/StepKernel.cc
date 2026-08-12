@@ -138,6 +138,7 @@ struct Band {
   std::vector<int> bottom_set, top_set;
   int seam_bottom = -1, seam_top = -1;  // the ruling the seam runs along
   bool alive = true;
+  const char *dropped = nullptr;  // why it was left faceted, for the report
 };
 
 /*! What lies on the other side of one rim of a band.
@@ -664,16 +665,16 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       return true;
     };
 
-    auto resolve_rim = [&](std::size_t bi, bool bottom, RimRef& out) {
+    auto resolve_rim = [&](std::size_t bi, bool bottom, RimRef& out, const char **why) {
       const Band& band = bands[bi];
       const auto edges = rim_edges(bi, bottom);
-      if (edges.empty()) return false;
+      if (edges.empty()) { *why = "no rim edges"; return false; }
       const std::set<std::size_t> in_band(band.walls.begin(), band.walls.end());
 
       std::set<std::size_t> others;
       for (const auto& edge : edges) {
         const auto it = loop_edges_map.find(edge);
-        if (it == loop_edges_map.end()) return false;
+        if (it == loop_edges_map.end()) { *why = "a rim edge belongs to no loop"; return false; }
         std::size_t outside = face_cnt;
         int count = 0;
         for (const std::size_t user : it->second) {
@@ -681,7 +682,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
           count++;
           outside = user;
         }
-        if (count != 1) return false;
+        if (count != 1) { *why = "a rim edge is used by more than two faces"; return false; }
         others.insert(outside);
       }
 
@@ -689,8 +690,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
 
       if (others.size() == 1) {
         const std::size_t nb = *others.begin();
-        if (band_of_loop[nb] != std::size_t(-1)) return false;  // a one facet band
-        if (!loop_valid[nb] || consumed[nb]) return false;
+        if (band_of_loop[nb] != std::size_t(-1)) { *why = "the rim borders a single facet of another band"; return false; }  // a one facet band
+        if (!loop_valid[nb] || consumed[nb]) { *why = "the neighbouring face was dropped"; return false; }
         const std::vector<int>& nb_loop = loops[nb];
         const std::set<int> key(nb_loop.begin(), nb_loop.end());
         if (key.size() == nb_loop.size() && edges.size() == nb_loop.size()) {
@@ -708,14 +709,14 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
           on_rim[j] = 1;
           cnt++;
         }
-        if (cnt != edges.size() || cnt >= n) return false;
+        if (cnt != edges.size() || cnt >= n) { *why = "the rim is not a run of its neighbour's edges"; return false; }
         std::size_t start = n;
         for (std::size_t j = 0; j < n; j++) {
           if (on_rim[j] == 0 || on_rim[(j + n - 1) % n] != 0) continue;
-          if (start != n) return false;
+          if (start != n) { *why = "the rim is split across its neighbour's loop"; return false; }
           start = j;
         }
-        if (start == n) return false;
+        if (start == n) { *why = "the rim covers its neighbour's whole loop twice"; return false; }
         out.kind = RimRef::LOOP_RUN;
         out.loop = nb;
         out.start = start;
@@ -726,13 +727,13 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       // shared with another band, which has to be collapsed too
       std::set<std::size_t> nb_bands;
       for (const std::size_t f : others) nb_bands.insert(band_of_loop[f]);
-      if (nb_bands.size() != 1 || *nb_bands.begin() == std::size_t(-1)) return false;
+      if (nb_bands.size() != 1 || *nb_bands.begin() == std::size_t(-1)) { *why = "the rim borders one face per facet"; return false; }
       const std::size_t other = *nb_bands.begin();
-      if (!bands[other].alive) return false;
+      if (!bands[other].alive) { *why = "the band sharing this rim was dropped"; return false; }
       // only between two full turns: a shared rim covered by several partial
       // bands would have to be split into arcs on both sides at once
-      if (!band.closed || !bands[other].closed) return false;
-      if (others.size() != bands[other].walls.size()) return false;
+      if (!band.closed || !bands[other].closed) { *why = "a shared rim needs both bands to cover the full turn"; return false; }
+      if (others.size() != bands[other].walls.size()) { *why = "the shared rim does not cover the whole neighbouring band"; return false; }
       out.kind = RimRef::OTHER_BAND;
       out.band = other;
       return true;
@@ -759,8 +760,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       for (std::size_t i = 0; i < bands.size(); i++) {
         if (!bands[i].alive) continue;
         RimRef bottom, top;
-        if (!resolve_rim(i, true, bottom) || !resolve_rim(i, false, top)) {
+        const char *why = "unresolved";
+        if (!resolve_rim(i, true, bottom, &why) || !resolve_rim(i, false, top, &why)) {
           bands[i].alive = false;
+          bands[i].dropped = why;
           changed = true;
           continue;
         }
@@ -774,6 +777,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
                           : (bottom.kind == RimRef::LOOP_RUN && top.kind == RimRef::LOOP_RUN);
         if (!shapes_ok) {
           bands[i].alive = false;
+          bands[i].dropped = "a rim is a run of a loop, but the band covers the full turn";
           changed = true;
           continue;
         }
@@ -785,6 +789,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         // shell against every face that shares the real one.
         if (!bands[i].closed && !ends_line_up(bottom, top)) {
           bands[i].alive = false;
+          bands[i].dropped = "the two rims of the band do not end on the same rulings";
           changed = true;
           continue;
         }
@@ -807,6 +812,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         }
         if (clash) {
           bands[i].alive = false;
+          bands[i].dropped = "another band already rewrites the same loop";
           changed = true;
           continue;
         }
@@ -840,6 +846,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       band.seam_top = pick(band.top_set);
       if (band.seam_bottom == -1 || band.seam_top == -1) {
         band.alive = false;
+        band.dropped = "no seam vertex";
         continue;
       }
       // the two ends have to lie on one ruling, or the seam would cut through
@@ -848,7 +855,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       const Vector3d b = vertices[band.seam_top] - band.base;
       const Vector3d ra = (a - band.axis * band.axis.dot(a)).normalized();
       const Vector3d rb = (b - band.axis * band.axis.dot(b)).normalized();
-      if ((ra - rb).norm() > 1e-6) band.alive = false;
+      if ((ra - rb).norm() > 1e-6) {
+        band.alive = false;
+        band.dropped = "the seam would not run along a ruling";
+      }
     }
 
     // dropping a band puts its facets back
@@ -871,6 +881,15 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     if (alive > 0) {
       printf("STEP export: %d surface%s recognised (%d conical, %d partial), %d facets replaced\n",
              int(alive), alive == 1 ? "" : "s", int(cones), int(partial), int(collapsed));
+    }
+    // Every band here fits its axis exactly and was declared by the model, so a
+    // drop is always the topology around it rather than the surface itself.
+    // Naming the rule that rejected it is the only way to tell a wall which
+    // cannot be written from one which should have been.
+    for (const auto& band : bands) {
+      if (band.alive || band.dropped == nullptr) continue;
+      printf("STEP export: r=%g band of %d facets left faceted: %s\n", band.r_bottom,
+             int(band.walls.size()), band.dropped);
     }
   }
 
