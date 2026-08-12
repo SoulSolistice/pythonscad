@@ -12,7 +12,8 @@ chamfered body now round trips through SolidWorks as a chamfered body. The third
 was meant to start item 4 of the roadmap and instead measured it, found it was
 worth fourteen faces of the part it was supposed to rescue, fixed the two much
 smaller things the measurement turned up instead, and lifted the recogniser out
-of the exporter so it can be reused and tested on its own.
+of the exporter so it can be reused and tested on its own. Its new fixture then
+found two more defects in the validator on the first run.
 
 *What generalises* and *What is actually left in the bayonet*, below, are the
 parts worth reading before starting a fourth. *What a model can do about it* is
@@ -180,6 +181,29 @@ too strict:
 Regressions are also demonstrated rather than assumed: building the exporter at
 `HEAD~1` and at `659ac1d` reproduces the membrane and the comma radix
 respectively, and the current checks reject both.
+
+**A third round of calibration came for free.** `step-shared-arc` failed on its
+first run, and both of the things it found were in the validator rather than the
+exporter. They are worth recording because each is a rule that had been correct
+until the geometry grew one new shape:
+
+- **The winding check approximated an arc loop by its vertices.** A polygon
+  through the ends of a *major* arc lies on the other side of its chord from the
+  face itself, so the 270 degree bottom face read as a 90 degree top face and
+  its `PLANE` normal was reported as inverted. Nothing had ever produced an arc
+  of more than 180 degrees before. The loop is now walked with each arc sampled
+  along the curve, which puts the polygon back on the face. `check_hole_nesting`
+  had already been given the same warning - *an arc bulges away from its
+  chord* - and the lesson simply had not been carried to the winding check.
+- **A partial curved face was required to have exactly four edges.** A rim need
+  not be one edge: where the neighbouring face is split, the rim is split with
+  it. SolidWorks re-saved `step-shared-arc` with three arcs along the z=2 rim
+  and therefore five-edge faces, which are perfectly valid. The rule is now two
+  rims and exactly two straight ends, with any number of arcs along a rim.
+
+Both fixes were re-checked by mutation: inverting that face's `PLANE` normal
+still fails the winding check, and reversing the shared arc in one of its two
+faces is caught by the edge-use rule.
 
 ## Analytic geometry
 
@@ -371,6 +395,22 @@ landed, and it settles the two constructions nothing else had exercised:
 `validatestep.py` passes on that file unchanged, and its half faces are the only
 thing which exercises the partial branch of `check_cylindrical_faces` from a
 source other than this exporter.
+
+`step-shared-arc` was round tripped once item 0 landed, and settles the last of
+the three rim cases - an arc shared by two *partial* curved faces:
+
+- It **kept both curved faces analytic**, and carried the cone's half angle
+  (0.7853981633974482790 against our 0.7853981633974483) to sixteen digits, so
+  the cone was re-derived from what we wrote rather than refitted.
+- It **kept the shared arc**. Our six faces came back as eight by the usual
+  halving, and the 270 degree arc at z=2 came back as *three* arcs - split at
+  213.75 and 225 degrees, where it split the faces. Every one of the three is
+  used by a conical face and by a cylindrical face, once in each direction,
+  with no planar face anywhere along it. That is the construction, re-emitted
+  by a different kernel.
+
+The three-arc rim is also the useful part: it is a shape this exporter never
+writes, and it caught a check that was too strict (below).
 
 ## Running the tests on Windows
 
@@ -684,11 +724,14 @@ elsewhere in this file still resolve; only the order changed. Item 4 moved from
 first to last, and item 5 is new and did not previously exist as work at all —
 it is the largest thing in the bayonet and the only item that unblocks another.
 
-### 0. The two changes above - done
+### 0. The two changes above - done and verified
 
 `step-shared-arc.scad` is the fixture for the second; the first needs none,
 because `step-partial-cylinder` already contains the shape that provoked it and
-simply recognises more of it now.
+simply recognises more of it now. On the fixture the exporter reports *2
+surfaces recognised (1 conical, 2 partial), 48 facets replaced*, taking the part
+from 52 faces to 6, and SolidWorks round trips the shared arc - see *What
+SolidWorks said*.
 
 One adjacent case was deliberately left: the *probe fit* that seeds the
 constrained walk still takes its four vertices from the first three facets of

@@ -412,29 +412,9 @@ def check_face_normals(entities, problems):
                 outer = bid
         if outer is None:
             continue
-        loop, orientation = _bound_loop(entities, outer)
-        if loop is None:
+        pts = _loop_polyline(entities, outer)
+        if pts is None or len(pts) < 3:
             continue
-
-        pts = []
-        for oid in loop.refs():
-            ends = _edge_endpoints(entities, oid)
-            if ends is None:
-                return
-            vtx = entities.get(ends[0])
-            if vtx is None or not vtx.refs():
-                return
-            cp = entities.get(vtx.refs()[0])
-            if cp is None:
-                return
-            coords = cp.floats()
-            if len(coords) != 3:
-                return
-            pts.append(coords)
-        if len(pts) < 3:
-            continue
-        if not orientation:
-            pts.reverse()
 
         # Newell
         n = [0.0, 0.0, 0.0]
@@ -466,6 +446,122 @@ def _edge_geometry(entities, oriented_id):
     if ec is None or ec.name != "EDGE_CURVE" or len(ec.refs()) < 3:
         return None
     return entities.get(ec.refs()[2])
+
+
+def _vec3(entities, eid, want):
+    e = entities.get(eid)
+    if e is None or e.name != want:
+        return None
+    v = e.floats()
+    return v if len(v) == 3 else None
+
+
+def _placement(entities, placement_id):
+    """(origin, axis, ref) of an AXIS2_PLACEMENT_3D, axis and ref normalised."""
+    ap = entities.get(placement_id)
+    if ap is None or ap.name != "AXIS2_PLACEMENT_3D" or len(ap.refs()) < 3:
+        return None
+    origin = _vec3(entities, ap.refs()[0], "CARTESIAN_POINT")
+    axis = _vec3(entities, ap.refs()[1], "DIRECTION")
+    ref = _vec3(entities, ap.refs()[2], "DIRECTION")
+    if origin is None or axis is None or ref is None:
+        return None
+
+    def unit(v):
+        n = math.sqrt(sum(c * c for c in v))
+        return [c / n for c in v] if n > 1e-12 else None
+
+    axis, ref = unit(axis), unit(ref)
+    if axis is None or ref is None:
+        return None
+    return origin, axis, ref
+
+
+ARC_SAMPLES = 12
+
+
+def _arc_interior(entities, circle, p0, p1):
+    """Points along a circular edge between its ends, excluding both.
+
+    A CIRCLE is parameterised counter clockwise about its own axis starting at
+    its reference direction, so the arc runs counter clockwise from the edge's
+    start to its end. `p0` and `p1` are the *curve's* own ends, before any
+    ORIENTED_EDGE reversal."""
+    pl = _placement(entities, circle.refs()[0]) if circle.refs() else None
+    nums = circle.floats()
+    if pl is None or not nums:
+        return None
+    centre, axis, ref = pl
+    radius = nums[-1]
+    perp = [
+        axis[1] * ref[2] - axis[2] * ref[1],
+        axis[2] * ref[0] - axis[0] * ref[2],
+        axis[0] * ref[1] - axis[1] * ref[0],
+    ]
+
+    def angle(p):
+        d = [p[k] - centre[k] for k in range(3)]
+        return math.atan2(sum(a * b for a, b in zip(d, perp)),
+                          sum(a * b for a, b in zip(d, ref)))
+
+    t0 = angle(p0)
+    sweep = (angle(p1) - t0) % (2 * math.pi)
+    if sweep < 1e-12:
+        sweep = 2 * math.pi  # a full circle, whose two ends are one vertex
+    return [
+        [centre[j] + radius * (math.cos(t) * ref[j] + math.sin(t) * perp[j]) for j in range(3)]
+        for t in (t0 + sweep * k / ARC_SAMPLES for k in range(1, ARC_SAMPLES))
+    ]
+
+
+def _vertex_point(entities, vertex_id):
+    vtx = entities.get(vertex_id)
+    if vtx is None or not vtx.refs():
+        return None
+    cp = entities.get(vtx.refs()[0])
+    if cp is None:
+        return None
+    coords = cp.floats()
+    return coords if len(coords) == 3 else None
+
+
+def _loop_polyline(entities, bound_id):
+    """The loop walked in its own direction, with arcs sampled along the curve.
+
+    Taking only the vertices is not good enough for anything that cares which
+    way a loop winds. The polygon through the ends of a *major* arc lies on the
+    other side of its chord from the face itself, so its winding comes out
+    inverted - a 270 degree bottom face reads as a 90 degree top face. Sampling
+    the arc puts the polygon back on the face."""
+    loop, orientation = _bound_loop(entities, bound_id)
+    if loop is None:
+        return None
+    pts = []
+    for oid in loop.refs():
+        ends = _edge_endpoints(entities, oid)
+        geom = _edge_geometry(entities, oid)
+        if ends is None or geom is None:
+            return None
+        start = _vertex_point(entities, ends[0])
+        if start is None:
+            return None
+        pts.append(start)
+        if geom.name != "CIRCLE":
+            continue
+        # ends[] already carries both the EDGE_CURVE's same_sense flag and the
+        # ORIENTED_EDGE's; undoing the latter gives the curve's own direction.
+        forward = ends[3]
+        natural = (ends[0], ends[1]) if forward else (ends[1], ends[0])
+        p0, p1 = _vertex_point(entities, natural[0]), _vertex_point(entities, natural[1])
+        if p0 is None or p1 is None:
+            return None
+        interior = _arc_interior(entities, geom, p0, p1)
+        if interior is None:
+            return None
+        pts.extend(interior if forward else list(reversed(interior)))
+    if not orientation:
+        pts.reverse()
+    return pts
 
 
 def _loop_points(entities, bound_id):
@@ -633,9 +729,9 @@ def check_cylindrical_faces(entities, problems):
             continue
 
         oriented = loop.refs()
-        if len(oriented) != 4:
+        if len(oriented) < 4:
             problems.append(
-                "#%d: cylindrical face has %d edges, expected 4" % (face.id, len(oriented))
+                "#%d: cylindrical face has %d edges, expected at least 4" % (face.id, len(oriented))
             )
             continue
 
@@ -653,9 +749,13 @@ def check_cylindrical_faces(entities, problems):
             else:
                 lines.append((oid, ends))
         else:
-            if len(circles) != 2:
+            # Two rims, but a rim need not be one edge. Where a neighbouring
+            # face is split the rim is split with it, and a face then carries
+            # several consecutive arcs along one rim - which is exactly what
+            # SolidWorks produces when it re-saves one of ours.
+            if len(circles) < 2:
                 problems.append(
-                    "#%d: %s face is bounded by %d circular edges, expected 2"
+                    "#%d: %s face is bounded by %d circular edges, expected at least 2"
                     % (face.id, surface.name, len(circles))
                 )
                 continue
@@ -677,6 +777,11 @@ def check_cylindrical_faces(entities, problems):
             for oid, _ends in lines:
                 oe = entities.get(oid)
                 line_edges.add(oe.refs()[-1] if oe is not None and oe.refs() else None)
+            if closed == 2 and len(circles) != 2:
+                problems.append(
+                    "#%d: a periodic cylindrical face needs exactly two full circles, found %d"
+                    % (face.id, len(circles))
+                )
             if closed == 2 and len(line_edges) != 1:
                 problems.append(
                     "#%d: a periodic cylindrical face needs one seam edge used twice, found %d"
