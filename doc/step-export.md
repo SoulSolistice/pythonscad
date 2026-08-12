@@ -765,7 +765,8 @@ if (!cone && !inverted_cone && r1 == r2 && this->angle == 360) {   // was
   `CONICAL_SURFACE`. The idiomatic construction lost to the workaround. The
   primitive now declares the circle at each of its rims, which is the same
   statement of intent the hull makes, so the two leave identical provenance.
-  Nothing in the recogniser changed.
+  Nothing in the recogniser changed, and `step-cone-primitive` comes out as
+  *1 surface recognised (1 conical, 0 partial), 32 facets replaced* - 3 faces.
 - **A pie slice declared nothing**, on the reasoning that its flat sides are not
   part of the cylinder. True, and the wrong place to act on it: those sides run
   through the axis, so they fit no cylinder and are discarded on the fit
@@ -782,6 +783,30 @@ shape that does not fit. The recogniser's report says why it dropped a band; it
 cannot say anything about a band that was never a candidate. When coverage looks
 lower than it should, check what was declared before checking what was matched.
 
+### The pie slice was not a pie slice
+
+Writing that fixture found a third defect, this one nothing to do with STEP.
+`cylinder(angle = 90)` in a `.scad` file produced a **whole cylinder**: `angle`
+was in the parameter list `Parameters::parse()` accepts and was never assigned
+to the node, so it parsed and was discarded. `CylinderNode` has the field,
+`createGeometry()` honours it, `toString()` prints it, and the Python binding in
+`py_primitives.cc` sets it - every part of the feature existed except the one
+line in the SCAD front end.
+
+The fixture passed anyway, because a whole cylinder exports perfectly well. What
+gave it away was the exporter's own report saying **0 partial** where a 90
+degree wall must be partial. That is worth recording as a method note in itself:
+
+> **Predict the diagnostic, not just the exit status.** A fixture that only
+> asserts "valid output" cannot tell a feature working from a feature absent -
+> both produce a valid file. The counts the exporter prints are cheap to predict
+> before the run and they discriminate; the fixture now states the expected
+> figure in its own comment, so the next reader can check it in one line.
+
+The parse is fixed, and `step-pie-slice` guards it from the STEP side: if
+`angle` is ever dropped again the band comes out closed, and the comment says
+what the report has to read.
+
 ### 1. `rotate_extrude` declaring its own surfaces - half done
 
 `RotateExtrudeNode` keeps its `profile_func`, so it can recognise that its own
@@ -796,7 +821,10 @@ emission work in it, only the record. `declareSurfacesOfRevolution()` in
 `rotate_extrude.cc` walks the profile of the first station and declares one
 circle per radius; `step-rotate-extrude.scad` is the fixture, a stepped tube
 whose six profile edges cover all three kinds (flat annulus, cylinder, frustum)
-and whose two internal rims each bound two curved faces and nothing else.
+and whose two internal rims each bound two curved faces and nothing else. It
+reports *3 analytic surfaces available, 4 surfaces recognised (1 conical, 0
+partial), 128 facets replaced* - three records for six edges, four faces from
+them, and the whole tube down to 6 faces.
 
 Two things it deliberately does not do:
 

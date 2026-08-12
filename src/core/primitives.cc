@@ -470,6 +470,19 @@ static std::shared_ptr<AbstractNode> builtin_cylinder(
     }
   }
 
+  // `angle` was in the parameter list and nowhere else: it parsed, and was then
+  // dropped on the floor, so cylinder(angle=90) in a .scad file silently
+  // produced a whole cylinder. The Python binding has always set it
+  // (py_primitives.cc), which is why the node, createGeometry() and toString()
+  // all handle it and only this path did not.
+  if (parameters["angle"].type() == Value::Type::NUMBER) {
+    node->angle = parameters["angle"].toDouble();
+    if (OpenSCAD::rangeCheck && (node->angle <= 0 || node->angle > 360)) {
+      LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
+          "cylinder(..., angle=%1$s)", parameters["angle"].toEchoStringNoThrow());
+    }
+  }
+
   if (parameters["center"].type() == Value::Type::BOOL) {
     node->center = parameters["center"].toBool();
   }
