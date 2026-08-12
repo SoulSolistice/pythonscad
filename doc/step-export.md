@@ -585,8 +585,9 @@ Item 4 below was carrying the note "the real prize", and the obvious next move
 was to start it. Measuring first says otherwise, and the measurement is cheap
 enough that there was no reason not to:
 `examples/step_test/bayonet_container_v1-2.stp` is a faceted export of the whole
-model at `$fn = 60`, and a hundred lines of Python over it gives exactly the
-loops the recogniser sees.
+model at `$fn = 60`, and `scripts/step-analytic-probe.py` over it gives exactly
+the loops the recogniser sees. Every number below is one run of that script -
+`surfaces` for the ceiling, `bands` for what the rules do with it.
 
 **1693 faces. 664 of them — 39% — are facets of one of 14 surfaces of
 revolution.** That is the ceiling: no recogniser of any sophistication can
@@ -795,12 +796,33 @@ each fix, and confirming the new check rejects that output, is cheap and turns
 "this test looks right" into evidence. It caught a validator that silently
 missed two of the seven mutations it was supposed to detect.
 
-**Prototype the pass in Python over an already exported file.** Both rounds did
-this and both times it paid for itself before any C++ existed: it caught the
-centroid of an arc not lying on the axis, and it proved the strip walk finds a
-frustum where the old growth could not. An exported STEP file is a complete
-description of the merged mesh, so a hundred lines of parsing gives the same
-input the exporter sees, with none of the build.
+**Prototype the pass in Python over an already exported file.** Every round did
+this and every time it paid for itself before any C++ existed: it caught the
+centroid of an arc not lying on the axis, it proved the strip walk finds a
+frustum where the old growth could not, and it found both of item 0's defects.
+An exported STEP file is a complete description of the merged mesh, so parsing
+one gives the same input the exporter sees, with none of the build.
+
+That parser is now `scripts/step-analytic-probe.py`, so the next round starts
+with it rather than rewriting it:
+
+```bash
+# the ceiling: how much of this part lies on a surface of revolution at all
+scripts/step-analytic-probe.py surfaces part.stp
+# every band the recogniser fits, and the rule that rejected each one it drops
+scripts/step-analytic-probe.py bands part.stp
+# ... and what the two changes of item 0 would add
+scripts/step-analytic-probe.py bands --local-axis --shared-arcs part.stp
+# why a wall that plainly fits was never even a candidate
+scripts/step-analytic-probe.py trace part.stp --z 89.25 90.75 --r 78 79.5
+```
+
+Run it on a **faceted** export. It replays the recogniser itself, so an
+analytic export would be measuring the answer rather than the question. It has
+no provenance to read, so it measures the geometry and topology gates only -
+which is exactly what makes its numbers a ceiling. Every figure in *What is
+actually left in the bayonet* is one run of it over
+`examples/step_test/bayonet_container_v1-2.stp`.
 
 **Make the exporter say why it refused.** See *A rejected surface is invisible*
 above.
@@ -810,10 +832,8 @@ list for two rounds on an estimate that counted rings rather than trims. The
 measurement that corrected it took under an hour, reused the parser from the
 habit above, and changed the order of everything below it — and the first thing
 it turned up was not a missing feature but a defect in code that already
-shipped. The reproduction is a faceted export of the part, the recogniser's own
-rules replayed in Python, and one line printed per rejected band naming the rule
-that rejected it; the numbers in *What is actually left in the bayonet* all come
-from that one run over `examples/step_test/bayonet_container_v1-2.stp`.
+shipped. `scripts/step-analytic-probe.py surfaces` is one command and it bounds
+any surface-recognition item you are about to cost.
 
 **Prefer the cheapest experiment that discriminates.** The question "can
 cylinders be recognised in post-boolean meshes?" was answered by a
