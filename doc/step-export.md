@@ -16,9 +16,10 @@ of the exporter so it can be reused and tested on its own. Its new fixture then
 found two more defects in the validator on the first run.
 
 *What generalises* and *What is actually left in the bayonet*, below, are the
-parts worth reading before starting a fourth. *What a model can do about it* is
-for the other audience - someone writing the SCAD rather than the exporter,
-which on this part turns out to be the side with more leverage.
+parts worth reading before starting a fourth, and *What the blocked items
+actually need* is where the ones that are not finished stand. *What a model can
+do about it* is for the other audience - someone writing the SCAD rather than
+the exporter, which on this part turns out to be the side with more leverage.
 
 ## Orientation
 
@@ -938,9 +939,10 @@ it:
   types still worth having, `SPHERICAL_SURFACE` and `TOROIDAL_SURFACE`, are
   bounded by *circles* - a sphere zone by its two cap rims and a seam, a torus
   by two seams - so neither needs one line of it. What needs it is splines, and
-  splines need a declaration channel that does not exist: `FilletNode` is
-  Python-only, glyph outlines are inside `text()`, and a 2D curve channel on
-  `Outline2d` is the same blocked work as item 5.
+  a spline has nothing to bound yet: no `Curve` subclass describes one, so the
+  generalisation would be written against a type that does not exist. See *What
+  the blocked items actually need* - the channel for declaring one is already
+  there, which is not what this item used to say.
 
 So the generalisation is a mechanism with nothing to drive it, and worse, it
 cannot be *tested*: there is no curve to generalise to, so any rim rule written
@@ -1163,6 +1165,89 @@ where the losses are:
 - **A feature that must be non-analytic is cheaper if it is bounded by planes.**
   A thread or a ramp will stay faceted whatever happens, but where it *ends*
   decides whether it also spoils its neighbours.
+
+## What the blocked items actually need
+
+Three items on this list have been described as blocked on "a declaration
+channel that does not exist". That is one sentence covering three different
+situations, and only one of them is true. The question that separates them is
+not how metadata would be carried - it is **where the declaration comes from**.
+
+### The channel exists, and it is not a sidecar
+
+`PolySet::surfaces` *is* metadata written during evaluation, and it is already
+the mechanism `cylinder()`, `sphere()` and `rotate_extrude()` use.
+`PolySetBuilder::addSurface()` is the public API any 3D generator can call.
+Transforms move the records, `hull()` keeps them on both backends, and
+`minkowski()` deliberately drops them.
+
+One real gap, found while writing this down: **`CGALNefGeometry` carries no
+surfaces at all.** On the Manifold backend `binOp()` merges them, but a
+union or difference on `--backend=CGAL` converts to a Nef polyhedron and every
+record is lost on the way. Manifold is the default so this is mostly latent, but
+an analytic export under the CGAL backend silently comes out faceted, and that
+is a bug rather than a design decision.
+
+### Only one item is short of a channel
+
+| item | what it is short of |
+| --- | --- |
+| 2, fillets and splines | a `Surface` subclass, not a channel. `FilletNode` already builds through `PolySetBuilder`, so it could declare today - what is missing is a type to declare, the matching, the emission and the rim generalisation |
+| the torus | a **2D** channel. `Outline2d` carries vertices, a winding flag and a colour, so `circle()` cannot say it was a circle |
+| 5, ramps and threads | a **user-facing** declaration. There is no generator at all: the sweep exists only in the user's `polyhedron()` list comprehension |
+
+So metadata is the answer for two of the three, and for different reasons.
+
+For the **torus** there are two shapes it could take. The honest one is a curve
+channel on `Outline2d`, which then has to survive the Clipper booleans and
+`offset()` - that is where the cost is. The cheap one is for `rotate_extrude` to
+read its **child node tree** rather than its geometry: a transform of a
+`CircleNode` says the profile is a circle exactly, with no channel at all. It
+breaks the moment a `difference()` intervenes, but it covers
+`rotate_extrude() translate([R, 0]) circle(r)`, which is the idiom.
+
+For **item 5** a user-facing declaration is the only possibility, and PythonSCAD
+is unusually well placed for one: solids are Python objects that already accept
+attribute assignment (`python__setattro__` forwards to `python__setitem__`). A
+call which appends a `CylinderSurface` to an object's `PolySet::surfaces` would
+then be carried by transforms, booleans and hulls for free - the machinery is
+all there, only the way in is missing. The SCAD equivalent is a module wrapping
+its children.
+
+### Two properties that make a loose scheme safe
+
+**A record is only ever a hint.** The exporter re-checks every declaration
+against the mesh and against the topology before acting on it, which is why the
+scheme tolerates imprecision. A *global* list of "surfaces mentioned anywhere in
+this model" would work nearly as well as the scoped one - it would only offer
+more candidates for the fit to reject. That lowers the bar for any metadata
+design a long way, and it is the reason a user-facing declaration is not as
+dangerous as it sounds.
+
+**World coordinates are the one thing that must ride along.** Records are stored
+in world coordinates and moved by the transforms above them. A sidecar written
+at render time would have to capture the transform stack in effect where the
+declaration was made, which is exactly what living inside the geometry gives for
+nothing. That is the argument against a separate file and for staying in
+`PolySet`.
+
+The limit is worth stating too: the fit gate catches a wrong declaration only
+when it does not match the mesh. `minkowski()` is dropped precisely because it
+changes a radius in a way that could still fit something else, and a user-facing
+declaration inherits that - someone can assert a cylinder which happens to fit a
+prism elsewhere in the part. Bounded, but not zero.
+
+### Ordered by value per unit of work
+
+1. **`rotate_extrude` reading its child node.** Small, and it turns the torus
+   from blocked into merely unfinished.
+2. **Fix the CGAL backend dropping records through booleans.** A bug, not a
+   feature, and invisible until someone changes backend.
+3. **A user-facing `declare_*` in the Python API.** The largest of the three,
+   and the only thing that reaches item 5 - which is 59% of the bayonet.
+4. **`FilletNode` declaring a B-spline.** No channel work at all: a surface
+   type, the matching, the emission, and the rim generalisation that item 2 has
+   been carrying all along.
 
 ## Method notes
 
