@@ -427,20 +427,21 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         if (rim.kind == AnalyticFeatures::RimRef::OTHER_BAND) shared_rim_edges.emplace(key, rim_edge[side]);
         else rim_of_loop.emplace(rim.loop, std::make_pair(rim_edge[side], !rim.wall_ccw));
       } else {
-        // an arc, from one end of the run to the other
-        const std::vector<int>& nb_loop = loops[rim.loop];
-        const std::size_t n = nb_loop.size();
-        const int first = nb_loop[rim.start];
-        const int last = nb_loop[(rim.start + rim.count) % n];
-        // the neighbour runs opposite to the wall, and a CIRCLE is counter
-        // clockwise about its own axis
-        const int from = rim.wall_ccw ? last : first;
-        const int to = rim.wall_ccw ? first : last;
+        // An arc, from one end of the rim to the other. A CIRCLE is counter
+        // clockwise about its own axis, so the arc is always written that way
+        // and the face's own direction is carried by rim_sense.
+        const int from = rim.ccw_start, to = rim.ccw_end;
         auto circle = new Circle(
           entities, "", placement(centre, band.axis, (vertices[from] - centre).normalized()), radius);
         rim_edge[side] = new EdgeCurve(entities, get_vertex(from), get_vertex(to), circle, true);
         rim_sense[side] = rim.wall_ccw;
-        arc_subs[rim.loop].push_back({rim.start, rim.count, rim_edge[side], !rim.wall_ccw});
+        if (rim.kind == AnalyticFeatures::RimRef::OTHER_BAND_ARC) {
+          // shared with another partial band: one arc, two curved faces, no
+          // planar loop anywhere along it
+          shared_rim_edges.emplace(key, rim_edge[side]);
+        } else {
+          arc_subs[rim.loop].push_back({rim.start, rim.count, rim_edge[side], !rim.wall_ccw});
+        }
       }
     }
 
@@ -455,20 +456,19 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       loop.push_back(new OrientedEdge(entities, edge_seam, false));
       face_edges_here = {rim_edge[0], rim_edge[1], edge_seam};
     } else {
-      // walk back along the bottom rim, up the end edge, back along the top
-      // rim, down the other end edge
-      const std::vector<int>& nb_bottom = loops[rims[i].first.loop];
-      const std::vector<int>& nb_top = loops[rims[i].second.loop];
-      const int b_first = nb_bottom[rims[i].first.start];
-      const int b_last = nb_bottom[(rims[i].first.start + rims[i].first.count) % nb_bottom.size()];
-      const int t_first = nb_top[rims[i].second.start];
-      const int t_last = nb_top[(rims[i].second.start + rims[i].second.count) % nb_top.size()];
+      // walk along the bottom rim, up the end edge, back along the top rim,
+      // down the other end edge - so the ends are where one rim's traversal
+      // finishes and the other's begins
+      const int b_from = rims[i].first.traversalStart();
+      const int b_to = rims[i].first.traversalEnd();
+      const int t_from = rims[i].second.traversalStart();
+      const int t_to = rims[i].second.traversalEnd();
 
       bool up_dir = true, down_dir = true;
-      EdgeCurve *edge_up = get_line_from_map(edge_map, b_first, t_last, get_vertex(b_first),
-                                             get_vertex(t_last), up_dir, merged_edge_cnt);
-      EdgeCurve *edge_down = get_line_from_map(edge_map, t_first, b_last, get_vertex(t_first),
-                                               get_vertex(b_last), down_dir, merged_edge_cnt);
+      EdgeCurve *edge_up = get_line_from_map(edge_map, b_to, t_from, get_vertex(b_to),
+                                             get_vertex(t_from), up_dir, merged_edge_cnt);
+      EdgeCurve *edge_down = get_line_from_map(edge_map, t_to, b_from, get_vertex(t_to),
+                                               get_vertex(b_from), down_dir, merged_edge_cnt);
       loop.push_back(new OrientedEdge(entities, rim_edge[0], rim_sense[0]));
       loop.push_back(new OrientedEdge(entities, edge_up, up_dir));
       loop.push_back(new OrientedEdge(entities, rim_edge[1], rim_sense[1]));

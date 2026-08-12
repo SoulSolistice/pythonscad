@@ -65,21 +65,41 @@ struct Band {
  * A rim can only be collapsed into a circle when everything using its edges
  * agrees to the substitution. Three cases do:
  *
- *   WHOLE_LOOP  the rim is the complete bound of one neighbouring face
- *   LOOP_RUN    the rim is a consecutive run of edges inside one such loop
- *   OTHER_BAND  the rim is shared with another band, which is being collapsed
- *               too - a wall standing on a chamfer, and the case that keeps a
- *               chamfered body faceted until both halves can be written
+ *   WHOLE_LOOP      the rim is the complete bound of one neighbouring face
+ *   LOOP_RUN        the rim is a consecutive run of edges inside one such loop
+ *   OTHER_BAND      the whole circle is shared with another band, which is
+ *                   being collapsed too - a wall standing on a chamfer, and
+ *                   the case that keeps a chamfered body faceted until both
+ *                   halves can be written
+ *   OTHER_BAND_ARC  the same, for two bands that each stop short of a full
+ *                   turn: one arc bounding two curved faces. A bayonet lug is
+ *                   a wall on a chamfer on a wall, none of them going all the
+ *                   way round, so every joint in it is this case.
  *
  * Anything else - most often one neighbouring face per facet - leaves the band
  * faceted. */
 struct RimRef {
-  enum Kind { UNRESOLVED, WHOLE_LOOP, LOOP_RUN, OTHER_BAND };
+  enum Kind { UNRESOLVED, WHOLE_LOOP, LOOP_RUN, OTHER_BAND, OTHER_BAND_ARC };
   Kind kind = UNRESOLVED;
   std::size_t loop = 0;              // WHOLE_LOOP, LOOP_RUN
   std::size_t start = 0, count = 0;  // LOOP_RUN
-  std::size_t band = 0;              // OTHER_BAND
-  bool wall_ccw = false;             // the wall facets run counter clockwise
+  std::size_t band = 0;              // OTHER_BAND, OTHER_BAND_ARC
+
+  /*! The wall facets run counter clockwise about the axis, which is the
+   * direction the collapsed face has to traverse this rim: the face replaces
+   * those facets, so its boundary is theirs. */
+  bool wall_ccw = false;
+
+  /*! The two ends of the arc, in counter clockwise order, for a rim of a band
+   * that stops short of a full turn. Taken from the rim's own edges - the two
+   * vertices used by one of them rather than two - so they are the same
+   * whether the other side of the rim is a planar loop or another band. */
+  int ccw_start = -1, ccw_end = -1;
+
+  /*! Where the collapsed face's traversal of this rim begins and ends, which
+   * is the arc's two ends taken in the wall's direction. */
+  [[nodiscard]] int traversalStart() const { return wall_ccw ? ccw_start : ccw_end; }
+  [[nodiscard]] int traversalEnd() const { return wall_ccw ? ccw_end : ccw_start; }
 };
 
 /*! The mesh the recogniser reads, as the caller already has it.

@@ -21,22 +21,22 @@ Three subcommands:
             stage each attempt dies at; for working out why a wall that plainly
             fits was never even a candidate
 
-Two flags on `bands` model changes that are not in the C++ yet, so their gain
-can be measured before anything is written:
+`bands` replays the shipped recogniser, so two of its rules are on by default
+and can be switched off to reproduce the behaviour from before item 0 of
+doc/step-export.md:
 
-  --local-axis   take the band's axis from the seed's immediate neighbourhood
-                 instead of the unconstrained walk
-  --shared-arcs  let two *partial* bands share a rim, as two closed ones may
+  --no-local-axis   take the band's axis from the whole unconstrained walk
+                    again, instead of the seed's immediate neighbourhood
+  --no-shared-arcs  require both bands of a shared rim to cover the full turn
 
-Both are item 0 of doc/step-export.md. Once they land the flags become the
-shipped behaviour, and they are worth keeping only so the before/after stays
-reproducible.
+Running with and without them is how item 0's gain was measured, and is the
+cheapest check that a change to the recogniser has not lost ground.
 
 Examples:
 
     scripts/step-analytic-probe.py surfaces examples/step_test/foo.stp
     scripts/step-analytic-probe.py bands examples/step_test/foo.stp
-    scripts/step-analytic-probe.py bands --local-axis --shared-arcs foo.stp
+    scripts/step-analytic-probe.py bands --no-local-axis --no-shared-arcs foo.stp
     scripts/step-analytic-probe.py trace foo.stp --z 89.25 90.75 --r 78 79.5
 """
 
@@ -716,11 +716,15 @@ def main(argv=None):
         p.add_argument('--axis', type=float, nargs=3, default=[0., 0., 1.],
                        metavar=('X', 'Y', 'Z'), help='axis of revolution (default Z)')
         if flags:
-            p.add_argument('--local-axis', action='store_true',
+            p.add_argument('--local-axis', action=argparse.BooleanOptionalAction,
+                           default=True,
                            help="take the band's axis from the seed's "
-                                'neighbourhood, not the unconstrained walk')
-            p.add_argument('--shared-arcs', action='store_true',
-                           help='let two partial bands share a rim')
+                                'neighbourhood, not the unconstrained walk '
+                                '(default: on, as shipped)')
+            p.add_argument('--shared-arcs', action=argparse.BooleanOptionalAction,
+                           default=True,
+                           help='let two partial bands share a rim as an arc '
+                                '(default: on, as shipped)')
 
     p = sp.add_parser('bands', help="replay the recogniser and report each band's fate")
     common(p)

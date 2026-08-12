@@ -598,7 +598,7 @@ bayonet ramps, the hose thread and the transition polygons between them.
 | --- | --- | --- |
 | on a surface of revolution | 664 | — |
 | collapsed by the shipped rules | 568 | 13 |
-| collapsed with the two changes below | 628 | 25 |
+| collapsed after item 0 (both changes below) | 628 | 25 |
 | still faceted after both | 36 | — |
 
 So the remaining headroom in the whole recognisable part of this model is 96
@@ -620,7 +620,9 @@ never raise them, which is what makes them a ceiling.
 
 ### The two changes worth making
 
-Both were found by the same run, and both are small.
+Both were found by the same run, both are small, and both have landed - this
+section is kept as the record of how they were found and what they were worth,
+because the shape of the finding generalises further than the fix does.
 
 **The axis is derived from a walk that has not been constrained yet.** The band
 walk runs twice — once freely to pin down the surface, then again admitting only
@@ -668,11 +670,18 @@ elsewhere in this file still resolve; only the order changed. Item 4 moved from
 first to last, and item 5 is new and did not previously exist as work at all —
 it is the largest thing in the bayonet and the only item that unblocks another.
 
-### 0. The two changes above
+### 0. The two changes above - done
 
-Measured, prototyped, not yet written in C++. They are the cheapest remaining
-work on this list by a wide margin and they are the only items whose gain on a
-real part has been measured rather than estimated. Do these first.
+`step-shared-arc.scad` is the fixture for the second; the first needs none,
+because `step-partial-cylinder` already contains the shape that provoked it and
+simply recognises more of it now.
+
+One adjacent case was deliberately left: the *probe fit* that seeds the
+constrained walk still takes its four vertices from the first three facets of
+the unconstrained walk, which is the same weakness the axis had. Substituting
+the seed's own neighbourhood there changed nothing measurable on the bayonet,
+so it was not made blind - but it is the obvious first suspect if a wall that
+plainly fits is ever missing again.
 
 ### 1. `rotate_extrude` declaring its own surfaces
 

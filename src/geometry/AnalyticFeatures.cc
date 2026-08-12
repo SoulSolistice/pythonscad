@@ -160,6 +160,39 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     }
   };
 
+  // The chords of a set of facets: the edges which are not rulings. They all
+  // lie in a plane perpendicular to the axis.
+  auto chords_of = [&](const std::vector<std::size_t>& walls, const std::map<std::size_t, int>& entry) {
+    std::vector<Vector3d> chords;
+    for (const std::size_t f : walls) {
+      const int r = entry.at(f);
+      for (const int c : {(r + 1) % 4, (r + 3) % 4}) {
+        const Vector3d dir = vertices[loops[f][(c + 1) % 4]] - vertices[loops[f][c]];
+        if (dir.norm() > 1e-12) chords.push_back(dir.normalized());
+      }
+    }
+    return chords;
+  };
+
+  // Two chords which are not parallel fix the axis exactly.
+  auto axis_from = [](const std::vector<Vector3d>& chords) {
+    for (std::size_t c = 1; c < chords.size(); c++) {
+      const Vector3d n = chords[0].cross(chords[c]);
+      if (n.norm() < 1e-9) continue;
+      Vector3d axis = n.normalized();
+      if (axis[2] < 0 || (axis[2] == 0 && axis[0] < 0)) axis = -axis;
+      return axis;
+    }
+    return Vector3d(0, 0, 0);
+  };
+
+  auto perpendicular_to = [](const std::vector<Vector3d>& chords, const Vector3d& axis) {
+    for (const Vector3d& c : chords) {
+      if (fabs(c.dot(axis)) >= 1e-9) return false;
+    }
+    return true;
+  };
+
   for (std::size_t seed = 0; seed < face_cnt; seed++) {
     if (!loop_valid[seed] || consumed[seed] || loop_is_hole[seed]) continue;
     if (loops[seed].size() != 4) continue;
@@ -175,31 +208,34 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       walk_strip(seed, side, walls, entry, nullptr);
       if (walls.size() < 3) continue;
 
-      // The chords - the edges which are not rulings - all lie in a plane
-      // perpendicular to the axis, so two of them which are not parallel fix
-      // the axis exactly.
-      std::vector<Vector3d> chords;
+      // Take the axis from the seed and the facets joined to it across a
+      // ruling, and from nothing else.
+      //
+      // Taking it from the whole free walk looks more robust and is not: where
+      // that walk runs off the surface it brings foreign chords back with it,
+      // the perpendicularity test below rejects them, and the candidate is
+      // thrown away before the constrained walk ever gets the chance to clean
+      // it up. That is how four lug chamfers of the bayonet container came to
+      // be silently unrecognisable - the walk crossed the end of a five quad
+      // strip into the lug's side face, turned through ninety degrees there
+      // because entering a quad by a different edge redefines which pair of
+      // its edges are rulings, and came back with four of fourteen chords
+      // perpendicular to nothing. Two chords is all the axis needs, and the
+      // seed's own neighbours are the two it can trust.
+      std::vector<std::size_t> near{seed};
       for (const std::size_t f : walls) {
-        const int r = entry[f];
-        for (const int c : {(r + 1) % 4, (r + 3) % 4}) {
-          const Vector3d dir = vertices[loops[f][(c + 1) % 4]] - vertices[loops[f][c]];
-          if (dir.norm() > 1e-12) chords.push_back(dir.normalized());
+        if (f == seed) continue;
+        bool joined = false;
+        for (int j = 0; j < 4 && !joined; j++) {
+          const auto key = edge_key(loops[f][j], loops[f][(j + 1) % 4]);
+          for (const int s : {side, (side + 2) % 4}) {
+            if (key == edge_key(loops[seed][s], loops[seed][(s + 1) % 4])) joined = true;
+          }
         }
+        if (joined) near.push_back(f);
       }
-      if (chords.size() < 2) continue;
-      Vector3d axis(0, 0, 0);
-      for (std::size_t c = 1; c < chords.size(); c++) {
-        const Vector3d n = chords[0].cross(chords[c]);
-        if (n.norm() > 1e-9) {
-          axis = n.normalized();
-          break;
-        }
-      }
+      const Vector3d axis = axis_from(chords_of(near, entry));
       if (axis.norm() < 0.5) continue;
-      if (axis[2] < 0 || (axis[2] == 0 && axis[0] < 0)) axis = -axis;
-      bool perpendicular_ok = true;
-      for (const Vector3d& c : chords) perpendicular_ok = perpendicular_ok && fabs(c.dot(axis)) < 1e-9;
-      if (!perpendicular_ok) continue;
 
       // Fit the surface from the seed and its first two neighbours - four
       // vertices on each rim, which is enough - and walk again, this time
@@ -246,6 +282,13 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         walk_strip(seed, side, walls, entry, &on_surface);
         if (walls.size() < 3) continue;
       }
+
+      // Now that the walk is confined to one surface, the whole band has to
+      // agree with the axis the seed's neighbourhood gave. This is the test
+      // that used to run against the free walk, moved to the only set of
+      // facets it can be asked of meaningfully - a seed whose neighbourhood
+      // happens to give a wrong axis is still rejected here, just later.
+      if (!perpendicular_to(chords_of(walls, entry), axis)) continue;
 
       // every wall vertex has to sit on one of the two rims
       std::map<int, double> along;
@@ -359,6 +402,41 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     return out;
   };
 
+  // The two ends of a rim that stops short of a full turn, counter clockwise
+  // about the axis.
+  //
+  // They come out of the rim's own edges - the two vertices used by one of them
+  // rather than two - and not out of whatever lies on the far side. That is
+  // what lets a rim shared between two bands be handled at all, since there is
+  // no neighbouring loop there to index into, and it keeps one code path for
+  // both cases rather than two that can drift apart.
+  //
+  // Ordering them by angle would put the branch cut of atan2 in the way; the
+  // sign of one cross product of two *adjacent* rim vertices does not, because
+  // adjacent rim vertices are a whole facet apart.
+  auto rim_ends = [&](std::size_t bi, bool bottom, int& ccw_start, int& ccw_end) {
+    const Band& band = bands[bi];
+    const auto edges = rim_edges(bi, bottom);
+    std::map<int, std::vector<int>> adjacent;
+    for (const auto& edge : edges) {
+      adjacent[edge.first].push_back(edge.second);
+      adjacent[edge.second].push_back(edge.first);
+    }
+    std::vector<int> ends;
+    for (const auto& kv : adjacent) {
+      if (kv.second.size() == 1) ends.push_back(kv.first);
+    }
+    if (ends.size() != 2) return false;
+
+    const Vector3d centre = bottom ? band.base : band.base + band.axis * band.height;
+    const Vector3d va = vertices[ends[0]] - centre;
+    const Vector3d vb = vertices[adjacent[ends[0]].front()] - centre;
+    const bool first_is_start = band.axis.dot(va.cross(vb)) > 0;
+    ccw_start = ends[first_is_start ? 0 : 1];
+    ccw_end = ends[first_is_start ? 1 : 0];
+    return true;
+  };
+
   // The direction the wall facets traverse a rim edge is the direction the
   // collapsed face has to traverse the whole rim: the face replaces those
   // facets, so its boundary is theirs.
@@ -442,9 +520,28 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     if (nb_bands.size() != 1 || *nb_bands.begin() == NO_BAND) { *why = "the rim borders one face per facet"; return false; }
     const std::size_t other = *nb_bands.begin();
     if (!bands[other].alive) { *why = "the band sharing this rim was dropped"; return false; }
-    // only between two full turns: a shared rim covered by several partial
-    // bands would have to be split into arcs on both sides at once
-    if (!band.closed || !bands[other].closed) { *why = "a shared rim needs both bands to cover the full turn"; return false; }
+    if (band.closed != bands[other].closed) { *why = "a shared rim needs both bands to be the same shape"; return false; }
+
+    if (!band.closed) {
+      // Two partial bands, so the shared rim is an arc rather than a circle -
+      // a bayonet lug is a wall on a chamfer on a wall and none of the three
+      // goes all the way round, so every joint in one is this case.
+      //
+      // It is the same substitution the closed case makes, and safe under the
+      // same condition strengthened: the two bands have to meet along the
+      // *whole* of the rim. If either had rim edges the other lacked, the arc
+      // would have to be split on one side and not the other, and the two
+      // faces could no longer share one edge.
+      for (const bool other_bottom : {true, false}) {
+        if (rim_edges(other, other_bottom) != edges) continue;
+        out.kind = RimRef::OTHER_BAND_ARC;
+        out.band = other;
+        return true;
+      }
+      *why = "the two partial bands share only part of the rim";
+      return false;
+    }
+
     if (others.size() != bands[other].walls.size()) { *why = "the shared rim does not cover the whole neighbouring band"; return false; }
     out.kind = RimRef::OTHER_BAND;
     out.band = other;
@@ -452,15 +549,16 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
   };
 
   // The end edges of a partial band have to be edges the mesh already has.
+  //
+  // The face closes by running along the bottom rim, up one end, back along
+  // the top rim and down the other, so the two ends it needs are "where the
+  // bottom traversal finishes to where the top traversal starts" and the
+  // reverse. If those are not edges of the mesh the face would be closed with
+  // a diagonal that is not an edge at all, which opens the shell against every
+  // face that shares the real one.
   auto ends_line_up = [&](const RimRef& bottom, const RimRef& top) {
-    const std::vector<int>& nb_bottom = loops[bottom.loop];
-    const std::vector<int>& nb_top = loops[top.loop];
-    const int b_first = nb_bottom[bottom.start];
-    const int b_last = nb_bottom[(bottom.start + bottom.count) % nb_bottom.size()];
-    const int t_first = nb_top[top.start];
-    const int t_last = nb_top[(top.start + top.count) % nb_top.size()];
-    return loop_edges_map.count(edge_key(b_first, t_last)) != 0 &&
-           loop_edges_map.count(edge_key(t_first, b_last)) != 0;
+    return loop_edges_map.count(edge_key(bottom.traversalEnd(), top.traversalStart())) != 0 &&
+           loop_edges_map.count(edge_key(top.traversalEnd(), bottom.traversalStart())) != 0;
   };
 
   // Two bands must not rewrite the same planar loop, or the same run of it.
@@ -481,15 +579,28 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       }
 
       // A full turn collapses each rim into a closed circle, which can only
-      // replace a whole loop or the matching rim of another band; a partial
-      // band collapses each rim into an arc, which only ever replaces a run.
-      // Anything else would put a closed circle in the middle of a loop.
+      // replace a whole loop or the matching rim of another closed band; a
+      // partial band collapses each rim into an arc, which either replaces a
+      // run of a loop or is shared with another partial band. Anything else
+      // would put a closed circle in the middle of a loop, or an arc where a
+      // whole bound was wanted.
+      auto is_arc = [](const RimRef& rim) {
+        return rim.kind == RimRef::LOOP_RUN || rim.kind == RimRef::OTHER_BAND_ARC;
+      };
       const bool shapes_ok =
-        bands[i].closed ? (bottom.kind != RimRef::LOOP_RUN && top.kind != RimRef::LOOP_RUN)
-                        : (bottom.kind == RimRef::LOOP_RUN && top.kind == RimRef::LOOP_RUN);
+        bands[i].closed ? (!is_arc(bottom) && !is_arc(top)) : (is_arc(bottom) && is_arc(top));
       if (!shapes_ok) {
         bands[i].alive = false;
-        bands[i].dropped = "a rim is a run of a loop, but the band covers the full turn";
+        bands[i].dropped = "a rim is an arc, but the band covers the full turn";
+        changed = true;
+        continue;
+      }
+
+      // Both ends of a partial band's rims, taken from the rims themselves.
+      if (!bands[i].closed && !(rim_ends(i, true, bottom.ccw_start, bottom.ccw_end) &&
+                                rim_ends(i, false, top.ccw_start, top.ccw_end))) {
+        bands[i].alive = false;
+        bands[i].dropped = "a rim of the band has no two ends";
         changed = true;
         continue;
       }
