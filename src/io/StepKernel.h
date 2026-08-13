@@ -477,6 +477,75 @@ public:
     RoundType(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
   };
 
+  /*! A tensor-product Bezier written as a B-spline with knots.
+   *
+   * A Bezier of degree d is the B-spline whose only knots are 0 and 1, each
+   * with multiplicity d+1, so no knot vector has to be invented: the control
+   * net is written straight out and the parameterisation follows. Both patches
+   * a fillet draws are degree 2 in at least one direction, and the corner's
+   * apex row makes three of its control points coincide - a singular point,
+   * which is how a rounded corner is normally written. */
+  class BSplineSurface : public SurfaceType
+  {
+  public:
+    BSplineSurface(std::vector<Entity *>& ent_list) : SurfaceType(ent_list) {}
+    BSplineSurface(std::vector<Entity *>& ent_list, std::string name_in, int degree_u_in,
+                   int degree_v_in, std::vector<std::vector<Point *>> net_in)
+      : SurfaceType(ent_list)
+    {
+      label = std::move(name_in);
+      degree_u = degree_u_in;
+      degree_v = degree_v_in;
+      net = std::move(net_in);
+    }
+    virtual ~BSplineSurface() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = B_SPLINE_SURFACE_WITH_KNOTS('" << label << "'," << degree_u << ","
+                << degree_v << ",(";
+      for (std::size_t i = 0; i < net.size(); i++) {
+        stream_in << (i ? ",(" : "(");
+        for (std::size_t j = 0; j < net[i].size(); j++) {
+          stream_in << (j ? ",#" : "#") << net[i][j]->id;
+        }
+        stream_in << ")";
+      }
+      stream_in << "),.UNSPECIFIED.,.F.,.F.,.F.,(" << degree_u + 1 << "," << degree_u + 1 << "),("
+                << degree_v + 1 << "," << degree_v + 1 << "),(0.,1.),(0.,1.),.UNSPECIFIED.);\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    int degree_u = 0, degree_v = 0;
+    std::vector<std::vector<Point *>> net;  // net[u][v]
+  };
+
+  /*! One boundary curve of such a patch: a row or a column of its net. */
+  class BSplineCurve : public RoundType
+  {
+  public:
+    BSplineCurve(std::vector<Entity *>& ent_list) : RoundType(ent_list) {}
+    BSplineCurve(std::vector<Entity *>& ent_list, std::string name_in, std::vector<Point *> pts_in)
+      : RoundType(ent_list)
+    {
+      label = std::move(name_in);
+      pts = std::move(pts_in);
+    }
+    virtual ~BSplineCurve() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      const int degree = int(pts.size()) - 1;
+      stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << degree << ",(";
+      for (std::size_t i = 0; i < pts.size(); i++) stream_in << (i ? ",#" : "#") << pts[i]->id;
+      stream_in << "),.UNSPECIFIED.,.F.,.F.,(" << degree + 1 << "," << degree + 1
+                << "),(0.,1.),.UNSPECIFIED.);\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    std::vector<Point *> pts;
+  };
+
   class Circle : public RoundType
   {
   public:

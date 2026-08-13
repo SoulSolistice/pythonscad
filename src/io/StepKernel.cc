@@ -346,6 +346,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // geometry/AnalyticFeatures - everything below this point is the STEP
   // specific half, turning its answer into entities.
   AnalyticFeatures::Result features;
+  std::vector<AnalyticFeatures::Patch> bezier_patches;
   features.consumed.assign(face_cnt, 0);  // nothing collapsed unless it says so
   if (analytic) {
     // Say so even when there is nothing, so that a model whose declarations
@@ -369,7 +370,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // patch that is silently not recognised looks exactly like one that was
     // never declared, which is the same trap the band report was added for.
     std::vector<std::string> patch_report;
-    const std::vector<AnalyticFeatures::Patch> patches =
+    std::vector<AnalyticFeatures::Patch> patches =
       AnalyticFeatures::recogniseBezierPatches(mesh, surfaces, features.consumed, patch_report);
     for (const auto& line : patch_report) printf("STEP export: %s (not yet written)\n", line.c_str());
     std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
@@ -410,6 +411,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       printf("STEP export: writing them would give %d faces instead of %d\n",
              int(face_cnt - covered + live), int(face_cnt));
     }
+    bezier_patches = patches;
   }
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
   const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;
