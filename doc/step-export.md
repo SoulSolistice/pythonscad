@@ -1033,6 +1033,40 @@ makes the curve generalisation mandatory for either, exactly as this item
 originally said - what has changed is that there is now something to generalise
 *to*, and a measured reason to want it.
 
+#### PythonSCAD's fillet is not a fillet
+
+Comparing a filleted cube against the same part filleted in SolidWorks says
+something the face counts hide. SolidWorks writes **6 PLANE, 12
+CYLINDRICAL_SURFACE and 8 SPHERICAL_SURFACE** - 26 faces, bounded by 24 circles
+and 24 lines. That is what a fillet *is*: a quarter cylinder along each edge and
+an octant of a sphere at each corner, all of radius r.
+
+`FilletNode` draws neither. Its rails are quadratic Beziers, and a quadratic
+Bezier through those control points is a **parabola**, not a circular arc - a
+circle needs a rational quadratic, with the middle weight at cos 45. Measured on
+`cube(10, center=True).fillet(1, fn=12)`, the twelve points of one cross-section
+sit between 1.000000 and 1.059690 from the axis a true fillet would turn about,
+where every one of them should be exactly 1:
+
+| | distance from the edge, at the middle of the arc |
+| --- | --- |
+| what a quadratic Bezier gives | 0.3536 |
+| what `fillet(1)` measures | 0.3622 |
+| what a quarter circle of r = 1 gives | 0.4142 |
+
+**Six per cent of the radius**, and it is in the mesh, so it is in every export
+and every print, not only in STEP. `fillet(1)` does not produce a 1 mm fillet.
+
+This reframes the item rather than blocking it. Writing the patches as
+B-splines is faithful to what `FilletNode` draws, and that is worth having for
+any generator whose surfaces really are splines. But if `FilletNode` drew
+circular arcs instead, a filleted cube would be 12 cylinders and 8 spheres - the
+same 26 faces SolidWorks writes, in entity types this exporter *already*
+declares, recognises and emits. The B-spline machinery would not be needed for
+fillets at all.
+
+So the order is: fix the geometry first, and see what is left for the splines.
+
 #### Where this item stands
 
 `BezierPatchSurface` exists and is verified: evaluation by de Casteljau,
