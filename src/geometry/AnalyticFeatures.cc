@@ -320,7 +320,12 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
     for (std::size_t pi = 0; pi < patches.size(); pi++) {
       if (!patches[pi].alive) continue;
       for (auto& run : patches[pi].runs) {
-        std::set<std::size_t> others;
+        // Which face is on the other side of each segment. When that face
+        // belongs to another patch the answer is the *patch*, not the face: a
+        // run of eleven segments against a corner patch borders eleven
+        // different triangles of it, so asking for one neighbouring loop
+        // rejects every rail on a filleted solid.
+        std::set<std::size_t> other_loops, other_patches;
         bool ok = run.verts.size() >= 2;
         for (std::size_t i = 0; ok && i + 1 < run.verts.size(); i++) {
           const auto it = edge_loops.find(edgeKey(run.verts[i], run.verts[i + 1]));
@@ -331,17 +336,20 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
           const std::size_t a = it->second[0], b = it->second[1];
           const auto own = patch_of_loop.find(a);
           const std::size_t other = (own != patch_of_loop.end() && own->second == pi) ? b : a;
-          others.insert(other);
+          const auto op = patch_of_loop.find(other);
+          if (op != patch_of_loop.end()) other_patches.insert(op->second);
+          else other_loops.insert(other);
         }
-        if (!ok || others.size() != 1) continue;  // stays UNRESOLVED
-        const std::size_t other = *others.begin();
-        const auto op = patch_of_loop.find(other);
-        if (op != patch_of_loop.end()) {
-          if (op->second == pi) continue;  // folded back on itself
+        if (!ok) continue;  // stays UNRESOLVED
+        if (!other_patches.empty()) {
+          if (other_patches.size() != 1 || !other_loops.empty()) continue;
+          if (*other_patches.begin() == pi) continue;  // folded back on itself
           run.kind = Patch::Run::OTHER_PATCH;
-          run.patch = op->second;
+          run.patch = *other_patches.begin();
           continue;
         }
+        if (other_loops.size() != 1) continue;
+        const std::size_t other = *other_loops.begin();
         // A stretch of one neighbouring face. Find where it starts, so the
         // caller can replace exactly those segments and leave the rest.
         const std::vector<int>& loop = loops[other];
@@ -352,12 +360,14 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
           for (std::size_t c = 0; c < run.count; c++) {
             const int a = loop[(j + c) % n], b = loop[(j + c + 1) % n];
             fwd = fwd && a == run.verts[c] && b == run.verts[c + 1];
-            rev = rev && b == run.verts[run.count - c] && a == run.verts[run.count - c - 1];
+            // the neighbour walking the same segments the other way round
+            rev = rev && a == run.verts[run.count - c] && b == run.verts[run.count - c - 1];
           }
           if (!fwd && !rev) continue;
           run.kind = run.count == n ? Patch::Run::WHOLE_LOOP : Patch::Run::LOOP_RUN;
           run.loop = other;
           run.start = j;
+          run.reversed = !fwd;
           break;
         }
       }

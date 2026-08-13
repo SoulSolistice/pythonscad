@@ -175,6 +175,7 @@ struct Patch {
     std::size_t loop = 0;              // WHOLE_LOOP, LOOP_RUN
     std::size_t start = 0, count = 0;  // LOOP_RUN
     std::size_t patch = 0;             // OTHER_PATCH
+    bool reversed = false;             // the neighbour traverses the run backwards
   };
   std::vector<Run> runs;
 
