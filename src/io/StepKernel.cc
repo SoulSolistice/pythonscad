@@ -348,6 +348,11 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   AnalyticFeatures::Result features;
   features.consumed.assign(face_cnt, 0);  // nothing collapsed unless it says so
   if (analytic) {
+    // Say so even when there is nothing, so that a model whose declarations
+    // never arrived cannot be mistaken for a build that predates them. The
+    // availability line above prints only when the list is non-empty, which
+    // makes those two cases look identical - silence.
+    if (surfaces.empty()) printf("STEP export: no analytic surfaces were declared\n");
     AnalyticFeatures::Mesh mesh;
     mesh.vertices = &vertices;
     mesh.loops = &loops;
