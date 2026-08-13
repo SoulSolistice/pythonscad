@@ -408,8 +408,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         "STEP export: those runs border %d whole faces, %d stretches of a face, %d other patches, "
         "%d unresolved\n",
         whole, part, shared, stuck);
-      printf("STEP export: written as %d faces instead of %d\n",
-             int(face_cnt - covered + live), int(face_cnt));
+      printf("STEP export: written as %d faces instead of %d\n", int(face_cnt - covered + live),
+             int(face_cnt));
     }
     // Only patches whose every boundary can be substituted are written. One
     // that cannot stays faceted, which is always a valid export.
