@@ -104,6 +104,66 @@ private:
   int operator==(const Surface& other) override { return 0; }
 };
 
+/*! A tensor-product Bezier patch, declared by the generator that drew it.
+ *
+ * `FilletNode` builds its surfaces from explicit quadratic Bezier control
+ * points and then tessellates them, so the exact surface is known before the
+ * mesh exists and there is nothing to fit. That is the general rule for
+ * splines: there is no unique spline underlying a triangle mesh, so never
+ * recover one - have the generator say what it drew.
+ *
+ * Two shapes occur, and both come out of `FilletNode` by algebra:
+ *
+ *   an edge fillet   degree (2,1), a 3x2 net. The rail along one end is the
+ *                    quadratic Bezier (p + e_fa, p, p + e_fb) - it starts on
+ *                    one of the two faces meeting at the edge, is controlled by
+ *                    the original edge vertex, and ends on the other. The strip
+ *                    is the ruled surface between the two rails.
+ *   a corner fillet  degree (2,2), a 3x3 net whose last row is the apex three
+ *                    times. It looks like a triangular patch, but every row is
+ *                    a quadratic Bezier between the two rails through a control
+ *                    point mixing their coordinates, and all three of those are
+ *                    quadratic in the row parameter. The degenerate row is a
+ *                    singular point, which is how a rounded corner is normally
+ *                    written in STEP.
+ *
+ * The boundary curves need no separate declaration: each is a row or a column
+ * of the net, so an exporter reads them off the record the way it reads a
+ * torus's two seam circles off theirs. */
+class BezierPatchSurface : public Surface
+{
+public:
+  /*! `net` holds (degree_u + 1) * (degree_v + 1) control points, v varying
+   * fastest. */
+  BezierPatchSurface(int degree_u, int degree_v, std::vector<Vector3d> net);
+  void display(const std::vector<Vector3d>& vertices) override;
+  int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
+  [[nodiscard]] std::shared_ptr<Surface> clone() const override;
+  bool transform(const Transform3d& mat) override;
+  [[nodiscard]] bool sameAs(const Surface& other) const override;
+
+  [[nodiscard]] const Vector3d& control(int i, int j) const { return net[i * (degree_v + 1) + j]; }
+  [[nodiscard]] Vector3d evaluate(double u, double v) const;
+
+  /*! One row (`along_u` false) or one column (true) of the net, which is the
+   * boundary curve along that edge of the patch. */
+  [[nodiscard]] std::vector<Vector3d> boundary(bool along_u, bool far) const;
+
+  /*! Closest point on the patch to `pt`, by Newton from a grid of starts.
+   * Returns false when it does not converge. */
+  bool project(const Vector3d& pt, double& u, double& v) const;
+
+  /*! The patch has collapsed to a point along one edge, as a corner fillet's
+   * apex row has. */
+  [[nodiscard]] bool degenerateAt(bool along_u, bool far) const;
+
+  int degree_u, degree_v;
+  std::vector<Vector3d> net;
+
+private:
+  int operator==(const Surface& other) override { return 0; }
+};
+
 class CylinderSurface : public Surface
 {
 public:

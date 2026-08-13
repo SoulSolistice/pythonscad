@@ -1021,6 +1021,34 @@ makes the curve generalisation mandatory for either, exactly as this item
 originally said - what has changed is that there is now something to generalise
 *to*, and a measured reason to want it.
 
+#### Where this item stands
+
+`BezierPatchSurface` exists and is verified: evaluation by de Casteljau,
+projection by Gauss-Newton from a grid of starting parameters, and the boundary
+curves read off as rows and columns of the net. `tests/bezier-patch-check.cc`
+builds both patch kinds the way `FilletNode` tessellates them and checks every
+vertex - 3754 accepted with none missed, and 312 points deliberately off the
+surface rejected with none wrongly accepted.
+
+Two things about it are worth keeping in mind. A Bezier is affine invariant, so
+unlike a cylinder it survives a non uniform scale and a shear - `transform()`
+moves the control points and always succeeds, where `CylinderSurface::transform`
+has to refuse. And the projection starts from a 5x5 grid rather than the middle
+of the patch, because a corner fillet is degenerate at its apex and the
+derivative vanishes there.
+
+Nothing constructs one yet, so it changes no output. What remains: `FilletNode`
+declaring the nets in world coordinates, a recognition pass that gathers the
+facets lying on a declared patch, the substitution of a run of edges by a
+`B_SPLINE_CURVE_WITH_KNOTS` read off the net, and the emission of
+`B_SPLINE_SURFACE_WITH_KNOTS`.
+
+Two incidental findings, both worth acting on separately: `OpenSCADUnitTests` is
+commented out in `CMakeLists.txt`, so no Catch2 test in this repository is
+built - which is why the check above is a standalone program - and
+`src/geometry/linear_extrude_test.cc` is not matched by the
+`src/utils/*_test.cc` glob even if it were.
+
 ### 3. Spheres - collapsed, without `SPHERICAL_SURFACE`
 
 Two things this item said were wrong, and finding out which cost one

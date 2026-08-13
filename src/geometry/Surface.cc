@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstddef>
 #include <memory>
 #include <typeinfo>
 #include <vector>
@@ -191,6 +193,164 @@ int TorusSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
   const double along = rel.dot(normdir);
   const double radial = (rel - normdir * along).norm();
   return fabs(sqrt((radial - r_major) * (radial - r_major) + along * along) - r_minor) > 1e-5 ? 0 : 1;
+}
+
+namespace {
+
+/*! de Casteljau, which is what a Bezier is: repeated linear interpolation.
+ * Stable, and short enough not to need the Bernstein basis written out. */
+Vector3d deCasteljau(std::vector<Vector3d> pts, double t)
+{
+  for (std::size_t k = pts.size(); k > 1; k--) {
+    for (std::size_t i = 0; i + 1 < k; i++) pts[i] = pts[i] * (1 - t) + pts[i + 1] * t;
+  }
+  return pts[0];
+}
+
+/*! The derivative of a Bezier is a Bezier of one degree less, on the
+ * differences of consecutive control points. */
+Vector3d deCasteljauDeriv(const std::vector<Vector3d>& pts, double t)
+{
+  if (pts.size() < 2) return Vector3d::Zero();
+  std::vector<Vector3d> d;
+  d.reserve(pts.size() - 1);
+  const double n = static_cast<double>(pts.size() - 1);
+  for (std::size_t i = 0; i + 1 < pts.size(); i++) d.push_back((pts[i + 1] - pts[i]) * n);
+  return deCasteljau(d, t);
+}
+
+}  // namespace
+
+BezierPatchSurface::BezierPatchSurface(int degree_u, int degree_v, std::vector<Vector3d> net)
+  : degree_u(degree_u), degree_v(degree_v), net(std::move(net))
+{
+  // The base class's refpt and normdir are only used for identity, never for
+  // geometry: a patch is its control net and nothing else. A corner of the net
+  // is stable under everything that can move the patch.
+  this->refpt = this->net.empty() ? Vector3d::Zero() : this->net.front();
+  this->normdir = Vector3d(0, 0, 1);
+}
+
+void BezierPatchSurface::display(const std::vector<Vector3d>& vertices)
+{
+  printf("BezierPatchSurface degree (%d,%d), %zu control points\n", degree_u, degree_v, net.size());
+}
+
+std::shared_ptr<Surface> BezierPatchSurface::clone() const
+{
+  return std::make_shared<BezierPatchSurface>(*this);
+}
+
+bool BezierPatchSurface::transform(const Transform3d& mat)
+{
+  // A Bezier is affine invariant: transforming the control points transforms
+  // the surface exactly. Unlike a cylinder, this survives a non uniform scale
+  // and a shear as well, so there is no similarity test to pass.
+  for (auto& p : net) p = mat * p;
+  refpt = net.empty() ? Vector3d::Zero() : net.front();
+  return true;
+}
+
+bool BezierPatchSurface::sameAs(const Surface& other) const
+{
+  if (typeid(*this) != typeid(other)) return false;
+  const auto& o = static_cast<const BezierPatchSurface&>(other);
+  if (degree_u != o.degree_u || degree_v != o.degree_v || net.size() != o.net.size()) return false;
+  for (std::size_t i = 0; i < net.size(); i++) {
+    if ((net[i] - o.net[i]).norm() > 1e-9) return false;
+  }
+  return true;
+}
+
+Vector3d BezierPatchSurface::evaluate(double u, double v) const
+{
+  std::vector<Vector3d> along_u;
+  along_u.reserve(degree_u + 1);
+  for (int i = 0; i <= degree_u; i++) {
+    std::vector<Vector3d> row;
+    row.reserve(degree_v + 1);
+    for (int j = 0; j <= degree_v; j++) row.push_back(control(i, j));
+    along_u.push_back(deCasteljau(row, v));
+  }
+  return deCasteljau(along_u, u);
+}
+
+std::vector<Vector3d> BezierPatchSurface::boundary(bool along_u, bool far) const
+{
+  std::vector<Vector3d> out;
+  if (along_u) {
+    const int j = far ? degree_v : 0;
+    for (int i = 0; i <= degree_u; i++) out.push_back(control(i, j));
+  } else {
+    const int i = far ? degree_u : 0;
+    for (int j = 0; j <= degree_v; j++) out.push_back(control(i, j));
+  }
+  return out;
+}
+
+bool BezierPatchSurface::degenerateAt(bool along_u, bool far) const
+{
+  const std::vector<Vector3d> edge = boundary(along_u, far);
+  for (const auto& p : edge) {
+    if ((p - edge.front()).norm() > 1e-9) return false;
+  }
+  return true;
+}
+
+bool BezierPatchSurface::project(const Vector3d& pt, double& u, double& v) const
+{
+  // Minimise |S(u,v) - pt|^2 by Newton. A patch this shallow has no local
+  // minima worth worrying about, but a corner fillet is degenerate at its apex
+  // and the derivative vanishes there, so start from a grid rather than the
+  // middle and keep the best answer.
+  double best = -1;
+  for (int gi = 0; gi <= 4; gi++) {
+    for (int gj = 0; gj <= 4; gj++) {
+      double cu = gi / 4.0, cv = gj / 4.0;
+      for (int iter = 0; iter < 40; iter++) {
+        std::vector<Vector3d> along_u, dv_u;
+        for (int i = 0; i <= degree_u; i++) {
+          std::vector<Vector3d> row;
+          for (int j = 0; j <= degree_v; j++) row.push_back(control(i, j));
+          along_u.push_back(deCasteljau(row, cv));
+          dv_u.push_back(deCasteljauDeriv(row, cv));
+        }
+        const Vector3d s = deCasteljau(along_u, cu);
+        const Vector3d su = deCasteljauDeriv(along_u, cu);
+        const Vector3d sv = deCasteljau(dv_u, cu);
+        const Vector3d r = s - pt;
+
+        // gradient and Gauss-Newton approximation of the Hessian
+        const Vector2d g(r.dot(su), r.dot(sv));
+        Eigen::Matrix2d h;
+        h << su.dot(su), su.dot(sv), su.dot(sv), sv.dot(sv);
+        h(0, 0) += 1e-12;
+        h(1, 1) += 1e-12;
+        const Vector2d step = h.fullPivLu().solve(-g);
+        if (!step.allFinite()) break;
+        const double nu = std::min(1.0, std::max(0.0, cu + step[0]));
+        const double nv = std::min(1.0, std::max(0.0, cv + step[1]));
+        const bool done = fabs(nu - cu) < 1e-14 && fabs(nv - cv) < 1e-14;
+        cu = nu;
+        cv = nv;
+        if (done) break;
+      }
+      const double d = (evaluate(cu, cv) - pt).norm();
+      if (best < 0 || d < best) {
+        best = d;
+        u = cu;
+        v = cv;
+      }
+    }
+  }
+  return best >= 0;
+}
+
+int BezierPatchSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
+{
+  double u = 0, v = 0;
+  if (!project(pt, u, v)) return 0;
+  return (evaluate(u, v) - pt).norm() > 1e-7 ? 0 : 1;
 }
 
 CylinderSurface::CylinderSurface(Vector3d refpt, Vector3d normdir, double r)
