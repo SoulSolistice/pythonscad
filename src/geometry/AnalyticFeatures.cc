@@ -221,16 +221,24 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
         uses[edgeKey(loop[i], loop[(i + 1) % loop.size()])]++;
       }
     }
-    std::map<int, std::vector<int>> next;  // boundary adjacency
+    // Directed, in the sense the region's own facets traverse it. That is what
+    // makes the collapsed face agree with the mesh it replaces, and it is what
+    // forces the neighbour on the far side of every boundary segment to
+    // traverse it the other way round - the invariant that keeps the shell
+    // closed. An undirected walk gives an arbitrary direction, and half the
+    // faces then share an edge in the same direction as their neighbour.
+    std::map<int, int> next;  // boundary vertex -> the next one along
     std::size_t boundary_edges = 0;
-    for (const auto& [key, count] : uses) {
-      if (count != 1) continue;
-      next[key.first].push_back(key.second);
-      next[key.second].push_back(key.first);
-      boundary_edges++;
+    for (const std::size_t f : patch.facets) {
+      const std::vector<int>& loop = loops[f];
+      for (std::size_t i = 0; i < loop.size(); i++) {
+        const int a = loop[i], b = loop[(i + 1) % loop.size()];
+        if (uses[edgeKey(a, b)] != 1) continue;
+        next[a] = b;
+        boundary_edges++;
+      }
     }
-    bool simple = boundary_edges > 0;
-    for (const auto& [v, adj] : next) simple = simple && adj.size() == 2;
+    bool simple = boundary_edges > 0 && next.size() == boundary_edges;
     if (!simple) {
       patch.alive = false;
       patch.dropped = "the facets on this patch do not form a simple sheet";
@@ -245,13 +253,10 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
     std::vector<int> edge_of;
     {
       const int start = next.begin()->first;
-      int prev = -1, cur = start;
+      int cur = start;
       do {
         cycle.push_back(cur);
-        const std::vector<int>& adj = next[cur];
-        const int step = adj[0] == prev ? adj[1] : adj[0];
-        prev = cur;
-        cur = step;
+        cur = next[cur];
       } while (cur != start && cycle.size() <= boundary_edges);
     }
     if (cycle.size() != boundary_edges) {

@@ -372,7 +372,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     std::vector<std::string> patch_report;
     std::vector<AnalyticFeatures::Patch> patches =
       AnalyticFeatures::recogniseBezierPatches(mesh, surfaces, features.consumed, patch_report);
-    for (const auto& line : patch_report) printf("STEP export: %s (not yet written)\n", line.c_str());
+    for (const auto& line : patch_report) printf("STEP export: %s\n", line.c_str());
     std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
     for (const auto& patch : patches) {
       if (!patch.alive) continue;
@@ -408,7 +408,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         "STEP export: those runs border %d whole faces, %d stretches of a face, %d other patches, "
         "%d unresolved\n",
         whole, part, shared, stuck);
-      printf("STEP export: writing them would give %d faces instead of %d\n",
+      printf("STEP export: written as %d faces instead of %d\n",
              int(face_cnt - covered + live), int(face_cnt));
     }
     // Only patches whose every boundary can be substituted are written. One
@@ -697,10 +697,14 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         face_edges_here.push_back(edge);
 
         // and the neighbouring planar face gives up the segments it replaces
+        // The region boundary is walked in the direction its own facets go, so
+        // the face on the far side necessarily goes the other way. Two faces
+        // traversing a shared edge the same way is precisely what leaves a
+        // shell open.
         if (run.kind == AnalyticFeatures::Patch::Run::WHOLE_LOOP) {
-          rim_of_loop[run.loop] = {edge, sense == run.reversed};
+          rim_of_loop[run.loop] = {edge, !sense};
         } else if (run.kind == AnalyticFeatures::Patch::Run::LOOP_RUN) {
-          arc_subs[run.loop].push_back({run.start, run.count, edge, sense == run.reversed});
+          arc_subs[run.loop].push_back({run.start, run.count, edge, !sense});
         }
       }
 
