@@ -578,6 +578,18 @@ exact. Everywhere else, only the generator knows the curve.
   there, and the sign of a coordinate which is zero to fifteen digits decided
   which side it fell on. One wall of five was dropped. Derive the second from
   the first.
+
+  The same trap, found again in `FilletNode` while probing it for declarations,
+  and this one had been shipping: the rail where an edge strip meets a corner
+  patch is computed by the strip as `p + e_fa - 2f*e_fa + f^2*(e_fa + e_fb)` and
+  by the corner as `center + mat * Bezier(...)`. Same point, different
+  arithmetic, one unit in the last place apart - `-4.471074380165288` against
+  `-4.471074380165289`. `PolySetBuilder`'s vertex lookup is exact, so the mesh
+  got two vertices where it needed one. A filleted cube exported with **48
+  quadrilateral holes**, one at every place a strip end meets a corner, and
+  SolidWorks imported it as loose surfaces instead of a solid. The crack is in
+  the `PolySet`, so it was never a STEP problem: every export of a filleted body
+  carried it.
 - **Grow a region by the surface, not by adjacency.** A band grown by crossing
   edges into any quad walks straight through a rib welded to the wall and out
   the far side. Fit the surface from the seed's neighbourhood first, then admit

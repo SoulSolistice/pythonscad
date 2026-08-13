@@ -37,7 +37,9 @@
 #include "src/geometry/Surface.h"
 
 #include <cmath>
+#include <map>
 #include <sstream>
+#include <tuple>
 
 #include <src/geometry/PolySetUtils.h>
 #include <src/core/Tree.h>
@@ -70,14 +72,74 @@ std::shared_ptr<const PolySet> childToPolySet(std::shared_ptr<AbstractNode> chil
   return PolySetUtils::getGeometryAsPolySet(geom);
 }
 
+namespace {
+
+/*! One vertex of a fillet gets computed twice, and the two answers differ.
+ *
+ * The rail where an edge strip meets a corner patch is generated once by the
+ * strip, as `p + e_fa - 2f*e_fa + f^2*(e_fa + e_fb)`, and once by the corner, as
+ * `center + mat * Bezier(...)`. Same point, different arithmetic, so they land
+ * one unit in the last place apart - and PolySetBuilder's vertex lookup is
+ * exact, so the mesh ended up with two vertices where it needed one and a crack
+ * between them. A filleted cube exported with 48 quadrilateral holes, one
+ * wherever a strip end meets a corner, and SolidWorks imported it as loose
+ * surfaces rather than a solid.
+ *
+ * Snapping to a grid fixes it, but the grid has to be fine. GRID_FINE is about
+ * 1e-6, coarser than the 1e-7 the exporter uses to decide whether a vertex lies
+ * on a declared surface, so aligning to that would push vertices off the very
+ * patches this file declares. 1e-9 is far above one ulp at any plausible model
+ * size and far below anything that is measured. */
+class VertexSnapper
+{
+public:
+  int index(PolySetBuilder& builder, const Vector3d& pt)
+  {
+    const Key key = keyOf(pt);
+    for (int64_t dx = -1; dx <= 1; dx++) {
+      for (int64_t dy = -1; dy <= 1; dy++) {
+        for (int64_t dz = -1; dz <= 1; dz++) {
+          const auto it =
+            known.find(Key{std::get<0>(key) + dx, std::get<1>(key) + dy, std::get<2>(key) + dz});
+          if (it != known.end()) return it->second;
+        }
+      }
+    }
+    return add(builder, pt);
+  }
+
+  /*! Allocate unconditionally, and record the position so later points snap
+   * onto it. The original mesh's vertices go through here rather than through
+   * index(): the fillet relies on vertex i of the input keeping index i, and
+   * merging two of them - however close together - would renumber the rest. */
+  int add(PolySetBuilder& builder, const Vector3d& pt)
+  {
+    const int id = builder.vertexIndex(pt);
+    known.emplace(keyOf(pt), id);
+    return id;
+  }
+
+private:
+  using Key = std::tuple<int64_t, int64_t, int64_t>;
+  static Key keyOf(const Vector3d& pt)
+  {
+    const double res = 1e-9;
+    return Key{(int64_t)llround(pt[0] / res), (int64_t)llround(pt[1] / res),
+               (int64_t)llround(pt[2] / res)};
+  }
+  std::map<Key, int> known;
+};
+
+}  // namespace
+
 // Credit: inphase Ryan Colyer
 Vector3d Bezier(double t, Vector3d a, Vector3d b, Vector3d c)
 {
   return (a * (1 - t) + b * t) * (1 - t) + (b * (1 - t) + c * t) * t;  // TODO improve
 }
 
-void bezier_patch(PolySetBuilder& builder, Vector3d center, Vector3d dir[3], int concave_1,
-                  int concave_2, int concave_3, int N)
+void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center,
+                  Vector3d dir[3], int concave_1, int concave_2, int concave_3, int N)
 {
   if ((dir[1].cross(dir[0])).dot(dir[2]) < 0) {
     Vector3d tmp = dir[0];
@@ -131,7 +193,7 @@ void bezier_patch(PolySetBuilder& builder, Vector3d center, Vector3d dir[3], int
     if (i == N - 1) {
       pt = zdir + 2 * (concave_1 + concave_2) * (xdir + ydir);
       pt = mat * pt;
-      points.push_back(builder.vertexIndex(pt + center));
+      points.push_back(snap.index(builder, pt + center));
     } else {
       int M = N - i;
       for (int j = 0; j < M; j++) {
@@ -142,7 +204,7 @@ void bezier_patch(PolySetBuilder& builder, Vector3d center, Vector3d dir[3], int
         pt = Bezier(t2, points_xz[i], Vector3d(points_xz[i][0], points_yz[i][1], points_xz[i][2]),
                     points_yz[i]);
         pt = mat * pt;
-        points.push_back(builder.vertexIndex(center + pt));
+        points.push_back(snap.index(builder, center + pt));
       }
     }
   }
@@ -412,8 +474,9 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
   // start builder with existing vertices to have VertexIndex available
   //
   PolySetBuilder builder;
+  VertexSnapper snap;
   for (size_t i = 0; i < vertices_copy.size(); i++) {
-    builder.vertexIndex(vertices_copy[i]);  // allocate all vertices in the right order
+    snap.add(builder, vertices_copy[i]);  // allocate all vertices in the right order
   }
 
   SearchReplace s;
@@ -564,9 +627,9 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
       for (int i = 0; i < bn; i++) {
         double f = (double)i / (double)(bn - 1);  // from 0 to 1
         e.second.bez1.push_back(
-          builder.vertexIndex(p1 + e_fa1 - 2 * f * e_fa1 + f * f * (e_fa1 + e_fb1)));
+          snap.index(builder, p1 + e_fa1 - 2 * f * e_fa1 + f * f * (e_fa1 + e_fb1)));
         e.second.bez2.push_back(
-          builder.vertexIndex(p2 + e_fa2 - 2 * f * e_fa2 + f * f * (e_fa2 + e_fb2)));
+          snap.index(builder, p2 + e_fa2 - 2 * f * e_fa2 + f * f * (e_fa2 + e_fb2)));
       }
 
       // Say what was just drawn. Expanding the rail above,
@@ -805,8 +868,8 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
         for (int i = 0; i < 3; i++) {
           pdir[i] = -dir[(i + dirshift) % 3];
         }
-        bezier_patch(builder, ps->vertices[i] - pdir[0] - pdir[1] - pdir[2], pdir, conc1, conc2, conc3,
-                     bn);
+        bezier_patch(builder, snap, ps->vertices[i] - pdir[0] - pdir[1] - pdir[2], pdir, conc1,
+                     conc2, conc3, bn);
       }
     }
   }
