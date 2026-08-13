@@ -377,11 +377,12 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
   // Two patches sharing a seam must agree on it exactly. They will share one
   // EdgeCurve, so a seam that is one run for one of them and two for the other
   // cannot be written at all.
-  std::size_t seam_mismatch = 0;
+  std::size_t seam_mismatch = 0, shared_seams = 0;
   for (std::size_t pi = 0; pi < patches.size(); pi++) {
     if (!patches[pi].alive) continue;
     for (auto& run : patches[pi].runs) {
       if (run.kind != Patch::Run::OTHER_PATCH) continue;
+      shared_seams++;
       const Patch& other = patches[run.patch];
       run.partner = std::size_t(-1);
       for (std::size_t ri = 0; ri < other.runs.size(); ri++) {
@@ -417,6 +418,13 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
   if (live > 0) {
     report.push_back(
       format("%d Bezier patch%s cover %d facets", int(live), live == 1 ? "" : "es", int(facets)));
+  }
+  if (shared_seams > 0) {
+    // Stated even when nothing is wrong. Reporting only the failures makes a
+    // clean run and a binary built before the check look identical - both print
+    // nothing - which is the same ambiguity the availability line had.
+    report.push_back(format("%d of %d shared seams agree between the two patches meeting there",
+                            int(shared_seams - seam_mismatch), int(shared_seams)));
   }
   return patches;
 }
