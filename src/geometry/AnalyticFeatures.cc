@@ -374,6 +374,36 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
     }
   }
 
+  // Two patches sharing a seam must agree on it exactly. They will share one
+  // EdgeCurve, so a seam that is one run for one of them and two for the other
+  // cannot be written at all.
+  std::size_t seam_mismatch = 0;
+  for (std::size_t pi = 0; pi < patches.size(); pi++) {
+    if (!patches[pi].alive) continue;
+    for (auto& run : patches[pi].runs) {
+      if (run.kind != Patch::Run::OTHER_PATCH) continue;
+      const Patch& other = patches[run.patch];
+      run.partner = std::size_t(-1);
+      for (std::size_t ri = 0; ri < other.runs.size(); ri++) {
+        const std::vector<int>& theirs = other.runs[ri].verts;
+        if (theirs.size() != run.verts.size()) continue;
+        bool same = true, flipped = true;
+        for (std::size_t k = 0; k < theirs.size(); k++) {
+          same = same && theirs[k] == run.verts[k];
+          flipped = flipped && theirs[k] == run.verts[theirs.size() - 1 - k];
+        }
+        if (same || flipped) {
+          run.partner = ri;
+          break;
+        }
+      }
+      if (run.partner == std::size_t(-1)) {
+        run.kind = Patch::Run::UNRESOLVED;
+        seam_mismatch++;
+      }
+    }
+  }
+
   std::size_t live = 0, facets = 0;
   for (const auto& p : patches) {
     if (!p.alive) {

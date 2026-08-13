@@ -176,6 +176,14 @@ struct Patch {
     std::size_t start = 0, count = 0;  // LOOP_RUN
     std::size_t patch = 0;             // OTHER_PATCH
     bool reversed = false;             // the neighbour traverses the run backwards
+
+    /*! For OTHER_PATCH, the run in that patch covering the same segments.
+     *
+     * The two have to be the same seam vertex for vertex, because they will
+     * share one curve: a face on either side of an edge that is one curve for
+     * one of them and two for the other leaves the shell open. NO_RUN when the
+     * partner disagrees, which the caller must treat as unsubstitutable. */
+    std::size_t partner = std::size_t(-1);
   };
   std::vector<Run> runs;
 
