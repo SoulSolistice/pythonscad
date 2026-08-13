@@ -138,8 +138,8 @@ Vector3d Bezier(double t, Vector3d a, Vector3d b, Vector3d c)
   return (a * (1 - t) + b * t) * (1 - t) + (b * (1 - t) + c * t) * t;  // TODO improve
 }
 
-void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center,
-                  Vector3d dir[3], int concave_1, int concave_2, int concave_3, int N)
+void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center, Vector3d dir[3],
+                  int concave_1, int concave_2, int concave_3, int N)
 {
   if ((dir[1].cross(dir[0])).dot(dir[2]) < 0) {
     Vector3d tmp = dir[0];
@@ -868,8 +868,8 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
         for (int i = 0; i < 3; i++) {
           pdir[i] = -dir[(i + dirshift) % 3];
         }
-        bezier_patch(builder, snap, ps->vertices[i] - pdir[0] - pdir[1] - pdir[2], pdir, conc1,
-                     conc2, conc3, bn);
+        bezier_patch(builder, snap, ps->vertices[i] - pdir[0] - pdir[1] - pdir[2], pdir, conc1, conc2,
+                     conc3, bn);
       }
     }
   }
