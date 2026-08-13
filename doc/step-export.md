@@ -1049,11 +1049,41 @@ has to refuse. And the projection starts from a 5x5 grid rather than the middle
 of the patch, because a corner fillet is degenerate at its apex and the
 derivative vanishes there.
 
-Nothing constructs one yet, so it changes no output. What remains: `FilletNode`
-declaring the nets in world coordinates, a recognition pass that gathers the
-facets lying on a declared patch, the substitution of a run of edges by a
-`B_SPLINE_CURVE_WITH_KNOTS` read off the net, and the emission of
-`B_SPLINE_SURFACE_WITH_KNOTS`.
+`FilletNode` declares both nets in world coordinates, at the two points where
+it draws them, and a recognition pass finds the facets on each and resolves
+every boundary. All of it is measured on a real filleted cube at `fn = 12`
+rather than on a transcription of the tessellation:
+
+```
+20 analytic surfaces available (0 cylindrical, 0 spherical, 0 toroidal, 20 Bezier)
+20 Bezier patches cover 1100 facets
+48 of 48 shared seams agree between the two patches meeting there
+their boundaries are 48 curved runs over 552 mesh edges, and 24 straight edges
+those runs border 0 whole faces, 24 stretches of a face, 48 other patches, 0 unresolved
+writing them would give 26 faces instead of 1106
+```
+
+1100 of 1106 facets, the six left over being the flat faces. Every boundary can
+be substituted, and both sides of every shared seam split it identically - which
+they must, because a seam becomes one `EdgeCurve` used by two faces, and a seam
+that is one run for the strip and two for the corner opens the shell along it.
+
+Three things had to be fixed to get there, and none of them was in the exporter:
+
+- **A patch run borders a patch, not a face.** A strip's rail of eleven segments
+  borders eleven different triangles of the corner it meets, so asking for one
+  neighbouring loop rejected all 48 curved runs. The test is agreement on one
+  neighbouring *patch*, falling back to one loop.
+- **The reversed match was off by one.** When the neighbour walks a run
+  backwards, `loop[j+c]` is `verts[count-c]`; the check compared the second
+  vertex against the first index, losing 8 of 24 straight runs.
+- **Every filleted body was non-manifold**, which is the one that mattered most
+  and had been shipping. See the trap above.
+
+What remains is entity writing: `B_SPLINE_CURVE_WITH_KNOTS` per curved run,
+spliced into the neighbouring loops through the `ArcSubstitution` path the arcs
+already use, `B_SPLINE_SURFACE_WITH_KNOTS` per patch, and the validator checks
+for both.
 
 Two incidental findings, both worth acting on separately: `OpenSCADUnitTests` is
 commented out in `CMakeLists.txt`, so no Catch2 test in this repository is
