@@ -140,6 +140,45 @@ struct Result {
   std::vector<std::string> report;
 };
 
+/*! A run of facets lying on one declared Bezier patch.
+ *
+ * Unlike a band, this is not walked out from a seed: the patch is known
+ * exactly, so the region is simply every facet all of whose vertices lie on it.
+ * There is nothing to fit and nothing to grow, which is the whole point of
+ * having the generator declare a spline rather than recovering one. */
+struct Patch {
+  std::shared_ptr<const Surface> surface;  // a BezierPatchSurface
+  std::vector<std::size_t> facets;
+
+  /*! The boundary of the region, split into runs - one per edge of the patch's
+   * parameter square that is not degenerate.
+   *
+   * A run is what has to become a single edge: an edge fillet's two rails are
+   * runs along `v = 0` and `v = 1` which the neighbouring face sees as a row of
+   * short segments, while its two rulings are single straight edges already. A
+   * corner fillet has three runs and no fourth, because its apex row collapses
+   * to a point. */
+  struct Run {
+    int edge = -1;           // 0: u=0, 1: u=1, 2: v=0, 3: v=1
+    std::vector<int> verts;  // consecutive along the boundary
+    bool straight = false;   // the patch is degree 1 across this edge
+  };
+  std::vector<Run> runs;
+
+  bool alive = true;
+  const char *dropped = nullptr;  // why it was left faceted, for the report
+};
+
+/*! Find the facets which lie on each declared Bezier patch.
+ *
+ * `consumed` marks loops already taken by a band, which a patch may not also
+ * claim. Loops a patch takes are *not* marked here - the caller decides that
+ * once it knows the patch can actually be written. */
+std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
+                                          const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                          const std::vector<char>& consumed,
+                                          std::vector<std::string>& report);
+
 /*! Find the bands of facets which were modelled as a surface of revolution.
  *
  * `surfaces` are the analytic surfaces the model declared; with none of them

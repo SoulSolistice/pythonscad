@@ -356,6 +356,31 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     mesh.normals = &loop_normals;
     features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol);
     for (const auto& line : features.report) printf("STEP export: %s\n", line.c_str());
+
+    // Bezier patches are found but not yet written. Reporting them first is
+    // deliberate: it says whether the fillet declarations reach the exporter
+    // and whether the regions and their boundary runs come out right, on real
+    // models, before any of the emission that depends on all three exists. A
+    // patch that is silently not recognised looks exactly like one that was
+    // never declared, which is the same trap the band report was added for.
+    std::vector<std::string> patch_report;
+    const std::vector<AnalyticFeatures::Patch> patches =
+      AnalyticFeatures::recogniseBezierPatches(mesh, surfaces, features.consumed, patch_report);
+    for (const auto& line : patch_report) printf("STEP export: %s (not yet written)\n", line.c_str());
+    std::size_t curved_runs = 0, straight_runs = 0, replaced = 0;
+    for (const auto& patch : patches) {
+      if (!patch.alive) continue;
+      for (const auto& run : patch.runs) {
+        (run.straight ? straight_runs : curved_runs)++;
+        if (run.verts.size() > 2) replaced += run.verts.size() - 2;
+      }
+    }
+    if (curved_runs + straight_runs > 0) {
+      printf(
+        "STEP export: their boundaries are %d curved and %d straight runs, %d edges to be "
+        "replaced\n",
+        int(curved_runs), int(straight_runs), int(replaced));
+    }
   }
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
   const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;

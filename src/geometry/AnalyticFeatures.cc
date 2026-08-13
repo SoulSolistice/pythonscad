@@ -72,6 +72,251 @@ std::string format(const char *fmt, ...)
 
 }  // namespace
 
+namespace {
+
+/*! An edge of a facet, as an unordered vertex pair. */
+using EdgeKey = std::pair<int, int>;
+EdgeKey edgeKey(int a, int b)
+{
+  return a < b ? EdgeKey(a, b) : EdgeKey(b, a);
+}
+
+/*! The four edges of the parameter square, as arguments to
+ * BezierPatchSurface::boundary: u=0, u=1, v=0, v=1. */
+constexpr bool EDGE_ALONG_U[4] = {false, false, true, true};
+constexpr bool EDGE_FAR[4] = {false, true, false, true};
+
+/*! Distance from a point to one boundary curve of a patch, by sampling then
+ * refining. The curve is degree 2 at most and only boundary vertices are ever
+ * tested, so this does not need to be clever. */
+double distanceToBoundary(const BezierPatchSurface& patch, int e, const Vector3d& pt)
+{
+  const std::vector<Vector3d> cp = patch.boundary(EDGE_ALONG_U[e], EDGE_FAR[e]);
+  auto at = [&](double t) {
+    std::vector<Vector3d> w = cp;
+    for (std::size_t k = w.size(); k > 1; k--) {
+      for (std::size_t i = 0; i + 1 < k; i++) w[i] = w[i] * (1 - t) + w[i + 1] * t;
+    }
+    return w[0];
+  };
+  double best = -1, bt = 0;
+  for (int i = 0; i <= 64; i++) {
+    const double t = i / 64.0;
+    const double d = (at(t) - pt).norm();
+    if (best < 0 || d < best) {
+      best = d;
+      bt = t;
+    }
+  }
+  for (double step = 1.0 / 64; step > 1e-13; step *= 0.5) {
+    for (const double t : {bt - step, bt + step}) {
+      const double c = std::min(1.0, std::max(0.0, t));
+      const double d = (at(c) - pt).norm();
+      if (d < best) {
+        best = d;
+        bt = c;
+      }
+    }
+  }
+  return best;
+}
+
+/*! Which boundary curves of the patch a vertex lies on.
+ *
+ * By distance to the curve rather than by its parameters, because the
+ * parameters cannot answer it at a corner of the square: a corner is on two
+ * edges at once, and a corner fillet's apex - the whole of its collapsed `u = 1`
+ * edge - is the far end of *both* rails. Classifying by parameter put the apex
+ * inside one rail's run, so that run spanned two different curves and the edge
+ * from the apex to the other rail was about to be replaced by the wrong one. */
+unsigned boundarySet(const BezierPatchSurface& patch, const Vector3d& pt, double tol)
+{
+  unsigned mask = 0;
+  for (int e = 0; e < 4; e++) {
+    if (patch.degenerateAt(EDGE_ALONG_U[e], EDGE_FAR[e])) continue;
+    if (distanceToBoundary(patch, e, pt) <= tol) mask |= 1u << e;
+  }
+  return mask;
+}
+
+}  // namespace
+
+std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
+                                          const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                          const std::vector<char>& consumed,
+                                          std::vector<std::string>& report)
+{
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  const std::vector<char>& loop_valid = *mesh.valid;
+  const std::vector<char>& is_hole = *mesh.is_hole;
+
+  std::vector<Patch> patches;
+  std::vector<char> taken(loops.size(), 0);
+
+  for (const auto& surface : surfaces) {
+    const auto *bez = dynamic_cast<const BezierPatchSurface *>(surface.get());
+    if (bez == nullptr || bez->net.empty()) continue;
+
+    // A Bezier lies inside the convex hull of its control net, so a box round
+    // the net rejects almost every facet in the model without projecting
+    // anything. That matters: projection is a Newton solve from a grid of
+    // starts, and a filleted cube has thousands of facets and dozens of
+    // patches.
+    Vector3d lo = bez->net.front(), hi = bez->net.front();
+    for (const auto& p : bez->net) {
+      lo = lo.cwiseMin(p);
+      hi = hi.cwiseMax(p);
+    }
+    const double slack = 1e-6 * std::max(1.0, (hi - lo).norm());
+    lo.array() -= slack;
+    hi.array() += slack;
+
+    Patch patch;
+    patch.surface = surface;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
+      bool on = true;
+      for (const int v : loops[f]) {
+        const Vector3d& p = vertices[v];
+        if ((p.array() < lo.array()).any() || (p.array() > hi.array()).any()) {
+          on = false;
+          break;
+        }
+      }
+      if (!on) continue;
+      for (const int v : loops[f]) {
+        std::vector<Vector3d> unused;
+        if (!const_cast<BezierPatchSurface *>(bez)->pointMember(unused, vertices[v])) {
+          on = false;
+          break;
+        }
+      }
+      if (on) patch.facets.push_back(f);
+    }
+    if (patch.facets.empty()) continue;
+
+    // The boundary of the region: edges used by one of its facets rather than
+    // two. Anything else means the region is not a simple sheet.
+    std::map<EdgeKey, int> uses;
+    for (const std::size_t f : patch.facets) {
+      const std::vector<int>& loop = loops[f];
+      for (std::size_t i = 0; i < loop.size(); i++) {
+        uses[edgeKey(loop[i], loop[(i + 1) % loop.size()])]++;
+      }
+    }
+    std::map<int, std::vector<int>> next;  // boundary adjacency
+    std::size_t boundary_edges = 0;
+    for (const auto& [key, count] : uses) {
+      if (count != 1) continue;
+      next[key.first].push_back(key.second);
+      next[key.second].push_back(key.first);
+      boundary_edges++;
+    }
+    bool simple = boundary_edges > 0;
+    for (const auto& [v, adj] : next) simple = simple && adj.size() == 2;
+    if (!simple) {
+      patch.alive = false;
+      patch.dropped = "the facets on this patch do not form a simple sheet";
+      patches.push_back(std::move(patch));
+      continue;
+    }
+
+    // Walk the boundary once, recording where each vertex sits in the patch's
+    // own parameters. That is what says which edge of the patch a boundary
+    // segment belongs to, and so which segments have to become one curve.
+    std::vector<int> cycle;
+    std::vector<int> edge_of;
+    {
+      const int start = next.begin()->first;
+      int prev = -1, cur = start;
+      do {
+        cycle.push_back(cur);
+        const std::vector<int>& adj = next[cur];
+        const int step = adj[0] == prev ? adj[1] : adj[0];
+        prev = cur;
+        cur = step;
+      } while (cur != start && cycle.size() <= boundary_edges);
+    }
+    if (cycle.size() != boundary_edges) {
+      patch.alive = false;
+      patch.dropped = "the patch boundary does not close";
+      patches.push_back(std::move(patch));
+      continue;
+    }
+    // Each *segment* of the boundary is assigned a curve, not each vertex: a
+    // segment lies on exactly one, while its endpoints may lie on two.
+    const double curve_tol = 1e-7 * std::max(1.0, (hi - lo).norm());
+    std::vector<unsigned> on(cycle.size());
+    for (std::size_t i = 0; i < cycle.size(); i++) {
+      on[i] = boundarySet(*bez, vertices[cycle[i]], curve_tol);
+    }
+    bool classified = true;
+    for (std::size_t i = 0; i < cycle.size(); i++) {
+      const unsigned both = on[i] & on[(i + 1) % cycle.size()];
+      if (both == 0) {
+        classified = false;
+        break;
+      }
+      // A segment whose ends share two curves is a whole edge of the square
+      // seen end to end; take the lowest, consistently.
+      int e = 0;
+      while (((both >> e) & 1u) == 0) e++;
+      edge_of.push_back(e);
+    }
+    if (!classified) {
+      patch.alive = false;
+      patch.dropped = "a boundary segment lies on none of the patch's edges";
+      patches.push_back(std::move(patch));
+      continue;
+    }
+
+    // Split the cycle into maximal runs sharing one edge of the parameter
+    // square. A vertex sitting exactly on a corner reports whichever edge came
+    // first, so let it join the run already in progress.
+    // Maximal runs of consecutive segments on the same curve. `edge_of[i]` is
+    // the segment from cycle[i] to cycle[i+1], so a run of segments is a run of
+    // vertices one longer.
+    const std::size_t n = cycle.size();
+    std::size_t begin = 0;
+    while (begin < n && edge_of[begin] == edge_of[(begin + n - 1) % n]) begin++;
+    if (begin == n) begin = 0;  // the whole boundary is one curve
+    for (std::size_t i = 0; i < n;) {
+      const int id = edge_of[(begin + i) % n];
+      Patch::Run run;
+      run.edge = id;
+      run.straight = id <= 1 ? bez->degree_v == 1 : bez->degree_u == 1;
+      std::size_t j = i;
+      run.verts.push_back(cycle[(begin + j) % n]);
+      while (j < n && edge_of[(begin + j) % n] == id) {
+        j++;
+        run.verts.push_back(cycle[(begin + j) % n]);
+      }
+      patch.runs.push_back(std::move(run));
+      i = j;
+    }
+
+    for (const std::size_t f : patch.facets) taken[f] = 1;
+    patches.push_back(std::move(patch));
+  }
+
+  std::size_t live = 0, facets = 0;
+  for (const auto& p : patches) {
+    if (!p.alive) {
+      report.push_back(
+        format("a Bezier patch of %d facets was left faceted: %s", int(p.facets.size()), p.dropped));
+      continue;
+    }
+    live++;
+    facets += p.facets.size();
+  }
+  if (live > 0) {
+    report.push_back(
+      format("%d Bezier patch%s cover %d facets", int(live), live == 1 ? "" : "es", int(facets)));
+  }
+  return patches;
+}
+
 Result recogniseSurfacesOfRevolution(const Mesh& mesh,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol)
 {
@@ -315,8 +560,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       // stops short of a full turn has one more, the far end of the last
       // facet. Anything else is not a band around a common axis.
       const bool full_turn = bottom_set.size() == walls.size() && top_set.size() == walls.size();
-      const bool part_turn =
-        bottom_set.size() == walls.size() + 1 && top_set.size() == walls.size() + 1;
+      const bool part_turn = bottom_set.size() == walls.size() + 1 && top_set.size() == walls.size() + 1;
       if (!full_turn && !part_turn) continue;
 
       // Fit each rim on its own: the centroid of a full rim lies on the axis
@@ -458,13 +702,19 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
   auto resolve_rim = [&](std::size_t bi, bool bottom, RimRef& out, const char **why) {
     const Band& band = bands[bi];
     const auto edges = rim_edges(bi, bottom);
-    if (edges.empty()) { *why = "no rim edges"; return false; }
+    if (edges.empty()) {
+      *why = "no rim edges";
+      return false;
+    }
     const std::set<std::size_t> in_band(band.walls.begin(), band.walls.end());
 
     std::set<std::size_t> others;
     for (const auto& edge : edges) {
       const auto it = loop_edges_map.find(edge);
-      if (it == loop_edges_map.end()) { *why = "a rim edge belongs to no loop"; return false; }
+      if (it == loop_edges_map.end()) {
+        *why = "a rim edge belongs to no loop";
+        return false;
+      }
       std::size_t outside = face_cnt;
       int count = 0;
       for (const std::size_t user : it->second) {
@@ -472,7 +722,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         count++;
         outside = user;
       }
-      if (count != 1) { *why = "a rim edge is used by more than two faces"; return false; }
+      if (count != 1) {
+        *why = "a rim edge is used by more than two faces";
+        return false;
+      }
       others.insert(outside);
     }
 
@@ -480,8 +733,14 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
 
     if (others.size() == 1) {
       const std::size_t nb = *others.begin();
-      if (band_of_loop[nb] != NO_BAND) { *why = "the rim borders a single facet of another band"; return false; }  // a one facet band
-      if (!loop_valid[nb] || consumed[nb]) { *why = "the neighbouring face was dropped"; return false; }
+      if (band_of_loop[nb] != NO_BAND) {
+        *why = "the rim borders a single facet of another band";
+        return false;
+      }  // a one facet band
+      if (!loop_valid[nb] || consumed[nb]) {
+        *why = "the neighbouring face was dropped";
+        return false;
+      }
       const std::vector<int>& nb_loop = loops[nb];
       const std::set<int> key(nb_loop.begin(), nb_loop.end());
       if (key.size() == nb_loop.size() && edges.size() == nb_loop.size()) {
@@ -499,14 +758,23 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         on_rim[j] = 1;
         cnt++;
       }
-      if (cnt != edges.size() || cnt >= n) { *why = "the rim is not a run of its neighbour's edges"; return false; }
+      if (cnt != edges.size() || cnt >= n) {
+        *why = "the rim is not a run of its neighbour's edges";
+        return false;
+      }
       std::size_t start = n;
       for (std::size_t j = 0; j < n; j++) {
         if (on_rim[j] == 0 || on_rim[(j + n - 1) % n] != 0) continue;
-        if (start != n) { *why = "the rim is split across its neighbour's loop"; return false; }
+        if (start != n) {
+          *why = "the rim is split across its neighbour's loop";
+          return false;
+        }
         start = j;
       }
-      if (start == n) { *why = "the rim covers its neighbour's whole loop twice"; return false; }
+      if (start == n) {
+        *why = "the rim covers its neighbour's whole loop twice";
+        return false;
+      }
       out.kind = RimRef::LOOP_RUN;
       out.loop = nb;
       out.start = start;
@@ -517,10 +785,19 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     // shared with another band, which has to be collapsed too
     std::set<std::size_t> nb_bands;
     for (const std::size_t f : others) nb_bands.insert(band_of_loop[f]);
-    if (nb_bands.size() != 1 || *nb_bands.begin() == NO_BAND) { *why = "the rim borders one face per facet"; return false; }
+    if (nb_bands.size() != 1 || *nb_bands.begin() == NO_BAND) {
+      *why = "the rim borders one face per facet";
+      return false;
+    }
     const std::size_t other = *nb_bands.begin();
-    if (!bands[other].alive) { *why = "the band sharing this rim was dropped"; return false; }
-    if (band.closed != bands[other].closed) { *why = "a shared rim needs both bands to be the same shape"; return false; }
+    if (!bands[other].alive) {
+      *why = "the band sharing this rim was dropped";
+      return false;
+    }
+    if (band.closed != bands[other].closed) {
+      *why = "a shared rim needs both bands to be the same shape";
+      return false;
+    }
 
     if (!band.closed) {
       // Two partial bands, so the shared rim is an arc rather than a circle -
@@ -542,7 +819,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       return false;
     }
 
-    if (others.size() != bands[other].walls.size()) { *why = "the shared rim does not cover the whole neighbouring band"; return false; }
+    if (others.size() != bands[other].walls.size()) {
+      *why = "the shared rim does not cover the whole neighbouring band";
+      return false;
+    }
     out.kind = RimRef::OTHER_BAND;
     out.band = other;
     return true;
