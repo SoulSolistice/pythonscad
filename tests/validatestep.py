@@ -884,6 +884,103 @@ def check_cylindrical_faces(entities, problems):
                 )
 
 
+def check_bspline_faces(entities, problems):
+    """A B-spline patch and the curves bounding it must come off one control net.
+
+    The exporter writes a fillet as the Bezier its generator drew, and each
+    bounding curve as a row or a column of that same net - so the curve lies on
+    the surface exactly, not to a tolerance. Checking that here is what catches
+    the failure the topology checks cannot see: a curve with the right two end
+    vertices, used twice in opposite directions so the shell still closes, but
+    built from the wrong edge of the patch, which bulges the face the wrong way.
+
+    Also checks the entities are well formed. A Bezier of degree d is the
+    B-spline whose only knots are 0 and 1 at multiplicity d+1, so the knot data
+    is implied by the degree and any other value is a mistake."""
+
+    def net_of(surface):
+        nums = re.findall(r"[-+]?\d+", surface.args.split("(", 1)[0] + ",")
+        degrees = [int(x) for x in re.findall(r",\s*(\d+)\s*,\s*(\d+)\s*,\s*\(", surface.args)[0]] \
+            if re.search(r",\s*\d+\s*,\s*\d+\s*,\s*\(", surface.args) else None
+        if not degrees:
+            return None, None, None
+        du, dv = degrees
+        refs = surface.refs()
+        if len(refs) < (du + 1) * (dv + 1):
+            return du, dv, None
+        grid = [[refs[i * (dv + 1) + j] for j in range(dv + 1)] for i in range(du + 1)]
+        return du, dv, grid
+
+    def pts(ids):
+        out = []
+        for i in ids:
+            p = entities.get(i)
+            if p is None or p.name != "CARTESIAN_POINT":
+                return None
+            f = p.floats()
+            if len(f) < 3:
+                return None
+            out.append(tuple(f[:3]))
+        return out
+
+    def knots_ok(ent, degree, count):
+        mult = re.findall(r"\((\d+(?:,\d+)*)\)", ent.args)
+        return degree >= 1 and count == degree + 1 and any(
+            m == "%d,%d" % (degree + 1, degree + 1) for m in mult
+        )
+
+    for curve in entities.values():
+        if curve.name != "B_SPLINE_CURVE_WITH_KNOTS":
+            continue
+        n = len(curve.refs())
+        m = re.match(r"\s*'[^']*'\s*,\s*(\d+)", curve.args)
+        degree = int(m.group(1)) if m else -1
+        if not knots_ok(curve, degree, n):
+            problems.append(
+                "#%d: B_SPLINE_CURVE_WITH_KNOTS of degree %d has %d control points and knots that "
+                "are not a Bezier's" % (curve.id, degree, n)
+            )
+
+    for face in entities.values():
+        if face.name != "ADVANCED_FACE":
+            continue
+        refs = face.refs()
+        surface = entities.get(refs[-1]) if refs else None
+        if surface is None or surface.name != "B_SPLINE_SURFACE_WITH_KNOTS":
+            continue
+        du, dv, grid = net_of(surface)
+        if grid is None:
+            problems.append("#%d: B_SPLINE_SURFACE_WITH_KNOTS has no readable control net" % surface.id)
+            continue
+        if not knots_ok(surface, du, du + 1) or not knots_ok(surface, dv, dv + 1):
+            problems.append(
+                "#%d: B_SPLINE_SURFACE_WITH_KNOTS of degree (%d,%d) has knots that are not a "
+                "Bezier's" % (surface.id, du, dv)
+            )
+
+        rows = [pts(r) for r in grid]
+        cols = [pts([grid[i][j] for i in range(du + 1)]) for j in range(dv + 1)]
+        edges = [e for e in (rows + cols) if e is not None]
+
+        for b in refs[:-1]:
+            loop, _ = _bound_loop(entities, b)
+            if loop is None:
+                continue
+            for oid in loop.refs():
+                geom = _edge_geometry(entities, oid)
+                if geom is None or geom.name != "B_SPLINE_CURVE_WITH_KNOTS":
+                    continue  # a straight ruling is a LINE, checked elsewhere
+                cp = pts(geom.refs())
+                if cp is None:
+                    problems.append("#%d: a bounding curve has no readable control points" % face.id)
+                    continue
+                if not any(cp == e or cp == e[::-1] for e in edges):
+                    problems.append(
+                        "#%d: bounding curve #%d is not an edge of the patch's control net, so it "
+                        "does not lie on the face it bounds" % (face.id, geom.id)
+                    )
+
+
 def check_shells(entities, problems):
     """Faces which are not connected by a shared edge belong to different bodies
     and must not share one CLOSED_SHELL."""
@@ -944,6 +1041,7 @@ def validateSTEP(filename):
         check_face_normals(entities, problems)
         check_hole_nesting(entities, problems)
         check_cylindrical_faces(entities, problems)
+        check_bspline_faces(entities, problems)
         check_shells(entities, problems)
 
     if problems:

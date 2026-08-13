@@ -411,6 +411,20 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       printf("STEP export: writing them would give %d faces instead of %d\n",
              int(face_cnt - covered + live), int(face_cnt));
     }
+    // Only patches whose every boundary can be substituted are written. One
+    // that cannot stays faceted, which is always a valid export.
+    for (auto& patch : patches) {
+      if (!patch.alive) continue;
+      for (const auto& run : patch.runs) {
+        if (run.kind == AnalyticFeatures::Patch::Run::UNRESOLVED) {
+          patch.alive = false;
+          patch.dropped = "one of its boundaries borders more than one face";
+          break;
+        }
+      }
+      if (!patch.alive) continue;
+      for (const std::size_t f : patch.facets) features.consumed[f] = 1;
+    }
     bezier_patches = patches;
   }
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
@@ -630,6 +644,85 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // a bore - where the material is outside it - is the opposite sense.
     sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
     face_edges_extra.push_back(face_edges_here);
+  }
+
+  // ---- Bezier patches ----------------------------------------------------
+  //
+  // A patch face is bounded by its runs, each of which is one curve read off
+  // the same control net the surface is written from - so the curve provably
+  // lies on the surface rather than approximately. A seam between two patches
+  // is one EdgeCurve used by both, in opposite senses; a run cutting into a
+  // planar neighbour is spliced into that loop through the same substitution
+  // the arcs use.
+  {
+    std::map<std::set<int>, EdgeCurve *> run_edges;  // run vertices -> its curve
+    for (const auto& patch : bezier_patches) {
+      if (!patch.alive) continue;
+      const auto *bez = dynamic_cast<const BezierPatchSurface *>(patch.surface.get());
+      if (bez == nullptr) continue;
+
+      std::vector<std::vector<Point *>> net;
+      for (int i = 0; i <= bez->degree_u; i++) {
+        std::vector<Point *> row;
+        for (int j = 0; j <= bez->degree_v; j++) row.push_back(new Point(entities, bez->control(i, j)));
+        net.push_back(row);
+      }
+      auto surface = new BSplineSurface(entities, "", bez->degree_u, bez->degree_v, net);
+
+      std::vector<OrientedEdge *> loop;
+      std::vector<EdgeCurve *> face_edges_here;
+      for (const auto& run : patch.runs) {
+        const std::set<int> key(run.verts.begin(), run.verts.end());
+        Vertex *from = get_vertex(run.verts.front());
+        Vertex *to = get_vertex(run.verts.back());
+        EdgeCurve *edge = nullptr;
+        const auto known = run_edges.find(key);
+        if (known != run_edges.end()) {
+          edge = known->second;
+        } else if (run.straight) {
+          edge = create_line_edge_curve(from, to, true);
+          run_edges.emplace(key, edge);
+        } else {
+          std::vector<Point *> cp;
+          for (const auto& c : AnalyticFeatures::runControlPoints(patch, run, vertices)) {
+            cp.push_back(new Point(entities, c));
+          }
+          auto curve = new BSplineCurve(entities, "", cp);
+          edge = new EdgeCurve(entities, from, to, curve, true);
+          run_edges.emplace(key, edge);
+        }
+        // The curve was built running from whichever patch reached it first.
+        const bool sense = edge->vert1 == from;
+        loop.push_back(new OrientedEdge(entities, edge, sense));
+        face_edges_here.push_back(edge);
+
+        // and the neighbouring planar face gives up the segments it replaces
+        if (run.kind == AnalyticFeatures::Patch::Run::WHOLE_LOOP) {
+          rim_of_loop[run.loop] = {edge, sense == run.reversed};
+        } else if (run.kind == AnalyticFeatures::Patch::Run::LOOP_RUN) {
+          arc_subs[run.loop].push_back({run.start, run.count, edge, sense == run.reversed});
+        }
+      }
+
+      // Which way the patch faces: compare its own normal with the mesh it
+      // replaces, since du x dv has no reason to agree with the facets.
+      bool outward = true;
+      if (!patch.facets.empty()) {
+        double u = 0.5, v = 0.5;
+        const_cast<BezierPatchSurface *>(bez)->project(vertices[loops[patch.facets[0]][0]], u, v);
+        const double h = 1e-6;
+        const Vector3d du =
+          bez->evaluate(std::min(1.0, u + h), v) - bez->evaluate(std::max(0.0, u - h), v);
+        const Vector3d dv =
+          bez->evaluate(u, std::min(1.0, v + h)) - bez->evaluate(u, std::max(0.0, v - h));
+        outward = du.cross(dv).dot(loop_normals[patch.facets[0]]) > 0;
+      }
+
+      auto edge_loop = new EdgeLoop(entities, loop);
+      std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
+      sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
+      face_edges_extra.push_back(face_edges_here);
+    }
   }
 
   // Build the loops, their edges and the carrier planes.

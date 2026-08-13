@@ -191,6 +191,14 @@ struct Patch {
   const char *dropped = nullptr;  // why it was left faceted, for the report
 };
 
+/*! The control points of the patch boundary a run lies on, ordered so the
+ * curve starts at `run.verts.front()`.
+ *
+ * The emitter needs the curve to run the way the run does; the net's own order
+ * depends on which edge of the parameter square it is. */
+std::vector<Vector3d> runControlPoints(const Patch& patch, const Patch::Run& run,
+                                       const std::vector<Vector3d>& vertices);
+
 /*! Find the facets which lie on each declared Bezier patch.
  *
  * `consumed` marks loops already taken by a band, which a patch may not also
