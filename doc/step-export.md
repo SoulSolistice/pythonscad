@@ -981,6 +981,46 @@ cannot be *tested*: there is no curve to generalise to, so any rim rule written
 for one would be unexercised code. It belongs behind the declaration work, not
 in front of it. The order in this item was backwards.
 
+#### What the patches actually are, measured
+
+The declaration work is done, so this item is next, and the first thing to
+establish is what there is to declare. Both kinds of patch turn out to be exact
+tensor-product Beziers whose control nets fall out of the generating code by
+algebra - verified numerically against the vertices `FilletNode` actually emits,
+worst residual 2.7e-15 over twenty configurations of the corner and 1.6e-15 over
+two hundred random edge strips:
+
+- **An edge strip** is degree (2,1). Expanding the rail
+  `p + e_fa - 2f*e_fa + f^2*(e_fa + e_fb)` gives the quadratic Bezier control
+  points `(p + e_fa, p, p + e_fb)`: it starts on one face, is controlled by the
+  original edge vertex, and ends on the other. The strip is the ruled surface
+  between the two rails, so its net is those two triples, 3x2.
+- **A corner patch** is degree (2,2), with a 3x3 net whose last row is the apex
+  three times. The row at parameter `t` is a quadratic Bezier between `Pxz(t)`
+  and `Pyz(t)` through a control point that mixes their coordinates, and all
+  three of those are themselves quadratic in `t`, which is what makes the whole
+  thing a tensor product. The degenerate row is a singular point, legal in STEP
+  and the usual way a rounded corner is written.
+
+**The corners are the item, not the strips.** A corner patch is `(N-1)^2`
+triangles and a strip is `N-1` quads, so the corners grow quadratically and the
+strips linearly:
+
+| `fillet(fn=N)` on a cube | 8 corners | 12 strips | planes | total | collapsed |
+| --- | --- | --- | --- | --- | --- |
+| N = 5 | 128 | 48 | 6 | 182 | 26 |
+| N = 12 | 968 | 132 | 6 | 1106 | 26 |
+| N = 24 | 4232 | 276 | 6 | 4514 | 26 |
+
+Collapsing only the strips - the obvious first slice, and the one that needs no
+sharing between two curved faces - wins 276 faces of 4514 at `fn = 24`, six per
+cent. So there is no cheap half of this item, and the two halves cannot be
+separated anyway: a corner's three boundaries are the rails of its three
+adjacent strips, so corner and strip are collapsed together or not at all. That
+makes the curve generalisation mandatory for either, exactly as this item
+originally said - what has changed is that there is now something to generalise
+*to*, and a measured reason to want it.
+
 ### 3. Spheres - collapsed, without `SPHERICAL_SURFACE`
 
 Two things this item said were wrong, and finding out which cost one
@@ -1405,7 +1445,8 @@ prism elsewhere in the part. Bounded, but not zero.
    see *Declaring a surface from the model* below.
 4. **`FilletNode` declaring a B-spline.** No channel work at all: a surface
    type, the matching, the emission, and the rim generalisation that item 2 has
-   been carrying all along.
+   been carrying all along. Sized under *What the patches actually are* above:
+   one indivisible piece, and worth 4514 faces down to 26 on a filleted cube.
 5. **A wall split by a Nef boolean.** Measured under *Known quality gaps*
    above: on `--backend=CGAL` a boolean leaves the wall of a ring it never
    touched cut into arcs at the seams where the operands met, and the recogniser
