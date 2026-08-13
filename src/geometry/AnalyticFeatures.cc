@@ -300,6 +300,70 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
     patches.push_back(std::move(patch));
   }
 
+  // Resolve what each boundary run borders. Only possible once every patch is
+  // known, because a run may be shared with another one.
+  {
+    std::map<EdgeKey, std::vector<std::size_t>> edge_loops;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      if (!loop_valid[f] || is_hole[f]) continue;
+      const std::vector<int>& loop = loops[f];
+      for (std::size_t i = 0; i < loop.size(); i++) {
+        edge_loops[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
+      }
+    }
+    std::map<std::size_t, std::size_t> patch_of_loop;
+    for (std::size_t pi = 0; pi < patches.size(); pi++) {
+      if (!patches[pi].alive) continue;
+      for (const std::size_t f : patches[pi].facets) patch_of_loop[f] = pi;
+    }
+
+    for (std::size_t pi = 0; pi < patches.size(); pi++) {
+      if (!patches[pi].alive) continue;
+      for (auto& run : patches[pi].runs) {
+        std::set<std::size_t> others;
+        bool ok = run.verts.size() >= 2;
+        for (std::size_t i = 0; ok && i + 1 < run.verts.size(); i++) {
+          const auto it = edge_loops.find(edgeKey(run.verts[i], run.verts[i + 1]));
+          if (it == edge_loops.end() || it->second.size() != 2) {
+            ok = false;
+            break;
+          }
+          const std::size_t a = it->second[0], b = it->second[1];
+          const auto own = patch_of_loop.find(a);
+          const std::size_t other = (own != patch_of_loop.end() && own->second == pi) ? b : a;
+          others.insert(other);
+        }
+        if (!ok || others.size() != 1) continue;  // stays UNRESOLVED
+        const std::size_t other = *others.begin();
+        const auto op = patch_of_loop.find(other);
+        if (op != patch_of_loop.end()) {
+          if (op->second == pi) continue;  // folded back on itself
+          run.kind = Patch::Run::OTHER_PATCH;
+          run.patch = op->second;
+          continue;
+        }
+        // A stretch of one neighbouring face. Find where it starts, so the
+        // caller can replace exactly those segments and leave the rest.
+        const std::vector<int>& loop = loops[other];
+        const std::size_t n = loop.size();
+        run.count = run.verts.size() - 1;
+        for (std::size_t j = 0; j < n; j++) {
+          bool fwd = true, rev = true;
+          for (std::size_t c = 0; c < run.count; c++) {
+            const int a = loop[(j + c) % n], b = loop[(j + c + 1) % n];
+            fwd = fwd && a == run.verts[c] && b == run.verts[c + 1];
+            rev = rev && b == run.verts[run.count - c] && a == run.verts[run.count - c - 1];
+          }
+          if (!fwd && !rev) continue;
+          run.kind = run.count == n ? Patch::Run::WHOLE_LOOP : Patch::Run::LOOP_RUN;
+          run.loop = other;
+          run.start = j;
+          break;
+        }
+      }
+    }
+  }
+
   std::size_t live = 0, facets = 0;
   for (const auto& p : patches) {
     if (!p.alive) {

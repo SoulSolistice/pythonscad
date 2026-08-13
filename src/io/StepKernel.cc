@@ -387,6 +387,26 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         "STEP export: their boundaries are %d curved runs over %d mesh edges, and %d straight "
         "edges\n",
         int(curved_runs), int(mesh_edges), int(straight_runs));
+
+      // What each run borders decides whether it can be collapsed at all, and
+      // it is the last thing the emission needs that has never been seen on a
+      // real model. A run left unresolved is one the substitution cannot make.
+      int whole = 0, part = 0, shared = 0, stuck = 0;
+      for (const auto& patch : patches) {
+        if (!patch.alive) continue;
+        for (const auto& run : patch.runs) {
+          switch (run.kind) {
+          case AnalyticFeatures::Patch::Run::WHOLE_LOOP:  whole++; break;
+          case AnalyticFeatures::Patch::Run::LOOP_RUN:    part++; break;
+          case AnalyticFeatures::Patch::Run::OTHER_PATCH: shared++; break;
+          default:                                        stuck++; break;
+          }
+        }
+      }
+      printf(
+        "STEP export: those runs border %d whole faces, %d stretches of a face, %d other patches, "
+        "%d unresolved\n",
+        whole, part, shared, stuck);
       printf("STEP export: writing them would give %d faces instead of %d\n",
              int(face_cnt - covered + live), int(face_cnt));
     }

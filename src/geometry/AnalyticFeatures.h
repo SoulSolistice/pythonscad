@@ -162,6 +162,19 @@ struct Patch {
     int edge = -1;           // 0: u=0, 1: u=1, 2: v=0, 3: v=1
     std::vector<int> verts;  // consecutive along the boundary
     bool straight = false;   // the patch is degree 1 across this edge
+
+    /*! What lies on the other side, which decides whether the run can be
+     * collapsed into one curve at all. The same question RimRef answers for a
+     * band, and the same three answers: the run is a whole neighbouring face,
+     * or a consecutive stretch of one, or it is shared with another patch being
+     * collapsed too - which is what a corner's rails are, since each is also a
+     * rail of the strip it meets. Anything else, most often one face per
+     * segment, leaves the patch faceted. */
+    enum Kind { UNRESOLVED, WHOLE_LOOP, LOOP_RUN, OTHER_PATCH };
+    Kind kind = UNRESOLVED;
+    std::size_t loop = 0;              // WHOLE_LOOP, LOOP_RUN
+    std::size_t start = 0, count = 0;  // LOOP_RUN
+    std::size_t patch = 0;             // OTHER_PATCH
   };
   std::vector<Run> runs;
 
