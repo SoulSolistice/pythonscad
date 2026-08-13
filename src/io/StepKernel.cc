@@ -175,14 +175,17 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // out - which is a feature nobody has asked for yet.
   (void)curves;
   if (!surfaces.empty()) {
-    int cylinders = 0, spheres = 0, tori = 0;
+    int cylinders = 0, spheres = 0, tori = 0, patches = 0;
     for (const auto& surface : surfaces) {
       if (dynamic_cast<const CylinderSurface *>(surface.get()) != nullptr) cylinders++;
       else if (dynamic_cast<const SphereSurface *>(surface.get()) != nullptr) spheres++;
       else if (dynamic_cast<const TorusSurface *>(surface.get()) != nullptr) tori++;
+      else if (dynamic_cast<const BezierPatchSurface *>(surface.get()) != nullptr) patches++;
     }
-    printf("STEP export: %d analytic surface%s available (%d cylindrical, %d spherical, %d toroidal)\n",
-           int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres, tori);
+    printf(
+      "STEP export: %d analytic surface%s available (%d cylindrical, %d spherical, %d toroidal, %d "
+      "Bezier)\n",
+      int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres, tori, patches);
   }
 
   const double model_tol = tol > 0 ? tol : 1e-5;
@@ -355,10 +358,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     for (const auto& line : features.report) printf("STEP export: %s\n", line.c_str());
   }
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
-  const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims =
-    features.rims;
+  const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;
   const std::vector<char>& consumed = features.consumed;
-
 
   // Emit the recognised bands: one CYLINDRICAL_SURFACE or CONICAL_SURFACE face
   // each, bounded by a circle or an arc at either rim.
@@ -447,8 +448,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       const auto *sph = dynamic_cast<const SphereSurface *>(band.zone.get());
       surface = new SphericalSurface(entities, "", placement(sph->refpt, band.axis, ref), sph->r);
     } else if (!is_cone) {
-      surface = new CylindricalSurface(entities, "", placement(band.base, band.axis, ref),
-                                       band.r_bottom);
+      surface =
+        new CylindricalSurface(entities, "", placement(band.base, band.axis, ref), band.r_bottom);
     } else {
       // ISO 10303 wants a half angle in (0, pi/2), so a cone which narrows
       // along the axis is written from its other end instead.
@@ -482,13 +483,14 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       if (band.closed) {
         const int seam = bottom ? band.seam_bottom : band.seam_top;
         const Vector3d seam_rel = vertices[seam] - centre;
-        auto circle = new Circle(entities, "", placement(centre, band.axis, seam_rel.normalized()),
-                                 radius);
+        auto circle =
+          new Circle(entities, "", placement(centre, band.axis, seam_rel.normalized()), radius);
         Vertex *vert = get_vertex(seam);
         // a full circle is one edge whose two ends are the same vertex
         rim_edge[side] = new EdgeCurve(entities, vert, vert, circle, true);
         rim_sense[side] = rim.wall_ccw;
-        if (rim.kind == AnalyticFeatures::RimRef::OTHER_BAND) shared_rim_edges.emplace(key, rim_edge[side]);
+        if (rim.kind == AnalyticFeatures::RimRef::OTHER_BAND)
+          shared_rim_edges.emplace(key, rim_edge[side]);
         else rim_of_loop.emplace(rim.loop, std::make_pair(rim_edge[side], !rim.wall_ccw));
       } else {
         // An arc, from one end of the rim to the other. A CIRCLE is counter
@@ -613,8 +615,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         const int ind = loop[j];
         const int indn = loop[(j + 1) % n];
         bool edge_dir = true;
-        EdgeCurve *edge_curve = get_line_from_map(edge_map, ind, indn, get_vertex(ind),
-                                                  get_vertex(indn), edge_dir, merged_edge_cnt);
+        EdgeCurve *edge_curve = get_line_from_map(edge_map, ind, indn, get_vertex(ind), get_vertex(indn),
+                                                  edge_dir, merged_edge_cnt);
         oriented_edges.push_back(new OrientedEdge(entities, edge_curve, edge_dir));
         loop_edges[i].push_back(edge_curve);
       }

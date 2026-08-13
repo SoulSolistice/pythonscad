@@ -34,6 +34,7 @@
 #include "Builtins.h"
 #include "handle_dep.h"
 #include "src/geometry/PolySetBuilder.h"
+#include "src/geometry/Surface.h"
 
 #include <cmath>
 #include <sstream>
@@ -108,6 +109,21 @@ void bezier_patch(PolySetBuilder& builder, Vector3d center, Vector3d dir[3], int
       Bezier(t, xdir, xdir + zdir, zdir + 2 * (concave_1 + concave_2) * (xdir + ydir)));
     points_yz.push_back(
       Bezier(t, ydir, ydir + zdir, zdir + 2 * (concave_1 + concave_2) * (xdir + ydir)));
+  }
+
+  // The same statement for the corner. Every row of this patch is a quadratic
+  // Bezier between the two rails through a control point mixing their
+  // coordinates, and each of those three is itself quadratic in the row
+  // parameter, which makes the whole thing a tensor product of degree (2,2)
+  // rather than the triangular patch it looks like. Its last row is the apex
+  // three times - a singular point, and the usual way a rounded corner is
+  // written.
+  {
+    const Vector3d apex = zdir + 2 * (concave_1 + concave_2) * (xdir + ydir);
+    std::vector<Vector3d> net{xdir,        xdir + ydir, ydir, xdir + zdir, xdir + ydir + zdir,
+                              ydir + zdir, apex,        apex, apex};
+    for (auto& p : net) p = center + mat * p;
+    builder.addSurface(std::make_shared<BezierPatchSurface>(2, 2, std::move(net)));
   }
 
   std::vector<int> points;
@@ -552,6 +568,17 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
         e.second.bez2.push_back(
           builder.vertexIndex(p2 + e_fa2 - 2 * f * e_fa2 + f * f * (e_fa2 + e_fb2)));
       }
+
+      // Say what was just drawn. Expanding the rail above,
+      // p + e_fa - 2f*e_fa + f^2*(e_fa + e_fb) is the quadratic Bezier through
+      // the control points (p + e_fa, p, p + e_fb): it leaves one of the two
+      // faces meeting at this edge, is controlled by the original edge vertex,
+      // and arrives on the other. The strip is the ruled surface between the
+      // two rails, so it is a tensor product of degree (2,1) and the net is
+      // those six points - the same numbers the loop was already evaluating,
+      // which is why this needs no fitting and cannot drift from the mesh.
+      builder.addSurface(std::make_shared<BezierPatchSurface>(
+        2, 1, std::vector<Vector3d>{p1 + e_fa1, p2 + e_fa2, p1, p2, p1 + e_fb1, p2 + e_fb2}));
       s.pol = e.second.facea;  // laengsseite1
       s.search = e.first.ind1;
       s.replace = {e.second.bez1[0]};
