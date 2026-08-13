@@ -372,19 +372,23 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     const std::vector<AnalyticFeatures::Patch> patches =
       AnalyticFeatures::recogniseBezierPatches(mesh, surfaces, features.consumed, patch_report);
     for (const auto& line : patch_report) printf("STEP export: %s (not yet written)\n", line.c_str());
-    std::size_t curved_runs = 0, straight_runs = 0, replaced = 0;
+    std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
     for (const auto& patch : patches) {
       if (!patch.alive) continue;
+      live++;
+      covered += patch.facets.size();
       for (const auto& run : patch.runs) {
         (run.straight ? straight_runs : curved_runs)++;
-        if (run.verts.size() > 2) replaced += run.verts.size() - 2;
+        if (!run.verts.empty()) mesh_edges += run.verts.size() - 1;
       }
     }
-    if (curved_runs + straight_runs > 0) {
+    if (live > 0) {
       printf(
-        "STEP export: their boundaries are %d curved and %d straight runs, %d edges to be "
-        "replaced\n",
-        int(curved_runs), int(straight_runs), int(replaced));
+        "STEP export: their boundaries are %d curved runs over %d mesh edges, and %d straight "
+        "edges\n",
+        int(curved_runs), int(mesh_edges), int(straight_runs));
+      printf("STEP export: writing them would give %d faces instead of %d\n",
+             int(face_cnt - covered + live), int(face_cnt));
     }
   }
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
