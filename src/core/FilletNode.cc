@@ -350,7 +350,6 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
   std::vector<std::vector<int>> corner_rounds;
   do {
     improved = false;  // fix short edges until happy
-    std::vector<int> lockouts;
 
     polinds.clear();
     polposs.clear();
@@ -397,180 +396,148 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
         corner_rounds[e.first.ind2].push_back(e.first.ind1);
       }
     }
-    // What the pass below is for: where an edge is shorter than 2r the arc
-    // cannot close along it, so the two corners are merged into one and the
-    // neighbouring faces extended to meet at a point. It is disabled, and these
-    // are the five things standing between it and being switched on. Measured on
-    // the plane configurations it would actually be handed, not read off the
-    // code.
+    // Where an edge is shorter than 2r the arc cannot close along it, so the two
+    // corners are merged into one and the faces around them extended to meet at
+    // that point. An arc of radius r genuinely cannot be drawn along a shorter
+    // edge - a parabola through the same control points quietly produced
+    // something, which is one reason this pass was never needed before.
     //
-    // 1. The collapse is over-determined, and this is the substantive one. Both
-    //    endpoints are 3-edge corners (that is what the selection above
-    //    requires), so *four* distinct planes surround the pair: the two sharing
-    //    the edge, plus the third face at either end. The merged vertex has to
-    //    lie on all four. cut_face_face_face() takes three, so whichever of
-    //    facea/faceb was not picked as `commonfaceind` is ignored, and the point
-    //    lands off it unless the four planes happen to be concurrent. The
-    //    residual is *linear in the edge length* with a coefficient set by the
-    //    angles - on one ordinary configuration it is 2.13 * L, so collapsing a
-    //    0.5 mm edge moves the vertex 1 mm off the fourth face, twice as far as
-    //    the edge that was removed. `line.norm() < 2*r_` is therefore the wrong
-    //    gate: what has to be small is the residual, and a length does not bound
-    //    it. Solve all four in least squares (about 5x smaller residual, and the
-    //    residual is then the measure of non-concurrency itself) and refuse the
-    //    collapse - e.second.sel = 0 - when it exceeds the modelling tolerance.
-    //    That also retires the "is it safe to take the bigger face?" question
-    //    below: with all four planes in, there is no face to choose.
+    // The collapse is over-determined, and that is the whole difficulty. Both
+    // endpoints are 3-edge corners (the selection above requires it), so *four*
+    // planes surround the pair: the two sharing the edge, plus the third face at
+    // either end. The merged vertex has to lie on all four, and four planes
+    // through one point is one equation too many unless they are concurrent.
     //
-    // 2. Three of those planes can be nearly parallel, and then the cut is
-    //    finite but meaningless. With a 0.1 mm edge and end faces tilted 0.004,
-    //    the three-plane point lands 12.4 units away - 124 times the edge it was
-    //    removing - at condition number 253, and cut_face_face_face() reports no
-    //    error because the determinant is not zero. The residual test in 1
-    //    catches this too; a conditioning check would catch it earlier.
+    // Cutting three of them and ignoring the fourth - which is what this did
+    // while it was disabled - puts the vertex off that face by an amount linear
+    // in the edge length, with a factor the angles set and nothing bounds: 2.13
+    // times the length on one ordinary configuration, so a 0.5 mm edge moved the
+    // vertex 1 mm off a face it should have been on, and with two of the planes
+    // nearly parallel a 0.1 mm edge landed 12 units away with no error reported,
+    // because the determinant was not zero. An edge length is therefore the wrong
+    // gate. All four planes go in, in least squares, and the residual - which is
+    // exactly their non-concurrency - decides.
     //
-    // 3. `merged.erase()` invalidates the loop it runs inside. edge_db holds
-    //    facea/faceb as *indices* into merged, and polinds/polposs index it too,
-    //    so erasing a collapsed-away face shifts every later index and the
-    //    remaining iterations of this same loop read the wrong faces. The outer
-    //    do-while already rebuilds edge_db, polinds and corner_rounds from
-    //    scratch on the next pass, so the fix is to collapse one edge, set
-    //    improved and break. That also makes `lockouts` unnecessary: it exists
-    //    only to stop two collapses in one pass interfering, and it does not
-    //    cover every vertex they share.
+    // Which bounds what this pass can do, and the bound is algebraic rather than
+    // a matter of tuning the tolerance. Corner one is facea & faceb & third1 and
+    // corner two is facea & faceb & third2, so if all four planes share a point
+    // then *both* corners are that point and the edge has zero length. A short
+    // edge of non-zero length therefore always has a non-zero residual - measured
+    // at 0.2887 times the length on a cube with a cut corner, at every size from
+    // 0.4 down to 1e-9 - and a collapse to one point is only available where the
+    // edge is already degenerate. That is worth having: a boolean leaves slivers
+    // and they are cleaned up here, verified to leave the mesh manifold. But it
+    // is not what removes a real short edge.
     //
-    // 4. Several indices can still be -1 where they are used. a_prev/a_next and
-    //    b_prev/b_next stay -1 when the search loop does not find the vertex,
-    //    and faceind1/faceind2 stay -1 when edge_db has no such edge or when
-    //    neither of its faces is commonfaceind - and merged[-1] follows. Each
-    //    needs a check before use.
+    // What does, for a real one, is collapsing the small *face* rather than one
+    // of its edges: drop it and intersect its neighbours, which for a three sided
+    // one is three planes and exactly determined. On the same cut corner that is
+    // exact - residual 0, every face still planar, the sharp corner restored -
+    // where every edge collapse of it is refused. That is the shape of the next
+    // step here, and it is a different operation from this one.
     //
-    // 5. The searches for a_prev/a_next and b_prev/b_next recompute what the
-    //    edge already knows: EdgeVal carries posa and posb, and facea[posa] is
-    //    ind1 with facea[posa+1] == ind2, faceb[posb] is ind2 with
-    //    faceb[posb+1] == ind1. Reading them from there removes the loops and
-    //    the `// TODO b hat die richtigen punkte` doubt with them - the -1/+2
-    //    indexing below is right, because facea traverses the edge one way and
-    //    faceb the other. It is the same "do not derive the same thing twice"
-    //    rule the rails above now follow.
-    //
-    // Rational arcs make this matter more rather than less: an arc of radius r
-    // genuinely cannot be drawn along an edge shorter than 2r, where a parabola
-    // through the same control points would quietly produce something.
-    /* TODO activate
+    // Until then the value of this pass for a real short edge is the refusal
+    // below: the edge is left unrounded and says why, rather than being filleted
+    // with two arcs that cannot both fit along it.
+    for (auto& e : edge_db) {
+      if (!e.second.sel) continue;
+      const int ind1 = e.first.ind1, ind2 = e.first.ind2;
+      if ((vertices_copy[ind1] - vertices_copy[ind2]).norm() >= 2 * r_) continue;
 
-        // eliminate  too short edges by extrapolating the neighboring edges
-        for(auto &e: edge_db) {
-          if(!e.second.sel) continue;
-          Vector3d line = vertices_copy[e.first.ind1] - vertices_copy[e.first.ind2];
-          if(line.norm() < 2*r_) {
+      const int facea_ind = e.second.facea, faceb_ind = e.second.faceb;
+      const int posa = e.second.posa;
+      if (facea_ind < 0 || faceb_ind < 0 || posa < 0) continue;
+      const IndexedFace& facea = merged[facea_ind];
+      const int na = int(facea.size());
+      // facea traverses the edge ind1 -> ind2 and faceb the other way round, so
+      // the two faces to extend are the ones across facea's neighbouring edges:
+      // the one before ind1 and the one after ind2. posa says where the edge sits
+      // without searching for it again.
+      if (posa >= na || na < 4) continue;
+      if (facea[posa] != ind1 || facea[(posa + 1) % na] != ind2) continue;
+      const int a_prev = facea[(posa + na - 1) % na];
+      const int a_next = facea[(posa + 2) % na];
+      if (a_prev == ind2 || a_next == ind1 || a_prev == a_next) continue;
 
-            int a_prev=-1, a_next=-1;
-            int b_prev=-1, b_next=-1;
-
-            if(std::find(lockouts.begin(), lockouts.end(), e.first.ind1) != lockouts.end()) continue;
-            if(std::find(lockouts.begin(), lockouts.end(), e.first.ind2) != lockouts.end()) continue;
-            auto &facea = merged[e.second.facea];
-            int na=facea.size();
-            for(int i=0;i<na;i++) {
-              if(facea[i] == e.first.ind1){
-                a_prev = facea[(i+na-1)%na];
-                a_next = facea[(i+na+2)%na];
-              }
-            }
-
-            auto &faceb = merged[e.second.faceb];
-            int nb=faceb.size();
-            for(int i=0;i<nb;i++) {
-              if(faceb[i] == e.first.ind2){
-                b_prev = faceb[(i+nb-1)%nb];
-                b_next = faceb[(i+nb+2)%nb];
-              }
-            }
-
-            if(std::find(lockouts.begin(), lockouts.end(), a_prev) != lockouts.end()) continue;
-            if(std::find(lockouts.begin(), lockouts.end(), a_next) != lockouts.end()) continue;
-            if(std::find(lockouts.begin(), lockouts.end(), b_prev) != lockouts.end()) continue;
-            if(std::find(lockouts.begin(), lockouts.end(), b_next) != lockouts.end()) continue;
-
-            // is it safe to take the bigger face ?
-            int commonfaceind=-1, faceind1=-1, faceind2=-1;
-            EdgeKey ek1, ek2;
-            if(nb > na) {
-              commonfaceind=e.second.faceb; // TODO b hat die richtigen punkte
-              ek1 = EdgeKey(b_prev, e.first.ind2);
-              ek2 = EdgeKey(e.first.ind1, b_next);
-            } else { // na  > nb)
-              commonfaceind=e.second.facea; // TODO b hat die richtigen punkte
-              ek1 = EdgeKey(a_prev, e.first.ind1);
-              ek2 = EdgeKey(e.first.ind2, a_next);
-            }
-
-            if(edge_db.count(ek1)) {
-              auto &ev1 = edge_db.at(ek1);
-              if(ev1.facea == commonfaceind) faceind1= ev1.faceb;
-              if(ev1.faceb == commonfaceind) faceind1= ev1.facea;
-            }
-
-            // find opposite of e.first.ind1, b_next)
-            if(edge_db.count(ek2)) {
-              auto &ev2 = edge_db.at(ek2);
-              if(ev2.facea == commonfaceind) faceind2= ev2.faceb;
-              if(ev2.faceb == commonfaceind) faceind2= ev2.facea;
-            }
-
-            Vector3d fn1 =calcTriangleNormal(vertices_copy, merged[commonfaceind]).head<3>();
-            Vector3d fn2 =calcTriangleNormal(vertices_copy, merged[faceind1]).head<3>();
-            Vector3d fn3 =calcTriangleNormal(vertices_copy, merged[faceind2]).head<3>();
-
-            Vector3d fp1 = vertices_copy[merged[commonfaceind][0]];
-            Vector3d fp2 = vertices_copy[merged[faceind1][0]];
-            Vector3d fp3 = vertices_copy[merged[faceind2][0]];
-            Vector3d ptcut;
-            if(cut_face_face_face(fp1, fn1, fp2, fn2, fp3, fn3, ptcut,nullptr)) {
-              printf("Error during cutting\n");
-              e.second.sel=0;
-              continue;
-            }
-            //
-            // change is going to happen
-            vertices_copy[e.first.ind1]=ptcut;
-            lockouts.push_back(ek1.ind1);
-            lockouts.push_back(ek1.ind2);
-            lockouts.push_back(ek2.ind1);
-            lockouts.push_back(ek2.ind2);
-
-            for(int j=0;j<merged.size();j++) {
-              auto &tri = merged[j];
-              int n = tri.size();
-              int dupind=-1;
-              for(int i=0;i<n;i++)
-              {
-                if(tri[i] == e.first.ind2){
-                  tri[i] =e.first.ind1;
-                  if(tri[(i+1)%n] == e.first.ind1 || tri[(i+n-1)%n] == e.first.ind1) {
-                    dupind=i;
-                  }
-                }
-              }
-              if(dupind != -1) {
-                IndexedFace tri_new;
-                for(int i=0;i<dupind;i++) tri_new.push_back(tri[i]);
-                for(int i=dupind+1;i<n;i++) tri_new.push_back(tri[i]);
-                tri = tri_new;
-                n--;
-              }
-              if(n < 3) {
-                    merged.erase(merged.begin()+j);
-                    j--;
-              }
-            }
-            improved=true;
-          // TODO lockout
-          }
-
+      // The third face at either end is the one on the other side of that
+      // neighbouring edge. At a 3-edge corner it can only be the third face, but
+      // check rather than assume: everything below dereferences it.
+      auto other_face = [&](const EdgeKey& key) {
+        const auto it = edge_db.find(key);
+        if (it == edge_db.end()) return -1;
+        if (it->second.facea == facea_ind) return it->second.faceb;
+        if (it->second.faceb == facea_ind) return it->second.facea;
+        return -1;
+      };
+      const int third1 = other_face(EdgeKey(a_prev, ind1));
+      const int third2 = other_face(EdgeKey(ind2, a_next));
+      const int around[4] = {facea_ind, faceb_ind, third1, third2};
+      bool usable = true;
+      Eigen::Matrix<double, 4, 3> planes;
+      Eigen::Matrix<double, 4, 1> offsets;
+      for (int i = 0; i < 4; i++) {
+        if (around[i] < 0 || around[i] >= int(merged.size()) || merged[around[i]].size() < 3) {
+          usable = false;
+          break;
         }
-    */
+        const Vector4d plane = calcTriangleNormal(vertices_copy, merged[around[i]]);
+        planes.row(i) = plane.head<3>().transpose();
+        offsets[i] = plane[3];  // the plane is norm . x == offset
+      }
+      if (!usable || third1 == faceb_ind || third2 == faceb_ind || third1 == third2) continue;
+
+      const Vector3d ptcut = planes.colPivHouseholderQr().solve(offsets);
+      double residual = 0;
+      for (int i = 0; i < 4; i++) {
+        residual = std::max(residual, fabs(planes.row(i).dot(ptcut) - offsets[i]));
+      }
+      // One thousandth of the radius: the merged vertex is then off each face by
+      // less than a micron on a 1 mm fillet, and the arcs drawn tangent to those
+      // faces inherit that error and no more. Beyond it the faces genuinely do
+      // not meet at a point and there is nothing to collapse to, so the edge is
+      // left unrounded rather than moved somewhere invented - and said out loud,
+      // because a silently dropped feature looks exactly like one that was never
+      // asked for.
+      if (!ptcut.allFinite() || residual > 1e-3 * r_) {
+        LOG(message_group::Warning,
+            "fillet() left edge %1$d-%2$d unrounded: it is shorter than the diameter of the fillet, "
+            "and the four faces around it miss a common point by %3$s, so there is no vertex to "
+            "collapse it to. Reduce the radius, or remove the short edge from the model.",
+            ind1, ind2, residual);
+        e.second.sel = 0;
+        continue;
+      }
+
+      // Merge ind2 into ind1 at the point they both become.
+      vertices_copy[ind1] = ptcut;
+      for (int j = 0; j < int(merged.size()); j++) {
+        IndexedFace& tri = merged[j];
+        int n = int(tri.size());
+        int dupind = -1;
+        for (int i = 0; i < n; i++) {
+          if (tri[i] != ind2) continue;
+          tri[i] = ind1;
+          if (tri[(i + 1) % n] == ind1 || tri[(i + n - 1) % n] == ind1) dupind = i;
+        }
+        if (dupind != -1) {
+          tri.erase(tri.begin() + dupind);
+          n--;
+        }
+        if (n < 3) {
+          merged.erase(merged.begin() + j);
+          j--;
+        }
+      }
+
+      // One collapse per pass, then start over. edge_db holds facea and faceb as
+      // *indices* into merged, and polinds, polposs and corner_rounds index it
+      // too; erasing a face here shifts every later index, so carrying on round
+      // this loop would read the wrong faces. The enclosing do-while rebuilds all
+      // of them, which is also why no lockout list is needed to keep two
+      // collapses in one pass from interfering.
+      improved = true;
+      break;
+    }
   } while (improved == true);
 
   // start builder with existing vertices to have VertexIndex available
