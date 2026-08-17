@@ -12,26 +12,20 @@
 // behind `#if 0` for long enough that nothing noticed the API moving under it -
 // both of the distance functions now return the two closest points as a
 // SelectedObject rather than a double. Restoring them found seven failing
-// assertions in one build of this file and nine in another, the difference being
-// the undefined behaviour described below. What is left over is marked
-// `known_broken` in the tables with the number the implementation currently
-// produces, and reported by Catch2 as a skip rather than a failure, so
-// re-enabling the suite does not turn the build red before anyone has looked at
-// the geometry.
+// assertions in one build of this file and nine in another, and every one of them
+// was a defect in the code rather than a stale expectation:
 //
-// One of them was not a wrong number but undefined behaviour, and is fixed here
-// rather than marked: calculateLineLineVector() never assigned signed_distance on
-// its parallel branch, so every measurement between two parallel or collinear
-// lines returned whatever was on the stack. It read 0 in one build of this file
-// and the previous call's distance in the next, which is what the four parallel
-// and collinear rows below now pin down.
-//
-// What remains marked is calculateSegSegDistance(). It clamps its two parameters
-// independently, which does not give the closest points on two segments, and its
-// parallel fall-back measures from one endpoint only. Two of those rows carry a
-// comment from the last time they were fixed - "the previous implementation was
-// returning NaN, so don't delete unless you must" - and NaN is what they return
-// again.
+//  - calculateLineLineVector() never assigned signed_distance on its parallel
+//    branch, and calculateLineLineDistance() returns that uninitialized double.
+//    Two parallel lines measured whatever was on the stack: 0 in one build, the
+//    previous call's distance in the next. The parallel and collinear rows below
+//    are what pin it down.
+//  - calculateSegSegDistance() clamped its two parameters independently, which
+//    does not give the closest points on two segments, and fell back to measuring
+//    from one endpoint when they were parallel. Two of the rows below carry a
+//    comment from the last time that was fixed - "the previous implementation was
+//    returning NaN, so don't delete unless you must" - and NaN is what they had
+//    gone back to returning.
 
 #define NOT_APPLICABLE 0.0
 
@@ -41,9 +35,10 @@ static const auto NaN = std::numeric_limits<double>::quiet_NaN();
  *
  * calculateLinePointDistance() and calculateSegSegDistance() return the two
  * closest points rather than the distance between them - the GUI draws a ruler
- * between them and derives the number for its label. A degenerate input comes
- * back as SELECTION_INVALID, which stands where these functions used to return
- * NaN. */
+ * between them and derives the number for its label, without checking the type
+ * or the length of pt, so anything but two points there is a crash in the
+ * caller. SELECTION_INVALID is mapped to NaN so a test says so rather than
+ * reading out of bounds itself. */
 static double rulerLength(const SelectedObject& ruler)
 {
   if (ruler.type == SelectionType::SELECTION_INVALID) {
@@ -103,9 +98,6 @@ TEST_CASE("calculateSegSegDistance handles standard geometry", "[vector_math][se
     std::string name;
     Vector3d l1b, l1e, l2b, l2e;
     double expected_distance;
-    // What the implementation returns today, where that is not the expected
-    // value. See the note at the top of this file.
-    const char *known_broken = nullptr;
   };
 
   std::vector<SegSegTestData> test_cases = {
@@ -128,31 +120,34 @@ TEST_CASE("calculateSegSegDistance handles standard geometry", "[vector_math][se
     // Following added for manually-detected bug:
     {"Collinear, where start of second segment is further than end of second segment",
      Vector3d(0.0, 0.0, 1.0), Vector3d(0.0, 0.0, 0.0), Vector3d(0.0, 0.0, 6.0), Vector3d(0.0, 0.0, 5.0),
-     4.0, "returns 5, the distance to the far end of the second segment"},
+     4.0},
     {"Displacement of unit line segments, Z+4, X+1 units apart", Vector3d(0.0, 0.0, 0.0),
-     Vector3d(0.0, 0.0, 1.0), Vector3d(1.0, 0.0, 6.0), Vector3d(1.0, 0.0, 5.0), 4.12311,
-     "returns 5.09902, measured to the wrong end of the second segment"},
+     Vector3d(0.0, 0.0, 1.0), Vector3d(1.0, 0.0, 6.0), Vector3d(1.0, 0.0, 5.0), 4.12311},
     // The following was gathered from the tops of linear_extrude_invisible-tests.scad.
     // The previous implementation was returning NaN, so don't delete unless you must.
     {"I can't believe it's not parallel", Vector3d(-32.928932189941406, 0, 30),
      Vector3d(-40, -7.0710678100585938, 30), Vector3d(-12.92893123626709, 0, 30),
-     Vector3d(-20, -7.0710678100585938, 30), 14.73623039,
-     "returns NaN, which is the regression this row was added to catch"},
+     Vector3d(-20, -7.0710678100585938, 30), 14.73623039},
     // The two are the above but decreasingly less parallel.
     // The previous implementation was failing these, so don't delete unless you must.
     {"Almost parallel", Vector3d(-32.93, 0, 30), Vector3d(-40, -7.0710678100585938, 30),
-     Vector3d(-12.92893123626709, 0, 30), Vector3d(-20, -7.0710678100585938, 30), 14.73719,
-     "returns 20, an endpoint-to-endpoint distance"},
+     Vector3d(-12.92893123626709, 0, 30), Vector3d(-20, -7.0710678100585938, 30), 14.73719},
     {"Not quite parallel", Vector3d(-33, 0, 30), Vector3d(-40, -7.0710678100585938, 30),
-     Vector3d(-12.92893123626709, 0, 30), Vector3d(-20, -7.0710678100585938, 30), 14.79865,
-     "returns 20, an endpoint-to-endpoint distance"},
+     Vector3d(-12.92893123626709, 0, 30), Vector3d(-20, -7.0710678100585938, 30), 14.79865},
+    // A point against the middle of a segment, which is the branch where the
+    // second segment has no length to solve along.
+    {"Second segment is a point beside the first", Vector3d(0.0, 0.0, 0.0), Vector3d(10.0, 0.0, 0.0),
+     Vector3d(5.0, 3.0, 0.0), Vector3d(5.0, 3.0, 0.0), 3.0},
+    // Skew segments whose closest points on the infinite lines lie beyond both
+    // of them, so both parameters have to be pinned before the answer is the
+    // distance between the two near ends.
+    {"Skew, closest point off the end of both segments", Vector3d(0.0, 0.0, 0.0),
+     Vector3d(1.0, 0.0, 0.0), Vector3d(4.0, 0.0, 3.0), Vector3d(4.0, 4.0, 3.0), 4.242640687119285},
   };
 
   for (const auto& test : test_cases) {
     SECTION(test.name)
     {
-      if (test.known_broken) SKIP("known failure: " << test.known_broken);
-
       double actual_distance =
         rulerLength(calculateSegSegDistance(test.l1b, test.l1e, test.l2b, test.l2e));
 
@@ -161,6 +156,14 @@ TEST_CASE("calculateSegSegDistance handles standard geometry", "[vector_math][se
       INFO("Expected: " << test.expected_distance << ", Actual: " << actual_distance);
 
       REQUIRE(actual_distance == Catch::Approx(test.expected_distance).margin(1e-6));
+
+      // The distance between two segments does not depend on which one is named
+      // first. The previous implementation was not symmetric: it took its first
+      // point from the start of segment 1 and its second from the *end* of
+      // segment 2.
+      const double swapped =
+        rulerLength(calculateSegSegDistance(test.l2b, test.l2e, test.l1b, test.l1e));
+      CHECK(swapped == Catch::Approx(actual_distance).margin(1e-6));
     }
   }
 }
@@ -175,7 +178,6 @@ TEST_CASE("calculateLineLineDistance handles various line arrangements (Eigen)",
     Vector3d l2e;
     double expected_dist;  // The signed shortest distance (returned 'd')
     double expected_t;     // The `t` or `s` from the parametric line equations ('parametric_t')
-    const char *known_broken = nullptr;
   };
 
   const LineLineTestData testCases[] = {
@@ -286,8 +288,6 @@ TEST_CASE("calculateLineLineDistance handles various line arrangements (Eigen)",
   for (const auto& test : testCases) {
     SECTION(test.name)
     {
-      if (test.known_broken) SKIP("known failure: " << test.known_broken);
-
       double actual_t;
       double actual_dist = calculateLineLineDistance(test.l1b, test.l1e, test.l2b, test.l2e, actual_t);
 

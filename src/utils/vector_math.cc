@@ -120,22 +120,53 @@ SelectedObject calculateSegSegDistance(const Vector3d& l1b, const Vector3d& l1e,
   SelectedObject ruler;
   ruler.type = SelectionType::SELECTION_LINE;
 
-  Vector3d v1 = l1e - l1b;
-  Vector3d v2 = l2e - l2b;
-  Vector3d n = v1.cross(v2);
-  Vector3d res;
-  if (n.norm() < 1e-6) {
-    double dummy;
-    return calculateLinePointDistance(l1b, l1e, l2b, dummy);
+  // The closest points on two segments, by the standard method: solve for the
+  // closest points on the two infinite lines, and where that answer falls off
+  // the end of a segment, pin that parameter to the end and re-solve the other
+  // one against it. Clamping both parameters independently is not the same thing
+  // and does not give the closest points - it was what this function did, and it
+  // measured to the far end of a segment whenever the unclamped answer lay
+  // outside. Parallel and degenerate inputs fall out of the same cases rather
+  // than needing a branch of their own, so there is no unsolvable input and this
+  // always returns two points: Measurement.cc reads both without checking.
+  const Vector3d d1 = l1e - l1b;
+  const Vector3d d2 = l2e - l2b;
+  const Vector3d r = l1b - l2b;
+  const double a = d1.squaredNorm();  // squared length of segment 1
+  const double e = d2.squaredNorm();  // squared length of segment 2
+  const double f = d2.dot(r);
+  const double eps = GRID_FINE * GRID_FINE;
+
+  double s = 0.0;  // parameter along segment 1
+  double t = 0.0;  // parameter along segment 2
+  if (a <= eps && e <= eps) {
+    // Both segments are points, so the endpoints are the answer.
+  } else if (a <= eps) {
+    t = std::clamp(f / e, 0.0, 1.0);
+  } else {
+    const double c = d1.dot(r);
+    if (e <= eps) {
+      s = std::clamp(-c / a, 0.0, 1.0);
+    } else {
+      const double b = d1.dot(d2);
+      const double denom = a * e - b * b;  // zero exactly when the segments are parallel
+      // Parallel segments have no single closest pair, so any point of the
+      // overlap will do: take the start of segment 1 and let the clamping below
+      // slide it onto segment 2's range.
+      s = (denom > 0.0) ? std::clamp((b * f - c * e) / denom, 0.0, 1.0) : 0.0;
+      t = (b * s + f) / e;
+      if (t < 0.0) {
+        t = 0.0;
+        s = std::clamp(-c / a, 0.0, 1.0);
+      } else if (t > 1.0) {
+        t = 1.0;
+        s = std::clamp((b - c) / a, 0.0, 1.0);
+      }
+    }
   }
-  if (linsystem(v1, n, v2, l2e - l1b, res, nullptr)) {
-    ruler.type = SelectionType::SELECTION_INVALID;
-    return ruler;
-  }
-  double d1 = std::clamp(res[0], 0.0, 1.0);
-  double d2 = std::clamp(res[2], 0.0, 1.0);
-  ruler.pt.push_back(l1b + v1 * d1);
-  ruler.pt.push_back(l2e - v2 * d2);
+
+  ruler.pt.push_back(l1b + d1 * s);
+  ruler.pt.push_back(l2b + d2 * t);
 
   return ruler;
 }
