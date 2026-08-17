@@ -1,0 +1,261 @@
+// The recogniser behind analytic STEP export, tested on meshes built by hand.
+//
+// AnalyticFeatures answers one question - which runs of facets were modelled as
+// a surface of revolution, and will every face sharing their edges accept the
+// substitution - and it answers it from plain loops and a list of declared
+// surfaces. Nothing here needs a geometry backend, an exporter or a binary: the
+// whole file links against AnalyticFeatures.cc, Surface.cc and Eigen.
+//
+// That matters because the only other guard on this code is the STEP export
+// sanity suite, which builds the application, exports each fixture three times
+// and parses the result with a 1000-line validator. These cases run in
+// milliseconds and can construct the shape a defect needs, rather than hoping a
+// fixture happens to contain it.
+#include "geometry/AnalyticFeatures.h"
+
+#include <catch2/catch_all.hpp>
+#include <cmath>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "geometry/Surface.h"
+
+using namespace AnalyticFeatures;
+
+namespace {
+
+/*! A faceted cylinder as mergeTriangles() would hand one over: one quad per
+ * segment for the wall, plus a cap at either end.
+ *
+ * `fan_top` splits the top cap into one triangle per segment instead of a
+ * single polygon, which is how a wall ends up with a rim bordering one face per
+ * facet - the rule that rejects most of what the recogniser fits. */
+struct FacetedCylinder {
+  std::vector<Vector3d> vertices;
+  std::vector<std::vector<int>> loops;
+  std::vector<Vector3d> normals;
+  std::vector<char> valid, is_hole;
+
+  FacetedCylinder(int fn, double r, double h, bool fan_top = false)
+  {
+    for (int i = 0; i < fn; i++) {
+      const double a = 2 * M_PI * i / fn;
+      vertices.emplace_back(r * cos(a), r * sin(a), 0.0);
+    }
+    for (int i = 0; i < fn; i++) {
+      const double a = 2 * M_PI * i / fn;
+      vertices.emplace_back(r * cos(a), r * sin(a), h);
+    }
+
+    // The wall, counter clockwise seen from outside, normals away from the axis.
+    for (int i = 0; i < fn; i++) {
+      const int j = (i + 1) % fn;
+      loops.push_back({i, j, j + fn, i + fn});
+      const double a = 2 * M_PI * (i + 0.5) / fn;
+      normals.emplace_back(cos(a), sin(a), 0.0);
+    }
+
+    std::vector<int> bottom;
+    for (int i = fn - 1; i >= 0; i--) bottom.push_back(i);
+    loops.push_back(bottom);
+    normals.emplace_back(0.0, 0.0, -1.0);
+
+    if (fan_top) {
+      const int hub = (int)vertices.size();
+      vertices.emplace_back(0.0, 0.0, h);
+      for (int i = 0; i < fn; i++) {
+        const int j = (i + 1) % fn;
+        loops.push_back({i + fn, j + fn, hub});
+        normals.emplace_back(0.0, 0.0, 1.0);
+      }
+    } else {
+      std::vector<int> top;
+      for (int i = 0; i < fn; i++) top.push_back(i + fn);
+      loops.push_back(top);
+      normals.emplace_back(0.0, 0.0, 1.0);
+    }
+
+    valid.assign(loops.size(), 1);
+    is_hole.assign(loops.size(), 0);
+  }
+
+  [[nodiscard]] Mesh mesh() const
+  {
+    Mesh m;
+    m.vertices = &vertices;
+    m.loops = &loops;
+    m.valid = &valid;
+    m.is_hole = &is_hole;
+    m.normals = &normals;
+    return m;
+  }
+};
+
+std::vector<std::shared_ptr<Surface>> declaredCylinder(double r)
+{
+  std::vector<std::shared_ptr<Surface>> surfaces;
+  surfaces.push_back(std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), r));
+  return surfaces;
+}
+
+std::size_t consumedCount(const Result& res)
+{
+  std::size_t n = 0;
+  for (char c : res.consumed) n += c ? 1 : 0;
+  return n;
+}
+
+bool reportMentions(const Result& res, const std::string& text)
+{
+  for (const auto& line : res.report) {
+    if (line.find(text) != std::string::npos) return true;
+  }
+  return false;
+}
+
+/*! The angle of a vertex about the z axis, which is the ruling it sits on. */
+double ruling(const std::vector<Vector3d>& vertices, int id)
+{
+  return atan2(vertices[id][1], vertices[id][0]);
+}
+
+}  // namespace
+
+TEST_CASE("fitCircleCentre finds the axis of an arc, which averaging cannot", "[analytic][fit]")
+{
+  // The case the header records: a 54 degree arc of a radius 78 wall. Its
+  // centroid sits inside the chord, nowhere near the axis, and taking it for the
+  // centre put the axis at radius 266 and the wall was then rejected for not
+  // fitting itself.
+  const double r = 78.0, level = 3.0;
+  std::vector<Vector3d> verts;
+  std::vector<int> ids;
+  for (int i = 0; i <= 9; i++) {
+    const double a = (54.0 * i / 9.0) * M_PI / 180.0;
+    verts.emplace_back(r * cos(a), r * sin(a), level);
+    ids.push_back(i);
+  }
+
+  Vector3d centroid(0, 0, 0);
+  for (const auto& v : verts) centroid += v / (double)verts.size();
+  CHECK(centroid.head<2>().norm() > 70.0);  // the averaged answer, for comparison
+
+  Vector3d centre;
+  REQUIRE(fitCircleCentre(verts, ids, Vector3d(0, 0, 1), level, centre));
+  CHECK(centre[0] == Catch::Approx(0.0).margin(1e-9));
+  CHECK(centre[1] == Catch::Approx(0.0).margin(1e-9));
+  CHECK(centre[2] == Catch::Approx(level).margin(1e-9));
+  for (const auto& v : verts) {
+    CHECK(distanceToAxis(v, centre, Vector3d(0, 0, 1)) == Catch::Approx(r).margin(1e-9));
+  }
+}
+
+TEST_CASE("a declared faceted cylinder is recognised as one closed band", "[analytic]")
+{
+  const int fn = 8;
+  const double r = 10.0, h = 5.0;
+  const FacetedCylinder cyl(fn, r, h);
+
+  const Result res = recogniseSurfacesOfRevolution(cyl.mesh(), declaredCylinder(r), 1e-6);
+
+  REQUIRE(res.bands.size() == 1);
+  const Band& band = res.bands[0];
+  CHECK(band.alive);
+  CHECK(band.dropped == nullptr);
+  CHECK(band.closed);
+  CHECK(band.outward);
+  CHECK_FALSE(band.isCone());
+  CHECK(band.walls.size() == (std::size_t)fn);
+  CHECK(band.r_bottom == Catch::Approx(r));
+  CHECK(band.r_top == Catch::Approx(r));
+  CHECK(band.height == Catch::Approx(h));
+  CHECK(consumedCount(res) == (std::size_t)fn);
+
+  // Both rims are the complete bound of one cap, which is the case that lets the
+  // whole loop be replaced by one circle.
+  REQUIRE(res.rims.size() == 1);
+  CHECK(res.rims[0].first.kind == RimRef::WHOLE_LOOP);
+  CHECK(res.rims[0].second.kind == RimRef::WHOLE_LOOP);
+
+  // The report is data the caller prints, and it is the only signal that a wall
+  // which should have been written was. Predict it rather than the exit status.
+  CHECK(reportMentions(res, "1 surface recognised"));
+  CHECK(reportMentions(res, "8 facets replaced"));
+}
+
+TEST_CASE("the seam's two ends are on one ruling across atan2's branch cut", "[analytic][seam]")
+{
+  // A periodic face is closed by a seam running up one ruling, and both of its
+  // ends have to be on that same ruling. Choosing each end independently as the
+  // rim vertex of smallest angle is what this used to do, and it is wrong
+  // exactly here: atan2's cut is at pi, an even sided polygon has a vertex
+  // sitting on it, and which side that vertex falls is decided by the sign of a
+  // coordinate that is zero to fifteen digits. The two rims of one wall
+  // disagreed and the wall was dropped while its neighbours were kept.
+  for (const int fn : {4, 6, 8, 12, 32}) {
+    const double r = 10.0, h = 5.0;
+    const FacetedCylinder cyl(fn, r, h);
+    const Result res = recogniseSurfacesOfRevolution(cyl.mesh(), declaredCylinder(r), 1e-6);
+
+    CAPTURE(fn);
+    REQUIRE(res.bands.size() == 1);
+    const Band& band = res.bands[0];
+    REQUIRE(band.alive);
+    REQUIRE(band.seam_bottom >= 0);
+    REQUIRE(band.seam_top >= 0);
+    // Same ruling, and the seam really is vertical: one end on each rim.
+    CHECK(ruling(cyl.vertices, band.seam_bottom) ==
+          Catch::Approx(ruling(cyl.vertices, band.seam_top)).margin(1e-12));
+    CHECK(cyl.vertices[band.seam_bottom][2] == Catch::Approx(0.0));
+    CHECK(cyl.vertices[band.seam_top][2] == Catch::Approx(h));
+  }
+}
+
+TEST_CASE("an undeclared cylinder stays faceted, because it is also a prism", "[analytic][intent]")
+{
+  // A ring of N quads is exactly the mesh of an N-sided prism, and a cube's four
+  // sides fit a cylinder through its corners with zero residual. No measurement
+  // of the geometry can tell the two apart, so the fit alone must never decide:
+  // geometry comes from the mesh, intent from the primitive.
+  const FacetedCylinder cyl(8, 10.0, 5.0);
+
+  const Result res = recogniseSurfacesOfRevolution(cyl.mesh(), {}, 1e-6);
+
+  CHECK(res.bands.empty());
+  CHECK(consumedCount(res) == 0);
+}
+
+TEST_CASE("a wrongly declared radius leaves the wall faceted", "[analytic][intent]")
+{
+  // A record is only ever a hint, re-checked against the mesh before it is acted
+  // on, which is what makes a loose declaration - including one a model makes
+  // for itself through declare_cylinder() - safe to offer.
+  const FacetedCylinder cyl(8, 10.0, 5.0);
+
+  const Result res = recogniseSurfacesOfRevolution(cyl.mesh(), declaredCylinder(9.0), 1e-6);
+
+  CHECK(res.bands.empty());
+  CHECK(consumedCount(res) == 0);
+}
+
+TEST_CASE("a rim bordering one face per facet rejects the band, and says so", "[analytic][rims]")
+{
+  // The topology gate, which is where the losses are: the bayonet lid had 11
+  // exact cylinder fits, every one declared, and produced no analytic surface at
+  // all because every rim bordered a taper one facet at a time. Here the top cap
+  // is a triangle fan, so each wall facet's top edge borders a different
+  // triangle and there is no single loop to rewrite.
+  const int fn = 8;
+  const double r = 10.0, h = 5.0;
+  const FacetedCylinder cyl(fn, r, h, /* fan_top */ true);
+
+  const Result res = recogniseSurfacesOfRevolution(cyl.mesh(), declaredCylinder(r), 1e-6);
+
+  CHECK(consumedCount(res) == 0);
+  for (const auto& band : res.bands) CHECK_FALSE(band.alive);
+  // A rejected surface is invisible in the output - a band that was never
+  // recognised looks exactly like one that was never there - so the rule that
+  // rejected it has to reach the report.
+  CHECK(reportMentions(res, "the rim borders one face per facet"));
+}
