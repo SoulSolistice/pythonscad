@@ -235,7 +235,16 @@ F1 to F5 have all been acted on; what stands below them is the work itself.
    and the B-spline path stays for everything else. It is a mesh fix, not a STEP
    one, and it changes the geometry of every filleted body - so it wants the
    maintainer's nod and a build to verify.
-3. **Re-measure item 5 now that `declare_*` exists.** The 59% is not one number
+3. **The short-edge collapse in `FilletNode`, if the fillet work continues.** The
+   pass that merges two corners when an edge is shorter than 2r is disabled, and
+   `src/core/FilletNode.cc` now carries the five things standing between it and
+   being switched on - measured, not read off the code. The substantive one: the
+   collapse is over-determined (four planes surround the pair, three are used) and
+   the residual is linear in the edge length, so the `< 2*r_` gate does not bound
+   the damage. On one ordinary configuration a 0.5 mm edge moves the vertex 1 mm
+   off the ignored face, and with shallow end faces a 0.1 mm edge sends it 12
+   units away with no error reported.
+4. **Re-measure item 5 now that `declare_*` exists.** The 59% is not one number
    any more: part of it is a thread that can never be a surface of revolution,
    and part is ramps and lugs a model could declare today. Nobody has separated
    those two, and the probe plus one annotated copy of the model would.

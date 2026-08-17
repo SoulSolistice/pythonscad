@@ -397,6 +397,66 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
         corner_rounds[e.first.ind2].push_back(e.first.ind1);
       }
     }
+    // What the pass below is for: where an edge is shorter than 2r the arc
+    // cannot close along it, so the two corners are merged into one and the
+    // neighbouring faces extended to meet at a point. It is disabled, and these
+    // are the five things standing between it and being switched on. Measured on
+    // the plane configurations it would actually be handed, not read off the
+    // code.
+    //
+    // 1. The collapse is over-determined, and this is the substantive one. Both
+    //    endpoints are 3-edge corners (that is what the selection above
+    //    requires), so *four* distinct planes surround the pair: the two sharing
+    //    the edge, plus the third face at either end. The merged vertex has to
+    //    lie on all four. cut_face_face_face() takes three, so whichever of
+    //    facea/faceb was not picked as `commonfaceind` is ignored, and the point
+    //    lands off it unless the four planes happen to be concurrent. The
+    //    residual is *linear in the edge length* with a coefficient set by the
+    //    angles - on one ordinary configuration it is 2.13 * L, so collapsing a
+    //    0.5 mm edge moves the vertex 1 mm off the fourth face, twice as far as
+    //    the edge that was removed. `line.norm() < 2*r_` is therefore the wrong
+    //    gate: what has to be small is the residual, and a length does not bound
+    //    it. Solve all four in least squares (about 5x smaller residual, and the
+    //    residual is then the measure of non-concurrency itself) and refuse the
+    //    collapse - e.second.sel = 0 - when it exceeds the modelling tolerance.
+    //    That also retires the "is it safe to take the bigger face?" question
+    //    below: with all four planes in, there is no face to choose.
+    //
+    // 2. Three of those planes can be nearly parallel, and then the cut is
+    //    finite but meaningless. With a 0.1 mm edge and end faces tilted 0.004,
+    //    the three-plane point lands 12.4 units away - 124 times the edge it was
+    //    removing - at condition number 253, and cut_face_face_face() reports no
+    //    error because the determinant is not zero. The residual test in 1
+    //    catches this too; a conditioning check would catch it earlier.
+    //
+    // 3. `merged.erase()` invalidates the loop it runs inside. edge_db holds
+    //    facea/faceb as *indices* into merged, and polinds/polposs index it too,
+    //    so erasing a collapsed-away face shifts every later index and the
+    //    remaining iterations of this same loop read the wrong faces. The outer
+    //    do-while already rebuilds edge_db, polinds and corner_rounds from
+    //    scratch on the next pass, so the fix is to collapse one edge, set
+    //    improved and break. That also makes `lockouts` unnecessary: it exists
+    //    only to stop two collapses in one pass interfering, and it does not
+    //    cover every vertex they share.
+    //
+    // 4. Several indices can still be -1 where they are used. a_prev/a_next and
+    //    b_prev/b_next stay -1 when the search loop does not find the vertex,
+    //    and faceind1/faceind2 stay -1 when edge_db has no such edge or when
+    //    neither of its faces is commonfaceind - and merged[-1] follows. Each
+    //    needs a check before use.
+    //
+    // 5. The searches for a_prev/a_next and b_prev/b_next recompute what the
+    //    edge already knows: EdgeVal carries posa and posb, and facea[posa] is
+    //    ind1 with facea[posa+1] == ind2, faceb[posb] is ind2 with
+    //    faceb[posb+1] == ind1. Reading them from there removes the loops and
+    //    the `// TODO b hat die richtigen punkte` doubt with them - the -1/+2
+    //    indexing below is right, because facea traverses the edge one way and
+    //    faceb the other. It is the same "do not derive the same thing twice"
+    //    rule the rails above now follow.
+    //
+    // Rational arcs make this matter more rather than less: an arc of radius r
+    // genuinely cannot be drawn along an edge shorter than 2r, where a parabola
+    // through the same control points would quietly produce something.
     /* TODO activate
 
         // eliminate  too short edges by extrapolating the neighboring edges
