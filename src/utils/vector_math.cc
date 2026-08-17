@@ -76,6 +76,13 @@ Vector3d calculateLineLineVector(const Vector3d& l1b, const Vector3d& l1e, const
 
     double dist_numerator = cross_c_v1.norm();
     double v1_norm = v1.norm();
+    // Parallel lines are everywhere the same distance apart, and that distance
+    // has no side to be signed by. This has to be assigned on every path out of
+    // this branch: calculateLineLineDistance() passes an uninitialized double in
+    // and returns it, so leaving it alone hands back whatever was on the stack -
+    // 0 in one build, the previous call's distance in the next.
+    signed_distance =
+      (v1_norm < GRID_FINE) ? std::numeric_limits<double>::quiet_NaN() : dist_numerator / v1_norm;
     if (v1_norm < GRID_FINE) {
       // Line 1 is a point. This handles both line 2 is point and line 2 is a line.
       // Leave parametric_t as NaN because it's meaningless.

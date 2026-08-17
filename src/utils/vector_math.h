@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Selection.h"
 #include "geometry/linalg.h"
 
 /**
