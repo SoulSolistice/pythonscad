@@ -48,6 +48,20 @@ class Entity:
         self.id = eid
         self.name = name
         self.args = args
+        # A rational B-spline has no entity of its own in ISO 10303: it is a
+        # complex instance naming several subtypes, and the geometry is spread
+        # over them. `parts` maps each subtype to its own arguments, so a check
+        # can ask for the one it needs instead of matching on `name`, which for a
+        # complex instance is only the first subtype listed.
+        self.parts = {name: args}
+
+    def has(self, name):
+        return name in self.parts
+
+    def part(self, name):
+        """Arguments of one subtype of a complex instance, or of the entity
+        itself when it is a simple one."""
+        return self.parts.get(name, "")
 
     def refs(self):
         return [int(r) for r in re.findall(r"#(\d+)", self.args)]
@@ -131,8 +145,55 @@ def parse_step(filename):
             continue
         if eid in entities:
             problems.append("duplicate entity id #%d" % eid)
-        entities[eid] = Entity(eid, nm.group(1), nm.group(2))
+        ent = Entity(eid, nm.group(1), nm.group(2))
+        if rhs.startswith("("):
+            ent.parts = split_complex(rhs)
+            if ent.parts:
+                ent.name = next(iter(ent.parts))
+            else:
+                ent.parts = {ent.name: ent.args}
+        entities[eid] = ent
     return entities, problems
+
+
+def split_complex(rhs):
+    """Split `( A(..) B(..) C(..) )` into {name: args}, one entry per subtype.
+
+    Nesting and string literals both have to be respected: a control net is full
+    of parentheses and a label can contain anything."""
+    body = rhs.strip()
+    if not body.startswith("(") or not body.endswith(")"):
+        return {}
+    body = body[1:-1]
+    out = {}
+    i = 0
+    n = len(body)
+    while i < n:
+        m = re.compile(r"\s*([A-Z_0-9]+)\s*\(").match(body, i)
+        if not m:
+            break
+        name = m.group(1)
+        depth = 1
+        j = m.end()
+        in_string = False
+        while j < n and depth:
+            c = body[j]
+            if in_string:
+                if c == "'":
+                    if j + 1 < n and body[j + 1] == "'":
+                        j += 1
+                    else:
+                        in_string = False
+            elif c == "'":
+                in_string = True
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+            j += 1
+        out[name] = body[m.end():j - 1]
+        i = j
+    return out
 
 
 def check_real_literals(filename, problems):
@@ -899,9 +960,12 @@ def check_bspline_faces(entities, problems):
     is implied by the degree and any other value is a mistake."""
 
     def net_of(surface):
-        nums = re.findall(r"[-+]?\d+", surface.args.split("(", 1)[0] + ",")
-        degrees = [int(x) for x in re.findall(r",\s*(\d+)\s*,\s*(\d+)\s*,\s*\(", surface.args)[0]] \
-            if re.search(r",\s*\d+\s*,\s*\d+\s*,\s*\(", surface.args) else None
+        # A rational surface keeps its degrees and its net in the
+        # B_SPLINE_SURFACE part of the complex instance, where there is no
+        # leading label; a plain one has them after the label.
+        text = surface.part("B_SPLINE_SURFACE") or surface.args
+        degrees = [int(x) for x in re.findall(r"(\d+)\s*,\s*(\d+)\s*,\s*\(", text)[0]] \
+            if re.search(r"\d+\s*,\s*\d+\s*,\s*\(", text) else None
         if not degrees:
             return None, None, None
         du, dv = degrees
@@ -923,30 +987,54 @@ def check_bspline_faces(entities, problems):
             out.append(tuple(f[:3]))
         return out
 
-    def knots_ok(ent, degree, count):
-        mult = re.findall(r"\((\d+(?:,\d+)*)\)", ent.args)
+    def knots_ok_text(text, degree, count):
+        mult = re.findall(r"\((\d+(?:,\d+)*)\)", text)
         return degree >= 1 and count == degree + 1 and any(
             m == "%d,%d" % (degree + 1, degree + 1) for m in mult
         )
 
+    def knots_ok(ent, degree, count):
+        return knots_ok_text(
+            ent.part("B_SPLINE_SURFACE_WITH_KNOTS") if ent.has("RATIONAL_B_SPLINE_SURFACE")
+            else ent.args, degree, count)
+
+    def weights_of(text):
+        return [float(t) for t in NUMBER_RE.findall(text)]
+
     for curve in entities.values():
-        if curve.name != "B_SPLINE_CURVE_WITH_KNOTS":
+        if not curve.has("B_SPLINE_CURVE_WITH_KNOTS"):
             continue
         n = len(curve.refs())
-        m = re.match(r"\s*'[^']*'\s*,\s*(\d+)", curve.args)
+        rational = curve.has("RATIONAL_B_SPLINE_CURVE")
+        if rational:
+            m = re.match(r"\s*(\d+)", curve.part("B_SPLINE_CURVE"))
+        else:
+            m = re.match(r"\s*'[^']*'\s*,\s*(\d+)", curve.args)
         degree = int(m.group(1)) if m else -1
-        if not knots_ok(curve, degree, n):
+        knot_text = curve.part("B_SPLINE_CURVE_WITH_KNOTS") if rational else curve.args
+        if not knots_ok_text(knot_text, degree, n):
             problems.append(
                 "#%d: B_SPLINE_CURVE_WITH_KNOTS of degree %d has %d control points and knots that "
                 "are not a Bezier's" % (curve.id, degree, n)
             )
+        if rational:
+            weights = weights_of(curve.part("RATIONAL_B_SPLINE_CURVE"))
+            if len(weights) != n:
+                problems.append(
+                    "#%d: RATIONAL_B_SPLINE_CURVE carries %d weights for %d control points"
+                    % (curve.id, len(weights), n)
+                )
+            if any(w <= 0 for w in weights):
+                problems.append(
+                    "#%d: RATIONAL_B_SPLINE_CURVE has a weight that is not positive" % curve.id
+                )
 
     for face in entities.values():
         if face.name != "ADVANCED_FACE":
             continue
         refs = face.refs()
         surface = entities.get(refs[-1]) if refs else None
-        if surface is None or surface.name != "B_SPLINE_SURFACE_WITH_KNOTS":
+        if surface is None or not surface.has("B_SPLINE_SURFACE_WITH_KNOTS"):
             continue
         du, dv, grid = net_of(surface)
         if grid is None:
@@ -957,6 +1045,21 @@ def check_bspline_faces(entities, problems):
                 "#%d: B_SPLINE_SURFACE_WITH_KNOTS of degree (%d,%d) has knots that are not a "
                 "Bezier's" % (surface.id, du, dv)
             )
+        if surface.has("RATIONAL_B_SPLINE_SURFACE"):
+            # A fillet's patch is rational: the middle weight is what makes its
+            # arc a circle instead of a parabola. One weight per control point,
+            # all of them positive, or the surface is not the one that was drawn.
+            weights = weights_of(surface.part("RATIONAL_B_SPLINE_SURFACE"))
+            want = (du + 1) * (dv + 1)
+            if len(weights) != want:
+                problems.append(
+                    "#%d: RATIONAL_B_SPLINE_SURFACE carries %d weights for a %dx%d net"
+                    % (surface.id, len(weights), du + 1, dv + 1)
+                )
+            if any(w <= 0 for w in weights):
+                problems.append(
+                    "#%d: RATIONAL_B_SPLINE_SURFACE has a weight that is not positive" % surface.id
+                )
 
         rows = [pts(r) for r in grid]
         cols = [pts([grid[i][j] for i in range(du + 1)]) for j in range(dv + 1)]
@@ -968,7 +1071,7 @@ def check_bspline_faces(entities, problems):
                 continue
             for oid in loop.refs():
                 geom = _edge_geometry(entities, oid)
-                if geom is None or geom.name != "B_SPLINE_CURVE_WITH_KNOTS":
+                if geom is None or not geom.has("B_SPLINE_CURVE_WITH_KNOTS"):
                     continue  # a straight ruling is a LINE, checked elsewhere
                 cp = pts(geom.refs())
                 if cp is None:

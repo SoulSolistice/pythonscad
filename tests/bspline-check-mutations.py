@@ -84,10 +84,50 @@ run("surface knots wrong",
 run("curve reversed (still a net column)",
     BODY.replace("(#11,#12,#13)", "(#13,#12,#11)"), "accepted")
 
+
+# The same patch written as a rational one, which is what a fillet now is: the
+# middle weight at cos 45 degrees is what makes the arc a circle rather than a
+# parabola. ISO 10303 has no single rational B-spline entity, so it is a complex
+# instance and the geometry is spread over the subtypes - which is exactly what
+# the parser and these checks have to cope with.
+W = "0.70710678118654757"
+RATIONAL = BODY.replace(
+    "#10 = B_SPLINE_SURFACE_WITH_KNOTS('',2,1,((#1,#2),(#3,#4),(#5,#6)),.UNSPECIFIED.,.F.,.F.,.F.,(3,3),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.);",
+    "#10 = ( BOUNDED_SURFACE() B_SPLINE_SURFACE(2,1,((#1,#2),(#3,#4),(#5,#6)),.UNSPECIFIED.,.F.,.F.,.F.)"
+    " B_SPLINE_SURFACE_WITH_KNOTS((3,3),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.)"
+    " GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_SURFACE(((1.,1.),(" + W + "," + W + "),(1.,1.)))"
+    " REPRESENTATION_ITEM('') SURFACE() );"
+).replace(
+    "#14 = B_SPLINE_CURVE_WITH_KNOTS('',2,(#11,#12,#13),.UNSPECIFIED.,.F.,.F.,(3,3),(0.,1.),.UNSPECIFIED.);",
+    "#14 = ( BOUNDED_CURVE() B_SPLINE_CURVE(2,(#11,#12,#13),.UNSPECIFIED.,.F.,.F.)"
+    " B_SPLINE_CURVE_WITH_KNOTS((3,3),(0.,1.),.UNSPECIFIED.) CURVE()"
+    " GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_CURVE((1.," + W + ",1.))"
+    " REPRESENTATION_ITEM('') );"
+)
+
+run("rational, as written", RATIONAL, "accepted")
+# the same wrong-edge mutation, to show the check still sees through the complex
+# instance rather than skipping it
+run("rational, curve from the wrong edge",
+    RATIONAL.replace("B_SPLINE_CURVE(2,(#11,#12,#13)", "B_SPLINE_CURVE(2,(#11,#2,#13)"),
+    "rejected")
+run("rational, a weight per point missing",
+    RATIONAL.replace("RATIONAL_B_SPLINE_CURVE((1.," + W + ",1.))",
+                     "RATIONAL_B_SPLINE_CURVE((1.," + W + "))"),
+    "rejected")
+run("rational, a negative weight",
+    RATIONAL.replace("RATIONAL_B_SPLINE_SURFACE(((1.,1.),(" + W + "," + W + "),(1.,1.)))",
+                     "RATIONAL_B_SPLINE_SURFACE(((1.,1.),(-" + W + "," + W + "),(1.,1.)))"),
+    "rejected")
+run("rational, surface knots wrong",
+    RATIONAL.replace("B_SPLINE_SURFACE_WITH_KNOTS((3,3),(2,2)",
+                     "B_SPLINE_SURFACE_WITH_KNOTS((2,2),(2,2)"),
+    "rejected")
+
 if failures:
     print()
     for f in failures:
         print("FAILED:", f, file=sys.stderr)
     sys.exit(1)
 print()
-print("%d mutations behaved as expected" % 5)
+print("%d mutations behaved as expected" % 10)
