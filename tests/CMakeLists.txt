@@ -1164,6 +1164,17 @@ add_cmdline_test(export-step-sanitytest SCRIPT ${STEPEXPORTSANITYTEST_PY} SUFFIX
 file(GLOB STEP_EXPORT_PY_FILES ${TEST_STEP_EXPORT_PY_DIR}/*.py)
 add_cmdline_test(export-step-py-sanitytest SCRIPT ${STEPEXPORTSANITYTEST_PY} SUFFIX txt FILES ${STEP_EXPORT_PY_FILES} ARGS ${OPENSCAD_EXE_ARG} --trust-python)
 
+# The validator's own calibration, which needs no binary: prove
+# check_bspline_faces() rejects what it exists to reject. The mutation that
+# matters is a bounding curve with the right two end vertices, used twice in
+# opposite directions so the shell still closes, but built from the wrong edge of
+# the patch's control net - a face that bulges the wrong way and passes every
+# topology check. Each mutation states whether it should be accepted or rejected
+# and the script exits non-zero when one behaves differently.
+add_test(NAME bspline-check-mutations CONFIGURATIONS Default
+  COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/bspline-check-mutations.py
+)
+
 # Export/import color support
 add_cmdline_test(offcolorpngtest EXPERIMENTAL SCRIPT ${EXPORT_IMPORT_PNGTEST_PY} SUFFIX png FILES ${COLOR_3D_TEST_FILES} EXPECTEDDIR render-manifold ARGS ${OPENSCAD_EXE_ARG} --format=OFF --backend=manifold --render --trust-python)
 if (ENABLE_LIB3MF_TESTS)
