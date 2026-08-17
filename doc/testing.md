@@ -55,9 +55,10 @@ the other declares internals of `linear_extrude.cc` that have since moved. Each
 says so at the top of the file. Deleting its line from that list is the last
 step of porting one.
 
-Catch2 3.3 or newer is required. If the machine has no suitable Catch2 the build
-downloads one at configure time, so the tests are available on every platform
-without adding a dependency that only they need. Two options control this:
+Catch2 3.3 or newer is required. MSYS2 packages it and the msys2 dependency
+profile asks for it (`catch:p`), so a Windows build uses the package. Where the
+distribution has no suitable Catch2 the build downloads one at configure time
+instead, so the tests are available on every platform. Two options control this:
 
 * `-DENABLE_UNIT_TESTS=OFF`: do not build or register them at all. They are also
   skipped automatically for a cross build or an Emscripten build, where ctest

@@ -44,7 +44,7 @@ option(ENABLE_TESTS "Run testsuite after building." ON)
 option(ENABLE_GUI_TESTS "Compile a special version of the PythonSCAD gui with feature for testing." OFF)
 option(ENABLE_UNIT_TESTS "Build the Catch2 unit tests (OpenSCADUnitTests) and register them with ctest." ON)
 option(FETCH_CATCH2 "Download Catch2 at configure time when the machine has no suitable Catch2 3 installed. Turn off to require a system Catch2." ON)
-set(CATCH2_FETCH_TAG "v3.9.1" CACHE STRING "Catch2 git tag used when FETCH_CATCH2 downloads it")
+set(CATCH2_FETCH_TAG "v3.15.3" CACHE STRING "Catch2 git tag used when FETCH_CATCH2 downloads it")
 option(EXPERIMENTAL "Enable Experimental Features" ON)
 option(USE_MANIFOLD_TRIANGULATOR "Use Manifold's triangulator instead of CGAL's" ON)
 option(USE_MANIFOLD_MINKOWSKI "Use Manifold's Minkowski instead of CGAL's" OFF)
@@ -2817,11 +2817,12 @@ if(ENABLE_TESTS)
       set(CMAKE_IGNORE_PREFIX_PATH "${CMAKE_IGNORE_PREFIX_PATH_BACKUP}")
     endif()
 
-    # No distribution this project builds on is guaranteed to package Catch2 3 -
-    # MSYS2 and Debian stable have both shipped without it or with 2.x - and a
-    # unit test suite nobody can build is a suite nobody runs. Fetching it keeps
-    # the tests available everywhere without adding a dependency to the
-    # get-dependencies profiles that only the tests need.
+    # Not every distribution this project builds on packages Catch2 3, and a unit
+    # test suite nobody can build is a suite nobody runs. MSYS2 does have it, and
+    # the msys2 profile now asks for it (`catch:p`), so a Windows build uses the
+    # package rather than this path. Everywhere the package is missing or too old
+    # this keeps the tests available without adding a dependency that only they
+    # need to a profile whose package name has not been checked.
     if(NOT Catch2_FOUND AND FETCH_CATCH2)
       message(STATUS "Catch2 3 not installed, fetching ${CATCH2_FETCH_TAG} for the unit tests")
       include(FetchContent)
