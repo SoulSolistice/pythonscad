@@ -28,6 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
 #include "StepKernel.h"
 #include "geometry/AnalyticFeatures.h"
+#include <algorithm>  // std::reverse
 #include <iostream>
 #include <fstream>
 #include <chrono>
@@ -312,9 +313,28 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     } else if (previous != -1 && loop_valid[previous] && !loop_is_hole[previous]) {
       parents[i] = previous;  // keep what mergeTriangles found
     } else {
-      // a reversed loop without an enclosing face cannot be exported as a face
+      // Nothing encloses it, which is the evidence that it is not the boundary
+      // of a hole in anything: it is an outer bound. It used to be marked
+      // invalid and dropped here, and dropping a face is never an option - its
+      // edges are then used by one face instead of two and the shell is open
+      // along every one of them. An analytic export of the bayonet lid came out
+      // with 94 such edges over 61 faces, all of them in the one annulus where
+      // this fired, and the only sign was a line on stdout nobody reads. See
+      // *The dropped loop* in doc/step-export.md.
       parents[i] = -1;
-      loop_valid[i] = 0;
+      loop_is_hole[i] = 0;
+      // Reverse it only if that is what marked it a hole. The rule above also
+      // marks a loop a hole because mergeTriangles() gave it a parent, and such
+      // a loop can be wound the right way already - reversing it would then turn
+      // a correct face into a backwards one. Wind it so the face agrees with the
+      // mesh normal, and therefore with the neighbours it shares edges with.
+      if (i < faceNormals.size()) {
+        const Vector3d ref = faceNormals[i].head<3>();
+        if (ref.squaredNorm() > 0.5 && ref.dot(loop_normals[i]) < 0) {
+          std::reverse(loops[i].begin(), loops[i].end());
+          loop_normals[i] = -loop_normals[i];
+        }
+      }
       orphan_cnt++;
     }
   }
@@ -328,8 +348,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
            reparented_cnt == 1 ? "" : "s");
   }
   if (orphan_cnt > 0) {
-    printf("STEP export: dropped %d reversed loop%s without an enclosing face\n", orphan_cnt,
-           orphan_cnt == 1 ? "" : "s");
+    printf("STEP export: kept %d reversed loop%s without an enclosing face as %s own face\n", orphan_cnt,
+           orphan_cnt == 1 ? "" : "s", orphan_cnt == 1 ? "its" : "their");
   }
 
   std::vector<Face *> sfaces_extra;
@@ -363,12 +383,14 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol);
     for (const auto& line : features.report) printf("STEP export: %s\n", line.c_str());
 
-    // Bezier patches are found but not yet written. Reporting them first is
-    // deliberate: it says whether the fillet declarations reach the exporter
-    // and whether the regions and their boundary runs come out right, on real
-    // models, before any of the emission that depends on all three exists. A
-    // patch that is silently not recognised looks exactly like one that was
-    // never declared, which is the same trap the band report was added for.
+    // Bezier patches are recognised here and written further down, with the
+    // B_SPLINE_SURFACE_WITH_KNOTS faces. The report is emitted either way, and
+    // before the writing: it says whether the fillet declarations reached the
+    // exporter and whether the regions and their boundary runs came out right,
+    // which a file with no B-spline face in it cannot distinguish from a model
+    // that declared none. A patch that is silently not recognised looks exactly
+    // like one that was never declared - the same trap the band report exists
+    // for.
     std::vector<std::string> patch_report;
     std::vector<AnalyticFeatures::Patch> patches =
       AnalyticFeatures::recogniseBezierPatches(mesh, surfaces, features.consumed, patch_report);

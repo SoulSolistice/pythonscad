@@ -58,6 +58,7 @@ misinterpreted.
 | Comma decimal separator on a German locale | `snprintf` follows `LC_NUMERIC`, and `openscad.cc:778` calls `setlocale(LC_ALL, "")` | `a8595cd` |
 | A membrane spanning every bore | holes attached to the wrong face | `a15fef9` |
 | `-o part.stp` rejected; `export(part, "part.stp")` silently wrote STL | suffix resolution keyed on the format identifier, not the suffix | `cf9b593` |
+| 94 edges used by one face, over 61 faces of one annulus | a loop whose winding disagreed with the mesh normal and which nothing encloses was *dropped*, and dropping a face opens the shell along every edge of it | see *The dropped loop* |
 
 Three of these are worth understanding rather than just recording.
 
@@ -94,6 +95,47 @@ The exporter no longer trusts `faceParents` for holes. It re-runs the
 containment search over the coplanar loops and takes the innermost enclosing
 one, falling back to what `mergeTriangles()` recorded only when its own search
 finds nothing.
+
+### The dropped loop
+
+`examples/step_test/lid10.stp` is an analytic export of the bayonet lid, and it
+is not a closed shell: **94 edges are used by exactly one face**, over 61 faces,
+every one of them in the annulus r = 78.20..78.31, z = 79.09..95.00. The five
+hole nesting failures in the same file are in that same annulus. Nothing else in
+the part is affected.
+
+Three measurements narrow it to one line of code, and they are worth recording
+because the shape of the reasoning applies to any missing-face report:
+
+- **All 94 are `LINE`s, and all 94 single users are `PLANE` faces.** The eight
+  analytic faces and twelve circles in the file are clean, so this is not the
+  analytic path.
+- **They are not a duplicate vertex crack.** For each open edge the nearest other
+  open edge is 0.2 mm away, not 1e-16 - so the shell is not split along a seam of
+  near coincident vertices the way every filleted body was (*Never choose the same
+  thing twice*, above). Faces are absent, not doubled.
+- **The exporter has exactly one path that removes a face after accepting it.**
+  A merged loop whose winding disagrees with `faceNormals[i]` is taken for the
+  boundary of a hole; if no coplanar loop encloses it, it used to be marked
+  invalid and dropped. That is `orphan_cnt`, and it printed *dropped N reversed
+  loops without an enclosing face* on stdout - a line nobody read.
+
+Dropping a face is never the right answer: its edges are then used once instead
+of twice and the shell is open along all of them. And nothing enclosing it is
+precisely the evidence that it is *not* a hole. It is now kept as an outer bound,
+reversed so its winding agrees with the mesh normal and therefore with the
+neighbours it shares edges with.
+
+Two lessons, both already in this file for other reasons:
+
+- **A rejected thing is invisible**, and this time it was a face rather than a
+  band. The diagnostic existed and was printed. Nobody validates the stdout of an
+  export of a real model, and no fixture contained the shape, so the only witness
+  was a 2.9 MB artifact committed to `examples/step_test/`.
+- **A real model finds what fixtures cannot.** Every fixture in the suite is a
+  small synthetic part and all of them validate. Running `tests/validatestep.py`
+  over an export of an actual user model is one command and it is not part of any
+  test.
 
 ### The locale regression
 
@@ -1114,10 +1156,19 @@ Three things had to be fixed to get there, and none of them was in the exporter:
 - **Every filleted body was non-manifold**, which is the one that mattered most
   and had been shipping. See the trap above.
 
-What remains is entity writing: `B_SPLINE_CURVE_WITH_KNOTS` per curved run,
-spliced into the neighbouring loops through the `ArcSubstitution` path the arcs
-already use, `B_SPLINE_SURFACE_WITH_KNOTS` per patch, and the validator checks
-for both.
+The entity writing has since landed too: `B_SPLINE_CURVE_WITH_KNOTS` per curved
+run, spliced into the neighbouring loops through the `ArcSubstitution` path the
+arcs already use, `B_SPLINE_SURFACE_WITH_KNOTS` per patch, and
+`check_bspline_faces()` in the validator for both. `tests/bspline-check-mutations.py`
+is that check's calibration and runs as its own ctest test: the mutation it
+exists for is a bounding curve with the right two end vertices, used twice in
+opposite directions so the shell still closes, but taken from the wrong edge of
+the control net - a face that bulges the wrong way and passes every topology
+check.
+
+What remains of this item is not the exporter but the geometry: see *PythonSCAD's
+fillet is not a fillet* above. Writing a parabola faithfully as a B-spline is
+still writing a parabola where the model said fillet.
 
 Two incidental findings, both since acted on: `OpenSCADUnitTests` was commented
 out in `CMakeLists.txt`, so no Catch2 test in this repository was built - which
