@@ -9,8 +9,8 @@ bulges the wrong way and validates. That is the mutation below.
 Run from the repository root: python3 tests/bspline-check-mutations.py
 """
 
-import sys, re
-sys.path.insert(0, '/home/user/pythonscad/tests')
+import os, sys, re
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from validatestep import parse_step, check_bspline_faces
 
 # one degree (2,1) patch: net rows (u) of 2 columns (v), bounded by its v=0 rail
