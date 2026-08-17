@@ -490,34 +490,65 @@ public:
   public:
     BSplineSurface(std::vector<Entity *>& ent_list) : SurfaceType(ent_list) {}
     BSplineSurface(std::vector<Entity *>& ent_list, std::string name_in, int degree_u_in,
-                   int degree_v_in, std::vector<std::vector<Point *>> net_in)
+                   int degree_v_in, std::vector<std::vector<Point *>> net_in,
+                   std::vector<std::vector<double>> weights_in = {})
       : SurfaceType(ent_list)
     {
       label = std::move(name_in);
       degree_u = degree_u_in;
       degree_v = degree_v_in;
       net = std::move(net_in);
+      weights = std::move(weights_in);
     }
     virtual ~BSplineSurface() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = B_SPLINE_SURFACE_WITH_KNOTS('" << label << "'," << degree_u << ","
-                << degree_v << ",(";
+      std::ostringstream ctrl;
       for (std::size_t i = 0; i < net.size(); i++) {
-        stream_in << (i ? ",(" : "(");
+        ctrl << (i ? ",(" : "(");
         for (std::size_t j = 0; j < net[i].size(); j++) {
-          stream_in << (j ? ",#" : "#") << net[i][j]->id;
+          ctrl << (j ? ",#" : "#") << net[i][j]->id;
         }
-        stream_in << ")";
+        ctrl << ")";
       }
-      stream_in << "),.UNSPECIFIED.,.F.,.F.,.F.,(" << degree_u + 1 << "," << degree_u + 1 << "),("
-                << degree_v + 1 << "," << degree_v + 1 << "),(0.,1.),(0.,1.),.UNSPECIFIED.);\n";
+      const std::string knots_u =
+        "(" + std::to_string(degree_u + 1) + "," + std::to_string(degree_u + 1) + "),(0.,1.)";
+      const std::string knots_v =
+        "(" + std::to_string(degree_v + 1) + "," + std::to_string(degree_v + 1) + "),(0.,1.)";
+
+      if (weights.empty()) {
+        stream_in << "#" << id << " = B_SPLINE_SURFACE_WITH_KNOTS('" << label << "'," << degree_u << ","
+                  << degree_v << ",(" << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,.F.,(" << degree_u + 1
+                  << "," << degree_u + 1 << "),(" << degree_v + 1 << "," << degree_v + 1
+                  << "),(0.,1.),(0.,1.),.UNSPECIFIED.);\n";
+        return;
+      }
+
+      // A rational surface has no single entity of its own in ISO 10303: it is a
+      // complex instance, the subtypes named in alphabetical order, with the
+      // weights carried by RATIONAL_B_SPLINE_SURFACE. Writing the weights away
+      // and the rest as a plain B_SPLINE_SURFACE_WITH_KNOTS would describe a
+      // different surface - a parabola in place of a circular arc.
+      std::ostringstream wts;
+      for (std::size_t i = 0; i < weights.size(); i++) {
+        wts << (i ? ",(" : "(");
+        for (std::size_t j = 0; j < weights[i].size(); j++) {
+          wts << (j ? "," : "") << step_real(weights[i][j]);
+        }
+        wts << ")";
+      }
+      stream_in << "#" << id << " = ( BOUNDED_SURFACE() B_SPLINE_SURFACE(" << degree_u << "," << degree_v
+                << ",(" << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,.F.)"
+                << " B_SPLINE_SURFACE_WITH_KNOTS(" << knots_u << "," << knots_v
+                << ",.UNSPECIFIED.) GEOMETRIC_REPRESENTATION_ITEM()" << " RATIONAL_B_SPLINE_SURFACE(("
+                << wts.str() << "))" << " REPRESENTATION_ITEM('" << label << "') SURFACE() );\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
 
     int degree_u = 0, degree_v = 0;
-    std::vector<std::vector<Point *>> net;  // net[u][v]
+    std::vector<std::vector<Point *>> net;     // net[u][v]
+    std::vector<std::vector<double>> weights;  // empty for a polynomial patch
   };
 
   /*! One boundary curve of such a patch: a row or a column of its net. */
@@ -525,6 +556,14 @@ public:
   {
   public:
     BSplineCurve(std::vector<Entity *>& ent_list) : RoundType(ent_list) {}
+    BSplineCurve(std::vector<Entity *>& ent_list, std::string name_in, std::vector<Point *> pts_in,
+                 std::vector<double> weights_in)
+      : RoundType(ent_list)
+    {
+      label = std::move(name_in);
+      pts = std::move(pts_in);
+      weights = std::move(weights_in);
+    }
     BSplineCurve(std::vector<Entity *>& ent_list, std::string name_in, std::vector<Point *> pts_in)
       : RoundType(ent_list)
     {
@@ -536,14 +575,33 @@ public:
     virtual void serialize(std::ostream& stream_in)
     {
       const int degree = int(pts.size()) - 1;
-      stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << degree << ",(";
-      for (std::size_t i = 0; i < pts.size(); i++) stream_in << (i ? ",#" : "#") << pts[i]->id;
-      stream_in << "),.UNSPECIFIED.,.F.,.F.,(" << degree + 1 << "," << degree + 1
-                << "),(0.,1.),.UNSPECIFIED.);\n";
+      std::ostringstream ctrl;
+      for (std::size_t i = 0; i < pts.size(); i++) ctrl << (i ? ",#" : "#") << pts[i]->id;
+
+      if (weights.empty()) {
+        stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << degree << ",("
+                  << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,(" << degree + 1 << "," << degree + 1
+                  << "),(0.,1.),.UNSPECIFIED.);\n";
+        return;
+      }
+
+      // The boundary of a rational patch is a rational curve of the patch's own
+      // weights, so it takes the same complex instance treatment. See
+      // BSplineSurface::serialize().
+      std::ostringstream wts;
+      for (std::size_t i = 0; i < weights.size(); i++) {
+        wts << (i ? "," : "") << step_real(weights[i]);
+      }
+      stream_in << "#" << id << " = ( BOUNDED_CURVE() B_SPLINE_CURVE(" << degree << ",(" << ctrl.str()
+                << "),.UNSPECIFIED.,.F.,.F.) B_SPLINE_CURVE_WITH_KNOTS((" << degree + 1 << ","
+                << degree + 1 << "),(0.,1.),.UNSPECIFIED.) CURVE()"
+                << " GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_CURVE((" << wts.str() << "))"
+                << " REPRESENTATION_ITEM('" << label << "') );\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
 
     std::vector<Point *> pts;
+    std::vector<double> weights;  // empty for a polynomial curve
   };
 
   class Circle : public RoundType

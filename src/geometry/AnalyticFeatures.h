@@ -196,8 +196,13 @@ struct Patch {
  *
  * The emitter needs the curve to run the way the run does; the net's own order
  * depends on which edge of the parameter square it is. */
+/*! Control points of one boundary run, and through `weights_out` the weights
+ * that go with them - a rational patch's boundary is a rational curve, and a
+ * caller writing the curve without them would describe a parabola where the
+ * patch has a circular arc. */
 std::vector<Vector3d> runControlPoints(const Patch& patch, const Patch::Run& run,
-                                       const std::vector<Vector3d>& vertices);
+                                       const std::vector<Vector3d>& vertices,
+                                       std::vector<double> *weights_out = nullptr);
 
 /*! Find the facets which lie on each declared Bezier patch.
  *

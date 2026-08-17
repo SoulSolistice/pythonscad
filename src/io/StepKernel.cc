@@ -684,12 +684,21 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       if (bez == nullptr) continue;
 
       std::vector<std::vector<Point *>> net;
+      std::vector<std::vector<double>> wnet;
       for (int i = 0; i <= bez->degree_u; i++) {
         std::vector<Point *> row;
-        for (int j = 0; j <= bez->degree_v; j++) row.push_back(new Point(entities, bez->control(i, j)));
+        std::vector<double> row_w;
+        for (int j = 0; j <= bez->degree_v; j++) {
+          row.push_back(new Point(entities, bez->control(i, j)));
+          row_w.push_back(bez->weight(i, j));
+        }
         net.push_back(row);
+        if (bez->isRational()) wnet.push_back(row_w);
       }
-      auto surface = new BSplineSurface(entities, "", bez->degree_u, bez->degree_v, net);
+      // A fillet's patch is rational - its middle weight is what makes the arc a
+      // circle rather than a parabola - and the weights have to be written, or
+      // the face describes a different surface from the mesh it replaces.
+      auto surface = new BSplineSurface(entities, "", bez->degree_u, bez->degree_v, net, wnet);
 
       std::vector<OrientedEdge *> loop;
       std::vector<EdgeCurve *> face_edges_here;
@@ -706,10 +715,11 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
           run_edges.emplace(key, edge);
         } else {
           std::vector<Point *> cp;
-          for (const auto& c : AnalyticFeatures::runControlPoints(patch, run, vertices)) {
+          std::vector<double> cw;
+          for (const auto& c : AnalyticFeatures::runControlPoints(patch, run, vertices, &cw)) {
             cp.push_back(new Point(entities, c));
           }
-          auto curve = new BSplineCurve(entities, "", cp);
+          auto curve = new BSplineCurve(entities, "", cp, cw);
           edge = new EdgeCurve(entities, from, to, curve, true);
           run_edges.emplace(key, edge);
         }

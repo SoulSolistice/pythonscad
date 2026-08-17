@@ -142,18 +142,26 @@ unsigned boundarySet(const BezierPatchSurface& patch, const Vector3d& pt, double
 }  // namespace
 
 std::vector<Vector3d> runControlPoints(const Patch& patch, const Patch::Run& run,
-                                       const std::vector<Vector3d>& vertices)
+                                       const std::vector<Vector3d>& vertices,
+                                       std::vector<double> *weights_out)
 {
+  if (weights_out != nullptr) weights_out->clear();
   const auto *bez = dynamic_cast<const BezierPatchSurface *>(patch.surface.get());
   if (bez == nullptr || run.edge < 0 || run.edge > 3 || run.verts.empty()) return {};
-  std::vector<Vector3d> cp = bez->boundary(EDGE_ALONG_U[run.edge], EDGE_FAR[run.edge]);
+  const bool along_u = EDGE_ALONG_U[run.edge], far = EDGE_FAR[run.edge];
+  std::vector<Vector3d> cp = bez->boundary(along_u, far);
+  std::vector<double> cw = bez->boundaryWeights(along_u, far);
   if (cp.empty()) return cp;
   // A Bezier interpolates its end control points, so which end the curve starts
   // at is decided by comparing the first of them with the run's first vertex.
+  // The weights are reversed with the points, off the same decision rather than
+  // a second one made from the same coordinates.
   const Vector3d& first = vertices[run.verts.front()];
   if ((cp.front() - first).norm() > (cp.back() - first).norm()) {
     std::reverse(cp.begin(), cp.end());
+    std::reverse(cw.begin(), cw.end());
   }
+  if (weights_out != nullptr) *weights_out = std::move(cw);
   return cp;
 }
 
