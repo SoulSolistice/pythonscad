@@ -36,6 +36,7 @@
 #include "src/geometry/PolySetBuilder.h"
 #include "src/geometry/Surface.h"
 
+#include <algorithm>  // std::clamp
 #include <cmath>
 #include <map>
 #include <sstream>
@@ -133,9 +134,40 @@ private:
 }  // namespace
 
 // Credit: inphase Ryan Colyer
+/*! The weight that makes a quadratic Bezier through these three points a
+ * circular arc.
+ *
+ * A *polynomial* quadratic through (a, b, c) is a parabola, which is why
+ * fillet(1) did not draw a 1 mm fillet: measured against the axis a true fillet
+ * turns about, it was out by 6% of the radius where the two faces meet at a
+ * right angle, 25% at a 60 degree dihedral, and the corner patch was 9.5% off
+ * the sphere.
+ *
+ * The same three control points with the middle weight at cos(theta/2), theta
+ * being the turn between the two end tangents, is exactly a circular arc - and
+ * the weight comes out of the control points themselves, so nothing upstream has
+ * to compute an axis or solve for tangency. That is what keeps this construction
+ * usable where a circular fillet has no clean definition: faces that are not
+ * perpendicular, edges that are not straight, a radius that changes sharply. In
+ * those cases the legs are no longer equal and the result is an exact conic
+ * rather than a circle, which is the same graceful degradation the polynomial
+ * form had, only now correct wherever a circle was meant.
+ *
+ * cos(theta/2) is sqrt((1 + cos theta) / 2), so this needs no trig call. */
+double BezierWeight(const Vector3d& a, const Vector3d& b, const Vector3d& c)
+{
+  const Vector3d t0 = b - a, t1 = c - b;
+  const double n0 = t0.norm(), n1 = t1.norm();
+  if (n0 < 1e-12 || n1 < 1e-12) return 1.0;  // no tangent to turn between
+  const double cos_theta = std::clamp(t0.dot(t1) / (n0 * n1), -1.0, 1.0);
+  return sqrt((1.0 + cos_theta) / 2.0);
+}
+
 Vector3d Bezier(double t, Vector3d a, Vector3d b, Vector3d c)
 {
-  return (a * (1 - t) + b * t) * (1 - t) + (b * (1 - t) + c * t) * t;  // TODO improve
+  const double w = BezierWeight(a, b, c);
+  const double b0 = (1 - t) * (1 - t), b1 = 2 * t * (1 - t) * w, b2 = t * t;
+  return (a * b0 + b * b1 + c * b2) / (b0 + b1 + b2);
 }
 
 void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center, Vector3d dir[3],
@@ -184,8 +216,18 @@ void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center,
     const Vector3d apex = zdir + 2 * (concave_1 + concave_2) * (xdir + ydir);
     std::vector<Vector3d> net{xdir,        xdir + ydir, ydir, xdir + zdir, xdir + ydir + zdir,
                               ydir + zdir, apex,        apex, apex};
+    // Rational in both directions, with the weight of each read off that
+    // direction's own boundary - the column for u, the row for v - and the net
+    // weight their product. The rows Bezier() draws between the two rails turn
+    // through the same angle as the row of the net does, which is why one scalar
+    // per direction describes the whole patch. On a cube corner both come out at
+    // cos 45 degrees and the patch is then exactly an octant of a sphere: this
+    // net, degenerate apex row and all, is the classical exact one.
+    const double wu = BezierWeight(net[0], net[3], net[6]);
+    const double wv = BezierWeight(net[0], net[1], net[2]);
+    std::vector<double> wnet{1.0, wv, 1.0, wu, wu * wv, wu, 1.0, wv, 1.0};
     for (auto& p : net) p = center + mat * p;
-    builder.addSurface(std::make_shared<BezierPatchSurface>(2, 2, std::move(net)));
+    builder.addSurface(std::make_shared<BezierPatchSurface>(2, 2, std::move(net), std::move(wnet)));
   }
 
   std::vector<int> points;
@@ -624,12 +666,17 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
       e_fb2 *= r_;
 
       // Calculate bezier patches
+      //
+      // Through the shared Bezier() rather than the expanded polynomial this
+      // used to spell out. Two reasons: the rail is now rational, and the
+      // expansion was the second of two ways to compute the same point - the
+      // corner patch computes the shared rail the other way, the two landed one
+      // unit in the last place apart, and every filleted body was non-manifold
+      // because of it. One arithmetic, one answer.
       for (int i = 0; i < bn; i++) {
         double f = (double)i / (double)(bn - 1);  // from 0 to 1
-        e.second.bez1.push_back(
-          snap.index(builder, p1 + e_fa1 - 2 * f * e_fa1 + f * f * (e_fa1 + e_fb1)));
-        e.second.bez2.push_back(
-          snap.index(builder, p2 + e_fa2 - 2 * f * e_fa2 + f * f * (e_fa2 + e_fb2)));
+        e.second.bez1.push_back(snap.index(builder, Bezier(f, p1 + e_fa1, p1, p1 + e_fb1)));
+        e.second.bez2.push_back(snap.index(builder, Bezier(f, p2 + e_fa2, p2, p2 + e_fb2)));
       }
 
       // Say what was just drawn. Expanding the rail above,
@@ -640,8 +687,13 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
       // two rails, so it is a tensor product of degree (2,1) and the net is
       // those six points - the same numbers the loop was already evaluating,
       // which is why this needs no fitting and cannot drift from the mesh.
+      // The weights are the ones Bezier() just drew with, one per rail: where
+      // the edge is straight and the radius constant the two are equal and the
+      // strip is exactly a piece of a cylinder.
       builder.addSurface(std::make_shared<BezierPatchSurface>(
-        2, 1, std::vector<Vector3d>{p1 + e_fa1, p2 + e_fa2, p1, p2, p1 + e_fb1, p2 + e_fb2}));
+        2, 1, std::vector<Vector3d>{p1 + e_fa1, p2 + e_fa2, p1, p2, p1 + e_fb1, p2 + e_fb2},
+        std::vector<double>{1.0, 1.0, BezierWeight(p1 + e_fa1, p1, p1 + e_fb1),
+                            BezierWeight(p2 + e_fa2, p2, p2 + e_fb2), 1.0, 1.0}));
       s.pol = e.second.facea;  // laengsseite1
       s.search = e.first.ind1;
       s.replace = {e.second.bez1[0]};

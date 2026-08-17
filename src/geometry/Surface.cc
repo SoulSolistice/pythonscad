@@ -199,12 +199,32 @@ namespace {
 
 /*! de Casteljau, which is what a Bezier is: repeated linear interpolation.
  * Stable, and short enough not to need the Bernstein basis written out. */
+/*! The same recursion on plain numbers, for the weights of a rational Bezier. */
+double deCasteljau1d(std::vector<double> w, double t)
+{
+  for (std::size_t k = w.size(); k > 1; k--) {
+    for (std::size_t i = 0; i + 1 < k; i++) w[i] = w[i] * (1 - t) + w[i + 1] * t;
+  }
+  return w.empty() ? 1.0 : w[0];
+}
+
 Vector3d deCasteljau(std::vector<Vector3d> pts, double t)
 {
   for (std::size_t k = pts.size(); k > 1; k--) {
     for (std::size_t i = 0; i + 1 < k; i++) pts[i] = pts[i] * (1 - t) + pts[i + 1] * t;
   }
   return pts[0];
+}
+
+/*! The same derivative on plain numbers, for a rational Bezier's weights. */
+double deCasteljauDeriv1d(const std::vector<double>& w, double t)
+{
+  if (w.size() < 2) return 0.0;
+  std::vector<double> d;
+  d.reserve(w.size() - 1);
+  const double n = static_cast<double>(w.size() - 1);
+  for (std::size_t i = 0; i + 1 < w.size(); i++) d.push_back((w[i + 1] - w[i]) * n);
+  return deCasteljau1d(d, t);
 }
 
 /*! The derivative of a Bezier is a Bezier of one degree less, on the
@@ -221,9 +241,21 @@ Vector3d deCasteljauDeriv(const std::vector<Vector3d>& pts, double t)
 
 }  // namespace
 
-BezierPatchSurface::BezierPatchSurface(int degree_u, int degree_v, std::vector<Vector3d> net)
-  : degree_u(degree_u), degree_v(degree_v), net(std::move(net))
+BezierPatchSurface::BezierPatchSurface(int degree_u, int degree_v, std::vector<Vector3d> net,
+                                       std::vector<double> weights)
+  : degree_u(degree_u), degree_v(degree_v), net(std::move(net)), weights(std::move(weights))
 {
+  // A weight list that is all ones describes the same surface as no weight list
+  // at all, and dropping it keeps the polynomial arithmetic - and every number
+  // that came out of it before - untouched.
+  bool trivial = true;
+  for (const double w : this->weights) {
+    if (w != 1.0) {
+      trivial = false;
+      break;
+    }
+  }
+  if (trivial || this->weights.size() != this->net.size()) this->weights.clear();
   // The base class's refpt and normdir are only used for identity, never for
   // geometry: a patch is its control net and nothing else. A corner of the net
   // is stable under everything that can move the patch.
@@ -256,23 +288,68 @@ bool BezierPatchSurface::sameAs(const Surface& other) const
   if (typeid(*this) != typeid(other)) return false;
   const auto& o = static_cast<const BezierPatchSurface&>(other);
   if (degree_u != o.degree_u || degree_v != o.degree_v || net.size() != o.net.size()) return false;
+  if (weights.size() != o.weights.size()) return false;
   for (std::size_t i = 0; i < net.size(); i++) {
     if ((net[i] - o.net[i]).norm() > 1e-9) return false;
+  }
+  // Two patches on one net but different weights are different surfaces - a
+  // parabola and a circular arc through the same three points.
+  for (std::size_t i = 0; i < weights.size(); i++) {
+    if (fabs(weights[i] - o.weights[i]) > 1e-9) return false;
   }
   return true;
 }
 
 Vector3d BezierPatchSurface::evaluate(double u, double v) const
 {
+  if (!isRational()) {
+    std::vector<Vector3d> along_u;
+    along_u.reserve(degree_u + 1);
+    for (int i = 0; i <= degree_u; i++) {
+      std::vector<Vector3d> row;
+      row.reserve(degree_v + 1);
+      for (int j = 0; j <= degree_v; j++) row.push_back(control(i, j));
+      along_u.push_back(deCasteljau(row, v));
+    }
+    return deCasteljau(along_u, u);
+  }
+
+  // Rational: run de Casteljau on (w*P, w) and divide at the end. Interpolating
+  // the weighted points and the weights separately is the same thing and is what
+  // makes a rational Bezier a projection of a polynomial one a dimension up.
   std::vector<Vector3d> along_u;
+  std::vector<double> wu;
   along_u.reserve(degree_u + 1);
+  wu.reserve(degree_u + 1);
   for (int i = 0; i <= degree_u; i++) {
     std::vector<Vector3d> row;
+    std::vector<double> row_w;
     row.reserve(degree_v + 1);
-    for (int j = 0; j <= degree_v; j++) row.push_back(control(i, j));
+    row_w.reserve(degree_v + 1);
+    for (int j = 0; j <= degree_v; j++) {
+      row.push_back(control(i, j) * weight(i, j));
+      row_w.push_back(weight(i, j));
+    }
     along_u.push_back(deCasteljau(row, v));
+    wu.push_back(deCasteljau1d(row_w, v));
   }
-  return deCasteljau(along_u, u);
+  const Vector3d num = deCasteljau(along_u, u);
+  const double den = deCasteljau1d(wu, u);
+  return den == 0.0 ? num : num / den;
+}
+
+std::vector<double> BezierPatchSurface::boundaryWeights(bool along_u, bool far) const
+{
+  std::vector<double> out;
+  if (!isRational()) return out;
+  if (along_u) {
+    const int j = far ? degree_v : 0;
+    for (int i = 0; i <= degree_u; i++) out.push_back(weight(i, j));
+  } else {
+    const int i = far ? degree_u : 0;
+    for (int j = 0; j <= degree_v; j++) out.push_back(weight(i, j));
+  }
+  return out;
 }
 
 std::vector<Vector3d> BezierPatchSurface::boundary(bool along_u, bool far) const
@@ -308,16 +385,37 @@ bool BezierPatchSurface::project(const Vector3d& pt, double& u, double& v) const
     for (int gj = 0; gj <= 4; gj++) {
       double cu = gi / 4.0, cv = gj / 4.0;
       for (int iter = 0; iter < 40; iter++) {
+        // The weighted control points and the weights are two polynomial
+        // surfaces, N and W, and the patch is their quotient. Differentiating a
+        // rational patch with the polynomial rule is what a Newton step must not
+        // do: it converges on the wrong point, and pointMember() then rejects
+        // vertices that lie exactly on the surface. For a polynomial patch W is
+        // 1 everywhere and this reduces to the previous arithmetic.
         std::vector<Vector3d> along_u, dv_u;
+        std::vector<double> w_u, dwv_u;
         for (int i = 0; i <= degree_u; i++) {
           std::vector<Vector3d> row;
-          for (int j = 0; j <= degree_v; j++) row.push_back(control(i, j));
+          std::vector<double> row_w;
+          for (int j = 0; j <= degree_v; j++) {
+            row.push_back(control(i, j) * weight(i, j));
+            row_w.push_back(weight(i, j));
+          }
           along_u.push_back(deCasteljau(row, cv));
           dv_u.push_back(deCasteljauDeriv(row, cv));
+          w_u.push_back(deCasteljau1d(row_w, cv));
+          dwv_u.push_back(deCasteljauDeriv1d(row_w, cv));
         }
-        const Vector3d s = deCasteljau(along_u, cu);
-        const Vector3d su = deCasteljauDeriv(along_u, cu);
-        const Vector3d sv = deCasteljau(dv_u, cu);
+        const Vector3d n = deCasteljau(along_u, cu);
+        const Vector3d n_du = deCasteljauDeriv(along_u, cu);
+        const Vector3d n_dv = deCasteljau(dv_u, cu);
+        const double w = deCasteljau1d(w_u, cu);
+        const double wu_d = deCasteljauDeriv1d(w_u, cu);
+        const double wv_d = deCasteljau1d(dwv_u, cu);
+        if (w == 0.0) break;
+        // quotient rule, which for W == 1 and its derivatives 0 is the plain one
+        const Vector3d s = n / w;
+        const Vector3d su = (n_du - s * wu_d) / w;
+        const Vector3d sv = (n_dv - s * wv_d) / w;
         const Vector3d r = s - pt;
 
         // gradient and Gauss-Newton approximation of the Hessian

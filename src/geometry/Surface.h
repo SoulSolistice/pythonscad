@@ -134,8 +134,17 @@ class BezierPatchSurface : public Surface
 {
 public:
   /*! `net` holds (degree_u + 1) * (degree_v + 1) control points, v varying
-   * fastest. */
-  BezierPatchSurface(int degree_u, int degree_v, std::vector<Vector3d> net);
+   * fastest.
+   *
+   * `weights` is parallel to `net` and may be empty, which means all of them are
+   * 1 and the patch is polynomial. A quadratic *polynomial* Bezier through three
+   * points is a parabola; the same three points with the middle weight at
+   * cos(theta/2), theta being the turn between the end tangents, is exactly a
+   * circular arc. That is how a fillet describes the surface it drew - see
+   * Bezier() in core/FilletNode.cc - so the weights have to travel with the net
+   * or the declaration describes a different surface from the mesh. */
+  BezierPatchSurface(int degree_u, int degree_v, std::vector<Vector3d> net,
+                     std::vector<double> weights = {});
   void display(const std::vector<Vector3d>& vertices) override;
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
@@ -143,11 +152,23 @@ public:
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   [[nodiscard]] const Vector3d& control(int i, int j) const { return net[i * (degree_v + 1) + j]; }
+  [[nodiscard]] double weight(int i, int j) const
+  {
+    return weights.empty() ? 1.0 : weights[i * (degree_v + 1) + j];
+  }
+  /*! False when every weight is 1, in which case the polynomial arithmetic is
+   * used unchanged. */
+  [[nodiscard]] bool isRational() const { return !weights.empty(); }
   [[nodiscard]] Vector3d evaluate(double u, double v) const;
 
   /*! One row (`along_u` false) or one column (true) of the net, which is the
    * boundary curve along that edge of the patch. */
   [[nodiscard]] std::vector<Vector3d> boundary(bool along_u, bool far) const;
+
+  /*! The weights of that same boundary curve, empty when the patch is
+   * polynomial. A boundary of a rational patch is a rational curve of the same
+   * weights, so an exporter writing the curve needs them too. */
+  [[nodiscard]] std::vector<double> boundaryWeights(bool along_u, bool far) const;
 
   /*! Closest point on the patch to `pt`, by Newton from a grid of starts.
    * Returns false when it does not converge. */
@@ -159,6 +180,7 @@ public:
 
   int degree_u, degree_v;
   std::vector<Vector3d> net;
+  std::vector<double> weights;  // empty, or parallel to net
 
 private:
   int operator==(const Surface& other) override { return 0; }
