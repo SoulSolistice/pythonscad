@@ -223,11 +223,18 @@ F1 to F5 have all been acted on; what stands below them is the work itself.
    run `validatestep.py` over the result; the two commands are in
    `examples/step_test/README.md`. Expect no unpaired edges, and a line saying how
    many reversed loops were kept as their own face.
-2. **Item 2's other half, which the doc has already argued for**: `fillet()`
-   draws parabolas, is out by six per cent of its radius, and a true fillet is 12
-   cylinders and 8 spheres — entity types this exporter already writes. Fixing
-   the geometry is worth more than the spline path it would partly obsolete, and
-   it is a mesh fix, not a STEP one.
+2. **Make `FilletNode`'s Beziers rational.** `fillet()` draws parabolas, out by
+   6% of the radius at a right angle and 25% at a 60° dihedral, and the corner
+   patch is 9.5% off the sphere. The Bezier substrate is deliberate and correct -
+   it needs no axis and survives non-perpendicular faces and a varying radius -
+   and the fix keeps it: a rational quadratic with weight `cos(θ/2)` on the same
+   three control points is exactly a circular arc, and `FilletNode`'s corner net
+   is already the exact sphere-octant net. `Bezier()` takes a weight, the two
+   callers pass it, the control points do not move. The exporter can then write
+   `CYLINDRICAL_SURFACE` and `SPHERICAL_SURFACE` where the weights say circle,
+   and the B-spline path stays for everything else. It is a mesh fix, not a STEP
+   one, and it changes the geometry of every filleted body - so it wants the
+   maintainer's nod and a build to verify.
 3. **Re-measure item 5 now that `declare_*` exists.** The 59% is not one number
    any more: part of it is a thread that can never be a surface of revolution,
    and part is ramps and lugs a model could declare today. Nobody has separated

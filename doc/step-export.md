@@ -1104,10 +1104,67 @@ B-splines is faithful to what `FilletNode` draws, and that is worth having for
 any generator whose surfaces really are splines. But if `FilletNode` drew
 circular arcs instead, a filleted cube would be 12 cylinders and 8 spheres - the
 same 26 faces SolidWorks writes, in entity types this exporter *already*
-declares, recognises and emits. The B-spline machinery would not be needed for
-fillets at all.
+declares, recognises and emits.
 
-So the order is: fix the geometry first, and see what is left for the splines.
+#### The Bezier substrate is the right one; the weights are missing
+
+An earlier version of this section concluded "fix the geometry first", meaning
+replace the Beziers with arcs. That was the wrong conclusion, and the reason is
+worth recording, because it is a case of measuring one thing correctly and then
+drawing a design conclusion the measurement does not support.
+
+`FilletNode`'s author chose quadratic Beziers deliberately: they need no axis and
+no tangency solve, so they keep working where a circular fillet has no clean
+definition - faces that are not perpendicular, edges that are not straight, a
+radius that changes sharply in size or direction. Replacing them with arcs would
+buy exactness on cubes at the cost of every case the construction exists for.
+
+The measurement stands. The diagnosis was wrong: the error does not come from
+using Beziers, it comes from using **non-rational** ones. A rational quadratic
+with the middle weight at `cos(θ/2)`, where θ is the turn angle between the two
+end tangents, is *exactly* a circular arc - and it uses the same three control
+points, computed the same way, with no axis to solve for.
+
+How far off the polynomial is depends on the angle, and it is worst exactly in
+the awkward cases the substrate was chosen to survive:
+
+| dihedral between the faces | turn angle | `cos(θ/2)` | polynomial error | rational error |
+| --- | --- | --- | --- | --- |
+| 60° | 120° | 0.500000 | 25.00% of r | 2e-16 |
+| 90° | 90° | 0.707107 | 6.07% of r | 1e-16 |
+| 120° | 60° | 0.866025 | 1.04% of r | 2e-16 |
+| 150° | 30° | 0.965926 | 0.06% of r | 1e-16 |
+
+The corner is the same story and slightly worse. Replaying `bezier_patch()`'s own
+rails-and-mid construction on a cube corner at `fn = 12`:
+
+| | worst distance from the sphere a true fillet turns about |
+| --- | --- |
+| both weights 1, as today | 9.55% of r |
+| rails rational, rows not | 6.07% of r |
+| both rational at `cos 45°` | 2.2e-16 |
+
+**The control net `FilletNode` builds is already the classical exact net for an
+octant of a sphere**, degenerate apex row and all - the net a rational
+bi-quadratic with weights `(1,w,1)x(1,w,1)` reproduces to machine precision. Only
+the weights are absent, and the weight the tensor product induces along the rail
+is constant, which is why one scalar suffices per patch rather than a table.
+
+So the change is not a replacement of the design but the completion of it:
+`Bezier()` at `src/core/FilletNode.cc:136` - which carries its own
+`// TODO improve` - takes a weight, and the two callers pass `cos(θ/2)`. The
+control points do not move.
+
+What that does to this item: for a constant radius meeting perpendicular faces
+the exporter can then write `CYLINDRICAL_SURFACE` and `SPHERICAL_SURFACE`, which
+it already recognises and emits, and a filleted cube becomes the 26 faces
+SolidWorks writes. The B-spline machinery is not obsoleted by that - it becomes
+the general case it should always have been: a varying radius, or a corner where
+the faces are not perpendicular, is a rational blend that is exactly a conic
+rather than a circle, and `RATIONAL_B_SPLINE_SURFACE` is how STEP says so.
+
+So the order is: make the existing Beziers rational, then let the exporter write
+a circle where the weights say circle and a spline where they do not.
 
 #### Where this item stands
 
