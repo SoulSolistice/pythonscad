@@ -42,6 +42,9 @@ configure_file(
 option(INFO "Display build configuration info at end of cmake config" ON)
 option(ENABLE_TESTS "Run testsuite after building." ON)
 option(ENABLE_GUI_TESTS "Compile a special version of the PythonSCAD gui with feature for testing." OFF)
+option(ENABLE_UNIT_TESTS "Build the Catch2 unit tests (OpenSCADUnitTests) and register them with ctest." ON)
+option(FETCH_CATCH2 "Download Catch2 at configure time when the machine has no suitable Catch2 3 installed. Turn off to require a system Catch2." ON)
+set(CATCH2_FETCH_TAG "v3.9.1" CACHE STRING "Catch2 git tag used when FETCH_CATCH2 downloads it")
 option(EXPERIMENTAL "Enable Experimental Features" ON)
 option(USE_MANIFOLD_TRIANGULATOR "Use Manifold's triangulator instead of CGAL's" ON)
 option(USE_MANIFOLD_MINKOWSKI "Use Manifold's Minkowski instead of CGAL's" OFF)
@@ -2093,12 +2096,18 @@ elseif(WIN32)
   list(APPEND RESOURCE_FILES ${WINDOWS_RESOURCE_PATH})
 endif()
 
-file(GLOB_RECURSE TEST_SOURCES
-  "src/utils/*_test.cc"
+# Unit test translation units, found wherever they live rather than in one
+# hardcoded directory - a test next to the code it covers was previously only
+# picked up under src/utils, so src/geometry/linear_extrude_test.cc was never
+# compiled by anything. The GUI ones are separated because they need the Qt
+# half of OpenSCADLibInternal, which a HEADLESS build does not have.
+file(GLOB_RECURSE ALL_TEST_SOURCES
+  "src/*_test.cc"
 )
-file(GLOB_RECURSE GUI_TEST_SOURCES
-  "src/gui/*_test.cc"
-)
+set(GUI_TEST_SOURCES ${ALL_TEST_SOURCES})
+list(FILTER GUI_TEST_SOURCES INCLUDE REGEX "/src/gui/")
+set(TEST_SOURCES ${ALL_TEST_SOURCES})
+list(FILTER TEST_SOURCES EXCLUDE REGEX "/src/gui/")
 list(FILTER Sources EXCLUDE REGEX ".*_test[.]cc")
 list(REMOVE_ITEM Sources "src/main_wrapper.cc")
 
@@ -2764,25 +2773,53 @@ if (MXECROSS)
 endif()
 
 if(ENABLE_TESTS)
-  find_package(Catch2 3 QUIET)
-
-  # Note: Since Catch2 is only used for testing, we install it via Homebrew.
-  # However, we need to temporarily re-enable searching in Homebrew for this to work.
-  if(NOT Catch2_FOUND AND APPLE)
-    set(CMAKE_IGNORE_PREFIX_PATH_BACKUP "${CMAKE_IGNORE_PREFIX_PATH}")
-    set(CMAKE_IGNORE_PREFIX_PATH "")
-    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
-    find_package(Catch2 3 QUIET)
-    set(CMAKE_IGNORE_PREFIX_PATH "${CMAKE_IGNORE_PREFIX_PATH_BACKUP}")
+  # ctest has to be able to run what it registers. A cross build produces an
+  # executable for another machine and an Emscripten build produces no native
+  # executable at all, so the unit tests are simply not part of those builds.
+  if(ENABLE_UNIT_TESTS AND (CMAKE_SYSTEM_NAME STREQUAL Emscripten OR MXECROSS OR CMAKE_CROSSCOMPILING))
+    message(STATUS "Unit tests skipped: this build does not produce a natively runnable executable")
+    set(ENABLE_UNIT_TESTS OFF)
   endif()
 
-  if(NOT Catch2_FOUND)
-    find_package(Catch2 3)
+  if(ENABLE_UNIT_TESTS)
+    # 3.3 is the first release with SKIP(), which the tests use to report a
+    # known failure without failing the run.
+    find_package(Catch2 3.3 QUIET)
+
+    # Note: Since Catch2 is only used for testing, we install it via Homebrew.
+    # However, we need to temporarily re-enable searching in Homebrew for this to work.
+    if(NOT Catch2_FOUND AND APPLE)
+      set(CMAKE_IGNORE_PREFIX_PATH_BACKUP "${CMAKE_IGNORE_PREFIX_PATH}")
+      set(CMAKE_IGNORE_PREFIX_PATH "")
+      list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+      find_package(Catch2 3.3 QUIET)
+      set(CMAKE_IGNORE_PREFIX_PATH "${CMAKE_IGNORE_PREFIX_PATH_BACKUP}")
+    endif()
+
+    # No distribution this project builds on is guaranteed to package Catch2 3 -
+    # MSYS2 and Debian stable have both shipped without it or with 2.x - and a
+    # unit test suite nobody can build is a suite nobody runs. Fetching it keeps
+    # the tests available everywhere without adding a dependency to the
+    # get-dependencies profiles that only the tests need.
+    if(NOT Catch2_FOUND AND FETCH_CATCH2)
+      message(STATUS "Catch2 3 not installed, fetching ${CATCH2_FETCH_TAG} for the unit tests")
+      include(FetchContent)
+      FetchContent_Declare(Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG ${CATCH2_FETCH_TAG}
+        GIT_SHALLOW TRUE
+      )
+      FetchContent_MakeAvailable(Catch2)
+      # find_package() puts Catch.cmake on the module path itself; a fetched
+      # copy has to be pointed at its own extras directory.
+      list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+      set(Catch2_FOUND TRUE)
+    endif()
   endif()
 
   enable_testing()
 
-  if(Catch2_FOUND)
+  if(ENABLE_UNIT_TESTS AND Catch2_FOUND)
     message(STATUS "Configuring OpenSCAD Unit Tests")
 
     # If you see a line like this:
@@ -2790,13 +2827,46 @@ if(ENABLE_TESTS)
     # You can ignore it. Something about incompatibility with POSITION_INDEPENDENT_CODE
     # and how the system Catch2 static library is compiled. It should be fine.
 
-    #    add_executable(OpenSCADUnitTests ${TEST_SOURCES})
-    #target_link_libraries(OpenSCADUnitTests PRIVATE Catch2::Catch2WithMain OpenSCADLibInternal)
-    #include(CTest)
-    #include(Catch)
-    #catch_discover_tests(OpenSCADUnitTests ADD_TAGS_AS_LABELS)
-  else()
-    message(WARNING "Catch2 3 was not found. OpenSCADUnitTests will not be built.")
+    set(UNIT_TEST_SOURCES ${TEST_SOURCES})
+    if(NOT HEADLESS)
+      list(APPEND UNIT_TEST_SOURCES ${GUI_TEST_SOURCES})
+    endif()
+
+    add_executable(OpenSCADUnitTests ${UNIT_TEST_SOURCES})
+    # The same language settings the library is built with. Without them this
+    # target would compile against the compiler's default standard and fail on
+    # headers the rest of the build compiles happily.
+    if(MSVC)
+      set_target_properties(OpenSCADUnitTests PROPERTIES CXX_STANDARD 20)
+    else()
+      set_target_properties(OpenSCADUnitTests PROPERTIES CXX_STANDARD 17)
+    endif()
+    set_target_properties(OpenSCADUnitTests PROPERTIES
+      CXX_EXTENSIONS OFF
+      CXX_STANDARD_REQUIRED ON
+    )
+    target_link_libraries(OpenSCADUnitTests PRIVATE Catch2::Catch2WithMain OpenSCADLibInternal)
+
+    include(Catch)
+    # PRE_TEST, not the default POST_BUILD: post-build discovery runs the fresh
+    # executable as part of the build, and on Windows the build tree has no DLLs
+    # beside it - only `cmake --install` gathers them - so discovery fails and
+    # takes the whole build with it. Deferring it to test time also means a
+    # cached build does not re-run discovery on every relink.
+    if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.27)
+      # Let the loader find the DLLs this target links against, for both the
+      # discovery run and the tests themselves.
+      set(UNIT_TEST_DL_PATHS DL_PATHS "$<TARGET_RUNTIME_DLL_DIRS:OpenSCADUnitTests>")
+    endif()
+    catch_discover_tests(OpenSCADUnitTests
+      ADD_TAGS_AS_LABELS
+      DISCOVERY_MODE PRE_TEST
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      ${UNIT_TEST_DL_PATHS}
+    )
+  elseif(ENABLE_UNIT_TESTS)
+    message(WARNING
+      "Catch2 3.3 was not found and FETCH_CATCH2 is off. OpenSCADUnitTests will not be built.")
   endif()
 
   add_subdirectory(tests)

@@ -29,6 +29,46 @@ From your build directory:
   * **Bugs:** Test known bugs (tests will fail).
   * **All:** Test everything.
 
+## Unit Tests
+
+The Catch2 unit tests build into one executable, `OpenSCADUnitTests`, and each
+`TEST_CASE` is registered with ctest under its own name with its Catch2 tags as
+ctest labels:
+
+```bash
+ctest -R "calculate"            # by test case name
+ctest -L geometry               # by Catch2 tag
+./OpenSCADUnitTests             # or run the executable directly
+./OpenSCADUnitTests "[bezier]"  # Catch2's own filtering, tags included
+./OpenSCADUnitTests --list-tests
+```
+
+A test lives beside the code it covers, in a file named `*_test.cc` anywhere
+under `src/`; nothing else is needed to register it. Files under `src/gui/` are
+compiled only when the build has a GUI, since they need Qt.
+
+Catch2 3.3 or newer is required. If the machine has no suitable Catch2 the build
+downloads one at configure time, so the tests are available on every platform
+without adding a dependency that only they need. Two options control this:
+
+* `-DENABLE_UNIT_TESTS=OFF`: do not build or register them at all. They are also
+  skipped automatically for a cross build or an Emscripten build, where ctest
+  could not run the result.
+* `-DFETCH_CATCH2=OFF`: require a system Catch2 and warn instead of downloading.
+  `-DCATCH2_FETCH_TAG=` picks the tag that gets fetched otherwise.
+
+Test discovery runs at test time rather than at build time (`DISCOVERY_MODE
+PRE_TEST`). This matters on Windows: the default is to run the freshly linked
+executable as part of the build, and the build tree has no DLLs beside it - only
+`cmake --install` gathers them - so build-time discovery fails and takes the
+build with it. See *Windows + MSYS2* below for the same problem in its other
+form.
+
+A test case may report `SKIP()` for an input whose expected value the code does
+not currently produce; ctest shows those as `Skipped` rather than failed. A real
+failure elsewhere in the same test case still fails the run, so a skip cannot
+mask a regression.
+
 ## Running GUI Tests
 
 GUI tests verify the user interface behavior. They require a window system to run (even if headless).
