@@ -32,8 +32,9 @@ Two things are true of the current state that the doc does not say:
    validator gained `check_bspline_faces` with its own mutation harness.
 2. **A committed analytic export of a real model does not pass the project's own
    validator.** `examples/step_test/lid10.stp`, written by pythonscad on
-   2026-08-13, has 94 edges used by one face. That is finding F1 below and it is
-   the only open correctness question in this assessment.
+   2026-08-13, has 94 edges used by one face. That was finding F1 below, the only
+   open correctness question in this assessment, and it has since been traced to
+   the exporter dropping a face it could not place and fixed.
 
 ## 1. Capability ledger, as verified in the tree
 
@@ -111,7 +112,7 @@ answer. It is used below for validity only.
 Ranked by what they cost. F1 is the only one that is a question about
 correctness; the rest are hygiene and drift.
 
-### F1 — a committed analytic export is not a closed shell
+### F1 — a committed analytic export is not a closed shell — **fixed**
 
 `tests/validatestep.py` over `examples/step_test/lid10.stp`
 (`FILE_NAME` says pythonscad, 2026-08-13):
@@ -125,18 +126,33 @@ correctness; the rest are hygiene and drift.
 Characterised further: of 4519 `EDGE_CURVE`s, the 94 used once are **all `LINE`s,
 and all 94 single users are `PLANE` faces** — 61 distinct ones. The file's eight
 analytic faces and twelve circles are clean. So this is not the analytic path
-failing; it is the faceted planar remainder of that model, and it is the same
-class of defect as the fillet non-manifoldness fixed in `6a457d2` (a mesh that
-validates nowhere near the surface work that exposed it).
+failing; it is the faceted planar remainder of that model. It looked at first like
+the same class as the fillet non-manifoldness fixed in `6a457d2`, and it is not -
+that was a shell split along near coincident vertices, this one is missing faces.
+Measuring which of the two it was is what led to the line responsible.
 
 Why it matters: every fixture in the suite is a small synthetic part, and none of
-them reproduces this. A real model does. Two possibilities, and they need a build
-to separate: either HEAD still produces it, in which case there is a live
-watertightness defect on a user part, or the artifact predates a fix and should
-be regenerated. **Confirming which is the first thing a fourth session should
-do** — it is one export and one validator run.
+them reproduces this. A real model does.
 
-### F2 — the doc understates item 2, and a code comment contradicts the code
+**Diagnosed and fixed.** Three measurements narrowed it to one line. All 94 are
+`LINE`s whose single users are `PLANE` faces, so it is not the analytic path. The
+nearest other open edge to each is 0.2 mm away rather than 1e-16, so it is not a
+duplicate-vertex crack like the one every filleted body had — faces are absent,
+not doubled. And the exporter had exactly one path that removed a face after
+accepting it: a merged loop whose winding disagreed with `faceNormals` was taken
+for a hole boundary, and when no coplanar loop enclosed it, it was marked invalid
+and dropped (`orphan_cnt`). Nothing enclosing it is precisely the evidence that it
+is not a hole; it is now kept as an outer bound, reversed to agree with the mesh
+normal only when its winding is what marked it. See *The dropped loop* in
+`doc/step-export.md`.
+
+The fix is reasoned from the artifact, not run: confirming it is one export of
+`examples/step_test/lid10.scad` and one validator run, and `examples/step_test/README.md`
+carries the two commands. If the reversal decision were ever wrong the validator
+catches it — a backwards face fails the winding check, and an inconsistently
+wound one fails the edge-use rule.
+
+### F2 — the doc understates item 2, and a code comment contradicts the code — **fixed**
 
 `doc/step-export.md`'s *Where this item stands* ends "what remains is entity
 writing: `B_SPLINE_CURVE_WITH_KNOTS` per curved run … and the validator checks
@@ -145,7 +161,7 @@ patches are found but not yet written", immediately above a path that writes
 them. Both are five-minute edits, and both are the kind of drift that makes a
 reader re-derive what the code already says.
 
-### F3 — one commit is outside the repo's own convention
+### F3 — one commit is outside the repo's own convention — **addressed**
 
 `05d202a` is titled `add test`. `CLAUDE.md` makes Conventional Commits a
 release-automation requirement and a commit-msg hook is supposed to enforce it,
@@ -155,7 +171,12 @@ machine. The same commit adds `examples/step_test/lid10.{scad,json,stp}` —
 themselves). It is a useful artifact, which is an argument for wiring it in or
 saying what it is for, not for leaving it untitled.
 
-### F4 — two test programs cannot run where they are
+`examples/step_test/README.md` now says what both artifacts are, which one the
+probe reads and why it has to stay faceted, and that neither is a known-good
+reference — with the reason each one fails the validator. The commit message
+itself is history and stays as it is.
+
+### F4 — two test programs cannot run where they are — **fixed**
 
 - `tests/bspline-check-mutations.py:13` hardcodes
   `sys.path.insert(0, '/home/user/pythonscad/tests')`. It passes here (all five
@@ -166,14 +187,15 @@ saying what it is for, not for leaving it untitled.
   the doc records and which is still true. The 3754-vertex verification it
   performs is therefore not run by anything.
 
-### F5 — the probe's reference input fails the validator
+### F5 — the probe's reference input fails the validator — **documented**
 
 `bayonet_container_v1-2.stp` (2026-08-10, faceted) fails one check: the hole
 nesting that catches the membrane. That is consistent with it being an export
 from before the membrane fix, and it does not affect its use as probe input —
 the probe reads loops, not validity. But the repository's canonical measurement
 input being a file the repository's own validator rejects deserves a sentence in
-`examples/step_test/` saying so, or a regenerated file.
+`examples/step_test/` saying so, or a regenerated file. It has the sentence now,
+in `examples/step_test/README.md`.
 
 ## 5. What is not verified here
 
@@ -194,17 +216,19 @@ than readings.
 
 ## 6. Recommended order
 
-1. **Settle F1.** Export `lid10.scad` at HEAD with the analytic feature on and
-   run the validator. Everything else in this list is smaller than the answer.
-2. **Land F2's two edits**, so the doc and the comment stop contradicting the
-   emission path.
-3. **F3 and F4**, together — they are one hygiene commit.
-4. **Item 2's other half, which the doc has already argued for**: `fillet()`
+F1 to F5 have all been acted on; what stands below them is the work itself.
+
+1. **Confirm F1 on a real build** — the one thing here that this environment could
+   not do. Export `examples/step_test/lid10.scad` with the analytic feature on and
+   run `validatestep.py` over the result; the two commands are in
+   `examples/step_test/README.md`. Expect no unpaired edges, and a line saying how
+   many reversed loops were kept as their own face.
+2. **Item 2's other half, which the doc has already argued for**: `fillet()`
    draws parabolas, is out by six per cent of its radius, and a true fillet is 12
    cylinders and 8 spheres — entity types this exporter already writes. Fixing
    the geometry is worth more than the spline path it would partly obsolete, and
    it is a mesh fix, not a STEP one.
-5. **Re-measure item 5 now that `declare_*` exists.** The 59% is not one number
+3. **Re-measure item 5 now that `declare_*` exists.** The 59% is not one number
    any more: part of it is a thread that can never be a surface of revolution,
    and part is ramps and lugs a model could declare today. Nobody has separated
    those two, and the probe plus one annotated copy of the model would.
