@@ -2098,12 +2098,33 @@ endif()
 
 # Unit test translation units, found wherever they live rather than in one
 # hardcoded directory - a test next to the code it covers was previously only
-# picked up under src/utils, so src/geometry/linear_extrude_test.cc was never
-# compiled by anything. The GUI ones are separated because they need the Qt
+# picked up under src/utils. The GUI ones are separated because they need the Qt
 # half of OpenSCADLibInternal, which a HEADLESS build does not have.
 file(GLOB_RECURSE ALL_TEST_SOURCES
   "src/*_test.cc"
 )
+
+# Two of those have never been compiled by any build, and neither one builds
+# against the code as it now stands. They are excluded by name rather than
+# deleted, because each records an intent worth keeping, and each carries a note
+# at the top saying what it would take to bring it back. Removing a line here is
+# the last step of porting one.
+#
+#   Measurement_test.cc     wants Measurement::Template<GLView> and a Result
+#                           type. The class has neither: it is a plain
+#                           Measurement holding a QGLView* and returning
+#                           std::vector<QString>. Compile error.
+#   linear_extrude_test.cc  declares three LinearExtrudeInternals functions
+#                           itself. assemblePolySetForCGAL no longer exists in
+#                           this fork at all, and assemblePolySetForManifold has
+#                           since taken colours and changed its references.
+#                           Link error.
+foreach(stale_test
+    "src/gui/Measurement_test.cc"
+    "src/geometry/linear_extrude_test.cc")
+  list(REMOVE_ITEM ALL_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${stale_test}")
+endforeach()
+
 set(GUI_TEST_SOURCES ${ALL_TEST_SOURCES})
 list(FILTER GUI_TEST_SOURCES INCLUDE REGEX "/src/gui/")
 set(TEST_SOURCES ${ALL_TEST_SOURCES})

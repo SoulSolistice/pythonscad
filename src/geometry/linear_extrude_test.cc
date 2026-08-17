@@ -1,3 +1,21 @@
+// EXCLUDED FROM THE BUILD - see the stale_test list in CMakeLists.txt.
+//
+// This file declares three LinearExtrudeInternals functions itself rather than
+// through a header, and the definitions have moved out from under it:
+//
+//   assemblePolySetForCGAL      does not exist anywhere in this fork
+//   assemblePolySetForManifold  now also takes colours and color indices, and
+//                               takes its vertices and indices by lvalue
+//                               reference rather than by rvalue reference
+//   prepareVerticesAndIndices   still exists, with the signature declared here
+//
+// It therefore compiles and fails to link. It has never been compiled by any
+// build: the unit test target was commented out, and the glob that fed it only
+// looked in src/utils, so this test has never run in this repository.
+//
+// Bringing it back means declaring those internals in a header both sides
+// include - which is the fix worth having anyway - and deciding what the CGAL
+// assembly path is now that assemblePolySetForCGAL is gone.
 #include "linear_extrude.h"
 
 #include <algorithm>

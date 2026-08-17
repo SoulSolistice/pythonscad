@@ -47,6 +47,14 @@ A test lives beside the code it covers, in a file named `*_test.cc` anywhere
 under `src/`; nothing else is needed to register it. Files under `src/gui/` are
 compiled only when the build has a GUI, since they need Qt.
 
+Two files are excluded by name in the `stale_test` list in `CMakeLists.txt`:
+`src/gui/Measurement_test.cc` and `src/geometry/linear_extrude_test.cc`. Neither
+has ever been compiled by any build, and neither builds against the code as it
+now stands - one needs a testability seam on `Measurement` that does not exist,
+the other declares internals of `linear_extrude.cc` that have since moved. Each
+says so at the top of the file. Deleting its line from that list is the last
+step of porting one.
+
 Catch2 3.3 or newer is required. If the machine has no suitable Catch2 the build
 downloads one at configure time, so the tests are available on every platform
 without adding a dependency that only they need. Two options control this:

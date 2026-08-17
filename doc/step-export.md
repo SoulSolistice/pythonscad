@@ -1119,11 +1119,14 @@ spliced into the neighbouring loops through the `ArcSubstitution` path the arcs
 already use, `B_SPLINE_SURFACE_WITH_KNOTS` per patch, and the validator checks
 for both.
 
-Two incidental findings, both worth acting on separately: `OpenSCADUnitTests` is
-commented out in `CMakeLists.txt`, so no Catch2 test in this repository is
-built - which is why the check above is a standalone program - and
-`src/geometry/linear_extrude_test.cc` is not matched by the
-`src/utils/*_test.cc` glob even if it were.
+Two incidental findings, both since acted on: `OpenSCADUnitTests` was commented
+out in `CMakeLists.txt`, so no Catch2 test in this repository was built - which
+is why the check above began as a standalone program - and the glob feeding it
+only matched `src/utils/*_test.cc`, so `src/geometry/linear_extrude_test.cc` was
+invisible to it. The target is back, the glob covers `src/**/*_test.cc`, and the
+check is now `src/geometry/bezier_patch_test.cc`. See `doc/testing.md`; enabling
+it turned up two test files that had never compiled and one uninitialised
+`double` in `vector_math`.
 
 ### 3. Spheres - collapsed, without `SPHERICAL_SURFACE`
 
