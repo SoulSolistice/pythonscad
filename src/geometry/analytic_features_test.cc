@@ -259,3 +259,72 @@ TEST_CASE("a rim bordering one face per facet rejects the band, and says so", "[
   // rejected it has to reach the report.
   CHECK(reportMentions(res, "the rim borders one face per facet"));
 }
+
+TEST_CASE("a rational fillet strip is recognised, boundary and all", "[analytic][bezier]")
+{
+  // The patch pass has two halves: finding the facets that lie on a declared
+  // patch, and deciding which edge of the patch each boundary segment belongs
+  // to. Both are geometric, and both have to know the patch is rational - a
+  // fillet's arc is a circle, and the parabola through the same control points
+  // is 6% of the radius away from it, which is enormous next to the 1e-7
+  // tolerance the boundary test uses. Getting that wrong drops every patch of
+  // every fillet and reports nothing beyond one line per patch, so the file is
+  // silently faceted and still perfectly valid.
+  const int bn = 12;
+  const Vector3d p1(0, 0, 0), p2(0, 0, 5);  // the two ends of a filleted edge
+  const Vector3d ea(1, 0, 0), eb(0, 1, 0);  // towards the two faces, radius 1
+
+  const double w = std::sqrt(0.5);  // cos 45, the weight for a quarter circle
+  auto rail = [&](const Vector3d& p, double t) {
+    const Vector3d a = p + ea, b = p, c = p + eb;
+    const double b0 = (1 - t) * (1 - t), b1 = 2 * t * (1 - t) * w, b2 = t * t;
+    return Vector3d((a * b0 + b * b1 + c * b2) / (b0 + b1 + b2));
+  };
+
+  std::vector<Vector3d> vertices;
+  for (int i = 0; i < bn; i++) vertices.push_back(rail(p1, (double)i / (bn - 1)));
+  for (int i = 0; i < bn; i++) vertices.push_back(rail(p2, (double)i / (bn - 1)));
+
+  std::vector<std::vector<int>> loops;
+  std::vector<Vector3d> normals;
+  for (int i = 0; i + 1 < bn; i++) {
+    loops.push_back({i, i + 1, i + 1 + bn, i + bn});
+    const Vector3d& a = vertices[loops.back()[0]];
+    const Vector3d& b = vertices[loops.back()[1]];
+    const Vector3d& c = vertices[loops.back()[2]];
+    normals.push_back((b - a).cross(c - b).normalized());
+  }
+  std::vector<char> valid(loops.size(), 1), is_hole(loops.size(), 0);
+
+  Mesh mesh;
+  mesh.vertices = &vertices;
+  mesh.loops = &loops;
+  mesh.valid = &valid;
+  mesh.is_hole = &is_hole;
+  mesh.normals = &normals;
+
+  std::vector<std::shared_ptr<Surface>> surfaces;
+  surfaces.push_back(std::make_shared<BezierPatchSurface>(
+    2, 1, std::vector<Vector3d>{p1 + ea, p2 + ea, p1, p2, p1 + eb, p2 + eb},
+    std::vector<double>{1.0, 1.0, w, w, 1.0, 1.0}));
+
+  std::vector<char> consumed(loops.size(), 0);
+  std::vector<std::string> report;
+  const std::vector<Patch> patches = recogniseBezierPatches(mesh, surfaces, consumed, report);
+
+  for (const auto& line : report) WARN(line);
+  REQUIRE(patches.size() == 1);
+  const Patch& patch = patches[0];
+  // Half one: every facet of the strip lies on the declared patch.
+  CHECK(patch.facets.size() == (std::size_t)(bn - 1));
+  // Half two: the boundary is classified, so the patch survives and its runs
+  // are the two rails and the two straight ends.
+  INFO("dropped: " << (patch.dropped != nullptr ? patch.dropped : "not dropped"));
+  CHECK(patch.alive);
+  CHECK(patch.dropped == nullptr);
+  CHECK(patch.runs.size() == 4);
+  int curved = 0, straight = 0;
+  for (const auto& run : patch.runs) (run.straight ? straight : curved)++;
+  CHECK(curved == 2);
+  CHECK(straight == 2);
+}

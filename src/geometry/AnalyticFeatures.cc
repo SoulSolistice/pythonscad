@@ -92,12 +92,31 @@ constexpr bool EDGE_FAR[4] = {false, true, false, true};
 double distanceToBoundary(const BezierPatchSurface& patch, int e, const Vector3d& pt)
 {
   const std::vector<Vector3d> cp = patch.boundary(EDGE_ALONG_U[e], EDGE_FAR[e]);
+  const std::vector<double> cw = patch.boundaryWeights(EDGE_ALONG_U[e], EDGE_FAR[e]);
+  const bool rational = cw.size() == cp.size();
   auto at = [&](double t) {
+    // The boundary of a rational patch is a rational curve, so de Casteljau has
+    // to run on (w*P, w) and divide at the end. Evaluating it as a polynomial
+    // curve measures the distance to the parabola through the same control
+    // points, which is 6% of the radius away from the circular arc the mesh
+    // actually sits on - against a tolerance of 1e-7 of the model size. Every
+    // boundary segment of every fillet patch then belongs to no edge, and the
+    // whole fillet is written faceted while nothing anywhere reports an error.
     std::vector<Vector3d> w = cp;
-    for (std::size_t k = w.size(); k > 1; k--) {
-      for (std::size_t i = 0; i + 1 < k; i++) w[i] = w[i] * (1 - t) + w[i + 1] * t;
+    std::vector<double> ww(cp.size(), 1.0);
+    if (rational) {
+      for (std::size_t i = 0; i < cp.size(); i++) {
+        w[i] = cp[i] * cw[i];
+        ww[i] = cw[i];
+      }
     }
-    return w[0];
+    for (std::size_t k = w.size(); k > 1; k--) {
+      for (std::size_t i = 0; i + 1 < k; i++) {
+        w[i] = w[i] * (1 - t) + w[i + 1] * t;
+        ww[i] = ww[i] * (1 - t) + ww[i + 1] * t;
+      }
+    }
+    return ww[0] == 0.0 ? w[0] : Vector3d(w[0] / ww[0]);
   };
   double best = -1, bt = 0;
   for (int i = 0; i <= 64; i++) {
