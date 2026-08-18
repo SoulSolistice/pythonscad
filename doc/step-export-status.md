@@ -167,8 +167,10 @@ reader re-derive what the code already says.
 release-automation requirement and a commit-msg hook is supposed to enforce it,
 so this one either bypassed the hook or the hook is not installed on that
 machine. The same commit adds `examples/step_test/lid10.{scad,json,stp}` —
-2.9 MB, referenced by nothing in the tree (`grep -rn lid10` finds only the files
-themselves). It is a useful artifact, which is an argument for wiring it in or
+2.9 MB. `grep` finds no reference, which was misleading: `tests/CMakeLists.txt`
+globs `examples/**/*.scad` recursively, so both models were being rendered by
+dump-examples, render-*, preview-* and throwntogether-* — 16 tests failing for a
+baseline they should never have needed. They are excluded from that glob now. It is a useful artifact, which is an argument for wiring it in or
 saying what it is for, not for leaving it untitled.
 
 `examples/step_test/README.md` now says what both artifacts are, which one the

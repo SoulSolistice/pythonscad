@@ -364,6 +364,14 @@ if(EXAMPLES_DIR)
   file(GLOB_RECURSE EXAMPLE_FILES    ${EXAMPLES_DIR}/*.scad)
   list(REMOVE_ITEM EXAMPLE_FILES
     ${EXAMPLES_DIR}/Basics/roof.scad # -> EXPERIMENTAL_ROOF_FILES
+    # Measurement input for analytic STEP export rather than examples: two parts
+    # of a real user model, kept so the recogniser can be measured on something
+    # that is not a synthetic fixture. See examples/step_test/README.md. The glob
+    # above is recursive, so without this they enter dump-examples, render-*,
+    # preview-* and throwntogether-* - 16 tests with no baseline, and no reason
+    # to have one.
+    ${EXAMPLES_DIR}/step_test/bayonet_container_v1-2.scad
+    ${EXAMPLES_DIR}/step_test/lid10.scad
   )
   list(APPEND EXAMPLE_3D_FILES ${EXAMPLE_FILES})
   # Remove 2D files from 3D examples
@@ -1171,7 +1179,12 @@ add_cmdline_test(export-step-py-sanitytest SCRIPT ${STEPEXPORTSANITYTEST_PY} SUF
 # the patch's control net - a face that bulges the wrong way and passes every
 # topology check. Each mutation states whether it should be accepted or rejected
 # and the script exits non-zero when one behaves differently.
-add_test(NAME bspline-check-mutations CONFIGURATIONS Default
+# No CONFIGURATIONS: get_test_config() leaves it empty for every cmdline test
+# that is not in one of the extended lists, and an empty CONFIGURATIONS is what
+# makes a test run under a plain `ctest`. Naming Default instead restricts it to
+# `ctest -C Default` - which is why this, ipython-smoke, ipython-fallback,
+# repl-smoke and version-helpers all sat out a full run of the suite.
+add_test(NAME bspline-check-mutations
   COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/bspline-check-mutations.py
 )
 

@@ -60,3 +60,12 @@ cd tests && python3 -c "from validatestep import validateSTEP; validateSTEP('/tm
 ```
 
 Keep it until that has been run on a build that has the fix.
+
+## They are excluded from the example test suite
+
+`tests/CMakeLists.txt` globs `examples/**/*.scad` recursively into
+`dump-examples`, `render-*`, `preview-*` and `throwntogether-*`. These two models
+are measurement input rather than examples, and neither has - or wants - a
+regression baseline, so both are named in the `REMOVE_ITEM` list beside
+`Basics/roof.scad`. Without that they contribute 16 failures to a full `ctest`,
+every one of them "missing expected output".
