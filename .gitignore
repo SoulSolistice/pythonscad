@@ -132,6 +132,11 @@ resources/Makefile
 resources/cmake_install.cmake
 resources/docs/OpenSCADUserDocs
 tests/data/scad/issues/issue2342.scad
+# The render-csg-* suites export each fixture to .csg beside its .scad and read
+# it back, so a test run leaves one of these next to every 2D and 3D fixture.
+# The two .scad.csg that are checked in are inputs rather than output and stay
+# tracked - git does not apply an ignore rule to a file it already tracks.
+tests/data/**/*.scad.csg
 tests/data/svg/viewbox/viewbox_300x400_meet_xMaxYMin.svg
 tests/data/svg/viewbox/viewbox_300x400_meet_xMidYMin.svg
 tests/data/svg/viewbox/viewbox_300x400_meet_xMinYMin.svg
