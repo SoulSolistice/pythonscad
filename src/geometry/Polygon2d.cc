@@ -156,6 +156,16 @@ void Polygon2d::transform(const Transform2d& mat)
  */
 void Polygon2d::transformArcs(const Transform2d& mat)
 {
+  // A Bezier is not fussy the way a circle is: an affine map takes one to
+  // another of the same degree, by mapping the control points and nothing else.
+  // So the shear and the non-uniform scale that turn a circle into an ellipse -
+  // and cost it its record below - leave a Bezier a Bezier.
+  for (auto& bez : this->beziers) {
+    for (int i = 0; i <= bez.degree; i++) {
+      const Vector2d moved = mat * Vector2d(bez.ctrl[i][0], bez.ctrl[i][1]);
+      bez.ctrl[i] = moved;
+    }
+  }
   if (this->arcs.empty()) return;
   const Eigen::Matrix2d linear = mat.linear();
   // a similarity has L^T L = s^2 I

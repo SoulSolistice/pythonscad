@@ -403,6 +403,55 @@ void declareExtrudedCylinders(const LinearExtrudeNode& node, const Polygon2d& pr
   }
 }
 
+/*! The Bezier patches a straight extrusion of the profile's Bezier segments
+ * sweeps.
+ *
+ * A Bezier segment swept along a straight line is a tensor product patch of
+ * degree (n, 1) whose control net is the segment's own control points at each
+ * end of the sweep - exact, and needing no fit, because both a Bezier and a
+ * linear sweep are affine in their control points.
+ *
+ * That makes this far less fussy than the arc case next door. An arc has to
+ * refuse a shear, a non-uniform scale and an oblique `v`, because each of them
+ * turns its circle into something no quadric describes; a Bezier survives all
+ * three, comes out a Bezier of the same degree, and is written by the same
+ * B_SPLINE_SURFACE_WITH_KNOTS either way. Even the uneven scale works: the
+ * extrusion's station at t is the profile scaled by lerp(1, s, t), and the
+ * patch's own linear interpolation in v gives lerp(P, sP, t), which is the same
+ * points.
+ *
+ * What it cannot take is a twist, where the station at t is the profile
+ * *rotated* by t times the angle. A rotation is not linear in t, the swept
+ * surface is not a Bezier patch of any degree, and this is the same helicoid
+ * the arc case refuses.
+ */
+void declareExtrudedPatches(const LinearExtrudeNode& node, const Polygon2d& profile,
+                            const Vector3d& height, const Vector3d& base, PolySet& polyset)
+{
+  if (profile.beziers.empty()) return;
+  if (node.twist != 0) return;
+#ifdef ENABLE_PYTHON
+  if (node.profile_func != nullptr || node.twist_func != nullptr) return;
+#endif
+  const Transform3d tr = profile.getTransform3d();
+  const Vector2d top_scale(node.scale_x, node.scale_y);
+  if (!top_scale.allFinite()) return;
+
+  for (const auto& bez : profile.beziers) {
+    if (bez.degree < 2 || bez.degree > 3) continue;
+    // v varies fastest, so the net is control point by control point, each one
+    // as a pair: where it starts and where the sweep takes it.
+    std::vector<Vector3d> net;
+    net.reserve((bez.degree + 1) * 2);
+    for (int i = 0; i <= bez.degree; i++) {
+      const Vector2d p(bez.ctrl[i][0], bez.ctrl[i][1]);
+      net.push_back(tr * Vector3d(p[0], p[1], 0.) + base);
+      net.push_back(tr * Vector3d(p[0] * top_scale[0], p[1] * top_scale[1], 0.) + base + height);
+    }
+    polyset.surfaces.push_back(std::make_shared<BezierPatchSurface>(bez.degree, 1, std::move(net)));
+  }
+}
+
 }  // namespace
 
 std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Polygon2d& poly)
@@ -594,6 +643,7 @@ std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Po
   // segmentation - which refuses the declaration anyway. Both share the same 3D
   // transform, so the frame is the same either way.
   declareExtrudedCylinders(node, poly, h2 - h1, h1, *result);
+  declareExtrudedPatches(node, poly, h2 - h1, h1, *result);
   return result;
 }
 

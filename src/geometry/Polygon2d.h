@@ -39,6 +39,32 @@ double outline_area(const Outline2d o);
  *
  * The centre is in the polygon's own 2D frame, before `getTransform3d()`.
  */
+/*! A Bezier segment some of a polygon's vertices were sampled from.
+ *
+ * The companion to Arc2d, and the reason the channel is worth having twice: a
+ * glyph outline is not made of arcs. FreeType hands `text()` its contours as
+ * lines and quadratic or cubic Beziers - see FreetypeRenderer's conic_to and
+ * cubic_to - and DrawingCallback samples them into points, which is exactly
+ * what circle() used to do with its radius. The control points are known at the
+ * moment of sampling and thrown away one line later.
+ *
+ * Extruded, such a segment sweeps a Bezier patch of degree (n, 1): the control
+ * net is the segment's own control points at each end of the sweep, and that is
+ * exact rather than fitted, because a Bezier maps through an affine transform
+ * by its control points. It is the same statement of intent Arc2d makes, and
+ * the exporter already writes it - BezierPatchSurface and
+ * B_SPLINE_SURFACE_WITH_KNOTS came in for fillet().
+ *
+ * Degree 2 uses the first three control points, degree 3 all four. Points are
+ * in the polygon's own 2D frame, before getTransform3d().
+ */
+struct Bezier2d {
+  /*! Unaligned for the reason Arc2d's centre is - see there. */
+  using Point = Eigen::Matrix<double, 2, 1, Eigen::DontAlign>;
+  Point ctrl[4];
+  int degree = 0;  // 2 (quadratic) or 3 (cubic)
+};
+
 struct Arc2d {
   /* Deliberately unaligned. A plain Vector2d makes this struct 24 bytes, so in
    * a std::vector every other element lands off a 16 byte boundary and Eigen's
@@ -82,6 +108,10 @@ public:
   /*! Circles some of this polygon's vertices lie on. See Arc2d: hints, not
    * guarantees, and consumed by re-checking them against the geometry. */
   std::vector<Arc2d> arcs;
+
+  /*! Bezier segments some of this polygon's vertices were sampled from. Same
+   * channel, same rules - see Bezier2d. */
+  std::vector<Bezier2d> beziers;
 
   void reverse(void);
   [[nodiscard]] std::unique_ptr<PolySet> tessellate(bool in3d = false) const;

@@ -271,6 +271,11 @@ static void carryArcs(Polygon2d& result, const std::vector<std::shared_ptr<const
       }
       if (!known) result.arcs.push_back(arc);
     }
+    // The Bezier records travel the same way and for the same reasons. No
+    // deduplication: two segments of one glyph share their endpoints but not
+    // their interior control points, so equality is rarer than for a circle and
+    // the comparison would cost more than the duplicates do.
+    for (const auto& bez : operand->beziers) result.beziers.push_back(bez);
   }
 }
 
