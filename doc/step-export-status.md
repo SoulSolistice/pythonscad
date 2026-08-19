@@ -230,12 +230,13 @@ F1 to F5 have all been acted on; what stands below them is the work itself.
    | reversed loops kept | **none reported**, so the fixed branch never ran and F1's cause is still unattributed |
    | `step-fillet` | 26 faces instead of 1106, 48 of 48 seams agree, 0 runs unresolved |
    | `cube(10).fillet(1, fn=24)` | volume 975.5163, surface 547.3143 against an exact 975.587 / 547.363 |
-   | `cube(10).fillet(5.1)` | twelve edges refused with a reason — and the corners were rounded anyway, which is now fixed |
+   | `cube(10).fillet(5.1)` | twelve edges refused with a reason, and the result is exactly `cube(10)` — 12 triangles, 8 vertices, volume 1000.000000, surface 600.000000, every edge used twice |
    | `bspline-check-mutations` | 10 mutations, all as expected |
    | the two STEP models | out of the example suite, 16 failures gone |
 
-   The one thing still worth re-running is `fillet(5.1)`: it should be a plain
-   cube of volume 1000, where it measured 1532 inside its own 10x10x10 box.
+   Nothing on this list is open. The `fillet(5.1)` case was the last of them: it
+   measured 1532 inside its own 10x10x10 box while every edge was refused and
+   every corner rounded anyway, and it is now the cube it should be.
 2. **Make `FilletNode`'s Beziers rational.** `fillet()` draws parabolas, out by
    6% of the radius at a right angle and 25% at a 60° dihedral, and the corner
    patch is 9.5% off the sphere. The Bezier substrate is deliberate and correct -
