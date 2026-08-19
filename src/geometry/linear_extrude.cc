@@ -326,21 +326,31 @@ using namespace LinearExtrudeInternals;
  */
 namespace {
 
-/*! The cylinders a straight extrusion of the profile's arcs sweeps.
+/*! The cylinders and cones a straight extrusion of the profile's arcs sweeps.
  *
  * An arc extruded along the normal of its own plane sweeps a circular cylinder,
  * exactly - the declaration the STEP exporter needs, and the reason Arc2d is
- * carried this far. Everything that would make that untrue is refused rather
- * than approximated:
+ * carried this far. With a uniform `scale` it sweeps a cone instead, and a cone
+ * states its intent the way every other cone in this codebase does: by declaring
+ * the circle at each of its two ends, which an exporter accepts as a frustum
+ * when both rims match. That is the taper idiom - a draft angle, a lead-in, a
+ * tapered boss - and it is as common as the straight case.
  *
- *   - a twist or an uneven scale, which sweeps a helicoid or a general ruled
- *     surface and not a cylinder;
+ * Everything that would make either untrue is refused rather than approximated:
+ *
+ *   - a twist, which sweeps a helicoid, or an uneven scale, which sweeps a
+ *     general ruled surface;
  *   - a Python profile or twist function, where the profile is not this one;
  *   - an oblique `v`, which sweeps an *oblique* cylinder - a real surface, but
  *     not a CYLINDRICAL_SURFACE, whose circular section is not perpendicular to
  *     its axis;
  *   - a profile plane whose 3D transform is not a similarity, which turns the
- *     circle into an ellipse before it is swept at all.
+ *     circle into an ellipse before it is swept at all;
+ *   - a scaled arc whose centre is not the origin the scale is taken about.
+ *     `scale` moves such a centre sideways as well as shrinking its radius, so
+ *     the surface is an *oblique* cone: still exact, still describable, and not
+ *     a CONICAL_SURFACE. Only an arc concentric with the scaling origin tapers
+ *     into one.
  *
  * Like every record on this channel these are hints. The recogniser fits each
  * one to the mesh and writes only what actually agrees, so an arc that a
@@ -351,6 +361,8 @@ void declareExtrudedCylinders(const LinearExtrudeNode& node, const Polygon2d& pr
 {
   if (profile.arcs.empty()) return;
   if (node.twist != 0 || node.scale_x != node.scale_y) return;
+  const double taper = node.scale_x;
+  if (!(taper >= 0) || !std::isfinite(taper)) return;
 #ifdef ENABLE_PYTHON
   if (node.profile_func != nullptr || node.twist_func != nullptr) return;
 #endif
@@ -375,7 +387,19 @@ void declareExtrudedCylinders(const LinearExtrudeNode& node, const Polygon2d& pr
   for (const auto& arc : profile.arcs) {
     if (arc.r <= 0) continue;
     const Vector3d centre = tr * Vector3d(arc.centre[0], arc.centre[1], 0.) + base;
-    addSurfaceUnique(polyset.surfaces, std::make_shared<CylinderSurface>(centre, axis, arc.r * scale));
+    const double radius = arc.r * scale;
+    if (taper == 1.0) {
+      addSurfaceUnique(polyset.surfaces, std::make_shared<CylinderSurface>(centre, axis, radius));
+      continue;
+    }
+    // A taper. Only an arc about the scaling origin stays concentric as it
+    // shrinks; any other one slides sideways too and sweeps an oblique cone.
+    if (arc.centre.norm() > 1e-12 * std::max(1.0, arc.r)) continue;
+    addSurfaceUnique(polyset.surfaces, std::make_shared<CylinderSurface>(centre, axis, radius));
+    if (taper > 0) {
+      addSurfaceUnique(polyset.surfaces,
+                       std::make_shared<CylinderSurface>(centre + height, axis, radius * taper));
+    }
   }
 }
 
