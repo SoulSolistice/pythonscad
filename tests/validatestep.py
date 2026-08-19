@@ -801,11 +801,22 @@ def check_cylindrical_faces(entities, problems):
             )
             continue
 
-        # A torus is closed in *both* directions, so its face has no rims at
+        # A toroidal face comes in two shapes, and both are four edges.
+        #
+        # A *complete* torus is closed in both directions, so it has no rims at
         # all: it is bounded by its own two seams, each a closed circle through
         # the one vertex where they cross and each used once in either
-        # direction. Same four edges as a periodic cylinder, two seams instead
-        # of one.
+        # direction. Four closed circles over two distinct edges.
+        #
+        # A *partial* one - a rounded corner of a revolved profile, which sweeps
+        # a quarter of a torus - is closed round the axis and open along the
+        # tube. It is bounded like any other ring: two rim circles of latitude,
+        # plus one seam running along the tube, used once in either direction.
+        # Two closed circles over three distinct edges.
+        #
+        # Either way every edge is a CIRCLE, one of them has exactly the minor
+        # radius, and the rest lie between the throat and the equator - which is
+        # what the radius checks below say, for both shapes at once.
         if surface.name == "TOROIDAL_SURFACE":
             if len(oriented) != 4:
                 problems.append(
@@ -824,15 +835,22 @@ def check_cylindrical_faces(entities, problems):
                 oe = entities.get(oid)
                 seams.add(oe.refs()[-1] if oe is not None and oe.refs() else None)
             else:
-                if closed_circles != 4:
+                if closed_circles == 4:
+                    if len(seams) != 2:
+                        problems.append(
+                            "#%d: a complete toroidal face needs two seam edges each used "
+                            "twice, found %d distinct edges" % (face.id, len(seams))
+                        )
+                elif closed_circles == 2:
+                    if len(seams) != 3:
+                        problems.append(
+                            "#%d: a partial toroidal face needs two rim circles and one seam "
+                            "used twice, found %d distinct edges" % (face.id, len(seams))
+                        )
+                else:
                     problems.append(
-                        "#%d: a toroidal face is bounded by two closed circles, found %d closed of 4"
-                        % (face.id, closed_circles)
-                    )
-                if len(seams) != 2:
-                    problems.append(
-                        "#%d: a toroidal face needs two seam edges each used twice, found %d"
-                        % (face.id, len(seams))
+                        "#%d: a toroidal face has %d closed circles, expected 4 (complete) "
+                        "or 2 (partial, with a seam along the tube)" % (face.id, closed_circles)
                     )
                 # One seam runs round the tube and so has exactly the minor
                 # radius; the other runs round the axis and is a circle of

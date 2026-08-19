@@ -475,7 +475,13 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // edge loop a periodic cylinder uses - the doubly periodic case needs no
     // new shape, only a second seam - and it needs nothing from the mesh beyond
     // that one vertex, since both circles come out of the declared record.
-    if (const auto *tor = dynamic_cast<const TorusSurface *>(band.zone.get())) {
+    // Only the complete one. A run with a free rim at either end - a rounded
+    // corner of a revolved profile, which sweeps a quarter of a torus - is a
+    // ring like any other band: two rim circles and one seam, written by the
+    // generic path below with a ToroidalSurface under it.
+    const auto *whole_torus = dynamic_cast<const TorusSurface *>(band.zone.get());
+    if (whole_torus != nullptr && band.seam_bottom != band.seam_top) whole_torus = nullptr;
+    if (const auto *tor = whole_torus) {
       const Vector3d centre = tor->refpt;
       const Vector3d axis = tor->normdir.normalized();
       const Vector3d corner = vertices[band.seam_bottom];
@@ -536,7 +542,17 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     const Vector3d ref = (rel - band.axis * band.axis.dot(rel)).normalized();
 
     SurfaceType *surface = nullptr;
-    if (band.zone != nullptr) {
+    if (const auto *tor = dynamic_cast<const TorusSurface *>(band.zone.get())) {
+      // A partial torus: the placement comes from the record, not from the
+      // band's rims. Its own axis and a radial direction through the seam are
+      // what the parameterisation is measured from, exactly as for the complete
+      // one above.
+      const Vector3d axis = tor->normdir.normalized();
+      const Vector3d rel_seam = vertices[band.seam_bottom] - tor->refpt;
+      const Vector3d radial = (rel_seam - axis * rel_seam.dot(axis)).normalized();
+      surface = new ToroidalSurface(entities, "", placement(tor->refpt, axis, radial), tor->r_major,
+                                    tor->r_minor);
+    } else if (band.zone != nullptr) {
       const auto *sph = dynamic_cast<const SphereSurface *>(band.zone.get());
       surface = new SphericalSurface(entities, "", placement(sph->refpt, band.axis, ref), sph->r);
     } else if (!is_cone) {
@@ -617,7 +633,23 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       // by nothing at all in the mesh, so replacing the line costs no
       // neighbouring loop a rewrite.
       EdgeCurve *edge_seam = nullptr;
-      if (band.zone != nullptr) {
+      if (const auto *tor = dynamic_cast<const TorusSurface *>(band.zone.get())) {
+        // Over a torus the seam is a meridian: an arc of the tube's own circle,
+        // about the point on the tube's centre circle at the seam's longitude.
+        // Same argument as the sphere below - a straight chord sags off the
+        // surface - and the same construction, one level in.
+        const Vector3d axis = tor->normdir.normalized();
+        const Vector3d rel_seam = vertices[band.seam_bottom] - tor->refpt;
+        const Vector3d radial = (rel_seam - axis * rel_seam.dot(axis)).normalized();
+        const Vector3d tube = tor->refpt + radial * tor->r_major;
+        const Vector3d from = (vertices[band.seam_bottom] - tube).normalized();
+        const Vector3d to = (vertices[band.seam_top] - tube).normalized();
+        const Vector3d normal = from.cross(to);
+        auto meridian =
+          new Circle(entities, "", placement(tube, normal.normalized(), from), tor->r_minor);
+        edge_seam = new EdgeCurve(entities, get_vertex(band.seam_bottom), get_vertex(band.seam_top),
+                                  meridian, true);
+      } else if (band.zone != nullptr) {
         const auto *sph = dynamic_cast<const SphereSurface *>(band.zone.get());
         const Vector3d from = (vertices[band.seam_bottom] - sph->refpt).normalized();
         const Vector3d to = (vertices[band.seam_top] - sph->refpt).normalized();

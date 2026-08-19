@@ -365,8 +365,8 @@ void declareExtrudedCylinders(const LinearExtrudeNode& node, const Polygon2d& pr
   const Vector3d ey = linear * Vector3d(0., 1., 0.);
   const double sx = ex.norm(), sy = ey.norm();
   if (sx < 1e-12 || sy < 1e-12) return;
-  if (fabs(sx - sy) > 1e-12 * sx) return;         // an ellipse, not a circle
-  if (fabs(ex.dot(ey)) > 1e-12 * sx * sy) return; // sheared, likewise
+  if (fabs(sx - sy) > 1e-12 * sx) return;          // an ellipse, not a circle
+  if (fabs(ex.dot(ey)) > 1e-12 * sx * sy) return;  // sheared, likewise
   // and the sweep has to run along that plane's normal, or the cylinder is oblique
   const Vector3d normal = ex.cross(ey) / (sx * sy);
   if (fabs(fabs(normal.dot(axis)) - 1.) > 1e-12) return;
@@ -564,7 +564,7 @@ std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Po
   // the polyset from vertices using PolySetBuilder
 
   auto result = assemblePolySetForManifold(polyref, vertices, indices, colors, color_indices,
-                                          node.convexity, isConvex, slice_stride * num_slices);
+                                           node.convexity, isConvex, slice_stride * num_slices);
   // From `poly` rather than `polyref`: the segmented copy is built vertex by
   // vertex and carries no records, and it only exists where a twist forced
   // segmentation - which refuses the declaration anyway. Both share the same 3D

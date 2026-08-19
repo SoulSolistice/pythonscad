@@ -1152,7 +1152,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     }
   }
 
-  // ---- merge a run of bands lying on one declared sphere ----------------
+  // ---- merge a run of bands lying on one declared sphere or torus -------
   //
   // A sphere is not a grid to be grown. Every ring of its tessellation is
   // already a frustum whose rims are circles, so the zone is the maximal run of
@@ -1179,10 +1179,26 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       }
     }
 
-    auto on_sphere = [&](const SphereSurface *sph, std::size_t bi) {
+    // Every vertex of the band on the surface, to a tolerance relative to the
+    // surface's own size. A sphere and a torus are the two zone shapes: for the
+    // torus the distance measured is to the tube's centre circle, which is what
+    // a torus is.
+    auto on_zone = [&](const Surface *zone, std::size_t bi) {
+      const auto *sph = dynamic_cast<const SphereSurface *>(zone);
+      const auto *tor = dynamic_cast<const TorusSurface *>(zone);
+      if (sph == nullptr && tor == nullptr) return false;
       for (const std::size_t f : bands[bi].walls) {
         for (const int v : loops[f]) {
-          if (fabs((vertices[v] - sph->refpt).norm() - sph->r) > 1e-7 * sph->r) return false;
+          if (sph != nullptr) {
+            if (fabs((vertices[v] - sph->refpt).norm() - sph->r) > 1e-7 * sph->r) return false;
+          } else {
+            const Vector3d rel = vertices[v] - tor->refpt;
+            const double along = rel.dot(tor->normdir);
+            const double radial = (rel - tor->normdir * along).norm() - tor->r_major;
+            if (fabs(sqrt(radial * radial + along * along) - tor->r_minor) > 1e-7 * tor->r_minor) {
+              return false;
+            }
+          }
         }
       }
       return true;
@@ -1190,12 +1206,12 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
 
     std::vector<char> absorbed(bands.size(), 0);
     for (const auto& surface : surfaces) {
-      const auto *sph = dynamic_cast<const SphereSurface *>(surface.get());
-      if (sph == nullptr) continue;
+      const bool is_torus = dynamic_cast<const TorusSurface *>(surface.get()) != nullptr;
+      if (dynamic_cast<const SphereSurface *>(surface.get()) == nullptr && !is_torus) continue;
 
       for (std::size_t seed = 0; seed < bands.size(); seed++) {
         if (!bands[seed].alive || absorbed[seed] || bands[seed].zone != nullptr) continue;
-        if (!bands[seed].closed || !on_sphere(sph, seed)) continue;
+        if (!bands[seed].closed || !on_zone(surface.get(), seed)) continue;
 
         // walk the run outwards from the seed, one rim at a time
         std::vector<std::size_t> run{seed};
@@ -1208,7 +1224,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
             const std::size_t next = it->second[0] == cur ? it->second[1] : it->second[0];
             if (absorbed[next] || next == seed) break;
             if (std::find(run.begin(), run.end(), next) != run.end()) break;  // closed on itself
-            if (!on_sphere(sph, next)) break;
+            if (!on_zone(surface.get(), next)) break;
             run.push_back(next);
             absorbed[next] = 1;
             cur = next;
@@ -1233,11 +1249,40 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         }
         if (low == bands.size() || high == bands.size()) {
           // No free rim at either end: the run closes on itself, which is a
-          // torus. It is only accepted when a torus was declared - `sph` here
-          // is a sphere, and a closed run of bands on a sphere is impossible,
-          // so this always falls through to the torus pass below.
+          // torus, and a *complete* one - the pass below writes it as a face
+          // bounded by two seams and nothing else.
           for (const std::size_t bi : run) absorbed[bi] = 0;
           continue;
+        }
+
+        // For a torus, an end of the run has to be an end of the *surface* and
+        // not merely of the walk. A torus's profile turns around at its widest
+        // and narrowest points, and the two bands meeting there meet top to top,
+        // so a walk that always follows the top rim turns back at the turnaround
+        // and stops - leaving a run whose ends look free because the band beyond
+        // each of them is not in the run. Merging that would break one complete
+        // torus into fragments.
+        //
+        // What separates the two cases is not whether the end rim is shared -
+        // the end rim of a rounded corner is shared with the wall it runs into,
+        // and that is the ordinary case - but *what it is shared with*. A band
+        // across the rim which lies on this same torus is a turnaround; anything
+        // else is a real end.
+        if (is_torus) {
+          bool turnaround = false;
+          for (const auto& end : {std::make_pair(low, true), std::make_pair(high, false)}) {
+            const std::vector<int>& level =
+              end.second ? bands[end.first].bottom_set : bands[end.first].top_set;
+            const auto it = at_rim.find(std::set<int>(level.begin(), level.end()));
+            if (it == at_rim.end()) continue;
+            for (const std::size_t other : it->second) {
+              if (other != end.first && on_zone(surface.get(), other)) turnaround = true;
+            }
+          }
+          if (turnaround) {
+            for (const std::size_t bi : run) absorbed[bi] = 0;
+            continue;
+          }
         }
 
         std::vector<std::size_t> walls;

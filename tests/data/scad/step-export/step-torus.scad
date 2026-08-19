@@ -20,9 +20,15 @@
 //
 // It needs a declaration of its own. The ring circles say "cone" thirty-two
 // times over and only a TorusSurface says the thirty-two were one surface -
-// which rotate_extrude can know only by reading its child node, since a 2D
-// outline carries vertices, a winding flag and a colour, and no record of
-// having been a circle.
+// which rotate_extrude knows because the circle told it. The profile carries the
+// circle as an Arc2d and the revolve turns it into the torus it sweeps, the same
+// path a rounded corner takes in step-rounded-profile.scad.
+//
+// It used to be read off the node tree instead - walk down through the
+// transforms and see whether the child is a CircleNode - because a 2D outline
+// carried vertices, a winding flag and a colour and no record of having been
+// round. That worked for a bare circle and stopped at the first difference() or
+// rotation in the way. The channel does not.
 //
 // This is also the first thing to chain more than three closed bands through
 // shared rims; the bayonet's longest chain is a wall on a chamfer on a wall.

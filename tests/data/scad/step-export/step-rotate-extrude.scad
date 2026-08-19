@@ -4,8 +4,10 @@
 // that item is free: revolving a *line segment* produces exactly the band the
 // recogniser already handles - a cylinder where the segment is parallel to the
 // axis, a frustum where it is tilted - so there is no emission work in it at
-// all, only the record. The other half, a circular profile and the
-// TOROIDAL_SURFACE it sweeps, is still to do.
+// all, only the record. The other half - an arc in the profile and the
+// TOROIDAL_SURFACE it sweeps - is step-rounded-profile.scad, and it needed the
+// profile to carry its arcs. This fixture stays deliberately straight-edged, so
+// that what it measures is the segment case on its own.
 //
 // The profile is a stepped tube, chosen so that one fixture covers all three
 // kinds of edge and the rim case that only appears between two curved faces:

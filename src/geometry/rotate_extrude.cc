@@ -210,12 +210,12 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
     const Vector2d centre(arc.centre[0] + node.offset_x, arc.centre[1] + node.offset_y);
     if (fabs(centre[0]) <= eps) {
       // the centre is on the axis: the arc sweeps a sphere, not a ring
-      addSurfaceUnique(polyset.surfaces, std::make_shared<SphereSurface>(
-                                           Vector3d(0, 0, centre[1]), Vector3d(0, 0, 1), arc.r));
+      addSurfaceUnique(polyset.surfaces, std::make_shared<SphereSurface>(Vector3d(0, 0, centre[1]),
+                                                                         Vector3d(0, 0, 1), arc.r));
     } else if (centre[0] > arc.r + eps) {
-      addSurfaceUnique(polyset.surfaces,
-                       std::make_shared<TorusSurface>(Vector3d(0, 0, centre[1]), Vector3d(0, 0, 1),
-                                                      centre[0], arc.r));
+      addSurfaceUnique(
+        polyset.surfaces,
+        std::make_shared<TorusSurface>(Vector3d(0, 0, centre[1]), Vector3d(0, 0, 1), centre[0], arc.r));
     }
     // An arc reaching the axis without being centred on it sweeps a horn or a
     // spindle torus, which is self-intersecting; rotatePolygon() has rejected a

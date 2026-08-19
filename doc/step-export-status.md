@@ -314,11 +314,11 @@ replacement.
 
 ### The order that follows from this
 
-1. **Exact 2D profiles.** `Outline2d` is a bare `VectorOfVector2d`
-   (`src/geometry/Polygon2d.h:19`), so a circle is already dead by the time it
-   reaches an extruder, and `linear_extrude(circle())` exports as a cylinder only
-   because that path is special-cased. An arc-aware profile is the prerequisite
-   for the next item and is the largest single lever in the picture.
+1. ~~**Exact 2D profiles.**~~ Done, as `Arc2d` on `Polygon2d` - a channel of
+   hints rather than an exact-arc geometry, which is what makes it survive
+   Clipper: a record the boolean has trimmed to nothing is simply never fitted.
+   See item 5 of §7 for what it recovered. What it does *not* do is give the
+   trim curves of item 3 below; it names surfaces, not boundaries.
 2. **`SURFACE_OF_LINEAR_EXTRUSION` and `SURFACE_OF_REVOLUTION`,** neither of
    which the kernel writes. Both take an *arbitrary* generatrix curve, so any
    `linear_extrude` is exactly the first and any `rotate_extrude` exactly the
@@ -434,16 +434,43 @@ three and what they cannot reach.
    written exactly by the B-spline machinery item 2 built, only approximated
    within a tolerance. The exporter's rule to date is *exact fit or stay
    faceted*. A thread is where that rule has to be decided, not a recogniser.
-5. **Roadmap item 1's other half: an arc in a `rotate_extrude` profile.**
-   `declareSurfacesOfRevolution` declares one `CylinderSurface` per profile
-   vertex radius (`src/geometry/rotate_extrude.cc:182`), which covers straight
-   segments - a wall becomes a cylinder, a taper a cone. A torus is declared only
-   where the whole profile is a `circle()` (`GeometryEvaluator.cc:2814`), so a
-   *rounded* profile - the common case, a fillet drawn into the section - sweeps
-   a torus and is declared as a stack of cones instead. The recogniser already
-   merges bands across a declared zone, so this is a declaration gap and not a
-   recogniser one: emit a `TorusSurface` per arc run in the profile and the
-   existing merge collapses it.
+5. ~~**Roadmap item 1's other half: an arc in a `rotate_extrude` profile.**~~
+   Done, and it turned into §6's item 1 - the arc channel - because the gap was
+   one level lower than the item said. `Outline2d` is a bare list of points, so
+   `circle()` was dead before any extruder saw it; the torus was recovered by
+   *reading the node tree* for a `CircleNode`, which stopped at the first
+   `difference()` or rotation.
+
+   `Arc2d` on `Polygon2d` is the channel: recorded by `circle()` and by
+   `offset(r=)` (one arc per input vertex, plus the operand's own arcs moved by
+   the offset), carried through `transform` under a similarity and through
+   union, difference and intersection, and consumed by both extruders.
+   `linear_extrude` declares a `CylinderSurface` per arc; `rotate_extrude`
+   declares a `TorusSurface`, or a `SphereSurface` where the arc's centre sits on
+   the axis. `torusOfRevolution()` is gone - 57 lines of node-tree walking whose
+   own comment named "a curve channel on Outline2d, which has to survive Clipper"
+   as the honest fix.
+
+   The recogniser needed one thing after all: its zone merge accepted a
+   *complete* torus only, so a rounded corner - a quarter of one - fell back to
+   the exact cone stack. The sphere pass already merged a run with two free ends,
+   and generalising it to a toroidal zone was the whole change, plus one test to
+   tell a real end of the surface from the *turnaround* where a torus's profile
+   doubles back: not whether the end rim is shared, but whether the band across
+   it lies on the same torus.
+
+   Measured on the headless build, with the three new fixtures:
+
+   | | before | after |
+   | --- | --- | --- |
+   | `linear_extrude(circle(r=10))`, fn 32 | 34 faces, declared by hand or not at all | 3 faces, declared by the circle |
+   | `linear_extrude(offset(r=3, square))`, fn 60 | 66 planes | 4 `CYLINDRICAL_SURFACE` + 6 `PLANE` |
+   | `rotate_extrude(offset(r=2, ...))`, fn 32 | 36 faces (32 exact cones) | 4 `TOROIDAL_SURFACE` + 2 cylinders + 2 planes, 8 faces from 1088 facets |
+
+   All three validate on both backends, so the records survive the conversion to
+   a Nef polyhedron as well. `validatestep.py` gained the partial toroidal face -
+   two rim circles of latitude and one seam along the tube, against the complete
+   torus's two closed seams and no rims.
 6. **Write the fillet's exact quadrants as quadrics.** Since item 2 an edge strip
    is an exact cylinder quadrant and a corner an exact sphere octant, and both go
    out as `B_SPLINE_SURFACE_WITH_KNOTS`. That is valid and imports, but a
