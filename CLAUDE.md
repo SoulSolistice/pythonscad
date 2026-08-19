@@ -27,6 +27,69 @@ make -j$(nproc)
 ./pythonscad
 ```
 
+### Headless build in a container or agent sandbox
+
+The recipe above assumes a desktop with Qt and a checked-out tree. In a sandbox
+it fails at four separate points, none of them obvious from the error. This is
+the path that works, in order:
+
+```bash
+# 1. Submodules. A fresh clone has none, and cmake reports them one failure at a
+#    time - "Unknown CMake command add_sanitizers", then "MCAD not found" - so do
+#    them all at once.
+git submodule update --init --recursive
+
+# 2. Dependencies, minus Qt. Ask the project for the list rather than guessing,
+#    then drop the qt/gui entries; HEADLESS needs none of them. gettext is not
+#    optional even headless: without msgfmt the build fails *after* linking
+#    pythonscad, at the locale step, which looks like a build failure but is not.
+python3 ./scripts/get-dependencies.py --distro ubuntu --profile pythonscad-qt5 --list
+apt-get install -y bison flex gettext ninja-build pkg-config python3-dev \
+  libboost-{program-options,regex,system}-dev libcgal-dev libeigen3-dev \
+  libdouble-conversion-dev libcairo2-dev libfontconfig-dev libfreetype-dev \
+  libharfbuzz-dev libglib2.0-dev libgmp-dev libmpfr-dev libtbb-dev \
+  libxml2-dev libzip-dev nettle-dev libmimalloc-dev libopencsg-dev \
+  libglew-dev libgl1-mesa-dev lib3mf-dev catch2
+
+# 3. Configure. OPENSCAD_VERSION is required: the version comes from git tags, a
+#    shallow or tagless clone gives "Version string 'abc1234' doesn't match
+#    expected format", and VERSION.txt does not rescue it.
+cmake -B build -G Ninja -DHEADLESS=ON -DENABLE_PYTHON=ON -DENABLE_TESTS=ON \
+  -DEXPERIMENTAL=ON -DCMAKE_BUILD_TYPE=Release -DOPENSCAD_VERSION=$(date +%Y.%m.%d)
+
+# 4. Build. Keep the job count *below* the core count - see the memory note.
+cmake --build build -j3
+```
+
+**Budget an hour.** A full build is ~272 targets and the CGAL translation units
+dominate: `cgalutils-*.cc`, `CGALNefGeometry.cc` and the minkowski ones take
+minutes *each*. An incremental build after touching a widely-included header
+(`Polygon2d.h`, `PolySet.h`, `Surface.h`) is ~110 targets and still 30+ minutes.
+Plan around that rather than polling it.
+
+**Memory is the binding constraint, not cores.** On 4 cores and 16 GB, `-j3` is
+right and `-j4` is marginal; a CGAL TU peaks around 2 GB. **Never run two builds
+in the same build directory** - it OOM-kills a compile *and* corrupts
+`.ninja_deps`, after which ninja silently skips translation units. That is not a
+theoretical hazard: it produced a stale-object ABI mismatch that presented as a
+`linear_extrude(square())` exporting a non-closed shell on the CGAL backend,
+hours away from anything that could explain it. The tell was the target count -
+111 where a header change should have rebuilt 272. Recovery is
+`rm -f build/.ninja_deps build/.ninja_log` and a full rebuild.
+
+**Tests.** `ctest --test-dir build -R <regex>` works headless for everything
+except the GL/PNG comparison tests, which need the virtual framebuffer that
+ctest starts through `tests/virtualfb.sh`. Let ctest own its lifecycle: do not
+`pkill ctest`, because the orphaned `Xvfb` leaves a PID file that makes the
+fixture conclude the server is already running, so it never exports `DISPLAY`
+and every GL test fails with "Unable to open a connection to the X server".
+Recovery is `rm -f build/tests/virtualfb.{PID,DISPLAY}`; as a stopgap,
+`DISPLAY=$(cat build/tests/virtualfb.DISPLAY) ctest ...` works.
+
+Note that `python3 ./scripts/get-dependencies.py` needs no `sudo` to *list*, and
+that apt behind an agent proxy may 403 on third-party PPAs while the main
+archives work - which is fine, nothing here comes from a PPA.
+
 ### Build Configuration Options
 
 Key CMake options (pass with `-D` flag):
