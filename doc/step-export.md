@@ -126,6 +126,16 @@ precisely the evidence that it is *not* a hole. It is now kept as an outer bound
 reversed so its winding agrees with the mesh normal and therefore with the
 neighbours it shares edges with.
 
+**The symptom is gone and the attribution is not confirmed.** Re-exported on a
+build with the fix, `lid10.scad` validates - *28645 entities, 1137 faces, 1
+shell*, no unpaired edges - but the export reports no reversed loop kept at all,
+so the branch above never executed. Something else closed the shell: the run does
+report *moved 1 hole to the enclosing face*, and the mesh is not the one the old
+artifact came from (1137 faces against 1854, and 24 surfaces recognised against
+8). Keeping the loop is right whatever the history - dropping a face can only
+open a shell - but it is not established that dropping one is what opened this
+one.
+
 Two lessons, both already in this file for other reasons:
 
 - **A rejected thing is invisible**, and this time it was a face rather than a
@@ -1165,6 +1175,22 @@ rather than a circle, and `RATIONAL_B_SPLINE_SURFACE` is how STEP says so.
 
 So the order is: make the existing Beziers rational, then let the exporter write
 a circle where the weights say circle and a spline where they do not.
+
+**Both halves have since landed and been measured on a real build.** A fully
+filleted cube is the Minkowski sum of `cube(a-2r)` with a sphere of radius r, so
+the truth is computable rather than a matter of comparing pictures.
+`cube(10, center=True).fillet(1, fn=24)` exported to STL now measures
+
+| | volume | surface |
+| --- | --- | --- |
+| measured | 975.5163 | 547.3143 |
+| exact, smooth | 975.587 | 547.363 |
+| what the polynomial rails gave | 980.889 | - |
+
+which is the tessellation deficit below the exact figure and 5.37 away from the
+parabola. And `step-fillet` exports as *26 faces instead of 1106* - the 20
+patches and the 6 flat faces, the same 26 SolidWorks writes - with all 48 shared
+seams agreeing and 0 boundary runs unresolved.
 
 #### Where this item stands
 

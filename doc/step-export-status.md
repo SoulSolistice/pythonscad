@@ -33,8 +33,9 @@ Two things are true of the current state that the doc does not say:
 2. **A committed analytic export of a real model does not pass the project's own
    validator.** `examples/step_test/lid10.stp`, written by pythonscad on
    2026-08-13, has 94 edges used by one face. That was finding F1 below, the only
-   open correctness question in this assessment, and it has since been traced to
-   the exporter dropping a face it could not place and fixed.
+   open correctness question in this assessment. Re-exported on a build with the
+   fix it validates cleanly - but the path that was fixed did not fire, so the
+   symptom is closed and the attribution is not (see F1).
 
 ## 1. Capability ledger, as verified in the tree
 
@@ -220,11 +221,21 @@ than readings.
 
 F1 to F5 have all been acted on; what stands below them is the work itself.
 
-1. **Confirm F1 on a real build** — the one thing here that this environment could
-   not do. Export `examples/step_test/lid10.scad` with the analytic feature on and
-   run `validatestep.py` over the result; the two commands are in
-   `examples/step_test/README.md`. Expect no unpaired edges, and a line saying how
-   many reversed loops were kept as their own face.
+1. ~~**Confirm F1 on a real build.**~~ Done, on Windows, along with the rest of
+   this branch. What the run established, and what it did not:
+
+   | check | result |
+   | --- | --- |
+   | `lid10.scad`, analytic, validated | ok — 28645 entities, 1137 faces, 1 shell, no unpaired edges |
+   | reversed loops kept | **none reported**, so the fixed branch never ran and F1's cause is still unattributed |
+   | `step-fillet` | 26 faces instead of 1106, 48 of 48 seams agree, 0 runs unresolved |
+   | `cube(10).fillet(1, fn=24)` | volume 975.5163, surface 547.3143 against an exact 975.587 / 547.363 |
+   | `cube(10).fillet(5.1)` | twelve edges refused with a reason — and the corners were rounded anyway, which is now fixed |
+   | `bspline-check-mutations` | 10 mutations, all as expected |
+   | the two STEP models | out of the example suite, 16 failures gone |
+
+   The one thing still worth re-running is `fillet(5.1)`: it should be a plain
+   cube of volume 1000, where it measured 1532 inside its own 10x10x10 box.
 2. **Make `FilletNode`'s Beziers rational.** `fillet()` draws parabolas, out by
    6% of the radius at a right angle and 25% at a 60° dihedral, and the corner
    patch is 9.5% off the sphere. The Bezier substrate is deliberate and correct -
