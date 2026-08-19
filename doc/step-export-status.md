@@ -312,6 +312,54 @@ lose a surface the present design writes. Fitting catches what provenance
 cannot; provenance catches what fitting cannot. Both channels, not a
 replacement.
 
+### The idiom matrix
+
+"How generic is this?" is answerable by measurement rather than by argument, so
+here it is measured: every common way an OpenSCAD model makes a curved surface,
+exported analytically on the headless build. What collapses is a fixture; what
+does not is *also* a fixture, in `step-extrude-refusals.scad`, because a wrong
+declaration is invisible and that is the direction this fails in.
+
+| idiom | result |
+| --- | --- |
+| `cylinder(r1, r2)` | `CONICAL_SURFACE`, 3 faces |
+| `linear_extrude(circle())` | `CYLINDRICAL_SURFACE`, 3 faces |
+| `linear_extrude(scale = s, circle())` | `CONICAL_SURFACE`, 3 faces - identical to `cylinder(r1, r2)` |
+| `linear_extrude(offset(r =, square()))` | 4 `CYLINDRICAL_SURFACE` + 6 `PLANE` |
+| `linear_extrude(rotate(a, circle()))` | collapses - the record rotates with the profile |
+| `linear_extrude(scale(k, circle()))` | collapses - uniform, so the radius scales |
+| `linear_extrude(difference(circle, circle))` | both walls collapse, 4 faces |
+| `difference(rounded box, cylinder)` | 5 cylinders, 11 faces - the bore is declared by the tool |
+| `rotate_extrude(polygon of segments)` | cylinders and cones |
+| `rotate_extrude(offset(r =, ...))` | 4 `TOROIDAL_SURFACE`, 8 faces from 1088 facets |
+| `rotate_extrude(angle < 360)` | partial bands, 6 faces |
+| `sphere()` | one `SPHERICAL_SURFACE` |
+| `rotate_extrude(circle())` | one `TOROIDAL_SURFACE`, 1 face from 1024 facets |
+| `linear_extrude(twist =, ...)` | **refused** - a helicoid |
+| `linear_extrude(scale = [a, b], ...)` | **refused** - a general ruled surface |
+| `linear_extrude(scale([a, b], circle()))` | **refused** - an ellipse before it is swept |
+| `linear_extrude(v = oblique, circle())` | **refused** - an oblique cylinder |
+| `linear_extrude(scale = s, translate(circle()))` | **refused** - an oblique cone |
+| `linear_extrude(scale = 0, circle())` | faceted - an apex, not a second rim, as `cylinder(r2 = 0)` |
+| `linear_extrude(text())` | faceted - **the one open gap**, see below |
+
+Every refusal is a surface that exists and is exactly describable; what it is not
+is a *quadric*, and this exporter's rule is exact fit or stay faceted. Three of
+them - the oblique cylinder, the oblique cone, the elliptical cylinder - would be
+written by `SURFACE_OF_LINEAR_EXTRUSION` over the profile's own curve. That entity
+was §7's item 2 and is measured there as worth nothing on any model in the tree;
+these are the cases that would change that, and none of them appears in a fixture
+that was not written to provoke it.
+
+`linear_extrude(text())` is the one gap that is neither a refusal nor covered.
+Glyph outlines *are* curves - `FreetypeRenderer` decomposes them through
+`line_to`, `conic_to` and `cubic_to`, so quadratic and cubic Beziers - and they
+are discretised on the way into `Outline2d` exactly as circles used to be.
+Carrying them wants a second record on the same channel beside `Arc2d`, and the
+consumer is the B-spline machinery item 2 of the roadmap already built. That is
+the largest remaining piece of genuinely generic coverage, and unlike the thread
+it is not blocked by anything: the mathematics is there, in the font.
+
 ### The order that follows from this
 
 1. ~~**Exact 2D profiles.**~~ Done, as `Arc2d` on `Polygon2d` - a channel of
@@ -324,6 +372,9 @@ replacement.
    `linear_extrude` is exactly the first and any `rotate_extrude` exactly the
    second - exact, not approximated, and far wider than the quadric family.
 3. **Per-face provenance through `runOriginalID`,** beside the hint channel.
+4. **The glyph outlines**, as a Bezier record on the arc channel - see the matrix
+   above. The one common idiom still faceted for want of a channel rather than
+   for want of mathematics.
 
 None of the three touches a thread. That one is a policy question - approximate
 within a tolerance, or stay faceted - and it is the only place the exporter's
