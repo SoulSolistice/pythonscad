@@ -242,18 +242,21 @@ F1 to F5 have all been acted on; what stands below them is the work itself.
    Nothing on this list is open. The `fillet(5.1)` case was the last of them: it
    measured 1532 inside its own 10x10x10 box while every edge was refused and
    every corner rounded anyway, and it is now the cube it should be.
-2. **Make `FilletNode`'s Beziers rational.** `fillet()` draws parabolas, out by
-   6% of the radius at a right angle and 25% at a 60° dihedral, and the corner
-   patch is 9.5% off the sphere. The Bezier substrate is deliberate and correct -
-   it needs no axis and survives non-perpendicular faces and a varying radius -
-   and the fix keeps it: a rational quadratic with weight `cos(θ/2)` on the same
-   three control points is exactly a circular arc, and `FilletNode`'s corner net
-   is already the exact sphere-octant net. `Bezier()` takes a weight, the two
-   callers pass it, the control points do not move. The exporter can then write
-   `CYLINDRICAL_SURFACE` and `SPHERICAL_SURFACE` where the weights say circle,
-   and the B-spline path stays for everything else. It is a mesh fix, not a STEP
-   one, and it changes the geometry of every filleted body - so it wants the
-   maintainer's nod and a build to verify.
+2. ~~**Make `FilletNode`'s Beziers rational.**~~ Done, with the maintainer's
+   agreement that it is what the TODO in `Bezier()` intended. `fillet()` drew
+   parabolas, out by 6% of the radius at a right angle and 25% at a 60° dihedral,
+   with the corner patch 9.5% off the sphere. The Bezier substrate stayed - it
+   needs no axis and survives non-perpendicular faces and a varying radius - and
+   the control points did not move: the weight is `cos(θ/2)` computed per cross
+   section from the actual tangents, which makes each quadratic an exact circular
+   arc. Measured on the Windows build, `cube(10, center=true).fillet(1, fn=24)`
+   is volume 975.5163 / surface 547.3143 against the exact Minkowski 975.587 /
+   547.363, where the parabola gave 980.889. The rational form reaches STEP as a
+   `RATIONAL_B_SPLINE_SURFACE` complex instance, which the validator and the
+   mutation harness both check.
+
+   What this *opens* is item 6 below: those patches are now exact quadrants and
+   octants, and the exporter still writes every one of them as a B-spline.
 3. ~~**The short-edge collapse in `FilletNode`.**~~ Done, and it turned into two
    passes rather than one. The disabled pass merged two corners of an edge
    shorter than 2r by cutting three of the four planes that surround the pair,
@@ -280,7 +283,29 @@ F1 to F5 have all been acted on; what stands below them is the work itself.
    standalone harness compiled from the block itself: collapses at cut 0.4 and
    0.01, declines at 1.9 (edges longer than 2r), declines when the dihedral gate
    excludes the edges, and leaves the mesh manifold and planar in each case.
-4. **Re-measure item 5 now that `declare_*` exists.** The 59% is not one number
+4. **Re-measure roadmap item 5 now that `declare_*` exists.** The 59% is not one number
    any more: part of it is a thread that can never be a surface of revolution,
    and part is ramps and lugs a model could declare today. Nobody has separated
    those two, and the probe plus one annotated copy of the model would.
+5. **Roadmap item 1's other half: an arc in a `rotate_extrude` profile.**
+   `declareSurfacesOfRevolution` declares one `CylinderSurface` per profile
+   vertex radius (`src/geometry/rotate_extrude.cc:182`), which covers straight
+   segments - a wall becomes a cylinder, a taper a cone. A torus is declared only
+   where the whole profile is a `circle()` (`GeometryEvaluator.cc:2814`), so a
+   *rounded* profile - the common case, a fillet drawn into the section - sweeps
+   a torus and is declared as a stack of cones instead. The recogniser already
+   merges bands across a declared zone, so this is a declaration gap and not a
+   recogniser one: emit a `TorusSurface` per arc run in the profile and the
+   existing merge collapses it.
+6. **Write the fillet's exact quadrants as quadrics.** Since item 2 an edge strip
+   is an exact cylinder quadrant and a corner an exact sphere octant, and both go
+   out as `B_SPLINE_SURFACE_WITH_KNOTS`. That is valid and imports, but a
+   `CYLINDRICAL_SURFACE` is what a CAD kernel can offset, thread and pattern.
+   The weights say which patches qualify - all of them, on a constant-radius
+   fillet - and `Surface.h` already carries the fit machinery. Needs an axis
+   recovered from the control net and the same rim rules the band path uses.
+7. **Give the remaining fifteen fixtures their `EXPECT:` lines.** Only
+   `step-fillet.py` states its counts as assertions; the rest state them in prose
+   and are checked for validity alone, which a silently faceted export also
+   passes. The driver names each unguarded fixture on stderr. One run confirms
+   the exporter's current wording for all of them at once.
