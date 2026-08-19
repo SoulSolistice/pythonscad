@@ -1,10 +1,17 @@
-// A wall the model says is a cylinder, from a generator that does not.
+// A wall the model says is a cylinder, from a generator that cannot.
 //
-// `linear_extrude` declares nothing. Extruding a circle gives a mesh that is a
-// cylinder in every measurable respect and is also, exactly, the mesh of a
-// 32 sided prism - the two are the same vertices and the same facets, and no
-// examination of the result tells them apart. `cylinder()` gets written as a
-// CYLINDRICAL_SURFACE only because the primitive said what it drew.
+// The profile is written out as a polygon, so nothing upstream knows it is a
+// circle - which is the point. Its mesh is a cylinder in every measurable
+// respect and is also, exactly, the mesh of a 32 sided prism: the same vertices
+// and the same facets, and no examination of the result tells them apart.
+// `cylinder()` gets written as a CYLINDRICAL_SURFACE only because the primitive
+// said what it drew.
+//
+// It was `circle()` here until circles started carrying their radius into the
+// extrusion (see step-extrude-circle.scad). That made this fixture measure two
+// channels at once, so the profile became the same points written by hand: the
+// mesh is identical to the letter, and the declaration below is once again the
+// only thing that could have produced it.
 //
 // This is the whole of item 5 in miniature. A swept thread or a ramp exists
 // only as a polyhedron the user built, and there is no generator anywhere in
@@ -23,4 +30,5 @@
 // none partial, 32 facets replaced, 34 faces down to 3.
 $fn = 32;
 declare_cylinder(r = 10)
-  linear_extrude(height = 20) circle(r = 10);
+  linear_extrude(height = 20)
+    polygon([for (i = [0 : 31]) [10 * cos(i * 360 / 32), 10 * sin(i * 360 / 32)]]);

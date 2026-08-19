@@ -142,6 +142,34 @@ void Polygon2d::transform(const Transform2d& mat)
       v = mat * v;
     }
   }
+  transformArcs(mat);
+}
+
+/*! Move the arc hints with the polygon, or drop them.
+ *
+ * A circle survives a translation, a rotation and a uniform scale, and none of
+ * those needs a new record - only the centre moves and the radius scales. A
+ * shear or a non-uniform scale turns it into an ellipse, which is not an Arc2d
+ * and is not what any consumer of one would fit, so the records go. Testing the
+ * map rather than the caller's intent is what makes this safe: `scale([2,1])` and
+ * a matrix assembled by hand arrive here the same way.
+ */
+void Polygon2d::transformArcs(const Transform2d& mat)
+{
+  if (this->arcs.empty()) return;
+  const Eigen::Matrix2d linear = mat.linear();
+  // a similarity has L^T L = s^2 I
+  const Eigen::Matrix2d gram = linear.transpose() * linear;
+  const double s2 = 0.5 * (gram(0, 0) + gram(1, 1));
+  if (s2 <= 0 || !gram.isApprox(s2 * Eigen::Matrix2d::Identity(), 1e-12)) {
+    this->arcs.clear();
+    return;
+  }
+  const double s = sqrt(s2);
+  for (auto& arc : this->arcs) {
+    arc.centre = mat * arc.centre;
+    arc.r *= s;
+  }
 }
 
 void Polygon2d::resize(const Vector2d& newsize, const Eigen::Matrix<bool, 2, 1>& autosize)

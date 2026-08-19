@@ -815,7 +815,13 @@ std::unique_ptr<const Geometry> CircleNode::createGeometry() const
     o.vertices[i] = {this->r * cos_degrees(phi), this->r * sin_degrees(phi)};
   }
   o.color = *OpenSCAD::parse_color("#f9d72c");
-  return std::make_unique<Polygon2d>(o);
+  auto poly = std::make_unique<Polygon2d>(o);
+  // Say what the vertices were, before anything downstream has to guess them
+  // back. A partial circle records it too: the arc is still an arc of this
+  // circle, and the two straight radii are simply not on it - a consumer fits
+  // the record to whichever run of vertices does lie on it.
+  poly->arcs.push_back(Arc2d{Vector2d(0., 0.), this->r});
+  return poly;
 }
 
 static std::shared_ptr<AbstractNode> builtin_circle(

@@ -245,6 +245,35 @@ std::unique_ptr<Polygon2d> toPolygon2d(const Clipper2Lib::PolyTree64& polytree, 
 std::unique_ptr<Polygon2d> apply(const std::vector<Clipper2Lib::Paths64>& pathsvector,
                                  Clipper2Lib::ClipType clipType, int scale_bits, bool is_polyline);
 
+/*! Carry the arc hints of the operands onto the result of a 2D operation.
+ *
+ * Every operand's records go on, the subtracted ones included. A difference
+ * leaves the tool's surface standing in the result - a bore is a cylinder, and
+ * it is the tool that knows its radius - which is exactly what the 3D channel
+ * does with `PolySet::surfaces` for the same reason.
+ *
+ * Records that no longer describe anything are harmless: an Arc2d is a hint and
+ * the consumer fits it before believing it. Only the duplicates are dropped, and
+ * only to keep the list from growing with every operation in a deep tree.
+ */
+static void carryArcs(Polygon2d& result, const std::vector<std::shared_ptr<const Polygon2d>>& operands)
+{
+  for (const auto& operand : operands) {
+    if (operand == nullptr) continue;
+    for (const auto& arc : operand->arcs) {
+      bool known = false;
+      for (const auto& have : result.arcs) {
+        if (fabs(have.r - arc.r) <= 1e-12 * std::max(1.0, arc.r) &&
+            (have.centre - arc.centre).norm() <= 1e-12 * std::max(1.0, arc.r)) {
+          known = true;
+          break;
+        }
+      }
+      if (!known) result.arcs.push_back(arc);
+    }
+  }
+}
+
 Polygon2d cleanUnion(const std::vector<std::shared_ptr<const Polygon2d>>& polygons)
 {
   int n = polygons.size();
@@ -368,6 +397,7 @@ Polygon2d cleanUnion(const std::vector<std::shared_ptr<const Polygon2d>>& polygo
   }
   union_result = union_sanitized;
   union_result.setSanitized(true);
+  carryArcs(union_result, polygons);
   for (const auto& poly : polygons) {
     if (poly == nullptr) continue;
     for (const auto& pl : poly->polylines()) {
@@ -443,7 +473,7 @@ std::unique_ptr<Polygon2d> apply(const std::vector<std::shared_ptr<const Polygon
 
   if (RenderSettings::inst()->backend3D == RenderBackend3D::ManifoldBackend) {
     if (clipType == Clipper2Lib::ClipType::Union) {
-      Polygon2d union_result = cleanUnion(polygons);
+      Polygon2d union_result = cleanUnion(polygons);  // carries the arcs itself
       return std::make_unique<Polygon2d>(union_result);
     }
   }
@@ -550,6 +580,7 @@ std::unique_ptr<Polygon2d> apply(const std::vector<std::shared_ptr<const Polygon
   }
 
   result.setSanitized(true);
+  carryArcs(result, polygons);
 
   return std::make_unique<Polygon2d>(result);
 }
@@ -620,6 +651,34 @@ std::unique_ptr<Polygon2d> applyOffset(const Polygon2d& poly, double offset,
   auto r = toPolygon2d(result, scale_bits);
   r->transform3d(poly.getTransform3d());
   r->stamp_color(poly);
+
+  // A round join *is* an arc, and this is where its radius is known exactly:
+  // Clipper places the join's points on a circle of radius |offset| about the
+  // vertex being rounded, and the grid it rounds them to is 2^-27 of a unit,
+  // three orders finer than the tolerance any consumer fits with. So a record
+  // per input vertex, which is what makes `linear_extrude(offset(r=2, ...))` -
+  // the rounded box, the most common curved profile there is - export as four
+  // cylinders instead of a hundred and twenty planes.
+  //
+  // Every vertex, not only the convex ones: at a concave vertex Clipper mitres
+  // instead of rounding, no run of points lies on the circle, and the consumer's
+  // fit rejects the record. Deciding it here would mean reimplementing Clipper's
+  // own choice, and getting that subtly wrong is worse than offering a hint that
+  // does not match.
+  if (isRound) {
+    for (const auto& outline : poly.outlines()) {
+      for (const auto& v : outline.vertices) {
+        r->arcs.push_back(Arc2d{v, fabs(offset)});
+      }
+    }
+    // An offset circle is a circle: the same centre, the radius moved by the
+    // offset. Which is why offset() of a circle stays declarable rather than
+    // becoming a hundred rounded corners.
+    for (const auto& arc : poly.arcs) {
+      const double moved = arc.r + offset;
+      if (moved > 0) r->arcs.push_back(Arc2d{arc.centre, moved});
+    }
+  }
   return r;
 }
 

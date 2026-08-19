@@ -44,6 +44,12 @@ public:
 [[nodiscard]] bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
                                    const std::shared_ptr<Surface>& surface);
 
+/*! Append a surface record unless one describing the same surface is already
+ * there. Coaxial cylinders of equal radius count as the same surface; see the
+ * definition. */
+void addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
+                      const std::shared_ptr<Surface>& surface);
+
 /*! Append the records of `from` that `into` does not already hold.
  *
  * Every boolean keeps both operands' declarations, including the subtracted

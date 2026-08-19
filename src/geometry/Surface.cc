@@ -85,6 +85,41 @@ bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
   return false;
 }
 
+/*! sameAs(), plus the one case it deliberately does not cover.
+ *
+ * Surface::sameAs() compares refpt exactly, which is right for a sphere or a
+ * torus - move the centre and it is a different surface. A cylinder is not like
+ * that: it is infinite along its axis, so two records with the same axis and
+ * radius whose reference points differ *along* that axis describe the same
+ * surface, and the point only ever says where the circle that declared it was.
+ *
+ * That distinction shows up as soon as two generators declare the same wall:
+ * `declare_cylinder()` places the point where the model says and an extrusion
+ * places it at the base of the sweep. Without this they are two records, and
+ * every count a fixture asserts moves for a surface nothing gained.
+ */
+static bool describesSameSurface(const Surface& a, const Surface& b)
+{
+  if (a.sameAs(b)) return true;
+  const auto *ca = dynamic_cast<const CylinderSurface *>(&a);
+  const auto *cb = dynamic_cast<const CylinderSurface *>(&b);
+  if (ca == nullptr || cb == nullptr) return false;
+  if (fabs(ca->r - cb->r) > 1e-9) return false;
+  if (fabs(fabs(ca->normdir.dot(cb->normdir)) - 1.0) > 1e-9) return false;
+  const Vector3d between = cb->refpt - ca->refpt;
+  return (between - between.dot(ca->normdir) * ca->normdir).norm() <= 1e-9;
+}
+
+void addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
+                      const std::shared_ptr<Surface>& surface)
+{
+  if (surface == nullptr) return;
+  for (const auto& s : list) {
+    if (s != nullptr && describesSameSurface(*s, *surface)) return;
+  }
+  list.push_back(surface);
+}
+
 void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
                    const std::vector<std::shared_ptr<Surface>>& from)
 {

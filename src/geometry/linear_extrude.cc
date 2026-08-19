@@ -17,6 +17,7 @@
 #include "geometry/Barcode1d.h"
 #include "geometry/PolySetBuilder.h"
 #include "geometry/PolySetUtils.h"
+#include "geometry/Surface.h"
 #include "geometry/linalg.h"
 #include "glview/RenderSettings.h"
 #include "utils/degree_trig.h"
@@ -323,6 +324,63 @@ using namespace LinearExtrudeInternals;
    Input to extrude should be sanitized. This means non-intersecting, correct winding order
    etc., the input coming from a library like Clipper.
  */
+namespace {
+
+/*! The cylinders a straight extrusion of the profile's arcs sweeps.
+ *
+ * An arc extruded along the normal of its own plane sweeps a circular cylinder,
+ * exactly - the declaration the STEP exporter needs, and the reason Arc2d is
+ * carried this far. Everything that would make that untrue is refused rather
+ * than approximated:
+ *
+ *   - a twist or an uneven scale, which sweeps a helicoid or a general ruled
+ *     surface and not a cylinder;
+ *   - a Python profile or twist function, where the profile is not this one;
+ *   - an oblique `v`, which sweeps an *oblique* cylinder - a real surface, but
+ *     not a CYLINDRICAL_SURFACE, whose circular section is not perpendicular to
+ *     its axis;
+ *   - a profile plane whose 3D transform is not a similarity, which turns the
+ *     circle into an ellipse before it is swept at all.
+ *
+ * Like every record on this channel these are hints. The recogniser fits each
+ * one to the mesh and writes only what actually agrees, so an arc that a
+ * boolean has since cut down to nothing simply never matches.
+ */
+void declareExtrudedCylinders(const LinearExtrudeNode& node, const Polygon2d& profile,
+                              const Vector3d& height, const Vector3d& base, PolySet& polyset)
+{
+  if (profile.arcs.empty()) return;
+  if (node.twist != 0 || node.scale_x != node.scale_y) return;
+#ifdef ENABLE_PYTHON
+  if (node.profile_func != nullptr || node.twist_func != nullptr) return;
+#endif
+  const double len = height.norm();
+  if (len < 1e-12) return;
+  const Vector3d axis = height / len;
+
+  const Transform3d tr = profile.getTransform3d();
+  const Eigen::Matrix3d linear = tr.linear();
+  // the plane the profile lies in, and the scale the transform applies inside it
+  const Vector3d ex = linear * Vector3d(1., 0., 0.);
+  const Vector3d ey = linear * Vector3d(0., 1., 0.);
+  const double sx = ex.norm(), sy = ey.norm();
+  if (sx < 1e-12 || sy < 1e-12) return;
+  if (fabs(sx - sy) > 1e-12 * sx) return;         // an ellipse, not a circle
+  if (fabs(ex.dot(ey)) > 1e-12 * sx * sy) return; // sheared, likewise
+  // and the sweep has to run along that plane's normal, or the cylinder is oblique
+  const Vector3d normal = ex.cross(ey) / (sx * sy);
+  if (fabs(fabs(normal.dot(axis)) - 1.) > 1e-12) return;
+
+  const double scale = 0.5 * (sx + sy);
+  for (const auto& arc : profile.arcs) {
+    if (arc.r <= 0) continue;
+    const Vector3d centre = tr * Vector3d(arc.centre[0], arc.centre[1], 0.) + base;
+    addSurfaceUnique(polyset.surfaces, std::make_shared<CylinderSurface>(centre, axis, arc.r * scale));
+  }
+}
+
+}  // namespace
+
 std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Polygon2d& poly)
 {
   assert(poly.isSanitized());
@@ -505,14 +563,14 @@ std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Po
   // Without Manifold, however, we don't have such a tessellator available, so we'll have to build
   // the polyset from vertices using PolySetBuilder
 
-#ifdef ENABLE_MANIFOLD
-  if (RenderSettings::inst()->backend3D == RenderBackend3D::ManifoldBackend) {
-    return assemblePolySetForManifold(polyref, vertices, indices, colors, color_indices, node.convexity,
-                                      isConvex, slice_stride * num_slices);
-  } else
-#endif
-    return assemblePolySetForManifold(polyref, vertices, indices, colors, color_indices, node.convexity,
-                                      isConvex, slice_stride * num_slices);
+  auto result = assemblePolySetForManifold(polyref, vertices, indices, colors, color_indices,
+                                          node.convexity, isConvex, slice_stride * num_slices);
+  // From `poly` rather than `polyref`: the segmented copy is built vertex by
+  // vertex and carries no records, and it only exists where a twist forced
+  // segmentation - which refuses the declaration anyway. Both share the same 3D
+  // transform, so the frame is the same either way.
+  declareExtrudedCylinders(node, poly, h2 - h1, h1, *result);
+  return result;
 }
 
 std::unique_ptr<Geometry> extrudeBarcode(const LinearExtrudeNode& node, const Barcode1d& barcode)

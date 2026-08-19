@@ -153,13 +153,20 @@ VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double s
  * states its intent everywhere else in this codebase: an exporter accepts one
  * when both of its rims match a declared cylinder.
  *
+ * An *arc* in the profile sweeps a torus, or a sphere where its centre sits on
+ * the axis, and those come from the profile's Arc2d records rather than from its
+ * vertices - which is the whole reason for that channel. Without them a rounded
+ * profile is a stack of cones: a fillet drawn into a section is the commonest
+ * curved profile there is, and it was reaching the exporter as fifteen frusta.
+ *
  * Only for a sweep whose stations are all the same profile in the same place. A
  * twist, a helical `v`, or a Python `profile_func` makes every station
  * different, and what comes out is then not a surface of revolution at all -
  * which is exactly how a screw thread is built, so this is not a corner case.
  */
 static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
-                                        const std::vector<VectorOfVector2d>& profiles, PolySet& polyset)
+                                        const std::vector<VectorOfVector2d>& profiles,
+                                        const std::vector<Arc2d>& arcs, PolySet& polyset)
 {
   if (node.v.norm() != 0 || node.twist != 0) return;
 #ifdef ENABLE_PYTHON
@@ -178,8 +185,8 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
       if (fabs(r - p[0]) <= eps * std::max(1.0, r)) return;
     }
     declared.push_back(p[0]);
-    polyset.surfaces.push_back(
-      std::make_shared<CylinderSurface>(Vector3d(0, 0, p[1]), Vector3d(0, 0, 1), p[0]));
+    addSurfaceUnique(polyset.surfaces,
+                     std::make_shared<CylinderSurface>(Vector3d(0, 0, p[1]), Vector3d(0, 0, 1), p[0]));
   };
 
   for (const auto& profile : profiles) {
@@ -194,6 +201,25 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
       declare(a);
       if (fabs(a[0] - b[0]) > eps) declare(b);
     }
+  }
+
+  // The arcs. With twist == 0 and the scale fixed at 1, alterprofile() reduces
+  // to a translation by the offset, so that is all the records need to follow.
+  for (const auto& arc : arcs) {
+    if (arc.r <= eps) continue;
+    const Vector2d centre(arc.centre[0] + node.offset_x, arc.centre[1] + node.offset_y);
+    if (fabs(centre[0]) <= eps) {
+      // the centre is on the axis: the arc sweeps a sphere, not a ring
+      addSurfaceUnique(polyset.surfaces, std::make_shared<SphereSurface>(
+                                           Vector3d(0, 0, centre[1]), Vector3d(0, 0, 1), arc.r));
+    } else if (centre[0] > arc.r + eps) {
+      addSurfaceUnique(polyset.surfaces,
+                       std::make_shared<TorusSurface>(Vector3d(0, 0, centre[1]), Vector3d(0, 0, 1),
+                                                      centre[0], arc.r));
+    }
+    // An arc reaching the axis without being centred on it sweeps a horn or a
+    // spindle torus, which is self-intersecting; rotatePolygon() has rejected a
+    // profile crossing the axis long before this, so there is nothing to say.
   }
 }
 
@@ -337,7 +363,7 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   // case for this.
   auto result = assemblePolySetForManifold(poly, vertices, indices, colors, color_indices, closed,
                                            node.convexity, slice_stride * num_sections, flip_faces);
-  if (result != nullptr) declareSurfacesOfRevolution(node, first_ring, *result);
+  if (result != nullptr) declareSurfacesOfRevolution(node, first_ring, poly.arcs, *result);
   return result;
 }
 
