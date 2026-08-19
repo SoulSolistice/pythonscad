@@ -392,8 +392,6 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
         if (polinds[e.first.ind2].size() != 3) continue;  // start must be 3edge corner
 
         e.second.sel = 1;
-        corner_rounds[e.first.ind1].push_back(e.first.ind2);
-        corner_rounds[e.first.ind2].push_back(e.first.ind1);
       }
     }
     // Where an edge is shorter than 2r the arc cannot close along it, so the two
@@ -537,6 +535,18 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
       // collapses in one pass from interfering.
       improved = true;
       break;
+    }
+
+    // Which rounded edges meet at each corner, built from the selection that
+    // *survived* the pass above rather than the one that entered it. An edge
+    // refused there is not rounded, and a corner which still lists it draws a
+    // patch whose rails were never drawn: cube(10) with fillet(5.1) left every
+    // edge sharp and every corner rounded, and the result was a mesh whose own
+    // volume, 1532, exceeded the 1000 of the box it sits in.
+    for (auto& e : edge_db) {
+      if (!e.second.sel) continue;
+      corner_rounds[e.first.ind1].push_back(e.first.ind2);
+      corner_rounds[e.first.ind2].push_back(e.first.ind1);
     }
   } while (improved == true);
 
