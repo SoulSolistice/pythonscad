@@ -206,8 +206,13 @@ No build was available (CGAL, manifold, Qt and the embedded interpreter are all
 absent), so the following remain doc-asserted and were not re-checked:
 
 - every per-fixture report line and face count (`step-pie-slice` reporting *1
-  partial, 31 facets replaced*, the fillet cube's *20 patches / 1100 facets / 26
-  faces*, and the rest);
+  partial, 31 facets replaced*, and the rest). The fillet cube's *20 patches /
+  1100 facets / 26 faces* is the exception: it was measured on the Windows build
+  and the fixture now states it as `EXPECT:` lines, which the sanity driver
+  checks against the analytic run. Every other fixture states its numbers in
+  prose only, and the driver says so on stderr - one line each - so which ones
+  are still unguarded is visible in any run. Turning a fixture's prose into
+  `EXPECT:` lines takes one run to confirm the wording;
 - the sanity driver's three invariants — locale-identical re-export, the analytic
   pass validating under the same checks, and the CGAL/Manifold declaration-count
   agreement;
@@ -249,15 +254,32 @@ F1 to F5 have all been acted on; what stands below them is the work itself.
    and the B-spline path stays for everything else. It is a mesh fix, not a STEP
    one, and it changes the geometry of every filleted body - so it wants the
    maintainer's nod and a build to verify.
-3. **The short-edge collapse in `FilletNode`, if the fillet work continues.** The
-   pass that merges two corners when an edge is shorter than 2r is disabled, and
-   `src/core/FilletNode.cc` now carries the five things standing between it and
-   being switched on - measured, not read off the code. The substantive one: the
-   collapse is over-determined (four planes surround the pair, three are used) and
-   the residual is linear in the edge length, so the `< 2*r_` gate does not bound
-   the damage. On one ordinary configuration a 0.5 mm edge moves the vertex 1 mm
-   off the ignored face, and with shallow end faces a 0.1 mm edge sends it 12
-   units away with no error reported.
+3. ~~**The short-edge collapse in `FilletNode`.**~~ Done, and it turned into two
+   passes rather than one. The disabled pass merged two corners of an edge
+   shorter than 2r by cutting three of the four planes that surround the pair,
+   which is where its damage came from: the residual is linear in the edge
+   length with an unbounded factor, so a 0.5 mm edge moved the vertex 1 mm off
+   the ignored face and a 0.1 mm edge between shallow end faces sent it 12 units
+   away with nothing reported. All four planes now go in, in least squares, and
+   the residual decides - which is correct, and which also bounds what that pass
+   can ever do: both corners are 3-edge corners, so four concurrent planes mean
+   a zero-length edge, and a short edge of non-zero length always has a residual
+   (0.2887 times its length on a cube with a cut corner, at every size from 0.4
+   down to 1e-9). It cleans up slivers and refuses everything else, out loud.
+
+   What removes a real short edge is collapsing the small **face**: three planes
+   through one point, exactly determined. That pass is now there too, ahead of
+   the edge one. On the cut-corner cube the intersection is exact - residual 0,
+   the mesh manifold, every face planar, the sharp corner restored - at cut sizes
+   where every edge collapse of the same shape is refused. The gate is not size:
+   all three edges must have been *selected for rounding*, so each is a genuine
+   sharp edge between two 3-edge corners and steeper than minang, and all three
+   must be shorter than 2r. A tessellated sphere is nothing but faces smaller
+   than the radius and never reaches it - its edges are too shallow to be
+   selected and its vertices carry more than three faces. Verified against a
+   standalone harness compiled from the block itself: collapses at cut 0.4 and
+   0.01, declines at 1.9 (edges longer than 2r), declines when the dihedral gate
+   excludes the edges, and leaves the mesh manifold and planar in each case.
 4. **Re-measure item 5 now that `declare_*` exists.** The 59% is not one number
    any more: part of it is a thread that can never be a surface of revolution,
    and part is ramps and lugs a model could declare today. Nobody has separated
