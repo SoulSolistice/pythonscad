@@ -6,23 +6,29 @@ checked against the tree rather than read off it.
 - **Basis:** `doc/step-export.md` as of `e764969`, tree at `0e8ab94`
   (`claude/step-export-feature-detection-7e75pq`, merged with upstream master
   2026-08-15).
-- **Method:** static reading of the four exporter files and the test wiring, plus
-  two things actually run — `scripts/step-analytic-probe.py` and
-  `tests/validatestep.py` over the two committed exports in
-  `examples/step_test/`. No build was available in this environment, so every
-  runtime claim that needs the binary is marked as such in *What is not verified*
-  below.
+- **Method:** it began as a static reading of the four exporter files and the
+  test wiring, plus two things actually run - `scripts/step-analytic-probe.py`
+  and `tests/validatestep.py` over the two committed exports in
+  `examples/step_test/`. A headless build was made later in the same exercise
+  (Manifold + CGAL, no Qt), so most runtime claims are now measured rather than
+  read; §5 says exactly which are not.
 - **Every number below is either a line reference or one run of a script named
   next to it.** Nothing here is restated from the doc without a check.
 
 ## Headline
 
 The faceted path is finished and guarded: eleven checks in `validatestep.py`,
-sixteen fixtures, one check per historical defect. The analytic path — behind
-`step-analytic-surfaces`, still off by default — now writes cylinders, cones,
-spheres, tori *and* B-spline patches, which is one surface family further than
-the doc's own roadmap section says. On the reference model the recogniser is
-within 36 facets of the geometric ceiling, reproduced here.
+twenty-three fixtures, one check per historical defect, and every fixture now
+asserts the exporter's own report rather than only its validity. The analytic
+path — behind `step-analytic-surfaces`, still off by default — writes cylinders,
+cones, spheres, tori and B-spline patches. On the reference model the recogniser
+is within 36 facets of the geometric ceiling, reproduced here.
+
+**A build exists in this environment now** (headless: Manifold + CGAL, no Qt),
+which changes what this document is. It began as a static reading with two
+Python tools run against committed exports; §5 listed what could not be checked.
+Most of that list is now measured. Where a number appears below without a
+"doc-asserted" caveat, it came out of a run.
 
 Two things are true of the current state that the doc does not say:
 
@@ -65,12 +71,12 @@ The doc's numbering, with the tree's answer beside it.
 | --- | --- | --- |
 | 0 — local axis, shared partial rims | done | confirmed: both are the probe's default behaviour (§3) |
 | 0b — what the primitives declare | done | confirmed; `step-cone-primitive`, `step-pie-slice` present |
-| 1 — `rotate_extrude` declaring surfaces | half done (line segment) | confirmed; `step-rotate-extrude` present |
+| 1 — `rotate_extrude` declaring surfaces | half done (line segment) | **done**: the segment half was there; the arc half arrived with the Arc2d channel, as `TOROIDAL_SURFACE` per profile arc (`step-rounded-profile`) |
 | torus | done, one `TOROIDAL_SURFACE` | confirmed: `TorusSurface`, `TOROIDAL_SURFACE`, `step-torus` |
 | 3 — spheres | done, one `SPHERICAL_SURFACE` | confirmed: `SphereSurface`, `SPHERICAL_SURFACE`, `step-sphere` |
 | 2 — fillet B-splines | recognition done, "what remains is entity writing" | **further along than the doc**: emission, validator check and mutation harness all landed (`1310d1a`, `8e96e6c`, `tests/bspline-check-mutations.py`) |
 | 4 — trimmed faces | last; 14 faces of the bayonet | unchanged; nothing in the tree attempts it |
-| 5 — swept surfaces | blocked on a user-facing declaration | **the blocker has landed.** `declare_*` exists in both languages, so item 5 is no longer "impossible", it is "the model has to say so" |
+| 5 — swept surfaces | blocked on a user-facing declaration | **measured, and closed as far as declarations can take it.** `declare_*` exists in both languages, but on the reference part a declaration recovers *nothing*: 99.8% of the uncovered area is one helical thread built as a hand-written `polyhedron` (§6) |
 
 Item 5 changing category is the most consequential ledger movement and the doc
 does not register it. Its stated blocker was that a `polyhedron()` sweep has no
@@ -200,27 +206,38 @@ input being a file the repository's own validator rejects deserves a sentence in
 `examples/step_test/` saying so, or a regenerated file. It has the sentence now,
 in `examples/step_test/README.md`.
 
-## 5. What is not verified here
+## 5. What is and is not verified here
 
-No build was available (CGAL, manifold, Qt and the embedded interpreter are all
-absent), so the following remain doc-asserted and were not re-checked:
+A headless build was made in this environment - Manifold and CGAL, no Qt, Release
+- so most of what this section used to disclaim is now measured. What runs:
 
-- every per-fixture report line and face count (`step-pie-slice` reporting *1
-  partial, 31 facets replaced*, and the rest). The fillet cube's *20 patches /
-  1100 facets / 26 faces* is the exception: it was measured on the Windows build
-  and the fixture now states it as `EXPECT:` lines, which the sanity driver
-  checks against the analytic run. Every other fixture states its numbers in
-  prose only, and the driver says so on stderr - one line each - so which ones
-  are still unguarded is visible in any run. Turning a fixture's prose into
-  `EXPECT:` lines takes one run to confirm the wording;
-- the sanity driver's three invariants — locale-identical re-export, the analytic
-  pass validating under the same checks, and the CGAL/Manifold declaration-count
-  agreement;
-- every SolidWorks round trip;
-- the CGAL-backend quality gap table under *Known quality gaps*.
+- **all 23 fixtures**, each asserting the exporter's own report through
+  `EXPECT:` lines, measured on that build rather than transcribed;
+- **the sanity driver's three invariants** - the locale-identical re-export, the
+  analytic pass validating under the same eleven checks, and the CGAL/Manifold
+  declaration-count agreement - on every fixture, every run;
+- the unit tests (808 assertions) and the B-spline mutation harness.
 
-Both pure-Python tools did run, which is what makes §3 and §4 measurements rather
-than readings.
+Still not verified, and honestly so:
+
+- **every SolidWorks round trip.** Nothing here can open one. This remains the
+  largest untested claim in the whole exercise: the exporter's purpose is that a
+  CAD kernel accepts the file, and `validatestep.py` is a proxy for that, not a
+  substitute.
+- **the CGAL-backend quality gap table** under *Known quality gaps*.
+- **the full GL regression suite.** The 483-test sweep hangs in this container
+  after about 45 minutes with no test process running, which looks like a
+  fixture deadlock rather than anything to do with the exporter. A 14-test
+  sample across circle, offset, rotate and text-font rendering passes with
+  `DISPLAY` set explicitly. Note the trap: `ctest` owns the `Xvfb` lifecycle
+  through `tests/virtualfb.sh`, and if the PID file survives while the server
+  does not, the fixture concludes it is already running and never exports
+  `DISPLAY` - every GL test then fails with "Unable to open a connection to the
+  X server". Delete `build/tests/virtualfb.{PID,DISPLAY}` and let ctest start it.
+- **the `pythonscadecho` suite**, 34 of whose 36 tests fail here because the
+  harness never writes its output file. The values print correctly to stdout and
+  match the expected files byte for byte, so this is the harness in this
+  environment and not the geometry.
 
 ## 6. Why the coverage stops where it does
 
@@ -563,3 +580,90 @@ three and what they cannot reach.
    transcribed, and calibrated by mutation - changing step-sphere's 480 facets
    replaced to 479, or step-extrude-text's 32 patches to 31, fails the test and
    names both texts.
+
+## 8. What this session established, and what to do next
+
+### The takeaways worth keeping
+
+**The declaration channel was one level too high.** Every item that looked like a
+recogniser problem turned out to be a *channel* problem one layer down.
+`Outline2d` is a bare list of points, so `circle()` was dead before any extruder
+saw it and a torus had to be recovered by walking the node tree for a
+`CircleNode` - which stopped at the first `difference()` or rotation. Giving
+`Polygon2d` an `Arc2d` and a `Bezier2d` record closed roadmap item 1's second
+half, deleted 57 lines of node-tree walking, and made `linear_extrude(text())`
+work with **no recogniser changes at all**. The lesson generalises: when a
+surface cannot be written, ask what threw the mathematics away and how far
+upstream that was.
+
+**The recogniser was already more general than its callers.** `BezierPatchSurface`
+took an arbitrary degree; `recogniseBezierPatches` accepted any declared patch.
+A glyph wall is the same shape of thing as a fillet strip, so the machinery built
+for `fillet()` wrote extruded text unchanged. Two of the three gaps that *did*
+need recogniser work were inconsistencies rather than absences - the zone merge
+accepting only a complete torus, and the patch path skipping hole loops the band
+path had always used.
+
+**Refusals need fixtures as much as successes do.** The taper bug -
+`linear_extrude(scale = 0.5)` declaring a cylinder of a frustum - survived
+because a wrong declaration is invisible: the fit rejects it, the export stays
+valid, and the report says neither "nothing declared" nor "something recognised".
+`step-extrude-refusals.scad` exists for that class, and it asserts the
+*availability* line, which is stronger than "nothing was written".
+
+**Face count is the wrong denominator.** The bayonet's "59% uncovered" is 59% of
+faces and 34.3% of area, and 99.8% of that area is one helical thread. Measuring
+by area turned an open-looking roadmap item into a closed question.
+
+**Two process notes, both learned the hard way.** Never run two `ninja`
+processes in one build directory: it corrupts `.ninja_deps`, and because adding a
+member to `Polygon2d` changed its size, the stale objects and the fresh ones
+disagreed about every offset - which presented as a plain `square(10)` extrusion
+breaking on the CGAL backend, hours from anything that could explain it. And
+`pkill`-ing `ctest` orphans the `Xvfb` it owns; see §5.
+
+### The recommendation
+
+**Do item 6 - write the fillet's quadrants as quadrics - and then stop adding
+surface families.**
+
+It is the only remaining item that is both substantial and reachable. Since the
+Beziers went rational, an edge strip *is* an exact cylinder quadrant and a corner
+an exact sphere octant, and all of them still leave as B-splines. A
+`CYLINDRICAL_SURFACE` is what a kernel can offset, thread and pattern; a B-spline
+is what it tolerates. The weights say which patches qualify - all of them on a
+constant-radius fillet - the partial-cylinder and partial-sphere machinery
+exists, and `fillet()` is PythonSCAD's own feature rather than upstream's. What
+it needs is an axis recovered from the control net and the rim rules the band
+path already applies.
+
+**Then verify against a real CAD kernel before anything else.** §5's largest gap
+is not a surface family, it is that nothing in this exercise has opened an export
+in SolidWorks, FreeCAD or Fusion. `validatestep.py` is a good proxy - eleven
+checks, one per historical defect, and it has caught real bugs - but the
+exporter's purpose is that a kernel accepts the file, and that has been assumed
+throughout. One round trip per surface family would either retire that risk or
+find something no amount of self-validation can.
+
+**What not to do, and why, so nobody re-derives it:**
+
+- `SURFACE_OF_LINEAR_EXTRUSION` / `SURFACE_OF_REVOLUTION` (§6 item 2) collapse
+  **zero** faces on every fixture and both real parts, and quadrics are the
+  better representation where they apply. The only thing they uniquely express is
+  the oblique cylinder, which needs its own surface family *and* recogniser.
+- Per-face provenance through `runOriginalID` (§6 item 3) is architecturally
+  cleaner but adds no coverage, and would *lose* the hull-generated surfaces that
+  fitting currently catches.
+- The bayonet's last rejection is geometrically necessary, not unimplemented: 36
+  pentagons each take one edge of the r=78.1 rim, and an arc through two vertices
+  of a planar facet lifts 0.30 mm out of its plane. It is correctly refused.
+- The thread cannot be written exactly by anything. It is a hand-written
+  `polyhedron` over a computed point list, and a circular helix is not a NURBS
+  curve. Writing it means approximating within a tolerance, which breaks the
+  *exact fit or stay faceted* rule this exporter is built on - a decision for the
+  maintainers, not a task.
+
+**And the open question that is not a feature at all:** the analytic path is
+still behind `step-analytic-surfaces`, off by default. Everything above makes it
+better; none of it decides when it becomes the default. That wants the round trip
+evidence first.
