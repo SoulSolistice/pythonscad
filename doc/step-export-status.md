@@ -558,8 +558,8 @@ three and what they cannot reach.
    The weights say which patches qualify - all of them, on a constant-radius
    fillet - and `Surface.h` already carries the fit machinery. Needs an axis
    recovered from the control net and the same rim rules the band path uses.
-7. **Give the remaining fifteen fixtures their `EXPECT:` lines.** Only
-   `step-fillet.py` states its counts as assertions; the rest state them in prose
-   and are checked for validity alone, which a silently faceted export also
-   passes. The driver names each unguarded fixture on stderr. One run confirms
-   the exporter's current wording for all of them at once.
+7. ~~**Give the remaining fixtures their `EXPECT:` lines.**~~ Done: all 23 state
+   their counts as assertions now, measured on the headless build rather than
+   transcribed, and calibrated by mutation - changing step-sphere's 480 facets
+   replaced to 479, or step-extrude-text's 32 patches to 31, fails the test and
+   names both texts.

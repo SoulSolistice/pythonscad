@@ -10,6 +10,8 @@ generator cannot make this declaration on the model's behalf.
 Expected: 1 analytic surface available, 1 surface recognised, none conical,
 none partial, 32 facets replaced, 34 faces down to 3.
 """
+# EXPECT: 1 analytic surface available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+# EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 32 facets replaced
 from pythonscad import *
 
 wall = linear_extrude(circle(r=10, fn=32), height=20)
