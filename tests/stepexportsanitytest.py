@@ -5,6 +5,14 @@
 # Exports the input file to STEP and validates the result (see validatestep.py
 # for the list of checks and the defect each of them guards against).
 #
+# A fixture can state what the exporter is expected to report about it, by
+# writing EXPECT: lines into its own comment or docstring (see expectations()
+# below). Those are checked against the analytic run. Without them the only
+# thing this script asserts about the analytic export is that it is valid,
+# which a silently faceted export also is - that is how a regression that
+# dropped every Bezier patch of the fillet fixture went unnoticed while the
+# test stayed green.
+#
 # The export is run a second time under a locale which uses a comma as decimal
 # separator, if the machine has one. openscad.cc calls setlocale(LC_ALL, ""),
 # so the number formatting in the exporter has to be independent of it; the two
@@ -77,6 +85,58 @@ def normalized(path):
     """File content without the header line carrying the export timestamp."""
     with open(path, encoding="utf-8", errors="replace") as f:
         return [line for line in f.read().splitlines() if not line.startswith("FILE_NAME")]
+
+
+def expectations(path):
+    """The EXPECT:/EXPECT-NOT: lines a fixture states about itself.
+
+    A fixture documents what the exporter should make of it in prose anyway;
+    these turn one of those sentences into an assertion. The text after the
+    marker is matched as a substring against everything the analytic run
+    printed, so a fixture quotes the exporter's own line verbatim:
+
+        # EXPECT: 20 Bezier patches cover 1100 facets
+        # EXPECT-NOT: left faceted
+
+    Whitespace inside the expected text is normalised, so a long line may be
+    wrapped in the fixture. Fixtures which state nothing are not weakened by
+    this - they are checked exactly as before."""
+    want, unwanted = [], []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.search(r"EXPECT(-NOT)?:\s*(.+?)\s*$", line)
+            if m:
+                (unwanted if m.group(1) else want).append(" ".join(m.group(2).split()))
+    return want, unwanted
+
+
+def check_expectations(path, output):
+    """True when the analytic run reported what the fixture says it should."""
+    want, unwanted = expectations(path)
+    if not want and not unwanted:
+        print(
+            "note: %s states no EXPECT: line, so the analytic export is only "
+            "checked for validity" % os.path.basename(path),
+            file=sys.stderr,
+        )
+        return True
+    flat = " ".join(output.split())
+    missing = [text for text in want if text not in flat]
+    present = [text for text in unwanted if text in flat]
+    for text in missing:
+        print("the analytic export never reported: " + text, file=sys.stderr)
+    for text in present:
+        print("the analytic export reported what %s rules out: %s" % (os.path.basename(path), text),
+              file=sys.stderr)
+    if missing or present:
+        print(
+            "%s states what the exporter should make of it; the run above did "
+            "something else. An export can be perfectly valid and still have "
+            "silently stopped recognising anything." % os.path.basename(path),
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 parser = argparse.ArgumentParser()
@@ -152,6 +212,8 @@ if ok:
     output = export(args.openscad, inputfile, analyticfile, remaining_args + [analytic_flag])
     if not validateSTEP(analyticfile):
         print("the analytic export is not valid", file=sys.stderr)
+        ok = False
+    elif not check_expectations(inputfile, output):
         ok = False
     else:
         declared = surfaces_available(output)

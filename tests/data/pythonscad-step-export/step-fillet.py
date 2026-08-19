@@ -23,7 +23,20 @@ The corner patch is the whole reason the count is worth having. It is (N-1)^2
 triangles against a strip's N-1 quads, so it grows quadratically and the strips
 linearly: at fn = 24 a cube is 4232 corner triangles against 276 strip quads,
 and collapsing only the strips would be six per cent of the model.
+
+The three counts below are what the exporter has to report for that to have
+happened; the driver checks them against the analytic run. Every one of them
+survives a run that recognises nothing at all - the file still validates, it is
+just faceted - and that is not hypothetical: the patch boundary was evaluated
+with the polynomial basis for a while after the patches went rational, which
+dropped all 20 of them and wrote 1106 faces, and this test stayed green through
+it. "left faceted" is the exporter's word for a patch it gave up on, and on
+this model it should never have cause to say it.
 """
+# EXPECT: 20 Bezier patches cover 1100 facets
+# EXPECT: 48 of 48 shared seams agree between the two patches meeting there
+# EXPECT: written as 26 faces instead of 1106
+# EXPECT-NOT: left faceted
 from pythonscad import *
 
 cube(10, center=True).fillet(1, fn=12).show()
