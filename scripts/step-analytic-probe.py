@@ -11,12 +11,15 @@ Run it on a *faceted* export (without `step-analytic-surfaces`). The recogniser 
 replayed here in full, so an analytic export would be measuring the answer
 rather than the question.
 
-Three subcommands:
+Four subcommands:
 
   bands     replay the recogniser: every band it fits, and for each band it
             rejects, the rule that rejected it
   surfaces  classify every face of the mesh, to find the ceiling - how much of
             the part lies on a surface of revolution at all
+  regions   what the faces above that ceiling actually are: the uncovered faces
+            split into smooth regions, each offered to the shapes declare_*
+            can name, and measured by area rather than by face count
   trace     replay the strip walk for the facets in one region, printing the
             stage each attempt dies at; for working out why a wall that plainly
             fits was never even a candidate
@@ -36,6 +39,7 @@ Examples:
 
     scripts/step-analytic-probe.py surfaces examples/step_test/foo.stp
     scripts/step-analytic-probe.py bands examples/step_test/foo.stp
+    scripts/step-analytic-probe.py regions examples/step_test/foo.stp
     scripts/step-analytic-probe.py bands --no-local-axis --no-shared-arcs foo.stp
     scripts/step-analytic-probe.py trace foo.stp --z 89.25 90.75 --r 78 79.5
 """
@@ -191,6 +195,53 @@ def solve3(m, b):
             for c in range(col, 4):
                 a[r][c] -= f * a[col][c]
     return [a[i][3] / a[i][i] for i in range(3)]
+
+
+def solve_ls(rows, rhs):
+    """Least squares through the normal equations, for the small fits below.
+
+    n is three or four here and the systems are well scaled, so the normal
+    equations are good enough and keep this file free of numpy - the probe has
+    to run wherever a bug report comes from."""
+    n = len(rows[0])
+    a = [[sum(r[i] * r[j] for r in rows) for j in range(n)] + [
+        sum(r[i] * y for r, y in zip(rows, rhs))] for i in range(n)]
+    for col in range(n):
+        piv = max(range(col, n), key=lambda r: abs(a[r][col]))
+        if abs(a[piv][col]) < 1e-18:
+            return None
+        a[col], a[piv] = a[piv], a[col]
+        for r in range(n):
+            if r == col:
+                continue
+            f = a[r][col] / a[col][col]
+            for c in range(col, n + 1):
+                a[r][c] -= f * a[col][c]
+    return [a[i][n] / a[i][i] for i in range(n)]
+
+
+def eigen3(m):
+    """Eigenvectors of a symmetric 3x3, by Jacobi rotation. Smallest first."""
+    a = [row[:] for row in m]
+    v = [[1. if i == j else 0. for j in range(3)] for i in range(3)]
+    for _ in range(50):
+        p, q = max(((i, j) for i in range(3) for j in range(i + 1, 3)),
+                   key=lambda ij: abs(a[ij[0]][ij[1]]))
+        if abs(a[p][q]) < 1e-15:
+            break
+        theta = 0.5 * math.atan2(2 * a[p][q], a[q][q] - a[p][p])
+        c, s = math.cos(theta), math.sin(theta)
+        for k in range(3):
+            akp, akq = a[k][p], a[k][q]
+            a[k][p], a[k][q] = c * akp - s * akq, s * akp + c * akq
+        for k in range(3):
+            apk, aqk = a[p][k], a[q][k]
+            a[p][k], a[q][k] = c * apk - s * aqk, s * apk + c * aqk
+        for k in range(3):
+            vkp, vkq = v[k][p], v[k][q]
+            v[k][p], v[k][q] = c * vkp - s * vkq, s * vkp + c * vkq
+    order = sorted(range(3), key=lambda i: a[i][i])
+    return [tuple(v[k][i] for k in range(3)) for i in order]
 
 
 def fit_centre(coords, ids, axis, level):
@@ -679,6 +730,200 @@ def cmd_surfaces(args):
               f'{sum(len(v) for _, v in rows[args.top:])} facets')
 
 
+def classify_face(coords, lp, axis):
+    """The same four buckets cmd_surfaces sorts a face into."""
+    pol = [(dist_axis(coords[v], (0., 0., 0.), axis), dot(axis, coords[v])) for v in lp]
+    rs = sorted({round(r, 6) for r, _ in pol})
+    zs = sorted({round(z, 6) for _, z in pol})
+    n = unit(newell(coords, lp))
+    if abs(abs(dot(n, axis)) - 1.) < 1e-9:
+        return 'planar'
+    if len(zs) == 2 and len(rs) <= 2 and len(lp) == 4:
+        return 'revolution'
+    _, _, residual = fit_radius_line(pol)
+    if residual <= 1e-7 * max(1.0, max(r for r, _ in pol)):
+        return 'trimmed'
+    return 'uncovered'
+
+
+def fit_about(pts, a):
+    """Cylinder, cone and torus about the axis `a`, each as a linear fit.
+
+    Every one of them is linear once the axis is fixed. The torus is the only
+    one that is not obvious: (rho-R)^2 + (z-z0)^2 = r^2 expands to
+    rho^2 + z^2 = 2R.rho + 2z0.z + (r^2 - R^2 - z0^2), which is linear in
+    2R, 2z0 and the constant. Returns {kind: (radius, worst residual)}."""
+    a = unit(a)
+    o = tuple(sum(p[k] for p in pts) / len(pts) for k in range(3))
+    e1 = (1., 0., 0.) if abs(a[0]) < 0.9 else (0., 1., 0.)
+    e1 = unit(sub(e1, scale(a, dot(e1, a))))
+    e2 = cross(a, e1)
+    z = [dot(sub(p, o), a) for p in pts]
+    u = [dot(sub(p, o), e1) for p in pts]
+    v = [dot(sub(p, o), e2) for p in pts]
+
+    out = {}
+    sol = solve_ls([[2 * ui, 2 * vi, 1.] for ui, vi in zip(u, v)],
+                   [ui * ui + vi * vi for ui, vi in zip(u, v)])
+    if sol is None:
+        return out
+    rho = [math.hypot(ui - sol[0], vi - sol[1]) for ui, vi in zip(u, v)]
+    mean = sum(rho) / len(rho)
+    out['cylinder'] = (mean, max(abs(x - mean) for x in rho))
+    sol = solve_ls([[1., zi] for zi in z], rho)
+    if sol is not None:
+        out['cone'] = (sol[0], max(abs(sol[0] + sol[1] * zi - ri) for zi, ri in zip(z, rho)))
+    sol = solve_ls([[2 * ri, 2 * zi, 1.] for ri, zi in zip(rho, z)],
+                   [ri * ri + zi * zi for ri, zi in zip(rho, z)])
+    if sol is not None:
+        big, z0 = sol[0], sol[1]
+        r2 = sol[2] + big * big + z0 * z0
+        if r2 > 0:
+            small = math.sqrt(r2)
+            out['torus'] = (big, max(abs(math.hypot(ri - big, zi - z0) - small)
+                                     for ri, zi in zip(rho, z)))
+    return out
+
+
+def fit_sphere(pts):
+    sol = solve_ls([[2 * p[0], 2 * p[1], 2 * p[2], 1.] for p in pts],
+                   [dot(p, p) for p in pts])
+    if sol is None:
+        return None
+    c = tuple(sol[:3])
+    r2 = sol[3] + dot(c, c)
+    if r2 <= 0:
+        return None
+    r = math.sqrt(r2)
+    return r, max(abs(norm(sub(p, c)) - r) for p in pts)
+
+
+def cmd_regions(args):
+    """What the uncovered part of a model actually is.
+
+    `surfaces` says how much of a part lies on a surface of revolution. This
+    says what the rest is, which is the question a declaration can answer: the
+    faces it cannot classify are split into smooth regions - facets joined
+    across an edge whose two normals agree - and each region is offered to the
+    shapes `declare_*` can name today. A region of a single face is a real face
+    of the model, flat or warped, and is already written as one entity: nothing
+    is lost there and nothing can be gained.
+
+    Area, not face count, is the honest denominator. A helical thread is a
+    third of a part's area and two thirds of its faces."""
+    coords, loops, is_hole, face_of_loop = build_mesh(args.file)
+    axis = tuple(args.axis)
+
+    def area(lp):
+        return 0.5 * norm(newell(coords, lp))
+
+    klass = {i: classify_face(coords, lp, axis)
+             for i, lp in enumerate(loops) if not is_hole[i]}
+    # a face's area is its outer loop less its holes
+    outer_of_face = {face_of_loop[i]: i for i in klass}
+    net = {i: 0. for i in klass}
+    for i, lp in enumerate(loops):
+        owner = outer_of_face.get(face_of_loop[i])
+        if owner is not None:
+            net[owner] += -area(lp) if is_hole[i] else area(lp)
+    total = sum(net.values())
+
+    print(f'{args.file}: {len(klass)} faces, {total:.1f} square units of surface\n')
+    by_class = defaultdict(lambda: [0, 0.])
+    for i, k in klass.items():
+        by_class[k][0] += 1
+        by_class[k][1] += net[i]
+    for k, (cnt, ar) in sorted(by_class.items(), key=lambda kv: -kv[1][1]):
+        print(f'  {cnt:5d} faces {100 * cnt / len(klass):5.1f}%   '
+              f'{ar:10.1f} {100 * ar / total:5.1f}% of the area   {k}')
+
+    todo = [i for i, k in klass.items() if k == 'uncovered']
+    if not todo:
+        print('\nnothing uncovered.')
+        return
+    todo_area = sum(net[i] for i in todo)
+
+    normals = {i: unit(newell(coords, loops[i])) for i in todo}
+    seen = defaultdict(list)
+    for i in todo:
+        lp = loops[i]
+        for a, b in zip(lp, lp[1:] + lp[:1]):
+            seen[edge_key(a, b)].append(i)
+    parent = {i: i for i in todo}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    cos_smooth = math.cos(math.radians(args.smooth))
+    for fs in seen.values():
+        if len(fs) != 2:
+            continue
+        f, g = fs
+        if dot(normals[f], normals[g]) >= cos_smooth:
+            ra, rb = find(f), find(g)
+            if ra != rb:
+                parent[ra] = rb
+    regions = defaultdict(list)
+    for i in todo:
+        regions[find(i)].append(i)
+
+    rows = []
+    for ids in regions.values():
+        verts = sorted({v for i in ids for v in loops[i]})
+        pts = [coords[v] for v in verts]
+        rz = [(dist_axis(p, (0., 0., 0.), axis), dot(axis, p)) for p in pts]
+        span = max(max(p[k] for p in pts) - min(p[k] for p in pts) for k in range(3))
+        cands = [axis]
+        moment = [[sum(normals[i][x] * normals[i][y] for i in ids) for y in range(3)]
+                  for x in range(3)]
+        cands += eigen3(moment)
+        best = ('nothing today', float('inf'))
+        for a in cands:
+            if norm(a) < 1e-9:
+                continue
+            for kind, (_, residual) in fit_about(pts, a).items():
+                if residual < best[1]:
+                    best = (kind, residual)
+        sphere = fit_sphere(pts)
+        if sphere is not None and sphere[1] < best[1]:
+            best = ('sphere', sphere[1])
+        if best[1] > args.tol * max(1.0, span):
+            best = ('nothing today', best[1])
+        rows.append((len(ids), sum(net[i] for i in ids), best[0], best[1], span,
+                     min(r for r, _ in rz), max(r for r, _ in rz),
+                     min(z for _, z in rz), max(z for _, z in rz)))
+
+    singles = [r for r in rows if r[0] == 1]
+    multi = sorted((r for r in rows if r[0] > 1), key=lambda r: -r[1])
+    print(f'\nthe {len(todo)} uncovered faces carry {todo_area:.1f} '
+          f'({100 * todo_area / total:.1f}% of the area) and fall into '
+          f'{len(rows)} smooth regions:\n')
+    print(f'  {len(singles):5d} regions of one face - already one entity each, '
+          f'{sum(r[1] for r in singles):.1f} of area')
+    print(f'  {len(multi):5d} faceted regions, {sum(r[1] for r in multi):.1f} of area')
+
+    named = defaultdict(lambda: [0, 0, 0.])
+    for cnt, ar, kind, _, _, _, _, _, _ in multi:
+        named[kind][0] += 1
+        named[kind][1] += cnt
+        named[kind][2] += ar
+    if named:
+        print('\nwhat a declaration could name, over the faceted regions:')
+        for kind, (regs, faces, ar) in sorted(named.items(), key=lambda kv: -kv[1][2]):
+            print(f'  {ar:10.1f} of area in {faces:5d} faces, {regs:3d} regions   {kind}')
+
+    print('\nthe faceted regions, largest first:')
+    print(f'  {"faces":>6} {"area":>10} {"best fit":>14} {"residual":>11}   where')
+    for cnt, ar, kind, residual, span, r0, r1, z0, z1 in multi[:args.top]:
+        print(f'  {cnt:6d} {ar:10.1f} {kind:>14} {residual:11.3e}   '
+              f'r {r0:.2f}..{r1:.2f}  z {z0:.2f}..{z1:.2f}')
+    if len(multi) > args.top:
+        print(f'  ... {len(multi) - args.top} more')
+
+
 def cmd_trace(args):
     """Replay the walk for the facets in one region, printing where it dies.
 
@@ -768,6 +1013,18 @@ def main(argv=None):
     common(p, flags=False)
     p.add_argument('--top', type=int, default=25, help='surfaces to list (default 25)')
     p.set_defaults(func=cmd_surfaces)
+
+    p = sp.add_parser('regions', help='what the uncovered faces are, and whether '
+                                      'a declaration could name them')
+    common(p, flags=False)
+    p.add_argument('--smooth', type=float, default=20.,
+                   help='dihedral below which two faces are one region, in '
+                        'degrees (default 20)')
+    p.add_argument('--tol', type=float, default=1e-4,
+                   help="fit residual accepted as a match, relative to the "
+                        "region's own span (default 1e-4)")
+    p.add_argument('--top', type=int, default=20, help='regions to list (default 20)')
+    p.set_defaults(func=cmd_regions)
 
     p = sp.add_parser('trace', help='replay the walk for one region of the mesh')
     common(p)

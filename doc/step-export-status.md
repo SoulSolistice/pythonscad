@@ -283,10 +283,48 @@ F1 to F5 have all been acted on; what stands below them is the work itself.
    standalone harness compiled from the block itself: collapses at cut 0.4 and
    0.01, declines at 1.9 (edges longer than 2r), declines when the dihedral gate
    excludes the edges, and leaves the mesh manifold and planar in each case.
-4. **Re-measure roadmap item 5 now that `declare_*` exists.** The 59% is not one number
-   any more: part of it is a thread that can never be a surface of revolution,
-   and part is ramps and lugs a model could declare today. Nobody has separated
-   those two, and the probe plus one annotated copy of the model would.
+4. ~~**Re-measure roadmap item 5 now that `declare_*` exists.**~~ Done, with a
+   new `regions` subcommand on the probe, and the answer is one-sided enough to
+   settle the item: **a declaration recovers nothing on this model.** The split
+   the doc assumed - some thread, some ramps and lugs a model could declare - is
+   not there.
+
+   `scripts/step-analytic-probe.py regions examples/step_test/bayonet_container_v1-2.stp`:
+
+   | | faces | area |
+   | --- | --- | --- |
+   | on a surface of revolution | 664 (39.4%) | 62691 (59.1%) |
+   | uncovered | 999 (59.3%) | 36434 (34.3%) |
+   | planar, perpendicular to the axis | 8 (0.5%) | 6192 (5.8%) |
+   | on a quadric, trim not planar | 14 (0.8%) | 804 (0.8%) |
+
+   The first thing the table says is that **59% was the wrong denominator**. It
+   is 59% of the *face count*, and a faceted helix is nothing but faces; by area
+   the uncovered part is 34.3%, and the part is already 59.1% analytic.
+
+   The second is where that 34.3% is. The 999 uncovered faces fall into 14
+   smooth regions, and ten of them are a single face each - a real warped
+   quadrilateral, already one entity, with nothing to collapse. Of the four
+   faceted regions, one is 977 faces and 36335 of the 36374 remaining units of
+   area, at `r 74.24..79.38, z 1.20..75.00`. That is the hose thread, exactly:
+   `_hoseThreadTurns` 3 times `_hoseThreadPitch` 25 is the 75 mm. The other
+   three regions are its run-out at z<1.2 and total 39 units, 0.04% of the part.
+
+   The eight single-face regions above the thread are the bayonet cam ramps at
+   `z 89.25..95`, 7.5 units each: warped quads, one face apiece, already written
+   as one entity. There are no lugs to declare.
+
+   The thread is also the cause of the only band the recogniser rejects: the
+   r=78.1 wall is dropped because its bottom rim is crossed by 36 faces, and
+   those 36 faces are thread facets.
+
+   So item 5 is not a declaration problem and never was on this part. What is
+   left is a *helical* surface family, and that is a bigger decision than it
+   looks: a circular helix is not a NURBS curve - the arc is rational in t but
+   the height is proportional to the angle, which is not - so a thread cannot be
+   written exactly by the B-spline machinery item 2 built, only approximated
+   within a tolerance. The exporter's rule to date is *exact fit or stay
+   faceted*. A thread is where that rule has to be decided, not a recogniser.
 5. **Roadmap item 1's other half: an arc in a `rotate_extrude` profile.**
    `declareSurfacesOfRevolution` declares one `CylinderSurface` per profile
    vertex radius (`src/geometry/rotate_extrude.cc:182`), which covers straight
