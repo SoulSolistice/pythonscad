@@ -351,9 +351,17 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
   // Resolve what each boundary run borders. Only possible once every patch is
   // known, because a run may be shared with another one.
   {
+    // Hole loops belong here. A patch's facets are always outer bounds - a hole
+    // is not a sheet of anything - but what a patch *borders* may perfectly well
+    // be one: the counter of a glyph is a hole in the letter's cap face, and
+    // every patch around the inside of an O runs along it. Skipping holes left
+    // those runs with one user instead of two and so unresolved, which drops the
+    // patch; an O kept eight of its nineteen. The band path has always used every
+    // valid loop for the same lookup, and the emitter already substitutes into a
+    // hole loop and builds a FaceBound for it.
     std::map<EdgeKey, std::vector<std::size_t>> edge_loops;
     for (std::size_t f = 0; f < loops.size(); f++) {
-      if (!loop_valid[f] || is_hole[f]) continue;
+      if (!loop_valid[f]) continue;
       const std::vector<int>& loop = loops[f];
       for (std::size_t i = 0; i < loop.size(); i++) {
         edge_loops[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
