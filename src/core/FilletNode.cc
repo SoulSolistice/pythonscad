@@ -394,6 +394,118 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
         e.second.sel = 1;
       }
     }
+    // A face too small to carry the fillet is dropped and its neighbours
+    // extended to meet where it was. This runs before the edge pass below and
+    // is the operation that pass could not perform: collapsing an *edge* of
+    // such a face is over-determined - four planes through one point - and is
+    // available only where the edge is already degenerate, while collapsing the
+    // face itself is three planes through one point, which is exactly
+    // determined and needs no tolerance to be met by luck. On a cube with a cut
+    // corner the intersection is exact, the result manifold, every face still
+    // planar and the sharp corner restored, where every edge collapse of the
+    // same shape is refused.
+    //
+    // What makes a face collapsible is not its size on its own. A finely
+    // tessellated sphere is nothing but faces smaller than the radius, and
+    // dropping those would eat the model. The gate is that all three of its
+    // edges were *selected for rounding* just above - so each is a genuine
+    // sharp edge between two 3-edge corners, steeper than minang - and that all
+    // three are shorter than 2r, so no arc of radius r fits along any of them.
+    // A face like that is a chamfer or a sliver the fillet cannot round, and
+    // the three fillets that would be drawn around it would collide. A smooth
+    // tessellation never reaches here: its edges are too shallow to be selected
+    // and its vertices carry more than three faces.
+    //
+    // Only triangles. A quadrilateral's four neighbours are over-determined
+    // again, which is the case the edge pass already documents; the general
+    // n-sided version wants the same least squares treatment and is not needed
+    // by anything yet.
+    for (int f = 0; f < int(merged.size()); f++) {
+      if (merged[f].size() != 3) continue;
+      const int v[3] = {merged[f][0], merged[f][1], merged[f][2]};
+      if (v[0] == v[1] || v[1] == v[2] || v[2] == v[0]) continue;
+
+      bool candidate = true;
+      int neigh[3] = {-1, -1, -1};
+      for (int i = 0; i < 3 && candidate; i++) {
+        const int a = v[i], b = v[(i + 1) % 3];
+        const auto it = edge_db.find(EdgeKey(a, b));
+        if (it == edge_db.end() || !it->second.sel) candidate = false;
+        else if ((vertices_copy[a] - vertices_copy[b]).norm() >= 2 * r_) candidate = false;
+        else {
+          if (it->second.facea == f) neigh[i] = it->second.faceb;
+          else if (it->second.faceb == f) neigh[i] = it->second.facea;
+          if (neigh[i] < 0 || neigh[i] >= int(merged.size()) || merged[neigh[i]].size() < 3)
+            candidate = false;
+        }
+      }
+      if (!candidate) continue;
+      // Three distinct neighbours, or the "intersection" is two planes and a
+      // repeat of one of them: a line, not a point.
+      if (neigh[0] == neigh[1] || neigh[1] == neigh[2] || neigh[0] == neigh[2]) continue;
+
+      Eigen::Matrix3d planes;
+      Vector3d offsets;
+      for (int i = 0; i < 3; i++) {
+        const Vector4d plane = calcTriangleNormal(vertices_copy, merged[neigh[i]]);
+        planes.row(i) = plane.head<3>().transpose();
+        offsets[i] = plane[3];  // the plane is norm . x == offset
+      }
+      const Vector3d ptcut = planes.colPivHouseholderQr().solve(offsets);
+      double residual = 0;
+      for (int i = 0; i < 3; i++) {
+        residual = std::max(residual, fabs(planes.row(i).dot(ptcut) - offsets[i]));
+      }
+
+      // Exactly determined does not mean well conditioned: three planes meeting
+      // at a very shallow angle put the point far away while the residual stays
+      // small, so where it *landed* is checked too. The restored corner of a cut
+      // one sits within the face's own circumradius of its centre - 0.577 of the
+      // cut against a circumradius of 0.816 - so a few times that is generous
+      // and still bounded, where the ill-conditioned case is unbounded.
+      const Vector3d centre = (vertices_copy[v[0]] + vertices_copy[v[1]] + vertices_copy[v[2]]) / 3.0;
+      double rad = 0;
+      for (int i = 0; i < 3; i++) rad = std::max(rad, (vertices_copy[v[i]] - centre).norm());
+      if (!ptcut.allFinite() || residual > 1e-3 * r_ || (ptcut - centre).norm() > 4 * rad) {
+        LOG(message_group::Warning,
+            "fillet() left the small face %1$d-%2$d-%3$d unrounded: its three edges are all "
+            "shorter than the diameter of the fillet, but the faces around it do not meet at a "
+            "usable point. Reduce the radius, or remove the small face from the model.",
+            v[0], v[1], v[2]);
+        continue;
+      }
+
+      // Merge all three corners into the point they become. Every neighbour
+      // keeps its plane - the new point lies on all three by construction - so
+      // nothing else in the mesh has to move, and the face itself shrinks to a
+      // single index and is dropped by the same cleanup.
+      vertices_copy[v[0]] = ptcut;
+      for (int j = 0; j < int(merged.size()); j++) {
+        IndexedFace& face = merged[j];
+        for (auto& ind : face) {
+          if (ind == v[1] || ind == v[2]) ind = v[0];
+        }
+        IndexedFace cleaned;
+        for (const int ind : face) {
+          if (!cleaned.empty() && cleaned.back() == ind) continue;
+          cleaned.push_back(ind);
+        }
+        while (cleaned.size() > 1 && cleaned.front() == cleaned.back()) cleaned.pop_back();
+        if (cleaned.size() < 3) {
+          merged.erase(merged.begin() + j);
+          j--;
+          continue;
+        }
+        face = cleaned;
+      }
+
+      // One collapse per pass, for the same reason the edge pass takes one: the
+      // face indices in edge_db, polinds and polposs all shift when a face is
+      // erased. The enclosing do-while rebuilds them.
+      improved = true;
+      break;
+    }
+
     // Where an edge is shorter than 2r the arc cannot close along it, so the two
     // corners are merged into one and the faces around them extended to meet at
     // that point. An arc of radius r genuinely cannot be drawn along a shorter
@@ -428,16 +540,13 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
     // is not what removes a real short edge.
     //
     // What does, for a real one, is collapsing the small *face* rather than one
-    // of its edges: drop it and intersect its neighbours, which for a three sided
-    // one is three planes and exactly determined. On the same cut corner that is
-    // exact - residual 0, every face still planar, the sharp corner restored -
-    // where every edge collapse of it is refused. That is the shape of the next
-    // step here, and it is a different operation from this one.
-    //
-    // Until then the value of this pass for a real short edge is the refusal
-    // below: the edge is left unrounded and says why, rather than being filleted
-    // with two arcs that cannot both fit along it.
+    // of its edges, which is the pass above: three planes rather than four, so
+    // exactly determined. Between them the two cover the cases - a sliver left
+    // by a boolean here, a chamfer too small to round there - and what is left
+    // over is refused below: the edge is left unrounded and says why, rather
+    // than being filleted with two arcs that cannot both fit along it.
     for (auto& e : edge_db) {
+      if (improved) break;  // a face was already collapsed this pass
       if (!e.second.sel) continue;
       const int ind1 = e.first.ind1, ind2 = e.first.ind2;
       if ((vertices_copy[ind1] - vertices_copy[ind2]).norm() >= 2 * r_) continue;
