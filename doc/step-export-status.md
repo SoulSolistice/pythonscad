@@ -18,7 +18,7 @@ checked against the tree rather than read off it.
 ## Headline
 
 The faceted path is finished and guarded: eleven checks in `validatestep.py`,
-twenty-three fixtures, one check per historical defect, and every fixture now
+twenty-four fixtures, one check per historical defect, and every fixture now
 asserts the exporter's own report rather than only its validity. The analytic
 path — behind `step-analytic-surfaces`, still off by default — writes cylinders,
 cones, spheres, tori and B-spline patches. On the reference model the recogniser
@@ -205,6 +205,31 @@ the probe reads loops, not validity. But the repository's canonical measurement
 input being a file the repository's own validator rejects deserves a sentence in
 `examples/step_test/` saying so, or a regenerated file. It has the sentence now,
 in `examples/step_test/README.md`.
+
+### F6 — `fillet()` is non-manifold on every non right dihedral — **open**
+
+Found while looking for a refusal fixture for item 6, and it is not a STEP
+problem at all. `fillet()` on a body whose faces do not meet at right angles
+produces an open shell:
+
+| model | single-use edges, analytic path **off** |
+| --- | --- |
+| `cylinder(r=10, h=10, fn=6).fillet(1, fn=8)` | 168 |
+| `cube(10, center=True)` sheared by 0.4, `.fillet(1, fn=8)` | 112 |
+
+The analytic path is not involved - those numbers are with it switched off
+entirely - and a cube, a non-cubic box, a square prism and a box turned through
+three arbitrary angles are all clean, so this is specifically the non right
+dihedral. It is the same *class* as the defect `6a457d2` fixed for the shared
+rail (two ways of computing one point disagreeing in the last place), but not
+the same instance, since that one is fixed and this survives it.
+
+Two things follow. It is a real bug in PythonSCAD's own feature, ahead of
+anything in this document in user-visible cost: a filleted hexagonal prism is
+not a solid, in STL as much as in STEP. And it is what makes item 6's refusal
+path untestable by fixture - every model that would exercise it is a model that
+cannot be exported at all - which is why that path is guarded by unit tests over
+the control nets instead.
 
 ## 5. What is and is not verified here
 
@@ -568,13 +593,55 @@ three and what they cannot reach.
    a Nef polyhedron as well. `validatestep.py` gained the partial toroidal face -
    two rim circles of latitude and one seam along the tube, against the complete
    torus's two closed seams and no rims.
-6. **Write the fillet's exact quadrants as quadrics.** Since item 2 an edge strip
-   is an exact cylinder quadrant and a corner an exact sphere octant, and both go
-   out as `B_SPLINE_SURFACE_WITH_KNOTS`. That is valid and imports, but a
-   `CYLINDRICAL_SURFACE` is what a CAD kernel can offset, thread and pattern.
-   The weights say which patches qualify - all of them, on a constant-radius
-   fillet - and `Surface.h` already carries the fit machinery. Needs an axis
-   recovered from the control net and the same rim rules the band path uses.
+6. ~~**Write the fillet's exact quadrants as quadrics.**~~ Done, and it needed
+   no rim rules after all - a patch already knows its own boundary runs, so the
+   whole change is one recovery function, one branch in the emitter and one new
+   face shape in the validator.
+
+   `AnalyticFeatures::quadricOfPatch` reads a candidate off the control net in
+   closed form - a rational quadratic's centre is the point on the perpendicular
+   to its first tangent equidistant from its last - and then **measures** the
+   patch against it on a 7x7 grid. That second half is not belt and braces: two
+   rails can be concentric circles of equal radius on a common axis and bound a
+   *hyperboloid* rather than a cylinder, if one is turned against the other, and
+   every test made of centres, radii and plane normals passes on it. The grid is
+   also what brings the weights into the test, so the parabola through the same
+   points fails rather than being written as the circle it is not.
+
+   The curves had to move with the surface: a quadric face bounded by splines
+   off a net is one no importer can check against its own surface, so a curved
+   run on a quadric patch is written as a `CIRCLE`. That makes the two patches
+   sharing a rail agree about one `EDGE_CURVE`, so a patch whose partner is not
+   a quadric withdraws, to a fixed point.
+
+   Measured on the headless build, `cube(10, center=True).fillet(1, fn=12)`:
+
+   | | before | after |
+   | --- | --- | --- |
+   | surfaces | 20 `B_SPLINE_SURFACE_WITH_KNOTS` | 12 `CYLINDRICAL_SURFACE`, 8 `SPHERICAL_SURFACE` |
+   | curves | 48 `B_SPLINE_CURVE_WITH_KNOTS` | 24 `CIRCLE` |
+   | faces | 26 | 26 |
+
+   No B-spline is left in the file - entity for entity what SolidWorks writes
+   for the same part. And the geometry is checkable rather than a matter of
+   comparing pictures: a filleted box is the Minkowski sum of the box shrunk by
+   2r with a sphere of radius r, so the eight sphere centres have to be at
+   `(+-4, +-4, +-4)` with radius exactly 1, and they are. `step-fillet-oblique.py`
+   repeats it on a 14 x 9 x 6 box turned through three angles sharing no factor,
+   where nothing is axis aligned, and the centres are the corners of a
+   12.4 x 7.4 x 4.4 box to nine decimal places at radius exactly 0.8.
+
+   The validator gained one face shape, and it is a shape rather than an
+   exemption: a sphere octant has **three** edges, all great circle arcs, because
+   its fourth side is the pole where the patch is degenerate.
+
+   **Where it stops is not where one would expect, and F6 is why it cannot be
+   fixtured.** A strip along a straight edge is a cylinder at any dihedral - a
+   hexagonal prism's eighteen would all qualify - but a corner between faces
+   that are not mutually perpendicular is not a sphere, and the fixed point
+   withdraws the strips with it. So a non right angled body writes no quadric.
+   That conservatism is guarded by unit tests over the nets rather than by a
+   fixture, because there is currently no such body that exports at all (F6).
 7. ~~**Give the remaining fixtures their `EXPECT:` lines.**~~ Done: all 23 state
    their counts as assertions now, measured on the headless build rather than
    transcribed, and calibrated by mutation - changing step-sphere's 480 facets
@@ -624,18 +691,20 @@ breaking on the CGAL backend, hours from anything that could explain it. And
 
 ### The recommendation
 
-**Do item 6 - write the fillet's quadrants as quadrics - and then stop adding
-surface families.**
+**Item 6 is done** - a filleted cube now exports as 12 `CYLINDRICAL_SURFACE`,
+8 `SPHERICAL_SURFACE` and 6 `PLANE`, bounded by circles and lines, with no
+B-spline in the file and the sphere centres exact to nine decimal places. That
+was the last item on this list which was both substantial and reachable, so the
+recommendation now moves on: **stop adding surface families.**
 
-It is the only remaining item that is both substantial and reachable. Since the
-Beziers went rational, an edge strip *is* an exact cylinder quadrant and a corner
-an exact sphere octant, and all of them still leave as B-splines. A
-`CYLINDRICAL_SURFACE` is what a kernel can offset, thread and pattern; a B-spline
-is what it tolerates. The weights say which patches qualify - all of them on a
-constant-radius fillet - the partial-cylinder and partial-sphere machinery
-exists, and `fillet()` is PythonSCAD's own feature rather than upstream's. What
-it needs is an axis recovered from the control net and the rim rules the band
-path already applies.
+Two things stand ahead of any further surface work, in this order.
+
+**First, fix `fillet()` on non right dihedrals (F6).** This displaced the round
+trip as the top item because it is a correctness bug in a shipping feature
+rather than an unverified claim: a filleted hexagonal prism is not a solid, in
+STL as much as in STEP, and the analytic path is not involved. It also gates
+item 6's own refusal path, which cannot be fixtured while every model that would
+exercise it fails to export at all.
 
 **Then verify against a real CAD kernel before anything else.** §5's largest gap
 is not a surface family, it is that nothing in this exercise has opened an export

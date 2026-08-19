@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -160,6 +161,131 @@ unsigned boundarySet(const BezierPatchSurface& patch, const Vector3d& pt, double
 
 }  // namespace
 
+namespace {
+
+/*! The circular arc a rational quadratic Bezier draws, from its control points
+ * alone.
+ *
+ * A quadratic Bezier through (a, b, c) with the middle weight at cos(theta/2)
+ * is exactly a circular arc - see BezierWeight() in core/FilletNode.cc, which
+ * is where every patch this file sees comes from. The arc leaves `a` along
+ * `b - a` and arrives at `c` along `c - b`, so its centre is the point on the
+ * perpendicular to the first tangent at `a` which is also equidistant from `c`:
+ * with u the in-plane unit normal to that tangent and d = a - c, the centre is
+ * a + s*u where |d + s*u|^2 = s^2, so s = -|d|^2 / (2 u.d).
+ *
+ * Nothing here checks the *weight*. It cannot: three points and a weight that
+ * is not cos(theta/2) draw some other conic through the same points, and this
+ * returns the circle they would have drawn. The caller is required to measure
+ * the patch against the result, which is what turns a guess into a fit. */
+bool arcCircle(const Vector3d& a, const Vector3d& b, const Vector3d& c, Vector3d& centre,
+               Vector3d& normal, double& radius)
+{
+  const Vector3d t0 = b - a, t1 = c - b;
+  const Vector3d n = t0.cross(t1);
+  if (n.norm() < 1e-12) return false;  // collinear: a straight rail, not an arc
+  normal = n.normalized();
+  const Vector3d u = normal.cross(t0).normalized();
+  const Vector3d d = a - c;
+  const double denom = 2.0 * u.dot(d);
+  if (fabs(denom) < 1e-12) return false;
+  const double s = -d.squaredNorm() / denom;
+  centre = a + u * s;
+  radius = fabs(s);
+  return radius > 1e-9;
+}
+
+/*! How far `pt` is off the quadric, for the two kinds this file recovers. */
+double deviationFrom(const Surface& surface, const Vector3d& pt)
+{
+  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(&surface)) {
+    return fabs(distanceToAxis(pt, cyl->refpt, cyl->normdir.normalized()) - cyl->r);
+  }
+  if (const auto *sph = dynamic_cast<const SphereSurface *>(&surface)) {
+    return fabs((pt - sph->refpt).norm() - sph->r);
+  }
+  return std::numeric_limits<double>::infinity();
+}
+
+}  // namespace
+
+std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double tol)
+{
+  // Only the two shapes FilletNode draws. A patch of any other degree was
+  // declared by something else and has no reason to be a quadric.
+  const bool strip = bez.degree_u == 2 && bez.degree_v == 1;
+  const bool corner = bez.degree_u == 2 && bez.degree_v == 2;
+  if (!strip && !corner) return nullptr;
+  if (!bez.isRational()) return nullptr;  // a polynomial patch is a parabola
+
+  std::shared_ptr<Surface> candidate;
+
+  if (strip) {
+    // The two rails are the columns of the net. Where the edge is straight and
+    // the radius constant they are equal circles on a common axis, and the
+    // ruled surface between them is exactly that cylinder.
+    //
+    // Two rails of *different* radii on a common axis would be a cone, and
+    // there is no cone among the declarable surface types - a band expresses
+    // one as a frustum, which needs two rims this patch does not have. Such a
+    // strip stays a B-spline, which is exact and describes it correctly.
+    Vector3d c0, n0, c1, n1;
+    double r0 = 0, r1 = 0;
+    if (!arcCircle(bez.control(0, 0), bez.control(1, 0), bez.control(2, 0), c0, n0, r0)) return nullptr;
+    if (!arcCircle(bez.control(0, 1), bez.control(1, 1), bez.control(2, 1), c1, n1, r1)) return nullptr;
+    if (fabs(r0 - r1) > tol) return nullptr;
+    Vector3d axis = c1 - c0;
+    if (axis.norm() < tol) return nullptr;  // the two rails coincide
+    axis.normalize();
+    // Both rails perpendicular to the line joining their centres is what makes
+    // the pair coaxial rather than merely parallel.
+    if (fabs(fabs(axis.dot(n0)) - 1.0) > 1e-9) return nullptr;
+    if (fabs(fabs(axis.dot(n1)) - 1.0) > 1e-9) return nullptr;
+    // Orient the axis so the rail sweeps counter clockwise about it. The face
+    // is then a region of the surface's own parameterisation running forwards
+    // from the reference direction rather than one wrapping through the seam.
+    if ((bez.control(0, 0) - c0).cross(bez.control(2, 0) - c0).dot(axis) < 0) axis = -axis;
+    candidate = std::make_shared<CylinderSurface>(c0, axis, r0);
+  } else {
+    // A corner. Its apex row is a single point, and its first row and first
+    // column are two arcs meeting there - concentric and of one radius exactly
+    // when the patch is an octant of that sphere.
+    const Vector3d apex = bez.control(2, 0);
+    if ((bez.control(2, 1) - apex).norm() > tol) return nullptr;
+    if ((bez.control(2, 2) - apex).norm() > tol) return nullptr;
+    Vector3d cu, nu, cv, nv;
+    double ru = 0, rv = 0;
+    if (!arcCircle(bez.control(0, 0), bez.control(0, 1), bez.control(0, 2), cv, nv, rv)) return nullptr;
+    if (!arcCircle(bez.control(0, 0), bez.control(1, 0), bez.control(2, 0), cu, nu, ru)) return nullptr;
+    if (fabs(ru - rv) > tol) return nullptr;
+    if ((cu - cv).norm() > tol) return nullptr;
+    // The apex is where the two meridians meet, so it is the pole of the
+    // parameterisation that keeps this face inside one (theta, phi) rectangle:
+    // the row at u = 0 is then the equator arc and the columns are meridians
+    // climbing to it. A sphere looks the same from every direction, so this
+    // choice costs nothing geometrically and buys a face with no seam in it.
+    const Vector3d polar = apex - cu;
+    if (polar.norm() < tol) return nullptr;
+    candidate = std::make_shared<SphereSurface>(cu, polar.normalized(), ru);
+  }
+
+  // The geometry gate. Everything above reads the *boundary* of the net, and a
+  // patch whose two rails are concentric arcs can still bulge off the quadric
+  // in between - a rail rotated relative to its partner rules a hyperboloid
+  // through the same two circles. Only measuring the surface itself settles it,
+  // and the weights are what the evaluation uses, so a patch whose middle
+  // weight is not cos(theta/2) fails here rather than being written as the
+  // circle it is not.
+  constexpr int STEPS = 6;
+  for (int i = 0; i <= STEPS; i++) {
+    for (int j = 0; j <= STEPS; j++) {
+      const Vector3d pt = bez.evaluate(double(i) / STEPS, double(j) / STEPS);
+      if (deviationFrom(*candidate, pt) > tol) return nullptr;
+    }
+  }
+  return candidate;
+}
+
 std::vector<Vector3d> runControlPoints(const Patch& patch, const Patch::Run& run,
                                        const std::vector<Vector3d>& vertices,
                                        std::vector<double> *weights_out)
@@ -182,6 +308,29 @@ std::vector<Vector3d> runControlPoints(const Patch& patch, const Patch::Run& run
   }
   if (weights_out != nullptr) *weights_out = std::move(cw);
   return cp;
+}
+
+bool runCircle(const Patch& patch, const Patch::Run& run, const std::vector<Vector3d>& vertices,
+               Vector3d& centre, Vector3d& normal, double& radius)
+{
+  std::vector<double> cw;
+  const std::vector<Vector3d> cp = runControlPoints(patch, run, vertices, &cw);
+  if (cp.size() != 3) return false;  // only a quadratic boundary is an arc
+  // runControlPoints orders the net so the curve starts at run.verts.front(),
+  // and arcCircle's normal is the one the sweep from the first control point to
+  // the last turns counter clockwise about - which is the direction a STEP
+  // CIRCLE is always written in, so the caller can use it unchanged.
+  if (!arcCircle(cp[0], cp[1], cp[2], centre, normal, radius)) return false;
+
+  // arcCircle reads the control points only, so it answers "the circle these
+  // three points would draw" for a curve which may be some other conic - a
+  // glyph outline is full of them. The weight is what decides, and rather than
+  // compare it against cos(theta/2) the curve is measured: at the midpoint the
+  // two differ by the whole sagitta, so one sample separates them.
+  const double w = cw.size() == 3 ? cw[1] : 1.0;
+  const double b0 = 0.25, b1 = 0.5 * w, b2 = 0.25;
+  const Vector3d mid = (cp[0] * b0 + cp[1] * b1 + cp[2] * b2) / (b0 + b1 + b2);
+  return fabs((mid - centre).norm() - radius) <= 1e-9 * std::max(1.0, radius);
 }
 
 std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,

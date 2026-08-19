@@ -24,7 +24,20 @@ triangles against a strip's N-1 quads, so it grows quadratically and the strips
 linearly: at fn = 24 a cube is 4232 corner triangles against 276 strip quads,
 and collapsing only the strips would be six per cent of the model.
 
-The three counts below are what the exporter has to report for that to have
+Since the rails went rational those 20 patches are not merely splines that
+happen to fit: an edge strip is an exact quadrant of a cylinder and a corner an
+exact octant of a sphere, and a cube is the case where every one of them
+qualifies. So the file this writes has no B-spline in it at all - 12
+CYLINDRICAL_SURFACE, 8 SPHERICAL_SURFACE, 6 PLANE, bounded by CIRCLEs and LINEs,
+which is entity for entity what SolidWorks writes for the same part. The eight
+sphere centres come out at (+-4, +-4, +-4) with radius exactly 1, which is the
+Minkowski truth for a 1 mm fillet on a 10 cube rather than something fitted.
+
+The quadric count is the assertion that guards it, and it fails in the direction
+that matters: a patch wrongly *accepted* as a quadric writes a surface the mesh
+is not on, and the count is the only line that says which way each patch went.
+
+The four counts below are what the exporter has to report for that to have
 happened; the driver checks them against the analytic run. Every one of them
 survives a run that recognises nothing at all - the file still validates, it is
 just faceted - and that is not hypothetical: the patch boundary was evaluated
@@ -36,6 +49,7 @@ this model it should never have cause to say it.
 # EXPECT: 20 Bezier patches cover 1100 facets
 # EXPECT: 48 of 48 shared seams agree between the two patches meeting there
 # EXPECT: written as 26 faces instead of 1106
+# EXPECT: 20 of 20 patches are exactly quadrics - 12 cylindrical, 8 spherical
 # EXPECT-NOT: left faceted
 from pythonscad import *
 

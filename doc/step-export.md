@@ -1249,9 +1249,94 @@ opposite directions so the shell still closes, but taken from the wrong edge of
 the control net - a face that bulges the wrong way and passes every topology
 check.
 
-What remains of this item is not the exporter but the geometry: see *PythonSCAD's
-fillet is not a fillet* above. Writing a parabola faithfully as a B-spline is
-still writing a parabola where the model said fillet.
+What remained of this item was not the exporter but the geometry: see
+*PythonSCAD's fillet is not a fillet* above. Writing a parabola faithfully as a
+B-spline is still writing a parabola where the model said fillet. That half
+landed when `Bezier()` went rational, and the consequence has now landed too.
+
+#### The quadrics, since the rails went rational
+
+A rational quadratic with the middle weight at `cos(theta/2)` is not a spline
+that approximates a circle, it *is* the circle. So once the fillet's rails
+became rational, an edge strip along a straight edge at constant radius stopped
+being merely close to a cylinder quadrant and became one, and a corner between
+three perpendicular faces became an exact sphere octant - and the exporter went
+on writing both as `B_SPLINE_SURFACE_WITH_KNOTS`. That is valid and it imports,
+but the difference is not cosmetic: a `CYLINDRICAL_SURFACE` is what a CAD kernel
+can offset, thread and pattern, and a B-spline is what it tolerates.
+
+`AnalyticFeatures::quadricOfPatch` recovers the surface from the control net.
+The two rails of a strip are read as circles - a rational quadratic's centre is
+the point on the perpendicular to its first tangent equidistant from its last,
+which is closed form and needs no fitting - and the pair is a cylinder when the
+radii agree and the line joining the centres is normal to both arc planes. A
+corner is a sphere when its first row and first column are arcs of one radius
+about one centre, and its polar axis is taken through the apex, which is what
+keeps the octant inside a single `(theta, phi)` rectangle instead of straddling
+the surface's own seam.
+
+**Reading the net is a candidate, not an answer, and the difference is a real
+surface.** Two rails can be concentric circles of equal radius on a common axis
+and still not bound a cylinder: turn one against the other and the ruled surface
+between them is a hyperboloid touching the cylinder only at its two ends. Every
+test made of centres, radii and plane normals passes on it. So the candidate is
+then *measured* - the patch is evaluated on a 7x7 grid and every point has to
+lie on the quadric within the modelling tolerance - which is also what brings
+the weights into the test, so a patch whose middle weight is not `cos(theta/2)`
+fails here rather than being written as the circle it is not. Both mutations are
+in `analytic_features_test.cc`.
+
+The curves have to move with the surface. A quadric face bounded by splines off
+a control net is a face no importer can check against its own surface, so a
+curved run on a quadric patch is written as a `CIRCLE` - the same curve, in the
+form a kernel will pattern along. Which means the two patches sharing a rail
+have to agree about which form it takes, since that rail is one `EDGE_CURVE`
+used by both. A patch whose partner is not a quadric therefore withdraws, and
+because withdrawing one can withdraw its own partner in turn, the classification
+runs to a fixed point. Straight runs are `LINE`s either way and constrain
+nothing.
+
+Measured on the headless build, `cube(10, center=True).fillet(1, fn=12)`:
+
+```
+20 Bezier patches cover 1100 facets
+20 of 20 patches are exactly quadrics - 12 cylindrical, 8 spherical
+written as 26 faces instead of 1106
+```
+
+and the file contains **12 `CYLINDRICAL_SURFACE`, 8 `SPHERICAL_SURFACE`, 6
+`PLANE`, 24 `CIRCLE`, 24 `LINE` and no B-spline at all** - entity for entity
+what SolidWorks writes for the same part.
+
+The geometry is checkable rather than a matter of comparing pictures, because a
+filleted box is the Minkowski sum of the box shrunk by 2r with a sphere of
+radius r. The eight sphere centres come out at `(+-4, +-4, +-4)` with radius
+exactly 1, which is the exact answer, not a fit. `step-fillet-oblique.py` runs
+the same measurement on a 14 x 9 x 6 box turned through three angles that share
+no factor - nothing is axis aligned - and the centres are the corners of a
+12.4 x 7.4 x 4.4 box to nine decimal places, at radius exactly 0.8.
+
+The validator learned one new face shape for this, and it is a shape rather than
+an exemption: a sphere octant is bounded by **three** great circle arcs meeting
+at right angles, with no straight edge anywhere and no fourth side, because its
+fourth side is the pole where the patch is degenerate. The rule that replaces
+"a partial face needs two distinct end edges" is that every bounding arc is a
+*great* circle - a small circle there would be a rim of some other sphere, which
+is the mistake this shape can make.
+
+**Where it stops, and it is not where one would expect.** A strip along a
+straight edge is a cylinder whatever the dihedral, so a hexagonal prism's
+eighteen strips all qualify; what does not is any corner where the three faces
+are not mutually perpendicular. The fixed point then withdraws the strips with
+them, and such a body writes no quadric at all. That conservatism is currently
+untestable on a real model for an unrelated reason: `fillet()` produces a **non
+manifold mesh** for non right dihedrals today, so a hexagonal prism and a sheared
+cube both export as open shells with the analytic path switched off entirely.
+Until that is fixed there is no model which both refuses the quadric and exports
+at all, which is why the refusal is guarded by unit tests over the nets rather
+than by a fixture. Lifting the conservatism - letting a quadric face keep a
+spline bound on a shared rail - needs the validator to check a `CIRCLE` bound
+against the patch it bounds, which nothing does today.
 
 Two incidental findings, both since acted on: `OpenSCADUnitTests` was commented
 out in `CMakeLists.txt`, so no Catch2 test in this repository was built - which

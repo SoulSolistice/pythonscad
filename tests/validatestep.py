@@ -795,9 +795,17 @@ def check_cylindrical_faces(entities, problems):
             continue
 
         oriented = loop.refs()
-        if len(oriented) < 4:
+        # Four is the floor for a face of revolution - two rims and two ends, or
+        # two rims and a seam used twice - with one exception, and it is a whole
+        # face shape rather than a special case: a fillet's corner is an octant
+        # of a sphere, bounded by three great circle arcs meeting at right
+        # angles. It has three edges because its fourth side is the pole, where
+        # the patch that drew it is degenerate. The arcs are checked below.
+        min_edges = 3 if surface.name == "SPHERICAL_SURFACE" else 4
+        if len(oriented) < min_edges:
             problems.append(
-                "#%d: cylindrical face has %d edges, expected at least 4" % (face.id, len(oriented))
+                "#%d: %s face has %d edges, expected at least %d"
+                % (face.id, surface.name, len(oriented), min_edges)
             )
             continue
 
@@ -957,10 +965,29 @@ def check_cylindrical_faces(entities, problems):
                         % (face.id, surface.name, len(seam_edges))
                     )
             if closed == 0 and len(line_edges) != 2:
-                problems.append(
-                    "#%d: a partial cylindrical face needs two distinct end edges, found %d"
-                    % (face.id, len(line_edges))
+                # A fillet corner is the exception, and it is a real face shape
+                # rather than an excuse: an octant of a sphere is bounded by
+                # three great circle arcs meeting at right angles, two of them
+                # meridians running up to the pole where the patch is
+                # degenerate, and there is no straight edge anywhere on it. The
+                # rule that replaces "two end edges" is that every bounding arc
+                # is a *great* circle - a small circle there would be a rim of
+                # some other sphere, which is the mistake this shape can make.
+                great = (
+                    surface.name == "SPHERICAL_SURFACE"
+                    and not line_edges
+                    and len(distinct(arcs)) >= 3
+                    and all(
+                        geom.floats()
+                        and abs(geom.floats()[-1] - radius) <= 1e-6 * max(1.0, radius)
+                        for _, geom, _ends in circles
+                    )
                 )
+                if not great:
+                    problems.append(
+                        "#%d: a partial %s face needs two distinct end edges, found %d"
+                        % (face.id, surface.name, len(line_edges))
+                    )
 
 
 def check_bspline_faces(entities, problems):

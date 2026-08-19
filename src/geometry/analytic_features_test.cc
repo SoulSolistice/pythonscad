@@ -328,3 +328,106 @@ TEST_CASE("a rational fillet strip is recognised, boundary and all", "[analytic]
   CHECK(curved == 2);
   CHECK(straight == 2);
 }
+
+TEST_CASE("a rational strip is an exact cylinder and a corner an exact sphere",
+          "[analytic][bezier][quadric]")
+{
+  // Since the fillet's rails went rational these two nets are not splines that
+  // happen to fit a quadric closely - they are the quadric, and the whole point
+  // of recovering it is that a CAD kernel can offset, thread and pattern a
+  // CYLINDRICAL_SURFACE while it merely tolerates a B-spline. The axis and the
+  // centre have to come out of the control net exactly, in world coordinates,
+  // with nothing assumed about the frame.
+  const double w = std::sqrt(0.5);  // cos 45, a quarter circle
+  const double tol = 1e-9;
+
+  SECTION("an edge strip is a cylinder quadrant")
+  {
+    // A quarter round along the z axis at radius 1, from +x to +y.
+    const Vector3d p1(0, 0, 0), p2(0, 0, 5);
+    const Vector3d ea(1, 0, 0), eb(0, 1, 0);
+    const BezierPatchSurface bez(2, 1, std::vector<Vector3d>{p1 + ea, p2 + ea, p1, p2, p1 + eb, p2 + eb},
+                                 std::vector<double>{1.0, 1.0, w, w, 1.0, 1.0});
+
+    const auto quadric = quadricOfPatch(bez, tol);
+    REQUIRE(quadric != nullptr);
+    const auto *cyl = dynamic_cast<const CylinderSurface *>(quadric.get());
+    REQUIRE(cyl != nullptr);
+    CHECK(cyl->r == Catch::Approx(1.0).margin(1e-12));
+    // The axis is *not* the filleted edge: the middle control point is the edge
+    // itself, so the arc bulges away from it and turns about the point at
+    // distance r from both faces - (1, 1, z) here, which is what a fillet's
+    // axis is. Getting this wrong would put the cylinder one radius off in two
+    // directions and still fit a circle, so it is worth stating.
+    CHECK(distanceToAxis(Vector3d(1, 1, 3), cyl->refpt, cyl->normdir.normalized()) ==
+          Catch::Approx(0.0).margin(1e-12));
+    // The axis is oriented so the rail sweeps counter clockwise about it, which
+    // for this arc - from (0,-1) to (-1,0) about the centre - is -z.
+    CHECK(cyl->normdir.normalized().dot(Vector3d(0, 0, 1)) == Catch::Approx(-1.0).margin(1e-12));
+  }
+
+  SECTION("a corner is a sphere octant, apex and all")
+  {
+    // FilletNode's own corner net, translated off the origin so that a
+    // recovery which quietly assumed the centre was at zero would fail.
+    const Vector3d c(3, -7, 2);
+    const Vector3d x(1, 0, 0), y(0, 1, 0), z(0, 0, 1);
+    const BezierPatchSurface bez(2, 2,
+                                 std::vector<Vector3d>{c + x, c + x + y, c + y, c + x + z, c + x + y + z,
+                                                       c + y + z, c + z, c + z, c + z},
+                                 std::vector<double>{1.0, w, 1.0, w, w * w, w, 1.0, w, 1.0});
+
+    const auto quadric = quadricOfPatch(bez, tol);
+    REQUIRE(quadric != nullptr);
+    const auto *sph = dynamic_cast<const SphereSurface *>(quadric.get());
+    REQUIRE(sph != nullptr);
+    CHECK(sph->r == Catch::Approx(1.0).margin(1e-12));
+    CHECK((sph->refpt - c).norm() == Catch::Approx(0.0).margin(1e-12));
+    // The polar axis is the apex, which is what keeps the octant inside one
+    // (theta, phi) rectangle instead of straddling the surface's seam.
+    CHECK(sph->normdir.normalized().dot(z) == Catch::Approx(1.0).margin(1e-12));
+  }
+
+  SECTION("the same net without weights is a parabola, and is refused")
+  {
+    // The polynomial patch through these points is 6% of the radius off the
+    // cylinder. Refusing it is the difference between writing the surface the
+    // mesh is on and writing one it is not.
+    const Vector3d p1(0, 0, 0), p2(0, 0, 5);
+    const Vector3d ea(1, 0, 0), eb(0, 1, 0);
+    const BezierPatchSurface bez(2, 1,
+                                 std::vector<Vector3d>{p1 + ea, p2 + ea, p1, p2, p1 + eb, p2 + eb});
+    CHECK(quadricOfPatch(bez, tol) == nullptr);
+  }
+
+  SECTION("a rail turned against its partner rules a hyperboloid, not a cylinder")
+  {
+    // This is the mutation the control net alone cannot catch, and the reason
+    // quadricOfPatch measures the surface rather than reading its boundary.
+    // Both rails are still circles of radius 1 on the same axis - every test
+    // made of centres, radii and plane normals passes - but the second is
+    // turned a quarter turn against the first, so the ruled surface between
+    // them is a hyperboloid that touches the cylinder only at its two ends.
+    const Vector3d p1(0, 0, 0), p2(0, 0, 5);
+    const Vector3d ea(1, 0, 0), eb(0, 1, 0);
+    const Vector3d fa(0, 1, 0), fb(-1, 0, 0);  // the same arc, rotated 90 degrees
+    const BezierPatchSurface bez(2, 1, std::vector<Vector3d>{p1 + ea, p2 + fa, p1, p2, p1 + eb, p2 + fb},
+                                 std::vector<double>{1.0, 1.0, w, w, 1.0, 1.0});
+    CHECK(quadricOfPatch(bez, tol) == nullptr);
+  }
+
+  SECTION("a corner whose faces are not perpendicular is not a sphere")
+  {
+    // A 60 degree dihedral. The rails are still exact circular arcs - that is
+    // what the rational weight guarantees - but they are arcs of different
+    // circles, so the patch is a genuine spline and stays one.
+    const Vector3d c(0, 0, 0);
+    const Vector3d x(1, 0, 0), y(0.5, std::sqrt(3.0) / 2, 0), z(0, 0, 1);
+    const double wu = std::sqrt(0.5), wv = std::sqrt((1.0 + x.dot(y)) / 2.0);
+    const BezierPatchSurface bez(2, 2,
+                                 std::vector<Vector3d>{c + x, c + x + y, c + y, c + x + z, c + x + y + z,
+                                                       c + y + z, c + z, c + z, c + z},
+                                 std::vector<double>{1.0, wv, 1.0, wu, wu * wv, wu, 1.0, wv, 1.0});
+    CHECK(quadricOfPatch(bez, tol) == nullptr);
+  }
+}
