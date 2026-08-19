@@ -341,7 +341,7 @@ declaration is invisible and that is the direction this fails in.
 | `linear_extrude(v = oblique, circle())` | **refused** - an oblique cylinder |
 | `linear_extrude(scale = s, translate(circle()))` | **refused** - an oblique cone |
 | `linear_extrude(scale = 0, circle())` | faceted - an apex, not a second rim, as `cylinder(r2 = 0)` |
-| `linear_extrude(text())` | faceted - **the one open gap**, see below |
+| `linear_extrude(text())` | the font's own Beziers, as `B_SPLINE_SURFACE_WITH_KNOTS` |
 
 Every refusal is a surface that exists and is exactly describable; what it is not
 is a *quadric*, and this exporter's rule is exact fit or stay faceted. Three of
@@ -351,14 +351,42 @@ was §7's item 2 and is measured there as worth nothing on any model in the tree
 these are the cases that would change that, and none of them appears in a fixture
 that was not written to provoke it.
 
-`linear_extrude(text())` is the one gap that is neither a refusal nor covered.
-Glyph outlines *are* curves - `FreetypeRenderer` decomposes them through
-`line_to`, `conic_to` and `cubic_to`, so quadratic and cubic Beziers - and they
-are discretised on the way into `Outline2d` exactly as circles used to be.
-Carrying them wants a second record on the same channel beside `Arc2d`, and the
-consumer is the B-spline machinery item 2 of the roadmap already built. That is
-the largest remaining piece of genuinely generic coverage, and unlike the thread
-it is not blocked by anything: the mathematics is there, in the font.
+`linear_extrude(text())` was the one gap that was neither a refusal nor covered,
+and it is covered now. Glyph outlines *are* curves - `FreetypeRenderer`
+decomposes them through `line_to`, `conic_to` and `cubic_to` - and
+`DrawingCallback` discretised them one line after holding the control points,
+exactly as `circle()` used to do with its radius. `Bezier2d` records them there.
+
+Extruded, such a segment sweeps a patch of degree (n, 1) whose control net is
+the segment's own control points at each end of the sweep: exact rather than
+fitted, because a Bezier and a linear sweep are both affine in their control
+points. It needed **no recogniser work at all** - `BezierPatchSurface` already
+takes a general degree and `recogniseBezierPatches` already accepts any declared
+patch, collects the facets on it and classifies its boundary. A glyph wall is the
+same shape of thing as a fillet strip, which is what that machinery was built
+for.
+
+| | patches | written | faces |
+| --- | --- | --- | --- |
+| `text("S")` | 32 | 32 | 68 → 36 |
+| `text("O")` | 19 | 19 | 42 → 21 |
+
+The consumer needs *fewer* refusals than the arc one, because a Bezier maps
+through any affine transform by its control points: the shear, the non-uniform
+scale and the oblique `v` that cost a circle its record all leave a Bezier a
+Bezier. Even an uneven `scale` works - the station at t is the profile scaled by
+lerp(1, s, t) and the patch's own linear interpolation in v gives lerp(P, sP, t),
+the same points. Only `twist` is refused, a rotation by t times the angle not
+being linear in t.
+
+One real gap turned up on the way. `recogniseBezierPatches` skipped hole loops
+when resolving what a patch borders, so every patch around the counter of an O
+found one neighbour instead of two and stayed unresolved - the letter kept eight
+of its nineteen. A patch's *facets* are always outer bounds, but what it borders
+may be a hole; the band path had always used every valid loop for that lookup and
+the emitter already substitutes into one, so the patch path was inconsistent with
+both. Most of the alphabet has a counter, so this was most of the alphabet
+quietly half-collapsing.
 
 ### The order that follows from this
 
@@ -372,9 +400,10 @@ it is not blocked by anything: the mathematics is there, in the font.
    `linear_extrude` is exactly the first and any `rotate_extrude` exactly the
    second - exact, not approximated, and far wider than the quadric family.
 3. **Per-face provenance through `runOriginalID`,** beside the hint channel.
-4. **The glyph outlines**, as a Bezier record on the arc channel - see the matrix
-   above. The one common idiom still faceted for want of a channel rather than
-   for want of mathematics.
+4. ~~**The glyph outlines**, as a Bezier record on the arc channel.~~ Done - see
+   the matrix above. What is left on that line is `rotate_extrude(text())`, which
+   revolves a Bezier into a rational surface of revolution rather than a patch,
+   and nothing declares it.
 
 None of the three touches a thread. That one is a policy question - approximate
 within a tolerance, or stay faceted - and it is the only place the exporter's
