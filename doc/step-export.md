@@ -1326,17 +1326,91 @@ is the mistake this shape can make.
 
 **Where it stops, and it is not where one would expect.** A strip along a
 straight edge is a cylinder whatever the dihedral, so a hexagonal prism's
-eighteen strips all qualify; what does not is any corner where the three faces
-are not mutually perpendicular. The fixed point then withdraws the strips with
-them, and such a body writes no quadric at all. That conservatism is currently
-untestable on a real model for an unrelated reason: `fillet()` produces a **non
-manifold mesh** for non right dihedrals today, so a hexagonal prism and a sheared
-cube both export as open shells with the analytic path switched off entirely.
-Until that is fixed there is no model which both refuses the quadric and exports
-at all, which is why the refusal is guarded by unit tests over the nets rather
-than by a fixture. Lifting the conservatism - letting a quadric face keep a
-spline bound on a shared rail - needs the validator to check a `CIRCLE` bound
-against the patch it bounds, which nothing does today.
+eighteen strips all qualify on their own; what does not is any corner where the
+three faces are not mutually perpendicular. The fixed point then withdraws the
+strips with them, and such a body writes no quadric at all.
+`step-fillet-refusals.py` is exactly that model and asserts exactly that, which
+is worth having because the failure is one-sided: a patch wrongly refused costs
+a nicer entity, while a patch wrongly accepted writes a surface the mesh is not
+on and still closes, still validates, and still looks right.
+
+Lifting the conservatism - letting a quadric face keep a spline bound on a
+shared rail - needs the validator to check a `CIRCLE` bound against the patch it
+bounds, which nothing does today.
+
+That fixture could not be written at first, because every model that would have
+exercised the refusal failed to export at all: `fillet()` produced a **non
+manifold mesh** for non right dihedrals, and a hexagonal prism came out as an
+open shell with the analytic path switched off entirely. That is fixed - see
+*The corner's frame* below - and it was the same class of error one level up.
+
+#### The corner's frame
+
+`bezier_patch()` builds a corner by replacing its three direction vectors with
+axis aligned ones of the same length, working in that frame, and shearing the
+result back with a matrix whose columns are the real directions. That is exact
+for the control points, because an affine combination commutes with a linear
+map. It is wrong for the **weight**: `cos(theta/2)` is measured between tangents
+and a shear changes the angle between them, so the weight computed in the
+fabricated frame describes a different curve once the frame is undone.
+
+On a cube the matrix is a signed permutation and nothing moves, which is why
+this survived so long. Where the three edges are not mutually perpendicular the
+corner drew the image of a circle - an ellipse - while the edge strips meeting
+it drew true circles in world coordinates, having never left them. The two
+curves share their endpoints and nothing else, so every corner carried a lens
+shaped hole: 168 edges used by one face on a hexagonal prism, 112 on a sheared
+cube.
+
+The fix measures every weight in world coordinates and hands it to `BezierW`
+explicitly, leaving the points in the frame where the coordinate mix between the
+two rails means anything. The corner's rails are then the same expression on the
+same inputs as the strips' rails, which is the rule `6a457d2` established for
+the shared *point* - one arithmetic, one answer - applied to the curve instead.
+
+| | before | after |
+| --- | --- | --- |
+| hex prism, edges used once | 168 | 0 |
+| sheared cube, edges used once | 112 | 0 |
+| corner boundary against the strip's rail | up to 0.024 apart | the same vertices |
+| that boundary as a circle | best fit residual 3.2e-3 | exact, at sqrt(3) - the analytic radius for a 120 degree dihedral at tangent length 1 |
+| sharp edges left on the filleted prism | - | none; every kink is tessellation, at most 14.3 degrees at fn 8 |
+
+Note what that radius says about the construction: the rails run through the
+edge vertex itself, so `fillet(r)` sets the *tangent length* rather than the
+radius, and the arc it draws has radius `r / tan(theta/2)` - equal to r only at
+a right angle. That is the shape the fillet has always intended; the corner has
+now caught up with it.
+
+All six models of `tests/data/pythonscad/fillet.py` are byte identical across
+the change, as are both cube fixtures: it is inert wherever the frame was
+already orthogonal.
+
+**What it costs, and where.** Correcting the mesh moved it away from the
+*declaration*, which had been matching the wrong surface. The declared net is a
+rational bi-quadratic whose weights are separable - `(1, wv, 1)` across
+`(1, wu, 1)` - and separability forces the patch's two u-rails, the columns at
+`v = 0` and `v = 1`, to share one middle weight. They do share one exactly when
+they turn through the same angle, which is to say when the third direction is
+perpendicular to the other two. That holds for every prism and every extrusion,
+because the direction toward the end face is normal to the profile plane - so a
+hexagonal prism still declares all thirty of its patches and writes 38 faces. It
+does not hold for a corner where no pair is perpendicular: there the drawn
+surface has three rails with three different weights and is not a separable
+tensor product at all, so the recogniser refuses the corner patches rather than
+believing them.
+
+| | before (open shell) | after (closed) |
+| --- | --- | --- |
+| hexagonal prism | 30 patches, invalid | 30 patches, 38 faces, valid |
+| sheared cube | 20 patches, 26 faces, **invalid** | 12 strips, 8 corners refused, 410 faces, **valid** |
+
+That is the right trade - an invalid file is worth nothing at any face count -
+and the refusal is loud, one report line per patch. Declaring a fully skewed
+corner exactly needs a non-separable weight net, which `BezierPatchSurface`
+already carries the storage for; whether the drawn blend is a bi-quadratic at
+all under those weights is the open question, and it is a modelling problem
+rather than an exporter one.
 
 Two incidental findings, both since acted on: `OpenSCADUnitTests` was commented
 out in `CMakeLists.txt`, so no Catch2 test in this repository was built - which

@@ -163,11 +163,24 @@ double BezierWeight(const Vector3d& a, const Vector3d& b, const Vector3d& c)
   return sqrt((1.0 + cos_theta) / 2.0);
 }
 
-Vector3d Bezier(double t, Vector3d a, Vector3d b, Vector3d c)
+/*! The rational quadratic through (a, b, c) with an explicitly given weight.
+ *
+ * `Bezier()` reads the weight off the control points it is handed, which is
+ * right wherever those points are the ones the curve is actually drawn between.
+ * It is wrong in one place: bezier_patch() does its arithmetic in a frame it
+ * builds by *pretending* the corner's three directions are perpendicular, and
+ * cos(theta/2) is not affine invariant - the weight measured in that frame
+ * describes a different curve once the frame is sheared back into the world.
+ * That caller measures its weights in world coordinates and passes them here. */
+Vector3d BezierW(double t, const Vector3d& a, const Vector3d& b, const Vector3d& c, double w)
 {
-  const double w = BezierWeight(a, b, c);
   const double b0 = (1 - t) * (1 - t), b1 = 2 * t * (1 - t) * w, b2 = t * t;
   return (a * b0 + b * b1 + c * b2) / (b0 + b1 + b2);
+}
+
+Vector3d Bezier(double t, Vector3d a, Vector3d b, Vector3d c)
+{
+  return BezierW(t, a, b, c, BezierWeight(a, b, c));
 }
 
 void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center, Vector3d dir[3],
@@ -191,18 +204,36 @@ void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center,
   ydir = Vector3d(0, 1, 0) * dir[1].norm();
   zdir = Vector3d(0, 0, 1) * dir[2].norm();
 
-  // now use matrices to transform the vectors into std orientation
+  // The frame above is orthogonal *by construction* - the three directions were
+  // replaced by axis aligned vectors of the same length - and `mat` shears it
+  // back onto the real ones. That is exact for the control points, because an
+  // affine combination commutes with a linear map, and wrong for the weight,
+  // because cos(theta/2) does not: it is measured between tangents, and a shear
+  // changes the angle between them. On a cube `mat` is a signed permutation and
+  // nothing moves, which is why this only ever showed on a corner whose three
+  // edges are not mutually perpendicular - there the corner drew the *image of
+  // a circle*, an ellipse, where the edge strips meeting it drew true circles,
+  // and the two came apart between their shared endpoints. A hexagonal prism
+  // lost 168 edges to it, in twelve lens shaped holes, one per corner.
+  //
+  // So every weight below is measured in world coordinates and handed to
+  // BezierW, while the points stay in the frame that makes the coordinate mix
+  // meaningful. The rails then agree with the strips' rails to the last bit,
+  // being the same expression on the same inputs.
   //
   //  N = floor(N/2)*2 + 1;
   Vector3d pt;
+  const Vector3d apex_l = zdir + 2 * (concave_1 + concave_2) * (xdir + ydir);
+  const Vector3d xdir_w = mat * xdir, ydir_w = mat * ydir, zdir_w = mat * zdir;
+  const Vector3d apex_w = mat * apex_l;
+  const double w_xz = BezierWeight(xdir_w, xdir_w + zdir_w, apex_w);
+  const double w_yz = BezierWeight(ydir_w, ydir_w + zdir_w, apex_w);
   std::vector<Vector3d> points_xz;
   std::vector<Vector3d> points_yz;
   for (int i = 0; i < N; i++) {
     double t = (double)i / (double)(N - 1);
-    points_xz.push_back(
-      Bezier(t, xdir, xdir + zdir, zdir + 2 * (concave_1 + concave_2) * (xdir + ydir)));
-    points_yz.push_back(
-      Bezier(t, ydir, ydir + zdir, zdir + 2 * (concave_1 + concave_2) * (xdir + ydir)));
+    points_xz.push_back(BezierW(t, xdir, xdir + zdir, apex_l, w_xz));
+    points_yz.push_back(BezierW(t, ydir, ydir + zdir, apex_l, w_yz));
   }
 
   // The same statement for the corner. Every row of this patch is a quadratic
@@ -213,9 +244,8 @@ void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center,
   // three times - a singular point, and the usual way a rounded corner is
   // written.
   {
-    const Vector3d apex = zdir + 2 * (concave_1 + concave_2) * (xdir + ydir);
-    std::vector<Vector3d> net{xdir,        xdir + ydir, ydir, xdir + zdir, xdir + ydir + zdir,
-                              ydir + zdir, apex,        apex, apex};
+    std::vector<Vector3d> net{xdir,        xdir + ydir, ydir,   xdir + zdir, xdir + ydir + zdir,
+                              ydir + zdir, apex_l,      apex_l, apex_l};
     // Rational in both directions, with the weight of each read off that
     // direction's own boundary - the column for u, the row for v - and the net
     // weight their product. The rows Bezier() draws between the two rails turn
@@ -223,29 +253,35 @@ void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center,
     // per direction describes the whole patch. On a cube corner both come out at
     // cos 45 degrees and the patch is then exactly an octant of a sphere: this
     // net, degenerate apex row and all, is the classical exact one.
+    // Placed into the world *before* the weights are read off it, for the reason
+    // above: cos(theta/2) has to be the angle the curve really turns through,
+    // not the one it turns through in the frame the arithmetic uses. Adding
+    // `center` is harmless either way, the weight being built from differences.
+    for (auto& p : net) p = center + mat * p;
     const double wu = BezierWeight(net[0], net[3], net[6]);
     const double wv = BezierWeight(net[0], net[1], net[2]);
     std::vector<double> wnet{1.0, wv, 1.0, wu, wu * wv, wu, 1.0, wv, 1.0};
-    for (auto& p : net) p = center + mat * p;
     builder.addSurface(std::make_shared<BezierPatchSurface>(2, 2, std::move(net), std::move(wnet)));
   }
 
   std::vector<int> points;
   for (int i = 0; i < N; i++) {
     if (i == N - 1) {
-      pt = zdir + 2 * (concave_1 + concave_2) * (xdir + ydir);
-      pt = mat * pt;
-      points.push_back(snap.index(builder, pt + center));
+      points.push_back(snap.index(builder, apex_w + center));
     } else {
       int M = N - i;
+      // The control point between the two rails mixes their coordinates, which
+      // only means anything in the axis aligned frame - so it is formed there
+      // and all three are carried into the world before the curve is drawn,
+      // where the angle it turns through is the real one.
+      const Vector3d mid_l(points_xz[i][0], points_yz[i][1], points_xz[i][2]);
+      const Vector3d a_w = mat * points_xz[i], b_w = mat * mid_l, c_w = mat * points_yz[i];
       for (int j = 0; j < M; j++) {
         int k;
         if (concave_1 == 1 || concave_3 == 1) k = j;
         else k = M - 1 - j;
         double t2 = (double)k / (double)(M - 1);
-        pt = Bezier(t2, points_xz[i], Vector3d(points_xz[i][0], points_yz[i][1], points_xz[i][2]),
-                    points_yz[i]);
-        pt = mat * pt;
+        pt = Bezier(t2, a_w, b_w, c_w);
         points.push_back(snap.index(builder, center + pt));
       }
     }

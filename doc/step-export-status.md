@@ -18,7 +18,7 @@ checked against the tree rather than read off it.
 ## Headline
 
 The faceted path is finished and guarded: eleven checks in `validatestep.py`,
-twenty-four fixtures, one check per historical defect, and every fixture now
+twenty-five fixtures, one check per historical defect, and every fixture now
 asserts the exporter's own report rather than only its validity. The analytic
 path — behind `step-analytic-surfaces`, still off by default — writes cylinders,
 cones, spheres, tori and B-spline patches. On the reference model the recogniser
@@ -206,7 +206,7 @@ input being a file the repository's own validator rejects deserves a sentence in
 `examples/step_test/` saying so, or a regenerated file. It has the sentence now,
 in `examples/step_test/README.md`.
 
-### F6 — `fillet()` is non-manifold on every non right dihedral — **open**
+### F6 — `fillet()` is non-manifold on every non right dihedral — **fixed**
 
 Found while looking for a refusal fixture for item 6, and it is not a STEP
 problem at all. `fillet()` on a body whose faces do not meet at right angles
@@ -224,12 +224,69 @@ dihedral. It is the same *class* as the defect `6a457d2` fixed for the shared
 rail (two ways of computing one point disagreeing in the last place), but not
 the same instance, since that one is fixed and this survives it.
 
-Two things follow. It is a real bug in PythonSCAD's own feature, ahead of
-anything in this document in user-visible cost: a filleted hexagonal prism is
-not a solid, in STL as much as in STEP. And it is what makes item 6's refusal
-path untestable by fixture - every model that would exercise it is a model that
-cannot be exported at all - which is why that path is guarded by unit tests over
-the control nets instead.
+Two things followed. It was a real bug in PythonSCAD's own feature, ahead of
+anything else in this document in user-visible cost: a filleted hexagonal prism
+was not a solid, in STL as much as in STEP. And it was what made item 6's
+refusal path untestable by fixture.
+
+**Diagnosed and fixed, and the cause is one line of frame.** `bezier_patch()`
+replaces the corner's three direction vectors with axis aligned ones of the same
+length, does its arithmetic in that frame, and shears the result back with a
+matrix whose columns are the real directions. That is exact for the control
+points - an affine combination commutes with a linear map - and wrong for the
+*weight*, because `cos(theta/2)` is measured between tangents and a shear
+changes the angle between them. On a cube the matrix is a signed permutation and
+nothing moves, which is why this only ever showed where the three edges are not
+mutually perpendicular: there the corner drew the image of a circle, an ellipse,
+while the edge strips meeting it drew true circles in world coordinates. The two
+agreed only at their shared endpoints and left a lens between them.
+
+The fix measures every weight in world coordinates and passes it in explicitly
+(`BezierW`), leaving the points in the frame that makes the coordinate mix
+meaningful. The corner's rails then become the same expression on the same
+inputs as the strips' rails - the "one arithmetic, one answer" rule that
+`6a457d2` established for the shared rail, applied one level up to the curve
+rather than the point.
+
+Measured:
+
+| | before | after |
+| --- | --- | --- |
+| hex prism, edges used once | 168 | **0** |
+| sheared cube, edges used once | 112 | **0** |
+| hex prism corner boundary vs the strip's rail | up to 0.024 apart, and not a circle | the same vertices |
+| hex prism, arc radius at a corner | best fit residual 3.2e-3 | exact circles at sqrt(3), the analytic answer for a 120 degree dihedral at tangent length 1 |
+| hex prism, sharp edges remaining | - | 0; every kink is tessellation, at most 14.3 degrees at fn 8 |
+
+**Nothing else moved.** All six models of `tests/data/pythonscad/fillet.py` are
+byte identical before and after, as are the cube and oblique box fixtures - the
+change is inert wherever the frame was already orthogonal, which is every right
+angled body. (`pythonscad_fillet` and `pythonscad_fillet_csg` do fail in this
+container, but they fail identically on a build without this change: they are
+image comparisons against a different rasteriser, like the PDF suite in §5.)
+
+With the shape exportable, item 6's refusal path has a fixture after all:
+`step-fillet-refusals.py` is that hexagonal prism, asserting all thirty patches
+stay splines and none becomes a quadric.
+
+**One consequence, and it is a coverage loss worth naming.** Correcting the mesh
+moved it away from the declaration, which had been matching the wrong surface.
+The declared net's weights are separable, which forces the patch's two u-rails
+to share a middle weight; they do exactly when the third direction is
+perpendicular to the other two. Every prism and extrusion satisfies that, so the
+hexagonal prism still declares all thirty patches. A corner where *no* pair is
+perpendicular does not, and its corner patches are now refused:
+
+| | before (open shell) | after (closed) |
+| --- | --- | --- |
+| hexagonal prism | 30 patches, invalid | 30 patches, 38 faces, valid |
+| sheared cube | 20 patches, 26 faces, **invalid** | 12 strips, 8 corners refused, 410 faces, **valid** |
+
+An invalid file is worth nothing at any face count, so this is the right trade,
+and the refusal prints one line per patch rather than going quiet. Declaring a
+fully skewed corner exactly wants a non-separable weight net - the storage for
+which `BezierPatchSurface` already has - and that is a modelling question, not
+an exporter one. It is the natural follow-on to this fix.
 
 ## 5. What is and is not verified here
 
@@ -699,14 +756,12 @@ recommendation now moves on: **stop adding surface families.**
 
 Two things stand ahead of any further surface work, in this order.
 
-**First, fix `fillet()` on non right dihedrals (F6).** This displaced the round
-trip as the top item because it is a correctness bug in a shipping feature
-rather than an unverified claim: a filleted hexagonal prism is not a solid, in
-STL as much as in STEP, and the analytic path is not involved. It also gates
-item 6's own refusal path, which cannot be fixtured while every model that would
-exercise it fails to export at all.
+**F6 is fixed** - `fillet()` produced a non manifold mesh on every non right
+dihedral, and a filleted hexagonal prism is now a closed solid. That was a
+correctness bug in a shipping feature rather than an unverified claim, so it
+went first; it also unblocked item 6's refusal fixture.
 
-**Then verify against a real CAD kernel before anything else.** §5's largest gap
+**So verify against a real CAD kernel before anything else.** §5's largest gap
 is not a surface family, it is that nothing in this exercise has opened an export
 in SolidWorks, FreeCAD or Fusion. `validatestep.py` is a good proxy - eleven
 checks, one per historical defect, and it has caught real bugs - but the
