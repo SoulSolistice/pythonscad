@@ -39,5 +39,11 @@
 //
 // If the report says 15 surfaces and 14 conical, the merge did not happen and
 // this is the cone stack again.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 9 analytic surfaces available (8 cylindrical, 1 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 1 surface recognised (0 toroidal, 1 spherical, 0 conical, 0 partial), 480 facets replaced
 $fn = 32;
 sphere(r = 10);

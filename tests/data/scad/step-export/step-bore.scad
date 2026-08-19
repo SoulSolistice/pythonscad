@@ -6,6 +6,12 @@
 // The rounded coordinates also make this the fixture for the number
 // formatting: on a locale with a comma radix a coordinate such as 7.0710678
 // would be written as "7,0710678" and split into two arguments.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 32 facets replaced
 $fn = 16;
 difference() {
   cylinder(h = 10, r = 10);

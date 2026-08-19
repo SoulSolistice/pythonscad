@@ -28,6 +28,12 @@
 //
 // Expected: 1 analytic surface available, 1 surface recognised, none conical,
 // none partial, 32 facets replaced, 34 faces down to 3.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 1 analytic surface available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 32 facets replaced
 $fn = 32;
 declare_cylinder(r = 10)
   linear_extrude(height = 20)

@@ -23,5 +23,11 @@
 // axis, so of its 33 side quads one at each end is flat and 31 are collapsed.
 // The report has to say *1 partial*; a closed band means `angle` was ignored
 // again.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 1 analytic surface available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 0 conical, 1 partial), 31 facets replaced
 $fn = 32;
 cylinder(h = 10, r = 8, angle = 90);

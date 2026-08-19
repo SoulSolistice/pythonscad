@@ -28,6 +28,12 @@
 // A twist, a helical v, or a Python profile_func would make each station a
 // different profile, and none of this would be declared - which is correct, and
 // is why a screw thread built that way stays faceted.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 3 analytic surfaces available (3 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 4 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 128 facets replaced
 $fn = 32;
 rotate_extrude()
   polygon(points = [[8, 0], [10, 0], [10, 6], [12, 10], [12, 16], [8, 16]]);

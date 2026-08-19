@@ -12,6 +12,12 @@
 // The frustum also has no analytic record of its own: a hull declares the two
 // cylinders, never the cone between them, so it is accepted because both of
 // its rims match one.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 64 facets replaced
 $fn = 32;
 hull() {
   translate([0, 0, 2]) cylinder(h = 18, r = 10);

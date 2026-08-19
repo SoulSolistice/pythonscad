@@ -40,6 +40,12 @@
 //
 // If the report says 32 conical, the torus was not declared and this is the
 // cone stack again.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 18 analytic surfaces available (17 cylindrical, 0 spherical, 1 toroidal, 0 Bezier)
+// EXPECT: 1 surface recognised (1 toroidal, 0 spherical, 0 conical, 0 partial), 1024 facets replaced
 $fn = 32;
 rotate_extrude()
   translate([10, 0]) circle(3);

@@ -25,6 +25,12 @@
 // bordering a single face (the top or the bottom disc), which is the case the
 // exporter handles; a rib stopping short would leave a rim bordering one face
 // per facet, and the arc is then correctly left faceted.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 1 analytic surface available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 4 surfaces recognised (0 toroidal, 0 spherical, 0 conical, 4 partial), 16 facets replaced
 $fn = 32;
 union() {
   cylinder(h = 20, r = 10);

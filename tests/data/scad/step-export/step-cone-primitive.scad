@@ -14,5 +14,11 @@
 // Expected: one CONICAL_SURFACE for the wall, and the two discs. Both of its
 // rims are the complete bound of a disc, which is the easiest of the three rim
 // cases - step-chamfered-cylinder covers the shared one.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 32 facets replaced
 $fn = 32;
 cylinder(h = 10, r1 = 8, r2 = 12);

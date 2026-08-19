@@ -26,6 +26,12 @@
 // through its chord, so no trapezoid is left inside the wall and both arcs end
 // on the true circle - see step-partial-cylinder for the case where that is
 // not true.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 2 partial), 48 facets replaced
 $fn = 32;
 difference() {
   hull() {
