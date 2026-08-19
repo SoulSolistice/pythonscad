@@ -222,9 +222,118 @@ absent), so the following remain doc-asserted and were not re-checked:
 Both pure-Python tools did run, which is what makes §3 and §4 measurements rather
 than readings.
 
-## 6. Recommended order
+## 6. Why the coverage stops where it does
+
+Every OpenSCAD model is built from closely defined mathematics, so it is fair to
+ask why the surface of every resulting face is not simply known. Mostly it
+could be. This section says where that reasoning holds, where it fails, and what
+the failure costs - it is the argument behind items 5 to 7 of the order below,
+and it was not written down anywhere.
+
+### Booleans are not the problem
+
+A union, difference or intersection **creates no new surface**. Every face of
+the result lies on a surface of one of the operands; what a boolean creates is
+new *edges* - the intersection curves - and new trims of surfaces that were
+already there. For the boolean core of the language the ambition is therefore
+exactly right: the surface of every face is knowable.
+
+### Three things break it
+
+**Some operations really do create surfaces.** `hull()`, `minkowski()` and
+`offset()` produce surfaces present in no operand. This model has one: the
+collar in `examples/step_test/bayonet_container_v1-2.scad` is a `hull()` of two
+cylinders, and the chamfer cone it generates (`r 81.8..82.4, z 0..0.6`, 60
+facets) exists in neither. It is recognised and written today - see below, it
+matters more than it looks.
+
+**Some geometry never had the mathematics.** The bayonet's thread, which is
+99.8% of everything this exporter leaves faceted on that part, is a hand-written
+`polyhedron` over a computed point list (`bayonet_container_v1-2.scad:765`):
+
+```
+steps = max(24, round($fn*turns));
+points = [ for (i = [0 : steps]) let (t = i/steps, a = 360*turns*t, ...
+```
+
+The script chose the discretisation, and the surface it approximates is not a
+named one in any case: the profile is scaled by a run-out factor that varies
+along the sweep, following a *tapered* helix. Not a helicoid, not a swept
+constant profile, not a NURBS. Nothing was lost in export - the model never held
+it.
+
+The eight remaining uncovered faces are the same story told small.
+`bayonetChannel` is a second hand-written `polyhedron` (`:835`, again over
+`steps`), and the cam ramps at `z 89.25..95` are that polyhedron's own
+quadrilaterals - warped quads, written as one face each, with nothing to
+collapse and nothing to declare. Both halves of this part's uncovered 34% are a
+`polyhedron()` the script computed.
+
+This is the structural difference from a B-rep kernel, and it is not an
+implementation gap. In a CAD kernel the exact surface *is* the model and the mesh
+is derived from it. In OpenSCAD the discretisation boundary sits **inside the
+language**: `$fn` is a user-facing modelling parameter and `polyhedron()` is a
+first-class primitive. A fully analytic export is therefore impossible in
+general, for any exporter, by construction.
+
+**The exact surface is only half of a face.** A face also needs its boundary
+written as curves lying *on* that surface, and two exact quadrics generally meet
+in a quartic rather than a conic. STEP can express it - `INTERSECTION_CURVE`,
+pcurves, an approximating B-spline - but that is roadmap item 4, and this part
+already has 14 faces in exactly that state: surface known, surface recognised,
+trim not writable. More surface knowledge moves the bottleneck rather than
+removing it.
+
+### What a different declaration channel would buy
+
+Today `PolySet::surfaces` carries *model-scoped hints*, re-checked against the
+mesh by fitting. That is what the three gates are for, and it is why a six-sided
+prism can be collapsed if a matching declaration happens to be in scope.
+
+Per-face identity is the stronger design, and the plumbing for it already exists
+and is proven - it is carrying a different payload. `manifoldutils.cc:72-73` groups
+triangles into runs and tags each run with an id:
+
+```cpp
+mesh.runIndex.push_back(mesh.triVerts.size());
+mesh.runOriginalID.push_back(id);
+```
+
+Manifold preserves that id through booleans, and `ManifoldGeometry.cc:196` reads
+it back per run to reconstruct each face's **colour**. The runs are grouped by
+colour. Grouping them by declared surface as well would give exact per-face
+surface identity across arbitrary boolean chains, on the Manifold backend, for
+very little: it removes the geometry gate outright and makes the intent gate
+exact instead of probabilistic.
+
+**It is not strictly stronger, which is the part worth remembering.** No face of
+either operand lies on the collar's hull chamfer, so per-face provenance would
+lose a surface the present design writes. Fitting catches what provenance
+cannot; provenance catches what fitting cannot. Both channels, not a
+replacement.
+
+### The order that follows from this
+
+1. **Exact 2D profiles.** `Outline2d` is a bare `VectorOfVector2d`
+   (`src/geometry/Polygon2d.h:19`), so a circle is already dead by the time it
+   reaches an extruder, and `linear_extrude(circle())` exports as a cylinder only
+   because that path is special-cased. An arc-aware profile is the prerequisite
+   for the next item and is the largest single lever in the picture.
+2. **`SURFACE_OF_LINEAR_EXTRUSION` and `SURFACE_OF_REVOLUTION`,** neither of
+   which the kernel writes. Both take an *arbitrary* generatrix curve, so any
+   `linear_extrude` is exactly the first and any `rotate_extrude` exactly the
+   second - exact, not approximated, and far wider than the quadric family.
+3. **Per-face provenance through `runOriginalID`,** beside the hint channel.
+
+None of the three touches a thread. That one is a policy question - approximate
+within a tolerance, or stay faceted - and it is the only place the exporter's
+*exact fit or stay faceted* rule has to be decided rather than applied.
+
+## 7. Recommended order
 
 F1 to F5 have all been acted on; what stands below them is the work itself.
+Items 5 to 7 are the near work; §6 is the argument for why they are the right
+three and what they cannot reach.
 
 1. ~~**Confirm F1 on a real build.**~~ Done, on Windows, along with the rest of
    this branch. What the run established, and what it did not:
