@@ -1038,10 +1038,26 @@ def check_bspline_faces(entities, problems):
             m == "%d,%d" % (degree + 1, degree + 1) for m in mult
         )
 
-    def knots_ok(ent, degree, count):
-        return knots_ok_text(
-            ent.part("B_SPLINE_SURFACE_WITH_KNOTS") if ent.has("RATIONAL_B_SPLINE_SURFACE")
-            else ent.args, degree, count)
+    def surface_knots_ok(ent, du, dv):
+        """The four knot lists of a surface, in the order ISO 10303-42 gives them.
+
+        b_spline_surface_with_knots is (u_multiplicities, v_multiplicities,
+        u_knots, v_knots) - all the multiplicities, then all the knots. Checking
+        only that the right lists are *present* is not enough, and this is the
+        check that says so: the rational branch of the exporter wrote them
+        interleaved, (u_mult, u_knots, v_mult, v_knots), for as long as it had
+        existed. Every list was individually correct, the degrees and the net
+        were right, validatestep.py passed it, and OpenCASCADE read (0.,1.)
+        where the schema puts v_multiplicities, failed to build the surface, and
+        dropped the face - so a filleted body imported as loose surfaces with no
+        error anywhere in this suite.
+
+        A Bezier's only knots are 0 and 1 at multiplicity degree+1, so the whole
+        tail is determined by the two degrees and can be compared literally."""
+        text = (ent.part("B_SPLINE_SURFACE_WITH_KNOTS") if ent.has("RATIONAL_B_SPLINE_SURFACE")
+                else ent.args)
+        want = "(%d,%d),(%d,%d),(0.,1.),(0.,1.)" % (du + 1, du + 1, dv + 1, dv + 1)
+        return du >= 1 and dv >= 1 and want in re.sub(r"\s+", "", text)
 
     def weights_of(text):
         return [float(t) for t in NUMBER_RE.findall(text)]
@@ -1085,10 +1101,12 @@ def check_bspline_faces(entities, problems):
         if grid is None:
             problems.append("#%d: B_SPLINE_SURFACE_WITH_KNOTS has no readable control net" % surface.id)
             continue
-        if not knots_ok(surface, du, du + 1) or not knots_ok(surface, dv, dv + 1):
+        if not surface_knots_ok(surface, du, dv):
             problems.append(
-                "#%d: B_SPLINE_SURFACE_WITH_KNOTS of degree (%d,%d) has knots that are not a "
-                "Bezier's" % (surface.id, du, dv)
+                "#%d: B_SPLINE_SURFACE_WITH_KNOTS of degree (%d,%d) does not carry "
+                "(%d,%d),(%d,%d),(0.,1.),(0.,1.) - the multiplicities and knots of a Bezier, in "
+                "the order ISO 10303-42 gives them" % (surface.id, du, dv, du + 1, du + 1,
+                                                       dv + 1, dv + 1)
             )
         if surface.has("RATIONAL_B_SPLINE_SURFACE"):
             # A fillet's patch is rational: the middle weight is what makes its

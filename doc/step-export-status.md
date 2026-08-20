@@ -288,6 +288,42 @@ fully skewed corner exactly wants a non-separable weight net - the storage for
 which `BezierPatchSurface` already has - and that is a modelling question, not
 an exporter one. It is the natural follow-on to this fix.
 
+### F7 — every rational B-spline face was unreadable to a CAD kernel — **fixed**
+
+Found by the round trip on its first run, and it is the exact defect that
+exercise existed to find: a file that passes all eleven of this project's checks
+and which no CAD kernel can use.
+
+`B_SPLINE_SURFACE_WITH_KNOTS` takes its arguments as `(u_multiplicities,
+v_multiplicities, u_knots, v_knots)` - every multiplicity, then every knot. The
+exporter has two branches for it, and only one was right. The polynomial branch
+wrote `(3,3),(2,2),(0.,1.),(0.,1.)`. The rational branch, used for every fillet
+patch since the Beziers went rational, built the tail out of two per-direction
+strings and wrote them **interleaved**: `(3,3),(0.,1.),(2,2),(0.,1.)`.
+
+Every list in it is individually correct, the degrees and the control net are
+right, and `validatestep.py` passed it - its knot check looked for the *presence*
+of `(d+1,d+1)` anywhere in the tail, which an interleaved tail still satisfies.
+OpenCASCADE reads `(0.,1.)` where the schema puts v_multiplicities, fails to
+build the surface, and drops the face:
+
+| `step-fillet-refusals` (hexagonal prism) | before | after |
+| --- | --- | --- |
+| `validatestep.py` | valid, 38 faces, 1 shell | valid, 38 faces, 1 shell |
+| OCCT reads | **0 solids**, 8 faces, all planes | 1 solid, 38 faces, 30 BSplineSurface + 8 Plane |
+
+So a filleted body imported as loose surfaces, silently, with nothing in this
+suite objecting - which is precisely the symptom that started the whole fillet
+investigation in SolidWorks. The two branches now share one string, so they
+cannot drift apart again, and `validatestep.py` checks the *order* rather than
+the presence, calibrated by mutating a good file back to the old order (all 30
+surfaces flagged, and OCCT reproduces the 0-solid symptom on the same file).
+
+Note what this says about the timing. The filleted cube no longer writes any
+B-spline at all - item 6 turned all twenty of its patches into quadrics - so the
+one model most likely to be round-tripped by hand had stopped exhibiting the bug
+a commit before it was found. It survived in every *other* filleted body.
+
 ## 5. What is and is not verified here
 
 A headless build was made in this environment - Manifold and CGAL, no Qt, Release
@@ -302,10 +338,19 @@ A headless build was made in this environment - Manifold and CGAL, no Qt, Releas
 
 Still not verified, and honestly so:
 
-- **every SolidWorks round trip.** Nothing here can open one. This remains the
-  largest untested claim in the whole exercise: the exporter's purpose is that a
-  CAD kernel accepts the file, and `validatestep.py` is a proxy for that, not a
-  substitute.
+- ~~**every SolidWorks round trip.**~~ **Measured.** This was the largest
+  untested claim in the whole exercise, and it is now a test.
+  `tests/steproundtrip.py` reads every export back with **OpenCASCADE** - the
+  kernel FreeCAD is built on - and asserts it comes back as a closed, valid,
+  positive-volume *solid* whose surfaces the kernel recognises by type. It is an
+  optional dependency (`pip install cadquery-ocp`) and skips silently when
+  absent, exactly as the locale check does.
+
+  It paid for itself immediately: see F7, a defect that made every rational
+  B-spline face unreadable to a CAD kernel while passing all eleven of this
+  project's own checks. SolidWorks and Fusion specifically are still unopened -
+  OCCT is one kernel, not all of them - but "no CAD kernel has ever read one of
+  these files" is no longer true.
 - **the CGAL-backend quality gap table** under *Known quality gaps*.
 - **the full GL regression suite.** The 483-test sweep hangs in this container
   after about 45 minutes with no test process running, which looks like a
@@ -761,13 +806,39 @@ dihedral, and a filleted hexagonal prism is now a closed solid. That was a
 correctness bug in a shipping feature rather than an unverified claim, so it
 went first; it also unblocked item 6's refusal fixture.
 
-**So verify against a real CAD kernel before anything else.** §5's largest gap
-is not a surface family, it is that nothing in this exercise has opened an export
-in SolidWorks, FreeCAD or Fusion. `validatestep.py` is a good proxy - eleven
-checks, one per historical defect, and it has caught real bugs - but the
-exporter's purpose is that a kernel accepts the file, and that has been assumed
-throughout. One round trip per surface family would either retire that risk or
-find something no amount of self-validation can.
+**The CAD kernel round trip is done, and it found something.** This was §5's
+largest gap - nothing in the exercise had ever opened an export in a real
+kernel. `tests/steproundtrip.py` now reads every export back through
+OpenCASCADE and asserts it is a closed, valid, positive-volume solid whose
+surfaces the kernel recognises by type. On its first run it found F7: every
+rational B-spline face was unreadable, so a filleted body imported as loose
+surfaces while passing all eleven of this project's own checks. That is exactly
+the class of thing self-validation cannot reach, and it is why the item was top
+of the list.
+
+What the kernel now reads back, one line per surface family, every fixture a
+single closed solid:
+
+| declared | OCCT reads | fixture |
+| --- | --- | --- |
+| `CYLINDRICAL_SURFACE` | Cylinder | `step-bore`, `step-declare`, `step-extrude-circle`, … |
+| `CONICAL_SURFACE` | Cone | `step-cone-primitive`, `step-tapered-extrude`, … |
+| `SPHERICAL_SURFACE` | Sphere | `step-sphere`, `step-fillet` |
+| `TOROIDAL_SURFACE` | Torus | `step-torus` (one face for the whole torus), `step-rounded-profile` |
+| `B_SPLINE_SURFACE_WITH_KNOTS` | BSplineSurface | `step-extrude-text`, `step-fillet-refusals` |
+
+And the geometry is exact rather than merely acceptable. A filleted cube is the
+Minkowski sum of `cube(8)` with a unit ball, so its volume is computable in
+closed form: **975.587014**. OCCT, reconstructing the smooth solid from our
+twelve cylinders, eight spheres and six planes, measures **975.587014** - within
+1.1e-07. The mesh those entities were recognised from measures 975.5163, so the
+analytic export carries *more* geometric truth than the mesh it came from, which
+is the whole point of the exercise stated as a number.
+
+**What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
+their own readers and their own opinions, and the failure that started this was
+observed in SolidWorks. A round trip through those is still worth doing - but it
+is now a second opinion rather than the only one.
 
 **What not to do, and why, so nobody re-derives it:**
 

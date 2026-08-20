@@ -1421,6 +1421,38 @@ check is now `src/geometry/bezier_patch_test.cc`. See `doc/testing.md`; enabling
 it turned up two test files that had never compiled and one uninitialised
 `double` in `vector_math`.
 
+### The round trip, and what it found
+
+Every check in this project until now was the exporter marking its own work.
+`validatestep.py` is a good proxy - eleven checks, one per historical defect -
+but a proxy knows what this exporter has got wrong before, not what a CAD kernel
+requires. `tests/steproundtrip.py` closes that: it reads each export back with
+**OpenCASCADE**, the kernel FreeCAD is built on, and asserts a closed, valid,
+positive-volume solid whose surfaces the kernel recognises *by type*. Optional
+dependency, skipped silently when absent.
+
+It found a real defect on its first run, and the defect is instructive.
+`B_SPLINE_SURFACE_WITH_KNOTS` takes `(u_multiplicities, v_multiplicities,
+u_knots, v_knots)`. The polynomial branch wrote that. The rational branch - every
+fillet patch - built the tail from two per-direction strings and wrote them
+interleaved, `(u_mult, u_knots, v_mult, v_knots)`. Each list correct, the order
+wrong. `validatestep.py` checked that the right lists were *present*, which an
+interleaved tail satisfies, so it passed; OpenCASCADE read `(0.,1.)` where
+v_multiplicities belongs, could not build the surface, and dropped the face. A
+hexagonal prism that this project called valid at 38 faces came back from the
+kernel as **0 solids and 8 planes** - loose surfaces, which is the symptom that
+started the fillet investigation in SolidWorks in the first place.
+
+Both branches now share one string, and the validator checks the order rather
+than the presence, calibrated by mutating a good file back.
+
+The measurement that makes the analytic path worth having, finally stated as a
+number a kernel produced: a filleted cube is the Minkowski sum of `cube(8)` with
+a unit ball, so its volume is exactly **975.587014**. OCCT, rebuilding the
+smooth solid from twelve `CYLINDRICAL_SURFACE`, eight `SPHERICAL_SURFACE` and
+six `PLANE`, measures **975.587014**. The mesh those were recognised from
+measures 975.5163. The export is closer to the truth than its own input.
+
 ### 3. Spheres - collapsed, without `SPHERICAL_SURFACE`
 
 Two things this item said were wrong, and finding out which cost one

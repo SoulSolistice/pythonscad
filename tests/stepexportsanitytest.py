@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 
+from steproundtrip import roundtripSTEP
 from validatestep import validateSTEP
 
 # locales which conventionally use a comma radix, cheapest first
@@ -110,6 +111,49 @@ def expectations(path):
     return want, unwanted
 
 
+def roundtrip_expectations(path):
+    """The ROUNDTRIP: line a fixture states about what a CAD kernel reads.
+
+    validatestep.py says the file is well formed by this project's own lights;
+    this says OpenCASCADE agrees, and in particular that it reads a
+    CYLINDRICAL_SURFACE *as a cylinder* rather than merely parsing it. The names
+    are OCCT's own, from BRepAdaptor_Surface::GetType:
+
+        # ROUNDTRIP: Cylinder=12 Sphere=8 Plane=6
+
+    A fixture which states nothing still gets the round trip, just without the
+    surface census assertion - reading as a closed, valid, positive volume solid
+    is checked for every fixture either way."""
+    wanted = {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.search(r"ROUNDTRIP:\s*(.+?)\s*$", line)
+            if not m:
+                continue
+            for token in m.group(1).split():
+                key, _, value = token.partition("=")
+                if value.isdigit():
+                    wanted[key] = int(value)
+    return wanted
+
+
+def check_roundtrip(path, stepfile, what, expect_surfaces=None):
+    """Read the export back with a real CAD kernel. Skipped when OCCT is absent.
+
+    Returns True when the round trip passed or could not be run, so a machine
+    without OpenCASCADE behaves exactly as it did before this check existed."""
+    result, report = roundtripSTEP(stepfile, expect_surfaces=expect_surfaces)
+    if result is None:
+        print("note: " + report[0], file=sys.stderr)
+        return True
+    for line in report:
+        print("round trip (%s): %s" % (what, line), file=sys.stderr)
+    if not result:
+        print("the %s export does not survive a round trip through OpenCASCADE" % what,
+              file=sys.stderr)
+    return result
+
+
 def check_expectations(path, output):
     """True when the analytic run reported what the fixture says it should."""
     want, unwanted = expectations(path)
@@ -154,6 +198,12 @@ if not os.path.exists(args.openscad):
 
 export(args.openscad, inputfile, stepfile, remaining_args)
 ok = validateSTEP(stepfile)
+
+# The faceted export is the baseline every fixture has to clear: whatever the
+# analytic path does or does not recognise, the plain triangle mesh has to come
+# back out of a CAD kernel as a closed solid.
+if ok:
+    ok = check_roundtrip(inputfile, stepfile, "faceted")
 
 # Re-export with a comma radix locale and compare, so a number formatted
 # through LC_NUMERIC cannot slip back in.
@@ -214,6 +264,10 @@ if ok:
         print("the analytic export is not valid", file=sys.stderr)
         ok = False
     elif not check_expectations(inputfile, output):
+        ok = False
+    elif not check_roundtrip(
+        inputfile, analyticfile, "analytic", roundtrip_expectations(inputfile) or None
+    ):
         ok = False
     else:
         declared = surfaces_available(output)

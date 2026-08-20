@@ -512,16 +512,24 @@ public:
         }
         ctrl << ")";
       }
-      const std::string knots_u =
-        "(" + std::to_string(degree_u + 1) + "," + std::to_string(degree_u + 1) + "),(0.,1.)";
-      const std::string knots_v =
-        "(" + std::to_string(degree_v + 1) + "," + std::to_string(degree_v + 1) + "),(0.,1.)";
+      // ISO 10303-42 orders these u_multiplicities, v_multiplicities, u_knots,
+      // v_knots - all four multiplicities before any knot, not one direction
+      // fully then the other. Writing them interleaved gives a reader (0.,1.)
+      // where it expects v_multiplicities, and a face whose surface will not
+      // build: OpenCASCADE drops it and takes the shell as loose surfaces. Both
+      // branches below share these so the two orders cannot drift apart again -
+      // which is exactly what had happened, the polynomial one being right and
+      // the rational one wrong.
+      const std::string mult_u =
+        "(" + std::to_string(degree_u + 1) + "," + std::to_string(degree_u + 1) + ")";
+      const std::string mult_v =
+        "(" + std::to_string(degree_v + 1) + "," + std::to_string(degree_v + 1) + ")";
+      const std::string knots = mult_u + "," + mult_v + ",(0.,1.),(0.,1.)";
 
       if (weights.empty()) {
         stream_in << "#" << id << " = B_SPLINE_SURFACE_WITH_KNOTS('" << label << "'," << degree_u << ","
-                  << degree_v << ",(" << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,.F.,(" << degree_u + 1
-                  << "," << degree_u + 1 << "),(" << degree_v + 1 << "," << degree_v + 1
-                  << "),(0.,1.),(0.,1.),.UNSPECIFIED.);\n";
+                  << degree_v << ",(" << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,.F.," << knots
+                  << ",.UNSPECIFIED.);\n";
         return;
       }
 
@@ -540,7 +548,7 @@ public:
       }
       stream_in << "#" << id << " = ( BOUNDED_SURFACE() B_SPLINE_SURFACE(" << degree_u << "," << degree_v
                 << ",(" << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,.F.)"
-                << " B_SPLINE_SURFACE_WITH_KNOTS(" << knots_u << "," << knots_v
+                << " B_SPLINE_SURFACE_WITH_KNOTS(" << knots
                 << ",.UNSPECIFIED.) GEOMETRIC_REPRESENTATION_ITEM()" << " RATIONAL_B_SPLINE_SURFACE(("
                 << wts.str() << "))" << " REPRESENTATION_ITEM('" << label << "') SURFACE() );\n";
     }

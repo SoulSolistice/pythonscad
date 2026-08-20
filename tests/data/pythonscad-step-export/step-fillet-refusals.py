@@ -36,6 +36,7 @@ fails loudly if the weights ever go back into the wrong frame.
 # EXPECT: 72 of 72 shared seams agree between the two patches meeting there
 # EXPECT: those runs border 0 whole faces, 36 stretches of a face, 72 other patches, 0 unresolved
 # EXPECT: 0 of 30 patches are exactly quadrics - 0 cylindrical, 0 spherical
+# ROUNDTRIP: BSplineSurface=30 Plane=8
 # EXPECT: written as 38 faces instead of 722
 # EXPECT-NOT: left faceted
 from pythonscad import *

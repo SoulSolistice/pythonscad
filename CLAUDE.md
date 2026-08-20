@@ -77,6 +77,16 @@ hours away from anything that could explain it. The tell was the target count -
 111 where a header change should have rebuilt 272. Recovery is
 `rm -f build/.ninja_deps build/.ninja_log` and a full rebuild.
 
+**Optional: the CAD kernel round trip.** `tests/steproundtrip.py` reads each STEP
+export back with OpenCASCADE and checks it comes back as a solid a kernel can
+use, which is the one thing the exporter's own validator cannot answer. It is
+optional and skips silently when absent, so install it only when working on the
+exporter:
+
+```bash
+pip install cadquery-ocp     # ~68 MB wheel, provides the OCP bindings
+```
+
 **Tests.** `ctest --test-dir build -R <regex>` works headless for everything
 except the GL/PNG comparison tests, which need the virtual framebuffer that
 ctest starts through `tests/virtualfb.sh`. Let ctest own its lifecycle: do not

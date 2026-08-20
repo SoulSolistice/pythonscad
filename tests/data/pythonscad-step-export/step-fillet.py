@@ -50,6 +50,7 @@ this model it should never have cause to say it.
 # EXPECT: 48 of 48 shared seams agree between the two patches meeting there
 # EXPECT: written as 26 faces instead of 1106
 # EXPECT: 20 of 20 patches are exactly quadrics - 12 cylindrical, 8 spherical
+# ROUNDTRIP: Cylinder=12 Sphere=8 Plane=6
 # EXPECT-NOT: left faceted
 from pythonscad import *
 
