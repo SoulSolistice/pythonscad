@@ -888,6 +888,36 @@ it; `step-fillet` and `step-fillet-oblique` assert `BSplineSurface=0` instead,
 which says the same thing from the other side - that `quadricOfPatch` left
 nothing behind at all. Both are calibrated by mutation.
 
+**Why the reverse-engineering route is not the route.** OCCT has no turnkey mesh
+feature recognition, and the pipeline usually assembled in its place -
+`Poly_Connect` to grow regions, a fitter to classify them, `BRepLib_MakeFace`
+and `BRepBuilderAPI_Sewing` to rebuild - is the right answer to a *different*
+question: recovering geometry from a mesh whose generator is gone. Two
+measurements say it is the wrong answer here.
+
+The first is that OCCT has no quadric fitter to reach for. `GProp_PEquation` is
+the point-cloud classifier, and its entire vocabulary is point, line, plane,
+space - there is no `IsCylindrical`. Asked about 64 points lying exactly on a
+cylinder it answers `Space`, and `GC_MakeCylindricalSurface` is a *constructor*:
+it wants the axis and radius already derived. Deriving them from a run of facets
+is precisely what `AnalyticFeatures` does, and it is the part OCCT does not
+have.
+
+The second is the intent gate, which this document has argued from the start and
+which is now measurable in one line: `GProp_PEquation` gives the **same answer**,
+`Space`, for a 32-sided tessellated cylinder and for a hexagonal prism. Every
+vertex of a regular prism lies exactly on a cylinder, so a fitter that did know
+about quadrics would return one for both. The mesh does not carry the difference;
+only the declaration does. A reverse-engineering pipeline would be throwing away
+the channel that makes this exporter correct.
+
+What *is* worth taking from that toolbox is the diagnostic.
+`ShapeAnalysis_FreeBounds` assembles the edges used by one face into wires, so a
+shell that does not close reports where rather than merely that: on the committed
+`lid10.stp` it names 18 closed and 6 open free wires with a length and a
+position for each, where the round trip previously said only "0 solids from 1860
+faces". That is now part of the failure path.
+
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was
 observed in SolidWorks. A round trip through those is still worth doing - but it
