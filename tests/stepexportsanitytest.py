@@ -137,6 +137,24 @@ def roundtrip_expectations(path):
     return wanted
 
 
+def keyed_expectations(path, marker, cast=int):
+    """A fixture line of `Key=value` tokens under `marker`."""
+    wanted = {}
+    pattern = re.compile(r"%s:\s*(.+?)\s*$" % marker)
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = pattern.search(line)
+            if not m:
+                continue
+            for token in m.group(1).split():
+                key, _, value = token.partition("=")
+                try:
+                    wanted[key] = cast(value)
+                except ValueError:
+                    pass
+    return wanted
+
+
 def canonical_expectations(path):
     """The CANONICAL: line a fixture states about its B-spline faces.
 
@@ -163,13 +181,18 @@ def canonical_expectations(path):
     return wanted
 
 
-def check_roundtrip(path, stepfile, what, expect_surfaces=None, expect_canonical=None):
+def check_roundtrip(path, stepfile, what, expect_surfaces=None, expect_canonical=None,
+                    expect_edges=None, expect_radii=None):
     """Read the export back with a real CAD kernel. Skipped when OCCT is absent.
 
     Returns True when the round trip passed or could not be run, so a machine
     without OpenCASCADE behaves exactly as it did before this check existed."""
     result, report = roundtripSTEP(
-        stepfile, expect_surfaces=expect_surfaces, expect_canonical=expect_canonical
+        stepfile,
+        expect_surfaces=expect_surfaces,
+        expect_canonical=expect_canonical,
+        expect_edges=expect_edges,
+        expect_radii=expect_radii,
     )
     if result is None:
         print("note: " + report[0], file=sys.stderr)
@@ -299,6 +322,8 @@ if ok:
         "analytic",
         roundtrip_expectations(inputfile) or None,
         canonical_expectations(inputfile) or None,
+        keyed_expectations(inputfile, "EDGES") or None,
+        keyed_expectations(inputfile, "RADII", float) or None,
     ):
         ok = False
     else:

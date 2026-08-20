@@ -1446,6 +1446,30 @@ started the fillet investigation in SolidWorks in the first place.
 Both branches now share one string, and the validator checks the order rather
 than the presence, calibrated by mutating a good file back.
 
+The round trip asserts the kernel's *parameters*, not only its face counts.
+Reading twelve cylinders says nothing about whether they are the right twelve: a
+recovery that got an axis or a radius wrong writes a surface the mesh is not on,
+and almost nothing objects, because the bounding circles come out of the same
+recovery and agree with it, the shell still closes, and `validatestep.py`
+compares the rim radius against the surface radius - both wrong together. So the
+filleted cube states its radii, and the kernel reads `Cylinder 1, Sphere 1` with
+axes on the three coordinate directions, four per axis.
+
+It asserts the **edges** too, which is the other half of item 6 and was
+previously unverified: a quadric face is bounded by `CIRCLE`s rather than by
+splines off a control net, because that is the form a kernel offsets and
+patterns along - but nothing checked that a kernel actually *reads* them as
+circles. It does: 24 circles of radius 1, 24 lines.
+
+The eight remaining edges are worth knowing about, because they look like a
+defect and are not. They come back as zero-length degenerate edges, one per
+corner, and the exporter did not write them: a spherical face is a rectangle in
+`(theta, phi)` whose fourth side is the pole, and OpenCASCADE inserts an edge
+there itself to close the parametric boundary. Seeing exactly eight of them, at
+the apex of each octant, is confirmation that putting the polar axis through the
+apex was right - that is what keeps the octant inside one parameter rectangle
+instead of straddling the surface's own seam.
+
 The round trip also carries a **cross check on the recogniser**, running in the
 one direction a missed opportunity can hide in: of the faces the exporter chose
 to leave as splines, how many are exactly quadrics after all?

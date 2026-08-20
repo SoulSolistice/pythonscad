@@ -31,6 +31,8 @@ doc/step-export-status.md.
 # EXPECT: 20 Bezier patches cover 756 facets
 # EXPECT: 20 of 20 patches are exactly quadrics - 12 cylindrical, 8 spherical
 # ROUNDTRIP: Cylinder=12 Sphere=8 Plane=6 BSplineSurface=0
+# RADII: Cylinder=0.8 Sphere=0.8
+# EDGES: Circle=24 Line=24 degenerate=8
 # EXPECT: written as 26 faces instead of 762
 # EXPECT-NOT: left faceted
 from pythonscad import *

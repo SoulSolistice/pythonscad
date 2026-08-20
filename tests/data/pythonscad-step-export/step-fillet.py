@@ -51,6 +51,8 @@ this model it should never have cause to say it.
 # EXPECT: written as 26 faces instead of 1106
 # EXPECT: 20 of 20 patches are exactly quadrics - 12 cylindrical, 8 spherical
 # ROUNDTRIP: Cylinder=12 Sphere=8 Plane=6 BSplineSurface=0
+# RADII: Cylinder=1 Sphere=1
+# EDGES: Circle=24 Line=24 degenerate=8
 # EXPECT-NOT: left faceted
 from pythonscad import *
 

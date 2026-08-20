@@ -835,6 +835,31 @@ twelve cylinders, eight spheres and six planes, measures **975.587014** - within
 analytic export carries *more* geometric truth than the mesh it came from, which
 is the whole point of the exercise stated as a number.
 
+**What the kernel is asked, beyond "did it read".** Counting face types says the
+kernel read twelve cylinders; it does not say they are the right twelve. A
+recovery with a wrong axis or radius writes a surface the mesh is not on and
+almost nothing objects - the bounding circles come from the same recovery so
+they agree with it, the shell closes, and `validatestep.py` compares the rim
+radius against the surface radius, both wrong together. So the fixtures assert
+the parameters as well:
+
+| | asserted | reads |
+| --- | --- | --- |
+| radii | `RADII: Cylinder=1 Sphere=1` | `Cylinder 1, Sphere 1`, axes on the three coordinate directions, four per axis |
+| edges | `EDGES: Circle=24 Line=24 degenerate=8` | 24 circles of radius 1, 24 lines, 8 degenerate |
+
+The edge census is the other half of item 6 and had never been verified: a
+quadric face is bounded by `CIRCLE`s because that is what a kernel offsets and
+patterns along, and nothing checked that a kernel *reads* them as circles. It
+does.
+
+The eight degenerate edges look like a defect and are not. The exporter did not
+write them: a spherical face is a rectangle in `(theta, phi)` whose fourth side
+is the pole, and OpenCASCADE inserts a zero-length edge there itself. Exactly
+eight, one at the apex of each octant, is confirmation that putting the polar
+axis through the apex was right - it is what keeps the octant inside one
+parameter rectangle rather than straddling the seam.
+
 **The cross check, and what it says today.** OCCT's
 `ShapeAnalysis_CanonicalRecognition` answers a *different* question from the one
 `AnalyticFeatures` asks - it works from the surface rather than from the facets,

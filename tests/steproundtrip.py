@@ -61,9 +61,11 @@ try:
     from OCP.IFSelect import IFSelect_ReturnStatus
     from OCP.STEPControl import STEPControl_Reader
     from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID
-    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopExp import TopExp, TopExp_Explorer
+    from OCP.TopTools import TopTools_IndexedMapOfShape
     from OCP.TopoDS import TopoDS
-    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
     from OCP.ShapeAnalysis import ShapeAnalysis_CanonicalRecognition
     from OCP.gp import gp_Cone, gp_Cylinder, gp_Pln, gp_Sphere
 
@@ -138,6 +140,67 @@ def canonical_census(shape, tol=1e-7):
     return census
 
 
+def surface_radii(shape, tol=1e-6):
+    """The distinct radius of every cylindrical, spherical and conical face.
+
+    Counting *types* says the kernel read twelve cylinders; it does not say they
+    are the right twelve. A recovery that got an axis or a radius wrong writes a
+    surface the mesh is not on, and almost nothing downstream objects: the
+    bounding circles come out of the same recovery so they agree with it, the
+    shell still closes, and this project's own validator compares the rim radius
+    against the surface radius - both wrong together. The volume would shift,
+    which is why that is checked too, but a radius is the thing to say out loud.
+
+    Returned as {kind: sorted distinct radii}, rounded so a fixture can state
+    them."""
+    radii = {}
+    exp = TopExp_Explorer(shape, TopAbs_FACE)
+    while exp.More():
+        adaptor = BRepAdaptor_Surface(TopoDS.Face_s(exp.Current()))
+        kind = str(adaptor.GetType()).rsplit("_", 1)[-1]
+        value = None
+        if kind == "Cylinder":
+            value = adaptor.Cylinder().Radius()
+        elif kind == "Sphere":
+            value = adaptor.Sphere().Radius()
+        elif kind == "Torus":
+            value = adaptor.Torus().MinorRadius()
+        if value is not None:
+            seen = radii.setdefault(kind, [])
+            if not any(abs(value - r) <= tol for r in seen):
+                seen.append(value)
+        exp.Next()
+    return {k: sorted(round(r, 9) for r in v) for k, v in radii.items()}
+
+
+def edge_census(shape):
+    """What the kernel makes of each distinct edge.
+
+    The other half of item 6: a quadric face is bounded by CIRCLEs rather than
+    by splines off a control net, because that is the form a kernel will offset
+    and pattern along. Nothing verified the kernel actually *reads* them as
+    circles until this.
+
+    Degenerate edges are counted separately rather than lumped in with
+    OtherCurve, because they are not something the exporter wrote. A spherical
+    face is a rectangle in (theta, phi) whose fourth side is the pole, and OCCT
+    inserts a zero length edge there itself - eight of them on a filleted cube,
+    one per corner octant. Seeing them is confirmation that the polar axis was
+    put through the apex, which is what keeps the octant inside one parameter
+    rectangle instead of straddling the seam."""
+    census = {}
+    edges = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, TopAbs_EDGE, edges)
+    for i in range(1, edges.Size() + 1):
+        edge = TopoDS.Edge_s(edges.FindKey(i))
+        if BRep_Tool.Degenerated_s(edge):
+            kind = "degenerate"
+        else:
+            kind = str(BRepAdaptor_Curve(edge).GetType()).rsplit("_", 1)[-1]
+        census[kind] = census.get(kind, 0) + 1
+    return census
+
+
 def _invalid_detail(shape, analyzer, limit=5):
     """Which subshapes the kernel rejects, and what it calls the problem.
 
@@ -172,7 +235,8 @@ def _invalid_detail(shape, analyzer, limit=5):
     return out
 
 
-def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canonical=None):
+def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canonical=None,
+                  expect_edges=None, expect_radii=None):
     """Read `filename` back with OpenCASCADE and report whether it is a solid.
 
     Returns (ok, lines). `ok` is None when OCCT is not installed, which the
@@ -240,6 +304,33 @@ def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canoni
             if got != want:
                 lines.append(
                     "expected the kernel to read %d %s face(s), it read %d" % (want, kind, got)
+                )
+                ok = False
+
+    radii = surface_radii(shape)
+    if radii:
+        lines.append(
+            "OCCT radii: %s"
+            % ", ".join("%s %s" % (k, ",".join("%g" % r for r in v)) for k, v in sorted(radii.items()))
+        )
+    if expect_radii:
+        for kind, want in sorted(expect_radii.items()):
+            got = radii.get(kind, [])
+            if len(got) != 1 or abs(got[0] - want) > 1e-6:
+                lines.append(
+                    "expected every %s face to have radius %g, the kernel reads %s"
+                    % (kind, want, got or "none")
+                )
+                ok = False
+
+    edges = edge_census(shape)
+    lines.append("OCCT edges: %s" % ", ".join("%s %d" % kv for kv in sorted(edges.items())))
+    if expect_edges:
+        for kind, want in sorted(expect_edges.items()):
+            got = edges.get(kind, 0)
+            if got != want:
+                lines.append(
+                    "expected the kernel to read %d %s edge(s), it read %d" % (want, kind, got)
                 )
                 ok = False
 
