@@ -137,12 +137,40 @@ def roundtrip_expectations(path):
     return wanted
 
 
-def check_roundtrip(path, stepfile, what, expect_surfaces=None):
+def canonical_expectations(path):
+    """The CANONICAL: line a fixture states about its B-spline faces.
+
+    The cross check on our own recogniser, running in the direction that finds a
+    missed opportunity rather than a wrong answer: OpenCASCADE is asked, of every
+    face we wrote as a spline, whether it is exactly a quadric after all.
+
+        # CANONICAL: Cylinder=6 spline=24
+
+    "spline" is the count OCCT agrees are genuinely not canonical. A fixture
+    which states this is asserting both halves - that we did not miss more than
+    we know about, and that we did not silently start missing something we used
+    to catch, which is what a regression in quadricOfPatch would look like."""
+    wanted = {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.search(r"CANONICAL:\s*(.+?)\s*$", line)
+            if not m:
+                continue
+            for token in m.group(1).split():
+                key, _, value = token.partition("=")
+                if value.isdigit():
+                    wanted[key] = int(value)
+    return wanted
+
+
+def check_roundtrip(path, stepfile, what, expect_surfaces=None, expect_canonical=None):
     """Read the export back with a real CAD kernel. Skipped when OCCT is absent.
 
     Returns True when the round trip passed or could not be run, so a machine
     without OpenCASCADE behaves exactly as it did before this check existed."""
-    result, report = roundtripSTEP(stepfile, expect_surfaces=expect_surfaces)
+    result, report = roundtripSTEP(
+        stepfile, expect_surfaces=expect_surfaces, expect_canonical=expect_canonical
+    )
     if result is None:
         print("note: " + report[0], file=sys.stderr)
         return True
@@ -266,7 +294,11 @@ if ok:
     elif not check_expectations(inputfile, output):
         ok = False
     elif not check_roundtrip(
-        inputfile, analyticfile, "analytic", roundtrip_expectations(inputfile) or None
+        inputfile,
+        analyticfile,
+        "analytic",
+        roundtrip_expectations(inputfile) or None,
+        canonical_expectations(inputfile) or None,
     ):
         ok = False
     else:

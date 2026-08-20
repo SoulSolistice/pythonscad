@@ -64,6 +64,8 @@ try:
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS
     from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.ShapeAnalysis import ShapeAnalysis_CanonicalRecognition
+    from OCP.gp import gp_Cone, gp_Cylinder, gp_Pln, gp_Sphere
 
     HAVE_OCCT = True
 except ImportError:
@@ -94,6 +96,44 @@ def _surface_census(shape):
     while exp.More():
         kind = str(BRepAdaptor_Surface(TopoDS.Face_s(exp.Current())).GetType()).rsplit("_", 1)[-1]
         census[kind] = census.get(kind, 0) + 1
+        exp.Next()
+    return census
+
+
+def canonical_census(shape, tol=1e-7):
+    """For every B-spline face, the canonical surface the kernel says it really is.
+
+    This is the cross check on our own recogniser, and it runs in the one
+    direction that can find a missed opportunity. ShapeAnalysis_CanonicalRecognition
+    answers "is this spline exactly a cylinder", which is a different question
+    from the one AnalyticFeatures asks - it works from the surface, not from the
+    facets, so it cannot recognise a tessellated cylinder and cannot replace
+    anything here. What it can do is audit what we chose to leave as a spline.
+
+    A face in this census under anything but "spline" is a quadric the exporter
+    wrote as a B-spline: valid, importable, and worse than it needed to be. A
+    count that *grows* is the regression signal - quadricOfPatch having stopped
+    recognising something it used to.
+
+    Note this is the kernel's opinion at its own tolerance, so the numbers can
+    move with an OCCT version. Fixtures assert it only where they say so."""
+    census = {}
+    exp = TopExp_Explorer(shape, TopAbs_FACE)
+    while exp.More():
+        face = TopoDS.Face_s(exp.Current())
+        if str(BRepAdaptor_Surface(face).GetType()).endswith("BSplineSurface"):
+            rec = ShapeAnalysis_CanonicalRecognition(face)
+            if rec.IsPlane(tol, gp_Pln()):
+                kind = "Plane"
+            elif rec.IsCylinder(tol, gp_Cylinder()):
+                kind = "Cylinder"
+            elif rec.IsCone(tol, gp_Cone()):
+                kind = "Cone"
+            elif rec.IsSphere(tol, gp_Sphere()):
+                kind = "Sphere"
+            else:
+                kind = "spline"
+            census[kind] = census.get(kind, 0) + 1
         exp.Next()
     return census
 
@@ -132,7 +172,7 @@ def _invalid_detail(shape, analyzer, limit=5):
     return out
 
 
-def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None):
+def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canonical=None):
     """Read `filename` back with OpenCASCADE and report whether it is a solid.
 
     Returns (ok, lines). `ok` is None when OCCT is not installed, which the
@@ -202,6 +242,29 @@ def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None):
                     "expected the kernel to read %d %s face(s), it read %d" % (want, kind, got)
                 )
                 ok = False
+
+    # The cross check, reported whenever there is a spline to ask about.
+    if census.get("BSplineSurface"):
+        canon = canonical_census(shape)
+        lines.append(
+            "OCCT canonical: %s"
+            % ", ".join("%s %d" % kv for kv in sorted(canon.items()))
+        )
+        missed = sum(n for k, n in canon.items() if k != "spline")
+        if missed:
+            lines.append(
+                "%d B-spline face(s) are exactly a quadric the exporter could have written"
+                % missed
+            )
+        if expect_canonical:
+            for kind, want in sorted(expect_canonical.items()):
+                got = canon.get(kind, 0)
+                if got != want:
+                    lines.append(
+                        "expected %d B-spline face(s) to be exactly %s, the kernel says %d"
+                        % (want, kind, got)
+                    )
+                    ok = False
 
     return ok, lines
 

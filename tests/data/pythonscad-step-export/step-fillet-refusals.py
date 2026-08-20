@@ -39,6 +39,7 @@ fails loudly if the weights ever go back into the wrong frame.
 # ROUNDTRIP: BSplineSurface=30 Plane=8
 # EXPECT: written as 38 faces instead of 722
 # EXPECT-NOT: left faceted
+# CANONICAL: Cylinder=6 spline=24
 from pythonscad import *
 
 cylinder(r=10, h=10, fn=6).fillet(1, fn=8).show()

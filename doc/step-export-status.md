@@ -835,6 +835,34 @@ twelve cylinders, eight spheres and six planes, measures **975.587014** - within
 analytic export carries *more* geometric truth than the mesh it came from, which
 is the whole point of the exercise stated as a number.
 
+**The cross check, and what it says today.** OCCT's
+`ShapeAnalysis_CanonicalRecognition` answers a *different* question from the one
+`AnalyticFeatures` asks - it works from the surface rather than from the facets,
+so it cannot recognise a tessellated cylinder and cannot replace anything here
+(measured: it refuses to call a 4, 6, 8, 16, 32 or 64-gon prism a cylinder at
+any tolerance up to 3.0, while recognising a true cylindrical face, and the same
+face after `NurbsConvert`, as radius 10.000000). What it *can* do is audit what
+the exporter chose to leave as a spline, which is the one direction a missed
+opportunity hides in. Every fixture with a B-spline face now reports it:
+
+| fixture | B-spline faces | OCCT says they really are |
+| --- | --- | --- |
+| `step-extrude-text` | 32 | 32 genuine splines |
+| `step-extrude-text-counter` | 19 | 19 genuine splines |
+| `step-fillet-refusals` | 30 | **6 exact cylinders**, 24 genuine splines |
+
+The glyph fixtures coming back clean is the useful negative: a font's Beziers are
+not quadrics, and nothing there is being left on the table. The prism's six are
+the vertical edge strips, radius sqrt(3) - exactly the faces item 6's fixed point
+withdraws because each shares a rail with a corner that is not a quadric. So the
+follow-on below is worth six faces on that model, and it is now a number from a
+third party rather than an estimate from the recogniser being audited.
+
+A count that *grows* is the regression signal, which is why the fixtures assert
+it; `step-fillet` and `step-fillet-oblique` assert `BSplineSurface=0` instead,
+which says the same thing from the other side - that `quadricOfPatch` left
+nothing behind at all. Both are calibrated by mutation.
+
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was
 observed in SolidWorks. A round trip through those is still worth doing - but it

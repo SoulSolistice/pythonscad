@@ -26,5 +26,6 @@
 // EXPECT: 32 Bezier patches cover 64 facets
 // EXPECT: 0 unresolved
 // EXPECT: written as 36 faces instead of 68
+// CANONICAL: spline=32
 $fn = 8;
 linear_extrude(height = 2) text("S", size = 20, font = "Liberation Sans");

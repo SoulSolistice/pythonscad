@@ -1446,6 +1446,24 @@ started the fillet investigation in SolidWorks in the first place.
 Both branches now share one string, and the validator checks the order rather
 than the presence, calibrated by mutating a good file back.
 
+The round trip also carries a **cross check on the recogniser**, running in the
+one direction a missed opportunity can hide in: of the faces the exporter chose
+to leave as splines, how many are exactly quadrics after all?
+`ShapeAnalysis_CanonicalRecognition` answers that. It is not a replacement for
+`AnalyticFeatures` and cannot be - it reads the surface, not the facets, so it
+refuses to call a 4, 6, 8, 16, 32 or 64-gon prism a cylinder at any tolerance up
+to 3.0, while recognising a true cylindrical face and a `NurbsConvert`ed one
+alike as radius 10.000000. The tessellated-cylinder problem has no OCCT tool.
+Auditing the spline faces is what it is good for, and there it is a genuinely
+independent opinion.
+
+Today it finds the extruded glyphs clean - 32 and 19 genuine splines, which is
+right, a font's Beziers being no kind of quadric - and six exact cylinders of
+radius sqrt(3) among the hexagonal prism's thirty. Those six are the vertical
+edge strips the fixed point withdraws for sharing a rail with a non-quadric
+corner, so the follow-on above is worth six faces on that model, measured rather
+than guessed.
+
 The measurement that makes the analytic path worth having, finally stated as a
 number a kernel produced: a filleted cube is the Minkowski sum of `cube(8)` with
 a unit ball, so its volume is exactly **975.587014**. OCCT, rebuilding the
