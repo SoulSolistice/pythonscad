@@ -970,12 +970,41 @@ surface could cover it. The thread does not: it is broadly smooth at 0.075 with
 a ten-fold tail, and those bad edges are where the boolean cut the sweep against
 the socket wall. Same measure, and it tells them apart.
 
+**The band says how accurate a fit could be. Whether one is available at all is a
+different question, and it is the one that settles this.** Fitting needs the
+facets' *ordering* - which follows which along the sweep - and no fitting
+machinery recovers that from an unordered set; `GeomAPI_PointsToBSplineSurface`
+wants a structured grid, and so would anything written by hand. A mesh straight
+from a generator still carries it: a swept quad grid, split into triangles the
+same way everywhere, gives every interior vertex a valence of exactly 6. A
+boolean does not preserve it, because trimming a sweep against a wall
+retriangulates the seam.
+
+So the pass measures that too, as the fraction of interior vertices at the modal
+valence, and the two models answer the two halves in opposite directions:
+
+| | facets | band | typical | grid regular |
+| --- | --- | --- | --- | --- |
+| `linear_extrude(twist)` wall | 736 | 0.0053 | 0.0051 | **100%** of 330, valence 6 |
+| the bayonet's hose thread | 1016 | 0.7813 | 0.0748 | **36%** of 956 |
+
+That is the answer to fitting-versus-declaring, and it is not the one the
+mockup suggested. The mockup fitted the thread beautifully - 1226 facets to 6
+faces, every vertex interpolated to 1.2e-13 - but it read `hoseRidge`'s own
+154x4 array, not the exported mesh. In the export that ordering is gone: the
+union with the socket wall retriangulated it, and 36% regularity means there is
+no grid left to walk.
+
+**So: fit where the generator's grid survives, declare where the boolean took
+it.** The thread is 99.8% of the uncovered area on this part and falls on the
+declaring side, which puts it back with roadmap item 5 and with §8's standing
+lesson - every item that looked like a recogniser problem turned out to be a
+channel problem one layer down. `hoseRidge` knows it swept a profile along a
+helix; nothing downstream can be told to guess it.
+
 **Nothing is fitted yet, and the pass says so on every run.** That is deliberate:
 a pass which silently did nothing would look exactly like one which found
-nothing - the same trap the band report itself exists for. What the measurement
-buys is a threshold chosen from evidence rather than picked in advance, and the
-first thing it shows is that fitting the *exported* thread is harder than fitting
-the generator's own grid, because the boolean has already trimmed it.
+nothing - the same trap the band report itself exists for.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

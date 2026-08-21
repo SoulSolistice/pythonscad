@@ -240,6 +240,24 @@ struct SmoothRegion {
    * want different answers - the first can be split, the second cannot. */
   double median_band = 0;
   double area = 0;
+
+  /*! Whether the region still carries the grid its generator laid down.
+   *
+   * Fitting a surface to a run of facets needs their *ordering* - which facet
+   * follows which along the sweep - and none of the fitting machinery can
+   * recover that from an unordered set. A mesh straight from a generator has
+   * it: a swept quad grid, split into triangles the same way everywhere, gives
+   * every interior vertex a valence of exactly 6. A boolean does not preserve
+   * it; trimming a sweep against a wall retriangulates the seam and the valence
+   * spreads out.
+   *
+   * So `regularity` is the fraction of interior vertices sitting at the modal
+   * valence, and it is the measurement that decides whether fitting is even
+   * available: 1.0 is a pristine grid, and anything low means the ordering is
+   * gone and only the generator can say what the surface was. */
+  std::size_t interior_vertices = 0;
+  std::size_t modal_valence = 0;
+  double regularity = 0;
 };
 
 /*! Group the facets neither pass claimed into smooth regions.

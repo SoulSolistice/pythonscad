@@ -428,6 +428,41 @@ std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<c
       }
       region.area += acc.norm() / 2.0;
     }
+    // The grid, or what is left of it. An interior vertex is one none of whose
+    // incident edges is on the region's boundary; its valence is how many of
+    // the region's facets meet there.
+    {
+      std::map<EdgeKey, int> edge_use;
+      std::map<int, int> valence;
+      for (const std::size_t f : region.facets) {
+        const std::vector<int>& loop = loops[f];
+        for (std::size_t j = 0; j < loop.size(); j++) {
+          edge_use[edgeKey(loop[j], loop[(j + 1) % loop.size()])]++;
+          valence[loop[j]]++;
+        }
+      }
+      std::set<int> on_boundary;
+      for (const auto& entry : edge_use) {
+        if (entry.second == 1) {
+          on_boundary.insert(entry.first.first);
+          on_boundary.insert(entry.first.second);
+        }
+      }
+      std::map<int, int> histogram;
+      for (const auto& entry : valence) {
+        if (on_boundary.count(entry.first) == 0) histogram[entry.second]++;
+      }
+      std::size_t total = 0, best = 0;
+      for (const auto& entry : histogram) {
+        total += entry.second;
+        if (std::size_t(entry.second) > best) {
+          best = entry.second;
+          region.modal_valence = entry.first;
+        }
+      }
+      region.interior_vertices = total;
+      region.regularity = total ? double(best) / double(total) : 0.0;
+    }
     if (!bands.empty()) {
       std::nth_element(bands.begin(), bands.begin() + bands.size() / 2, bands.end());
       region.median_band = bands[bands.size() / 2];

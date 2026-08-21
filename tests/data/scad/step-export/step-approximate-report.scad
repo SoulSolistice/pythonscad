@@ -21,11 +21,26 @@
 // the facets where the sweep was cut against the socket wall. Same measure, and
 // it tells the two apart, which is the whole reason for reporting both.
 //
+// The band says how *accurate* a fit could be. Whether a fit is available at all
+// is a separate question, and it is the one that decides this feature's fate.
+// Fitting needs the facets' ordering - which follows which along the sweep - and
+// nothing can recover that from an unordered set. A mesh straight from a
+// generator still has it: a swept quad grid split into triangles the same way
+// everywhere gives every interior vertex a valence of exactly 6, and this model
+// measures 100% of 330. A mesh that has been through a boolean does not. The
+// bayonet's thread, trimmed against its socket wall, measures 36%.
+//
+// So the two models answer the two halves differently, and together they say
+// where each route applies: fit where the generator's grid survives, declare
+// where the boolean took it.
+//
 // Nothing is fitted yet. The pass measures and says so out loud, because a pass
 // which silently did nothing would look exactly like one which found nothing.
 // APPROX: 6 smooth regions left faceted, 2050 facets in all
 // APPROX: the tessellation leaves at most 0.0055 to fit inside
 // APPROX: band 0.0053 (typical 0.0051)
+// APPROX: grid 100% regular over 330 interior vertices at valence 6
+// APPROX: the generator's ordering survives, a fit could be made
 // APPROX: approximation is measuring only - all 6 regions stay faceted
 // APPROX-NOT: approximation found nothing left to fit
 linear_extrude(height = 20, twist = 90, $fn = 64) square([10, 4], center = true);

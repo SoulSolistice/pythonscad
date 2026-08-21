@@ -546,6 +546,16 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
             "worst dihedral %5$.1f degrees",
             int(regions[i].facets.size()), regions[i].area, regions[i].band, regions[i].median_band,
             regions[i].worst_dihedral * 180.0 / M_PI);
+          // Whether a fit is even available here, which is a different question
+          // from whether it would be accurate.
+          LOG(
+            "STEP export:     grid %1$.0f% regular over %2$d interior vertices at valence "
+            "%3$d - %4$s",
+            regions[i].regularity * 100.0, int(regions[i].interior_vertices),
+            int(regions[i].modal_valence),
+            regions[i].regularity > 0.95
+              ? "the generator's ordering survives, a fit could be made"
+              : "the ordering is gone, only a declaration could describe this");
         }
         // Nothing is fitted yet, so nothing is at risk: every region above stays
         // faceted. Saying so is the point - a pass which silently did nothing
