@@ -293,6 +293,14 @@ public:
    * tessellated at, which is the most any mesh can say. */
   [[nodiscard]] double tessellationBand() const { return band; }
 
+  /*! The tolerance membership is answered at: the tessellation band, floored
+   * so that a grid whose interpolant is exact - a sweep along a straight line,
+   * where the cubic reproduces the stations and the band is zero - does not end
+   * up asking for equality to the last bit. Every caller deciding whether a
+   * point is on this surface uses this, or two of them disagree about the same
+   * point. */
+  [[nodiscard]] double membershipTolerance() const { return std::max(band, 1e-7); }
+
   /*! Whether `pt` is one of the points the generator emitted. Exact, by
    * position - no projection, no tolerance to choose. */
   [[nodiscard]] bool isDeclaredPoint(const Vector3d& pt) const;

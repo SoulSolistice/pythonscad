@@ -318,6 +318,14 @@ def check_approximation(openscad, inputfile, stepfile, args):
     if not validateSTEP(approxfile):
         print("the approximation export is not valid", file=sys.stderr)
         return False
+    # And read back with a real kernel, because this file is where the newest
+    # geometry is. validatestep.py checks that an entity is well formed; only a
+    # kernel says whether a face actually builds from it. That is not a
+    # theoretical difference - a B-spline surface whose knot lists were written
+    # in the wrong order passed every check here and was silently dropped by
+    # OpenCASCADE, taking its face with it.
+    if not check_roundtrip(inputfile, approxfile, "approximation"):
+        return False
     ok = True
     flat = " ".join(output.split())
     with open(inputfile, encoding="utf-8", errors="replace") as f:

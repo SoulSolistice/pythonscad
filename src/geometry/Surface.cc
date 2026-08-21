@@ -881,7 +881,7 @@ int GridSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
   // point a boolean created is on it too, and refusing those was the whole
   // shortfall of declaring the grid alone.
   if (isDeclaredPoint(pt)) return 1;
-  return onSurface(pt, std::max(band, 1e-7)) ? 1 : 0;
+  return onSurface(pt, membershipTolerance()) ? 1 : 0;
 }
 
 std::shared_ptr<Surface> GridSurface::clone() const

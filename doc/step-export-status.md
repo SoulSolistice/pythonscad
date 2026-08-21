@@ -1142,11 +1142,59 @@ profile, so its face crosses the surface's seam
 
 A face on a surface written as an open rectangle cannot be bounded across that
 seam. A region covering only some of the spans is a strip, whose boundary stays
-inside the rectangle and can be written as it stands - so the two cases are
-reported apart, and the reference ridge is the harder one. Until that is
-resolved the pass measures and reports and collapses nothing, which is
-deliberate for the same reason as before - a pass that silently did nothing
-would look exactly like one that found nothing.
+inside the rectangle - **and those are now written.**
+
+### Written: one face per declared strip
+
+`step-declare-grid-strip.py` is the reference ridge with its profile declared
+open rather than closed, which is the whole difference between a region a face
+can carry and one that cannot. The export replaces **240 facets with one
+`B_SPLINE_SURFACE_WITH_KNOTS` face**: cubic along the sweep with the interior
+knots the chord lengths gave it, ruled across the profile, bounded by the mesh's
+own straight edges. OpenCASCADE reads it back as one solid of one shell and puts
+the volume 0.005% above the faceted export's - the smooth surface standing off
+the chords by about the band, in the direction it should.
+
+Three things had to be true first, and two of them were not.
+
+**Membership is a question about facets, not about corners.** Every corner of a
+facet closing a declared-open profile is a point the generator emitted, so
+position alone claims it while its middle is nowhere near the surface. So is
+every corner of a facet the boolean retriangulated across two stations. The
+centroid is the cheapest point that is not a declared point, and requiring it on
+the surface refuses 108 of them on the strip fixture and 49 on the closed one -
+including, at last, the two end caps, which until now the region swallowed.
+
+**One tolerance, not two.** The recogniser asked `onSurface` with the raw
+tessellation band while `pointMember` floored it at 1e-7, so a grid whose
+interpolant is exact - a sweep along a straight line, where the band is zero -
+had the two disagreeing about the same point. `membershipTolerance()` is now the
+single answer, and the tube unit test is what caught it.
+
+**The boundary stays as the mesh has it**, which is the design and not a
+compromise, and it is where the intuition from the fillet path was wrong. A
+fillet's rail becomes an arc because that arc lies in the flat face beside it. A
+trimmed sweep's neighbours are the planar facets the boolean left, so a curve on
+the sweep lies in none of them, and a shared edge can only be the chord it
+already is. Taking the edges from the same map every other face uses is both the
+simplest thing and the only one that keeps the shell closed: the neighbour is
+asked to give up nothing.
+
+The face is written only under `step-approximate-surfaces`. That gate is honest
+rather than cautious: every other analytic face this exporter writes carries a
+surface the mesh lies on exactly, and this one is matched to within the grid's
+tessellation band - the model's own resolution, and not zero.
+
+The approximation export is now read back through OpenCASCADE too, not only
+validated. That file is where the newest geometry is, and `validatestep.py` can
+only say an entity is well formed; a kernel says whether a face builds from it.
+F7 is the standing argument - a B-spline surface with its knot lists in the
+wrong order passed every check in this suite and was silently dropped.
+
+**What remains is the seam.** A region that closes around its profile still
+stays faceted, and the reference ridge declared closed is that case. It needs
+either the surface written as closed in `v` with a seam edge carried in the
+loop, or the region split into strips that each stay inside the rectangle.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

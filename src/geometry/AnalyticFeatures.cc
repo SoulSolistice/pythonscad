@@ -816,6 +816,7 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
 
   std::vector<Patch> patches;
   std::vector<char> taken(loops.size(), 0);
+  std::size_t corners_only = 0;  // every corner on the sweep, the middle not
 
   // Which faces sit on either side of every edge of the mesh. Needed before the
   // boundaries are split rather than after, because for a declared grid the
@@ -866,7 +867,21 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
           break;
         }
       }
-      if (on) patch.facets.push_back(f);
+      if (!on) continue;
+      // Corners are not enough. Every corner of the facet closing a declared
+      // profile is a point the generator emitted, so position alone claims it
+      // even when the declaration does not cover that strip - which is exactly
+      // what a grid declared open does. The centroid is the cheapest point that
+      // is not a declared point, and asking whether it lies on the surface asks
+      // about the facet rather than about its corners.
+      Vector3d centroid = Vector3d::Zero();
+      for (const int v : loops[f]) centroid += vertices[v];
+      centroid /= double(loops[f].size());
+      if (!grid->onSurface(centroid, grid->membershipTolerance())) {
+        corners_only++;
+        continue;
+      }
+      patch.facets.push_back(f);
     }
     if (patch.facets.empty()) continue;
 
@@ -999,6 +1014,14 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
       longest = std::max(longest, run.verts.size() - 1);
       bounds = std::max(bounds, run.bound + 1);
     }
+  }
+  if (corners_only > 0) {
+    // Worth a line of its own: it is the difference between the facets a
+    // declaration claims and the facets that are actually on it, and the
+    // biggest single contributor is a face closing the profile of a grid
+    // declared open, every corner of which the generator emitted.
+    report.push_back(format("%d facets have every corner on the sweep and their middle off it",
+                            int(corners_only)));
   }
   if (live > 0) {
     report.push_back(format("%d declared sweep%s %s %d facets over %d boundary cycle%s, split "

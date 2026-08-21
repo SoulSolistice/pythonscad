@@ -378,6 +378,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // specific half, turning its answer into entities.
   AnalyticFeatures::Result features;
   std::vector<AnalyticFeatures::Patch> bezier_patches;
+  // Declared sweeps whose claimed region can be written as one face: a strip,
+  // whose boundary stays inside the surface's parameter rectangle. One closing
+  // around its profile crosses the surface's seam and is left faceted.
+  std::vector<AnalyticFeatures::Patch> grid_faces;
   // Parallel to `bezier_patches`: the exact quadric that patch lies on, or null
   // where it is written as the spline it is in general. See quadricOfPatch.
   std::vector<std::shared_ptr<Surface>> patch_quadric;
@@ -601,21 +605,39 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       for (const char c : span_used) used += c ? 1 : 0;
       const bool wraps = used == segs && g->closed_v;
       if (wraps) wrapping++;
-      else strips++;
+      else {
+        strips++;
+        // Written only under the approximation flag. Every other analytic face
+        // this exporter writes carries a surface the mesh lies on exactly; a
+        // declared sweep is matched to within its tessellation band, which is
+        // the model's own resolution and not zero.
+        if (approximate) {
+          grid_faces.push_back(patch);
+          for (const std::size_t f : patch.facets) features.consumed[f] = 1;
+        }
+      }
       LOG("STEP export: its facets lie over %1$d of the profile's %2$d spans - %3$s", used, segs,
           wraps ? "the region closes around the profile, so its face crosses the surface's seam"
                 : "the region is a strip, whose boundary stays inside the surface's rectangle");
     }
 
-    if (wrapping > 0 || strips > 0) {
-      // Nothing is written yet, and which sweep is blocked on what is worth
-      // saying apart. A strip is bounded by the mesh's own edges and waits only
-      // on the emitter; one that closes around its profile waits on a seam,
-      // which is a different piece of work.
+    if (!grid_faces.empty()) {
+      std::size_t written_facets = 0;
+      for (const auto& patch : grid_faces) written_facets += patch.facets.size();
+      LOG("STEP export: %1$d declared sweep%2$s written as one face each, replacing %3$d facets",
+          int(grid_faces.size()), grid_faces.size() == 1 ? "" : "s", int(written_facets));
+    }
+    if (wrapping > 0 || strips > grid_faces.size()) {
+      // Which sweep is blocked on what is worth saying apart. A strip is
+      // bounded by the mesh's own edges and needs only the approximation flag;
+      // one that closes around its profile crosses a seam, which is a different
+      // piece of work.
       LOG(message_group::Export_Warning,
-          "STEP export: declared sweeps are recognised but not yet written - %1$d wrap the "
-          "surface's seam, %2$d are strips",
-          int(wrapping), int(strips));
+          "STEP export: %1$d declared sweep%2$s left faceted - %3$d wrap the surface's seam, "
+          "%4$d await the approximation flag",
+          int(wrapping + strips - grid_faces.size()),
+          wrapping + strips - grid_faces.size() == 1 ? "" : "s", int(wrapping),
+          int(strips - grid_faces.size()));
     }
 
     if (approximate) {
@@ -1075,6 +1097,118 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
       face_edges_extra.push_back(face_edges_here);
     }
+  }
+
+  // ---- declared sweeps ---------------------------------------------------
+  //
+  // One face per claimed region, on the B-spline the declaration describes,
+  // bounded by the mesh's own straight edges.
+  //
+  // That last part is the whole design and it is not a compromise. The obvious
+  // move is to fit a curve along each boundary run, the way a fillet's rails
+  // become arcs - but a fillet's rail lies in the flat face beside it, and a
+  // trimmed sweep's boundary does not. Its neighbours here are the planar
+  // facets the boolean left, so a curve on the sweep lies in none of them, and
+  // a shared edge between the two can only be the chord it already is. Taking
+  // the edges from the same map every other face uses is therefore both the
+  // simplest thing and the only one that keeps the shell closed: the neighbour
+  // is not asked to give anything up.
+  for (const auto& patch : grid_faces) {
+    const auto *grid = dynamic_cast<const GridSurface *>(patch.surface.get());
+    if (grid == nullptr) continue;
+
+    int du = 0, dv = 0, nu = 0, nv = 0;
+    std::vector<Vector3d> ctrl;
+    std::vector<double> knots_u, knots_v;
+    std::vector<int> mults_u, mults_v;
+    if (!grid->splineForm(du, dv, nu, nv, ctrl, knots_u, mults_u, knots_v, mults_v)) continue;
+
+    std::vector<std::vector<Point *>> net;
+    for (int i = 0; i < nu; i++) {
+      std::vector<Point *> row;
+      for (int j = 0; j < nv; j++) {
+        row.push_back(new Point(entities, ctrl[std::size_t(i) * nv + j]));
+      }
+      net.push_back(row);
+    }
+    auto surface = new BSplineSurface(entities, "", du, dv, net);
+    surface->setKnots(knots_u, mults_u, knots_v, mults_v);
+
+    // The boundary, one cycle at a time. Patch::Run carries them in order with
+    // consecutive runs sharing an endpoint, so a cycle is its runs' vertices
+    // with the joins written once.
+    std::map<std::size_t, std::vector<int>> cycles;
+    for (const auto& run : patch.runs) {
+      std::vector<int>& cycle = cycles[run.bound];
+      for (std::size_t i = 0; i + 1 < run.verts.size(); i++) cycle.push_back(run.verts[i]);
+    }
+
+    std::vector<FaceBound *> bounds;
+    std::vector<EdgeCurve *> face_edges_here;
+    // Which cycle is the outer bound is a question about the surface's own
+    // parameters, not about the model: a hole in a face is a hole in its
+    // parameter rectangle. The largest area there is the one that contains the
+    // others.
+    std::size_t outer = 0;
+    double widest = -1.0;
+    std::map<std::size_t, double> area;
+    for (const auto& entry : cycles) {
+      std::vector<std::pair<double, double>> uv;
+      for (const int v : entry.second) {
+        double pu = 0, pv = 0;
+        if (!grid->project(vertices[v], pu, pv)) continue;
+        uv.emplace_back(pu, pv);
+      }
+      double twice = 0.0;
+      for (std::size_t i = 0; i < uv.size(); i++) {
+        const auto& a = uv[i];
+        const auto& b = uv[(i + 1) % uv.size()];
+        twice += a.first * b.second - b.first * a.second;
+      }
+      area[entry.first] = fabs(twice) / 2;
+      if (area[entry.first] > widest) {
+        widest = area[entry.first];
+        outer = entry.first;
+      }
+    }
+
+    for (const auto& entry : cycles) {
+      const std::vector<int>& cycle = entry.second;
+      if (cycle.size() < 3) continue;
+      std::vector<OrientedEdge *> loop;
+      for (std::size_t i = 0; i < cycle.size(); i++) {
+        const int a = cycle[i], b = cycle[(i + 1) % cycle.size()];
+        bool dir = true;
+        EdgeCurve *edge =
+          get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+        loop.push_back(new OrientedEdge(entities, edge, dir));
+        face_edges_here.push_back(edge);
+      }
+      auto edge_loop = new EdgeLoop(entities, loop);
+      bounds.push_back(new FaceBound(entities, edge_loop, true, entry.first == outer));
+    }
+    if (bounds.empty()) continue;
+
+    // Which way the face points. du x dv has no reason to agree with the mesh,
+    // so it is compared against a facet the region actually contains.
+    bool outward = true;
+    if (!patch.facets.empty()) {
+      const std::vector<int>& facet = loops[patch.facets.front()];
+      Vector3d centroid = Vector3d::Zero();
+      for (const int v : facet) centroid += vertices[v];
+      centroid /= double(facet.size());
+      double pu = 0, pv = 0;
+      grid->project(centroid, pu, pv);
+      const double h = 1e-5;
+      const Vector3d d_u = grid->evaluate(std::min(1.0, pu + h), pv) -
+                           grid->evaluate(std::max(0.0, pu - h), pv);
+      const Vector3d d_v = grid->evaluate(pu, std::min(1.0, pv + h)) -
+                           grid->evaluate(pu, std::max(0.0, pv - h));
+      outward = d_u.cross(d_v).dot(loop_normals[patch.facets.front()]) > 0;
+    }
+
+    sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
+    face_edges_extra.push_back(face_edges_here);
   }
 
   // Build the loops, their edges and the carrier planes.

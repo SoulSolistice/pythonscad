@@ -44,15 +44,15 @@ Claiming 348 rather than 356 is the honest ceiling: the eight are where the
 union actually removed surface, and the 185 cut across it are the facets the
 trim left straddling the ridge's edge.
 
-Those 348 then have to be one *face*, which is a stricter thing than 348 claims:
-a sheet, with a boundary that closes, split into runs each of which a single
-neighbouring face can replace in step. They are, and the shape of the answer is
-the interesting part. The boundary is **two** cycles rather than one, because a
-sweep closed around its profile and trimmed against a wall is an annulus - the
-case a fillet patch never produces, and the reason the boundary walk cannot stop
-at the first cycle it closes. The 185 runs are the 185 cut facets: each one
-meets the ridge along its own stretch of the boundary, so there is one run per
-neighbour, none longer than 7 mesh edges, and none unresolved.
+Those 348 then have to be one *face*, which is a stricter thing than 348 claims,
+and being claimed by position is not enough to be on the sweep. Every corner of
+this ridge's two end caps is a point the generator emitted, and so is every
+corner of a facet the boolean retriangulated across two stations - and their
+middles are off the surface. Asking whether the facet's centroid lies on the
+sweep asks about the facet rather than about its corners, and refuses 49 of
+them. What is left is 299 facets forming one sheet with one boundary, split into
+282 runs of at most 7 mesh edges with a single neighbouring face behind each,
+none unresolved.
 
 Nothing is written yet, and what stands in the way is not what it looked like.
 The profile here is declared closed, so the sweep is a tube and its surface is
@@ -71,7 +71,8 @@ destroys.
 """
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
 # EXPECT: a declared 60x4 sweep claims 348 facets whole, 185 cut across it, within its tessellation band of 0.0660
-# EXPECT: 1 declared sweep covers 348 facets over 2 boundary cycles, split into 185 runs of up to 7 mesh edges, 0 unresolved
+# EXPECT: 49 facets have every corner on the sweep and their middle off it
+# EXPECT: 1 declared sweep covers 299 facets over 1 boundary cycle, split into 282 runs of up to 7 mesh edges, 0 unresolved
 # EXPECT: its facets lie over 4 of the profile's 4 spans - the region closes around the profile, so its face crosses the surface's seam
 from pythonscad import *
 import math
