@@ -20,7 +20,7 @@ cuts the ridge along its base, and the numbers below say exactly what that costs
 
   the ridge alone                              356 claimed whole,   0 cut
   fused onto the wall, by declared points       63 claimed whole, 237 cut
-  fused onto the wall, by the surface          348 claimed whole, 185 cut
+  fused onto the wall, by the surface          349 claimed whole, 184 cut
 
 The middle line is what declaring the grid alone achieved, and it was not
 enough: only the facets the boolean never touched were claimed, because
@@ -36,12 +36,12 @@ constant. The declared sweep is smooth; the mesh is its tessellation; a boolean
 cuts the *tessellation*, so the vertices it creates lie on facets, standing off
 the smooth surface by up to the sagitta of a station. At 1e-7 every one is
 refused - projection alone moved 63 to 66. So the tolerance is the grid's own
-tessellation band, the widest the interpolant departs from the chords through
-the points it was built from: 0.0660 here, printed on every export because it is
-the number being trusted.
+tessellation band, the widest the interpolant departs from the flat facets
+covering it: 0.1290 here, printed on every export because it is the number being
+trusted.
 
-Claiming 348 rather than 356 is the honest ceiling: the eight are where the
-union actually removed surface, and the 185 cut across it are the facets the
+Claiming 349 rather than 356 is the honest ceiling: the seven are where the
+union actually removed surface, and the 184 cut across it are the facets the
 trim left straddling the ridge's edge.
 
 Those 348 then have to be one *face*, which is a stricter thing than 348 claims,
@@ -58,7 +58,7 @@ The profile here is declared closed, so the sweep is a tube and its surface is
 closed across v, and the claimed facets lie over all four of the profile's
 spans: the region closes around the profile. A face on a surface written as an
 open rectangle cannot be bounded across its own seam, so the region is **cut**
-into two arcs of two spans each, and each arc is written as its own face - 299
+into two arcs of two spans each, and each arc is written as its own face - 300
 facets replaced by two.
 
 Cutting rather than seaming is a choice about what the operation has to survive.
@@ -81,16 +81,16 @@ destroys.
 OpenCASCADE reads the result back as one solid of one shell. Its volume is 0.15%
 under the faceted export's, which is the smooth surface departing from the
 chords: spread over the ridge's roughly 1280 square units of surface that is an
-average normal displacement of about 0.02, against a tessellation band of 0.0660
+average normal displacement of about 0.02, against a tessellation band of 0.1290
 - inside what the mesh leaves open, which is the whole claim being made.
 """
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
-# EXPECT: a declared 60x4 sweep claims 348 facets whole, 185 cut across it, within its tessellation band of 0.0660
+# EXPECT: a declared 60x4 cubic sweep claims 349 facets whole, 184 cut across it, within its tessellation band of 0.1290
 # EXPECT: 49 facets have every corner on the sweep and their middle off it
 # EXPECT: a sweep closing around its profile was cut into 2 faces, so that no face crosses the surface's seam
-# EXPECT: 2 declared sweeps cover 299 facets over 1 boundary cycle, split into 402 runs of up to 7 mesh edges, 0 unresolved
+# EXPECT: 2 declared sweeps cover 300 facets over 1 boundary cycle, split into 401 runs of up to 8 mesh edges, 0 unresolved
 # EXPECT-NOT: written as one face each
-# APPROX: 2 declared sweeps written as one face each, replacing 299 facets
+# APPROX: 2 declared sweeps written as one face each, replacing 300 facets
 # EXPECT: its facets lie over 2 of the profile's 4 spans - the region is a strip, whose boundary stays inside the surface's rectangle
 from pythonscad import *
 import math

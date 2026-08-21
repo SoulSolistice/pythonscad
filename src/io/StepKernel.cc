@@ -444,8 +444,15 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         // Below the threshold there is nothing to recover and the region is
         // left alone rather than fitted to something plausible.
         if (region.regularity < 0.95 || region.interior_vertices == 0) continue;
-        guess = AnalyticFeatures::gridFromRegion(mesh, region, model_tol);
-        if (guess == nullptr) continue;
+        const char *why = "no reason was given";
+        guess = AnalyticFeatures::gridFromRegion(mesh, region, model_tol, &why);
+        if (guess == nullptr) {
+          // A region this regular is one the measurement said could be fitted,
+          // so failing to recover it is worth a line rather than a silence.
+          LOG("STEP export: a region of %1$d facets kept its ordering but was not recovered: %2$s",
+              int(region.facets.size()), why);
+          continue;
+        }
         recovered++;
         coarsest = std::max(coarsest, region.band);
         addSurfaceUnique(effective, guess);
@@ -603,7 +610,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // question it has to answer is whether the declaration still matches the
     // mesh once the booleans have run - a record which matches nothing is
     // harmless but useless, and looks identical to one that was never made.
-    for (const auto& surface : surfaces) {
+    for (const auto& surface : effective) {
       const auto *grid = dynamic_cast<const GridSurface *>(surface.get());
       if (grid == nullptr) continue;
       std::size_t whole = 0, partly = 0;
@@ -624,9 +631,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         // surface, up to the sagitta of a station away. That is the widest a
         // claim here can be wrong by, and it is the model's own resolution
         // rather than a constant somebody chose.
-        "STEP export: a declared %1$dx%2$d sweep claims %3$d facets whole, %4$d cut across it, "
-        "within its tessellation band of %5$.4f",
-        grid->rows, grid->cols, int(whole), int(partly), grid->tessellationBand());
+        "STEP export: a declared %1$dx%2$d %3$s sweep claims %4$d facets whole, %5$d cut across "
+        "it, within its tessellation band of %6$.4f",
+        grid->rows, grid->cols, grid->interpolated() ? "cubic" : "linear", int(whole), int(partly),
+        grid->tessellationBand());
     }
 
     // What those claimed facets look like as a face: one sheet, and a boundary
@@ -750,9 +758,9 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         // a pass which quietly wrote nothing here would look exactly like one
         // which found nothing to write.
         LOG(message_group::Export_Warning,
-            "STEP export: %1$d region%2$s stay faceted, no fit having been found for them - "
-            "which is always a valid export",
-            int(regions.size()), regions.size() == 1 ? "" : "s");
+            "STEP export: %1$d region%2$s faceted, no fit having been found - which is always "
+            "a valid export",
+            int(regions.size()), regions.size() == 1 ? " stays" : "s stay");
       }
     }
   }

@@ -305,7 +305,8 @@ std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& regio
  *
  * The result is an ordinary GridSurface, so what happens to it afterwards is
  * exactly what happens to one the model declared. */
-std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& region, double tol);
+std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& region, double tol,
+                                        const char **why = nullptr);
 
 std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<char>& consumed,
                                            double smooth_angle);

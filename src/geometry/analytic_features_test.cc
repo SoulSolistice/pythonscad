@@ -662,3 +662,145 @@ TEST_CASE("the approximation pass fits a cylinder nobody declared", "[analytic][
     CHECK(fitCylinder(cyl.mesh(), flat, 1e-5) == nullptr);
   }
 }
+
+namespace {
+
+/*! A twisted quad patch, triangulated - the shape a swept wall arrives as.
+ *
+ * `flip` alternates which diagonal each quad is split by, because nothing
+ * guarantees a mesher picks the same one twice and the recovery must not
+ * depend on it. */
+struct TriangulatedPatch {
+  std::vector<Vector3d> vertices;
+  std::vector<std::vector<int>> loops;
+  std::vector<Vector3d> normals;
+  std::vector<char> valid, is_hole;
+
+  TriangulatedPatch(int rows, int cols, bool flip)
+  {
+    for (int i = 0; i < rows; i++) {
+      const double t = double(i) / (rows - 1);
+      const double a = 0.9 * t;
+      for (int j = 0; j < cols; j++) {
+        const double s = -1.0 + 2.0 * j / (cols - 1);
+        vertices.emplace_back(s * cos(a) - sin(a), s * sin(a) + cos(a), 4.0 * t);
+      }
+    }
+    for (int i = 0; i + 1 < rows; i++) {
+      for (int j = 0; j + 1 < cols; j++) {
+        const int a = i * cols + j, b = i * cols + j + 1;
+        const int c = (i + 1) * cols + j + 1, d = (i + 1) * cols + j;
+        if (flip && ((i + j) % 2)) {
+          loops.push_back({a, b, d});
+          loops.push_back({b, c, d});
+        } else {
+          loops.push_back({a, b, c});
+          loops.push_back({a, c, d});
+        }
+        normals.emplace_back(0, 0, 1);
+        normals.emplace_back(0, 0, 1);
+      }
+    }
+    valid.assign(loops.size(), 1);
+    is_hole.assign(loops.size(), 0);
+  }
+
+  [[nodiscard]] Mesh mesh() const
+  {
+    Mesh m;
+    m.vertices = &vertices;
+    m.loops = &loops;
+    m.valid = &valid;
+    m.is_hole = &is_hole;
+    m.normals = &normals;
+    return m;
+  }
+
+  [[nodiscard]] SmoothRegion region() const
+  {
+    SmoothRegion r;
+    for (std::size_t f = 0; f < loops.size(); f++) r.facets.push_back(f);
+    return r;
+  }
+};
+
+}  // namespace
+
+TEST_CASE("a swept grid is recovered from the facets it was tessellated into",
+          "[analytic][approximate]")
+{
+  const int rows = 8, cols = 5;
+
+  SECTION("whichever diagonal the mesher chose")
+  {
+    // The pairing cannot lean on edge length: a swept grid's quads are skewed
+    // parallelograms, where the short diagonal is shorter than the sides, and
+    // near the boundary a side can be the longest edge a triangle has.
+    for (const bool flip : {false, true}) {
+      TriangulatedPatch patch(rows, cols, flip);
+      const char *why = "";
+      const std::shared_ptr<Surface> found =
+        gridFromRegion(patch.mesh(), patch.region(), 1e-5, &why);
+      INFO((flip ? "alternating diagonals: " : "uniform diagonals: ") << why);
+      REQUIRE(found != nullptr);
+      const auto *grid = dynamic_cast<const GridSurface *>(found.get());
+      REQUIRE(grid != nullptr);
+      // Which axis came out as rows is the flood fill's choice, not the
+      // model's; both describe the same sweep.
+      CHECK(std::size_t(grid->rows) * grid->cols == std::size_t(rows) * cols);
+      CHECK(grid->net.size() == patch.vertices.size());
+      // Every vertex is one of the grid's points, and the surface passes
+      // through it.
+      for (const auto& v : patch.vertices) CHECK(grid->isDeclaredPoint(v));
+    }
+  }
+
+  SECTION("and the facets it was recovered from are members of it")
+  {
+    // The point of recovering it at all. A facet's middle is not a vertex, so
+    // this exercises the band rather than the point lookup - and it is what
+    // refused every facet of a recovered grid while the band was measured at
+    // the cell centre only.
+    TriangulatedPatch patch(rows, cols, false);
+    const std::shared_ptr<Surface> found = gridFromRegion(patch.mesh(), patch.region(), 1e-5);
+    REQUIRE(found != nullptr);
+    const auto *grid = dynamic_cast<const GridSurface *>(found.get());
+    REQUIRE(grid != nullptr);
+    for (const auto& loop : patch.loops) {
+      Vector3d centroid = Vector3d::Zero();
+      for (const int v : loop) centroid += patch.vertices[v];
+      centroid /= double(loop.size());
+      CHECK(grid->onSurface(centroid, grid->membershipTolerance()));
+    }
+  }
+
+  SECTION("a fan is not a grid, and says so")
+  {
+    // Triangles that pair into no consistent quad layout. Refusing is the
+    // answer; approximating one anyway would invent a surface.
+    std::vector<Vector3d> verts{{0, 0, 0}};
+    std::vector<std::vector<int>> loops;
+    std::vector<Vector3d> normals;
+    for (int i = 0; i < 8; i++) {
+      const double a = 2 * M_PI * i / 8;
+      verts.emplace_back(cos(a), sin(a), 0.0);
+    }
+    for (int i = 1; i <= 8; i++) {
+      loops.push_back({0, i, i % 8 + 1});
+      normals.emplace_back(0, 0, 1);
+    }
+    std::vector<char> valid(loops.size(), 1), is_hole(loops.size(), 0);
+    Mesh m;
+    m.vertices = &verts;
+    m.loops = &loops;
+    m.valid = &valid;
+    m.is_hole = &is_hole;
+    m.normals = &normals;
+    SmoothRegion region;
+    for (std::size_t f = 0; f < loops.size(); f++) region.facets.push_back(f);
+    const char *why = "";
+    CHECK(gridFromRegion(m, region, 1e-5, &why) == nullptr);
+    INFO(why);
+    CHECK(std::string(why).size() > 0);
+  }
+}

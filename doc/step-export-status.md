@@ -1263,13 +1263,65 @@ four refused, and the pass reports both numbers - how many it took and how many
 it left. A pass that quietly wrote nothing would look exactly like one that
 found nothing to write.
 
+### Recovering the grid, which closes the other half
+
+`step-approximate-report` has measured its four helicoid walls at **100% regular
+over 330 interior vertices** since the day that measurement landed, and declined
+them ever since. `gridFromRegion` recovers what that number says is still there.
+**2048 facets become 4 faces**, each a 24x17 or 10x17 cubic sweep. OCCT reads the
+result as one solid of one shell, volume 798.716 against the faceted export's
+800.717 - over 570 square units of wall, an average normal displacement of
+0.0035 against a band of 0.0107.
+
+The recovered grid is handed over as a *declaration*, the same as the cylinder
+fit, so everything after it is the path already built for grids the model
+declared: membership, the boundary walk, cutting at the seam, emission.
+
+Three things had to be got right, and the first two were got wrong first.
+
+**Which edge is the diagonal.** The obvious rule - the edge that is the longest
+in both its triangles - is the hypotenuse rule, and it holds for a grid of
+rectangles. A swept wall is a grid of skewed parallelograms, where the short
+diagonal is shorter than the sides, and near the boundary a side can be the
+longest edge a triangle has. Both failures were measured before the rule was
+replaced: quads are now scored by how close they come to a parallelogram and
+paired greedily from the best down, with augmenting-path repair because greedy
+alone stranded triangles on every wall.
+
+**Which way round a quad is written.** The layout turns the same way at every
+step, so it needs every quad wound the same way. Taking the shared edge as the
+edge *key* gives each quad an arbitrary handedness - the key is sorted by vertex
+index - and the layout then disagreed with itself wherever two neighbours were
+written opposite ways round. The winding comes from the mesh instead.
+
+**What the band actually measures.** This one was a real defect in code that had
+already shipped. `tessellationBand()` measured the sagitta of the chords along a
+column: how far the interpolant bows away from the sweep direction. But
+membership is asked about *facets*, and a facet's middle is neither a vertex nor
+a chord midpoint - it sits inside a cell, and the flat triangles covering that
+cell stand off the smooth surface by more than the chord midpoint does. Measured
+on a twisted patch: band 0.000271, middles out by 0.000373. That gap refused
+every facet of a grid that had just been recovered from them, while their
+corners passed. The band is now sampled across each cell against the bilinear
+patch through its corners, plus half the warp - the amount by which either
+triangulation of a non-planar quad falls inside that patch. The declared ridge's
+band moves from 0.0660 to 0.1290 for the same reason, and it was always the
+truer number.
+
+There is one guard, and it earns its place: the band is not only a measurement
+here but the tolerance membership is then answered at, so a wild recovery would
+arrive with a wild band and admit everything. A grid whose interpolant bows by
+more than a quarter of a cell is refused - a property of the grid itself, not of
+the caller's bookkeeping.
+
 **What remains.** Declared sweeps are recognised, cut where they must be, and
-written; the approximation pass writes cylinders. What is left is the round trip
-through SolidWorks and Fusion - which are not OCCT, and where the failure that
-started this was seen - and more shapes for the approximation pass: a sphere and
-a cone are the same fit with a different unknown, and a general fitted spline
-over a region whose grid survives is the case `step-approximate-report` measures
-at 100% regular and still declines.
+written; the approximation pass writes both cylinders and recovered sweeps. What
+is left is the round trip through SolidWorks and Fusion - which are not OCCT, and
+where the failure that started this was seen - and more shapes for the quadric
+fit: a sphere is a linear least squares through the vertices and a cone a linear
+one through the tangent planes, but neither collapses through this exporter's
+band path, which takes a cone as two rims matching declared cylinders. That is a
+different piece of work from the fit itself.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

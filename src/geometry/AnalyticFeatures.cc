@@ -432,18 +432,35 @@ std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& regio
   return std::make_shared<CylinderSurface>(centre, axis, r);
 }
 
-std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& region, double tol)
+std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& region, double tol,
+                                        const char **why)
 {
+  auto refuse = [&](const char *reason) -> std::shared_ptr<Surface> {
+    if (why != nullptr) *why = reason;
+    return nullptr;
+  };
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
-  if (region.facets.size() < 2) return nullptr;
+  if (region.facets.size() < 2) return refuse("it is a single facet");
 
   // Recover the quads. A generator's sweep is a quad grid; whether it reaches
   // here as quads or as pairs of triangles depends on what merged the facets,
-  // so both are accepted. A pair of triangles is one quad when the edge between
-  // them is the longest edge of both - the hypotenuse of each half - which is
-  // what splitting a quad by a diagonal makes it, and what splitting a genuine
-  // triangle fan does not.
+  // so both are accepted.
+  //
+  // Which edge between two triangles is the diagonal is the whole difficulty,
+  // and the obvious answer is wrong. "The longest edge of both" is the
+  // hypotenuse rule, and it holds for a grid of rectangles and fails for a grid
+  // of skewed parallelograms - a twisted extrusion's walls, where the short
+  // diagonal is shorter than the sides, and where near the boundary a side can
+  // be the longest edge a triangle has. Both failures were measured on
+  // step-approximate-report before this was written the second time.
+  //
+  // What does hold is that a swept grid's quads are nearly parallelograms. So
+  // every interior edge is scored by how close the quad across it would come to
+  // one, and the pairing is taken greedily from the best score down. That is a
+  // heuristic, and it does not have to be right: the layout below either comes
+  // out a rectangle of coordinates or it does not, so a wrong pairing is
+  // refused rather than believed.
   std::map<EdgeKey, std::vector<std::size_t>> users;
   for (const std::size_t f : region.facets) {
     const std::vector<int>& loop = loops[f];
@@ -451,52 +468,132 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
       users[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
     }
   }
-  auto longestEdge = [&](const std::vector<int>& loop) {
-    double best = -1;
-    EdgeKey which(0, 0);
-    for (std::size_t i = 0; i < loop.size(); i++) {
-      const int a = loop[i], b = loop[(i + 1) % loop.size()];
-      const double len = (vertices[a] - vertices[b]).squaredNorm();
-      if (len > best) {
-        best = len;
-        which = edgeKey(a, b);
-      }
-    }
-    return which;
-  };
 
   std::vector<std::vector<int>> quads;
   std::set<std::size_t> paired;
+  std::set<std::size_t> triangles;
   for (const std::size_t f : region.facets) {
-    if (paired.count(f)) continue;
     const std::vector<int>& loop = loops[f];
     if (loop.size() == 4) {
       quads.push_back(loop);
       paired.insert(f);
       continue;
     }
-    if (loop.size() != 3) return nullptr;
-    const EdgeKey diagonal = longestEdge(loop);
-    const auto it = users.find(diagonal);
-    if (it == users.end() || it->second.size() != 2) return nullptr;
-    const std::size_t other = it->second[0] == f ? it->second[1] : it->second[0];
-    if (paired.count(other) || loops[other].size() != 3) return nullptr;
-    if (!(longestEdge(loops[other]) == diagonal)) return nullptr;
-    // Stitch the two halves into one quad: the diagonal's two ends, with each
-    // triangle's odd vertex between them.
+    if (loop.size() != 3) {
+      return refuse("it has a facet that is neither a triangle nor a quad");
+    }
+    triangles.insert(f);
+  }
+
+  struct Candidate {
+    double score;
+    std::size_t a, b;
+    std::vector<int> quad;
+  };
+  std::vector<Candidate> candidates;
+  for (const auto& entry : users) {
+    if (entry.second.size() != 2) continue;
+    const std::size_t f = entry.second[0], g = entry.second[1];
+    if (!triangles.count(f) || !triangles.count(g)) continue;
     auto opposite = [&](std::size_t face) {
       for (const int v : loops[face]) {
-        if (v != diagonal.first && v != diagonal.second) return v;
+        if (v != entry.first.first && v != entry.first.second) return v;
       }
       return -1;
     };
-    const int a = opposite(f), b = opposite(other);
-    if (a < 0 || b < 0) return nullptr;
-    quads.push_back({diagonal.first, a, diagonal.second, b});
-    paired.insert(f);
-    paired.insert(other);
+    const int a = opposite(f), b = opposite(g);
+    if (a < 0 || b < 0) continue;
+    // The quad in cyclic order, and the order has to come from the mesh rather
+    // than from the edge key. The key is sorted by vertex index, so taking it as
+    // written gives each quad an arbitrary handedness, and the layout below -
+    // which turns the same way at every step - then disagrees with itself
+    // wherever two neighbours were written opposite ways round. That is what it
+    // did on every wall of step-approximate-report.
+    //
+    // The shared edge is interior to the quad, so the quad's own boundary is
+    // the four outer edges: with f running u->v, they are v->a, a->u from f and
+    // u->b, b->v from g.
+    int u = entry.first.first, v = entry.first.second;
+    bool found = false;
+    for (std::size_t i = 0; i < loops[f].size() && !found; i++) {
+      const int x = loops[f][i], y = loops[f][(i + 1) % loops[f].size()];
+      if (x == u && y == v) found = true;
+      else if (x == v && y == u) {
+        std::swap(u, v);
+        found = true;
+      }
+    }
+    if (!found) continue;
+    const Vector3d p0 = vertices[v], p1 = vertices[a];
+    const Vector3d p2 = vertices[u], p3 = vertices[b];
+    const double perimeter =
+      (p1 - p0).norm() + (p2 - p1).norm() + (p3 - p2).norm() + (p0 - p3).norm();
+    if (!(perimeter > 0)) continue;
+    const double skew =
+      ((p1 - p0) - (p2 - p3)).norm() + ((p2 - p1) - (p3 - p0)).norm();
+    candidates.push_back({skew / perimeter, f, g, {v, a, u, b}});
   }
-  if (quads.empty()) return nullptr;
+  std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& x, const Candidate& y) { return x.score < y.score; });
+
+  // Greedy from the best score down, and then repaired. Greedy alone strands
+  // triangles - it did, on every wall of step-approximate-report - because
+  // taking the best pair available can leave a neighbour with none, and on a
+  // grid where every quad scores about the same the order is close to
+  // arbitrary. The repair is the standard one: walk an augmenting path from
+  // each stranded triangle, breaking and remaking pairs along it.
+  std::map<std::size_t, std::vector<std::size_t>> neighbours;
+  std::map<std::pair<std::size_t, std::size_t>, std::size_t> quad_of;
+  for (std::size_t c = 0; c < candidates.size(); c++) {
+    neighbours[candidates[c].a].push_back(candidates[c].b);
+    neighbours[candidates[c].b].push_back(candidates[c].a);
+    quad_of[{candidates[c].a, candidates[c].b}] = c;
+    quad_of[{candidates[c].b, candidates[c].a}] = c;
+  }
+  std::map<std::size_t, std::size_t> partner;
+  for (const auto& candidate : candidates) {
+    if (partner.count(candidate.a) || partner.count(candidate.b)) continue;
+    partner[candidate.a] = candidate.b;
+    partner[candidate.b] = candidate.a;
+  }
+  std::function<bool(std::size_t, std::set<std::size_t>&)> augment =
+    [&](std::size_t u, std::set<std::size_t>& seen) {
+      for (const std::size_t v : neighbours[u]) {
+        if (seen.count(v)) continue;
+        seen.insert(v);
+        const auto held = partner.find(v);
+        if (held == partner.end()) {
+          partner[v] = u;
+          partner[u] = v;
+          return true;
+        }
+        const std::size_t displaced = held->second;
+        partner.erase(displaced);
+        partner.erase(v);
+        if (augment(displaced, seen)) {
+          partner[v] = u;
+          partner[u] = v;
+          return true;
+        }
+        partner[v] = displaced;
+        partner[displaced] = v;
+      }
+      return false;
+    };
+  for (const std::size_t f : triangles) {
+    if (partner.count(f)) continue;
+    std::set<std::size_t> seen{f};
+    if (!augment(f, seen)) return refuse("a triangle pairs with no neighbour into a quad");
+  }
+  for (const auto& entry : partner) {
+    if (entry.first > entry.second) continue;  // once per pair
+    const auto it = quad_of.find({entry.first, entry.second});
+    if (it == quad_of.end()) return refuse("a pairing has no quad behind it");
+    quads.push_back(candidates[it->second].quad);
+    paired.insert(entry.first);
+    paired.insert(entry.second);
+  }
+  if (quads.empty()) return refuse("no quads could be recovered");
 
   // Lay the quads out on integer coordinates, by flood fill from one of them.
   // A quad sharing an edge with a placed quad has two of its corners placed
@@ -547,16 +644,20 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
       const std::pair<int, int> a = coord[quad[known]];
       const std::pair<int, int> b = coord[quad[(known + 1) % 4]];
       const int di = b.first - a.first, dj = b.second - a.second;
-      if (abs(di) + abs(dj) != 1) return nullptr;  // not a unit step: not a grid
+      if (abs(di) + abs(dj) != 1) return refuse("the quads do not step by one, so they are not a grid");
       const int pi = -dj, pj = di;                 // turn left, into the new quad
-      if (!place(quad[(known + 2) % 4], b.first + pi, b.second + pj)) return nullptr;
-      if (!place(quad[(known + 3) % 4], a.first + pi, a.second + pj)) return nullptr;
+      if (!place(quad[(known + 2) % 4], b.first + pi, b.second + pj)) {
+        return refuse("the layout disagrees with itself, so the region folds or wraps");
+      }
+      if (!place(quad[(known + 3) % 4], a.first + pi, a.second + pj)) {
+        return refuse("the layout disagrees with itself, so the region folds or wraps");
+      }
       placed[q] = 1;
       moved = true;
     }
   }
   for (const char c : placed) {
-    if (!c) return nullptr;  // the region is not one connected sheet of quads
+    if (!c) return refuse("the quads are not one connected sheet");
   }
 
   int lo_i = 0, hi_i = 0, lo_j = 0, hi_j = 0;
@@ -570,8 +671,8 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
     first = false;
   }
   const int rows = hi_i - lo_i + 1, cols = hi_j - lo_j + 1;
-  if (rows < 2 || cols < 2) return nullptr;
-  if (std::size_t(rows) * cols != coord.size()) return nullptr;  // holes, or a fold
+  if (rows < 2 || cols < 2) return refuse("the recovered grid is one row or one column");
+  if (std::size_t(rows) * cols != coord.size()) return refuse("the recovered grid is not a full rectangle");
 
   std::vector<Vector3d> net(std::size_t(rows) * cols, Vector3d::Zero());
   std::vector<char> filled(std::size_t(rows) * cols, 0);
@@ -581,16 +682,35 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
     filled[at] = 1;
   }
   for (const char c : filled) {
-    if (!c) return nullptr;
+    if (!c) return refuse("the recovered grid has a gap in it");
   }
 
   // The grid is only worth declaring if the surface it describes passes through
   // the points it was built from, which is what GridSurface's own interpolation
   // decides. Cubic along the sweep needs four stations; below that the fit is
   // the mesh again and buys nothing.
-  if (rows < 4) return nullptr;
+  if (rows < 4) return refuse("the sweep has fewer than four stations, so there is no cubic to fit");
   auto grid = std::make_shared<GridSurface>(rows, cols, net, false);
-  if (grid->tessellationBand() > region.band * 4 + tol) return nullptr;
+
+  // One guard, and it matters more than it looks. The band is not only a
+  // measurement here - it is the tolerance membership is then answered at - so
+  // a wild recovery would come with a wild band and admit everything. Against
+  // what, though, has to be a property of the grid itself rather than of the
+  // caller's bookkeeping: a surface that bows by a quarter of a cell is not
+  // describing this tessellation, whatever the region record happens to say.
+  double scale = 0;
+  int cells = 0;
+  for (int i = 0; i + 1 < rows; i++) {
+    for (int j = 0; j + 1 < cols; j++) {
+      scale += (grid->at(i + 1, j + 1) - grid->at(i, j)).norm();
+      cells++;
+    }
+  }
+  if (cells == 0 || !(scale > 0)) return refuse("the recovered grid has no extent");
+  scale /= cells;
+  if (grid->tessellationBand() > 0.25 * scale + tol) {
+    return refuse("the interpolant bows by more than a quarter of a cell");
+  }
   return grid;
 }
 
@@ -1054,6 +1174,7 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
   std::vector<char> taken(loops.size(), 0);
   std::size_t corners_only = 0;  // every corner on the sweep, the middle not
   std::size_t cut_into = 0;      // faces a wrapping claim had to be cut into
+  double worst_miss = 0, missed_against = 0;  // how far off, and what was allowed
 
   // Which faces sit on either side of every edge of the mesh. Needed before the
   // boundaries are split rather than after, because for a declared grid the
@@ -1120,9 +1241,15 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
       for (const int v : loops[f]) centroid += vertices[v];
       centroid /= double(loops[f].size());
       double pu = 0, pv = 0;
-      if (!grid->project(centroid, pu, pv) ||
-          (grid->evaluate(pu, pv) - centroid).norm() > grid->membershipTolerance()) {
+      if (!grid->project(centroid, pu, pv)) {
         corners_only++;
+        continue;
+      }
+      const double miss = (grid->evaluate(pu, pv) - centroid).norm();
+      if (miss > grid->membershipTolerance()) {
+        corners_only++;
+        worst_miss = std::max(worst_miss, miss);
+        missed_against = grid->membershipTolerance();
         continue;
       }
       claimed.push_back(f);
@@ -1343,8 +1470,9 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     // declaration claims and the facets that are actually on it, and the
     // biggest single contributor is a face closing the profile of a grid
     // declared open, every corner of which the generator emitted.
-    report.push_back(format("%d facets have every corner on the sweep and their middle off it",
-                            int(corners_only)));
+    report.push_back(format("%d facets have every corner on the sweep and their middle off it, "
+                            "by up to %.4f against an allowance of %.4f",
+                            int(corners_only), worst_miss, missed_against));
   }
   if (live > 0) {
     report.push_back(format("%d declared sweep%s %s %d facets over %d boundary cycle%s, split "

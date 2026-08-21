@@ -19,7 +19,7 @@ position alone claims them - and their middles are nowhere near the declared
 surface. Asking whether the facet's centroid lies on the sweep asks about the
 facet instead, and here it refuses 108 of them.
 
-What is written is one B_SPLINE_SURFACE_WITH_KNOTS face replacing 240 facets:
+What is written is one B_SPLINE_SURFACE_WITH_KNOTS face replacing 241 facets:
 cubic along the sweep with the interior knots the chord lengths gave it, ruled
 across the profile, bounded by the mesh's own straight edges.
 
@@ -35,17 +35,17 @@ neighbour gives up nothing.
 The face is written only under step-approximate-surfaces, and that gate is
 honest rather than cautious. Every other analytic face this exporter writes
 carries a surface the mesh lies on exactly. This one is matched to within the
-grid's tessellation band - 0.0660 here - which is the model's own resolution and
+grid's tessellation band - 0.1290 here - which is the model's own resolution and
 not zero. OpenCASCADE reads the result back as one solid of one shell and puts
 its volume 0.005% above the faceted export's, which is the smooth surface
 standing off the chords by about that band, in the direction it should.
 """
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
 # EXPECT: 108 facets have every corner on the sweep and their middle off it
-# EXPECT: 1 declared sweep covers 240 facets over 2 boundary cycles
+# EXPECT: 1 declared sweep covers 241 facets over 2 boundary cycles
 # EXPECT: the region is a strip, whose boundary stays inside the surface's rectangle
 # EXPECT-NOT: written as one face each
-# APPROX: 1 declared sweep written as one face each, replacing 240 facets
+# APPROX: 1 declared sweep written as one face each, replacing 241 facets
 from pythonscad import *
 import math
 

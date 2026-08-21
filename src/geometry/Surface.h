@@ -299,6 +299,12 @@ public:
    * up asking for equality to the last bit. Every caller deciding whether a
    * point is on this surface uses this, or two of them disagree about the same
    * point. */
+  /*! Whether a cubic was actually fitted along the sweep. False when the grid
+   * was too short for one, or when its stations repeat and leave no parameter -
+   * in which case `evaluate` walks the declared points linearly, which is the
+   * mesh again. */
+  [[nodiscard]] bool interpolated() const { return !poles.empty(); }
+
   [[nodiscard]] double membershipTolerance() const { return std::max(band, 1e-7); }
 
   /*! Whether `pt` is one of the points the generator emitted. Exact, by

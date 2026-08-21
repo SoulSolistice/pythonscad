@@ -664,6 +664,39 @@ void GridSurface::buildSpline()
       band = std::max(band, (evaluate(mid, v) - (at(i, j) + at(i + 1, j)) / 2).norm());
     }
   }
+  // And then over the cells, because a chord along a column is not what the
+  // mesh actually covers this surface with.
+  //
+  // Membership is asked about facets, and a facet's middle is neither a vertex
+  // nor a chord midpoint: it sits somewhere inside a cell, and the flat
+  // triangles covering that cell stand off the smooth surface by more than the
+  // chord midpoint does. Measuring only at the cell centre said 0.000271 where
+  // the middles were 0.000373 out, and on a twisted extrusion that gap refused
+  // every facet the grid had just been recovered from.
+  //
+  // So the cell is sampled rather than probed at one point, against the
+  // bilinear patch through its corners - which is what a flat tessellation of
+  // it is - plus half the warp, the amount by which either triangulation of a
+  // non-planar quad falls inside that patch.
+  const int segs = vspans();
+  const double samples[3] = {1.0 / 6, 0.5, 5.0 / 6};
+  for (int j = 0; j < segs; j++) {
+    const int j2 = (j + 1) % cols;
+    for (int i = 0; i + 1 < m; i++) {
+      const Vector3d p00 = at(i, j), p10 = at(i + 1, j);
+      const Vector3d p11 = at(i + 1, j2), p01 = at(i, j2);
+      const double warp = (p00 - p10 + p11 - p01).norm() / 2;
+      for (const double a : samples) {
+        for (const double b : samples) {
+          const double u = t[i] + a * (t[i + 1] - t[i]);
+          const double v = (double(j) + b) / segs;
+          const Vector3d flat = p00 * (1 - a) * (1 - b) + p10 * a * (1 - b) + p11 * a * b +
+                                p01 * (1 - a) * b;
+          band = std::max(band, (evaluate(u, v) - flat).norm() + warp / 2);
+        }
+      }
+    }
+  }
 }
 
 std::vector<Vector3d> GridSurface::withClosingColumn(const std::vector<Vector3d>& src) const

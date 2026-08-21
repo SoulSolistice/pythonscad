@@ -305,3 +305,53 @@ TEST_CASE("a profile declared closed has a surface over its closing strip", "[su
     }
   }
 }
+
+TEST_CASE("the band covers the facets the grid was built from", "[surface][grid]")
+{
+  // A twisted wall, the shape step-approximate-report sweeps: stations up z,
+  // each rotated a little, so every cell is warped and the sweep curves.
+  //
+  // The band is what membership is answered at, and a mesh vertex is not the
+  // only point that has to fall inside it. A facet's *middle* stands off the
+  // smooth surface too, and by more than the chord midpoint does - that is what
+  // refused every facet of a recovered grid while its corners passed.
+  const int rows = 24, cols = 17;
+  std::vector<Vector3d> net;
+  for (int i = 0; i < rows; i++) {
+    const double t = double(i) / (rows - 1);
+    const double a = 0.9 * t;  // the twist
+    for (int j = 0; j < cols; j++) {
+      const double s = -1.0 + 2.0 * j / (cols - 1);
+      net.emplace_back(s * cos(a) - 1.0 * sin(a), s * sin(a) + 1.0 * cos(a), 4.0 * t);
+    }
+  }
+  GridSurface grid(rows, cols, net);
+  REQUIRE(grid.interpolated());
+  CHECK(grid.tessellationBand() > 0);
+
+  double worst_vertex = 0, worst_middle = 0;
+  for (int i = 0; i + 1 < rows; i++) {
+    for (int j = 0; j + 1 < cols; j++) {
+      const Vector3d corner[4] = {grid.at(i, j), grid.at(i + 1, j), grid.at(i + 1, j + 1),
+                                  grid.at(i, j + 1)};
+      for (const auto& p : corner) {
+        double u = 0, v = 0;
+        REQUIRE(grid.project(p, u, v));
+        worst_vertex = std::max(worst_vertex, (grid.evaluate(u, v) - p).norm());
+      }
+      // Both halves of the cell, since that is what a triangulated mesh
+      // presents and what membership is asked about.
+      const Vector3d middles[2] = {(corner[0] + corner[1] + corner[2]) / 3,
+                                   (corner[0] + corner[2] + corner[3]) / 3};
+      for (const auto& m : middles) {
+        double u = 0, v = 0;
+        REQUIRE(grid.project(m, u, v));
+        worst_middle = std::max(worst_middle, (grid.evaluate(u, v) - m).norm());
+      }
+    }
+  }
+  INFO("band " << grid.tessellationBand() << ", vertices miss " << worst_vertex << ", middles miss "
+               << worst_middle);
+  CHECK(worst_vertex < 1e-9);
+  CHECK(worst_middle <= grid.membershipTolerance());
+}

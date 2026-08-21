@@ -32,20 +32,26 @@
 //
 // So the two models answer the two halves differently, and together they say
 // where each route applies: fit where the generator's grid survives, declare
-// where the boolean took it.
+// where the boolean took it. This one is the first half, and the numbers above
+// are what the approximation pass now acts on rather than only reports.
 //
-// Nothing here is fitted, and that is the point of keeping this fixture once
-// fitting exists. The approximation pass fits cylinders, and a helicoid is not
-// one at any tolerance, so all four regions are tried and all four refused. The
-// pass says both numbers out loud - how many it took and how many it left -
-// because a pass which quietly wrote nothing would look exactly like one which
-// found nothing to write.
-// APPROX: approximation fitted 0 of 4 uncovered regions as cylinders
-// APPROX: 4 smooth regions left faceted, 2048 facets in all
-// APPROX: the tessellation leaves at most 0.0055 to fit inside
-// APPROX: band 0.0053 (typical 0.0051)
-// APPROX: grid 100% regular over 330 interior vertices at valence 6
-// APPROX: the generator's ordering survives, a fit could be made
-// APPROX: 4 regions stay faceted, no fit having been found for them
-// APPROX-NOT: approximation found nothing left to fit
+// And now it is fitted, which is what those two measurements were for. A
+// helicoid is not a cylinder at any tolerance, so the quadric fit refuses all
+// four regions; the grid recovery takes all four, because 100% regularity means
+// the ordering is still there to recover. 2048 facets become 4 faces.
+//
+// The recovered grid is handed to the recogniser as a declaration, so what
+// happens to it afterwards is what happens to one the model made: the same
+// membership test, the same boundary walk, the same emission. A wall comes back
+// as a 24x17 cubic sweep with a tessellation band of 0.0107.
+//
+// OpenCASCADE reads the result as one solid of one shell, volume 798.716
+// against the faceted export's 800.717. Over the walls' 570 square units that
+// is an average normal displacement of 0.0035, well inside the band - the
+// smooth surface cutting the corners the chords left standing.
+// APPROX: approximation fitted 0 of 4 uncovered regions as cylinders and recovered 4 as swept grids
+// APPROX: a declared 24x17 cubic sweep claims 736 facets whole
+// APPROX: 4 declared sweeps written as one face each, replacing 2048 facets
+// APPROX: approximation found nothing left to fit
+// APPROX-NOT: regions stay faceted
 linear_extrude(height = 20, twist = 90, $fn = 64) square([10, 4], center = true);
