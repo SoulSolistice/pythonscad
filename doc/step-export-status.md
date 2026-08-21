@@ -1191,10 +1191,44 @@ only say an entity is well formed; a kernel says whether a face builds from it.
 F7 is the standing argument - a B-spline surface with its knot lists in the
 wrong order passed every check in this suite and was silently dropped.
 
-**What remains is the seam.** A region that closes around its profile still
-stays faceted, and the reference ridge declared closed is that case. It needs
-either the surface written as closed in `v` with a seam edge carried in the
-loop, or the region split into strips that each stay inside the rectangle.
+### The seam: cut, not seamed
+
+A region that closes around its profile is now **cut into arcs of spans**, each
+of which is a sheet in its own right and its own face. The reference ridge
+declared closed - the case that was left faceted - is written as two faces
+replacing 299 facets, and the export says so:
+
+```
+a sweep closing around its profile was cut into 2 faces, so that no face
+crosses the surface's seam
+```
+
+The alternative was to write the surface as closed across `v` and carry a seam
+edge round the loop, which is how a full cylindrical band is already written
+here. That works when the region *is* the whole tube. This one is whatever the
+boolean left of a tube, with a trim boundary meeting the seam wherever it
+happens to, and the seam edge would have to be spliced into a loop whose shape
+is not known in advance. Cutting does not depend on that boundary at all: the
+cut runs along mesh edges the two arcs already share, so the neighbours are
+asked for nothing, and the two arcs cover the wall exactly once - a cut, not a
+reduction and not an overlap, which is what the unit test checks.
+
+Halves are tried first and one face per span is the fallback, so a region with a
+hole in it - which a half would not be a sheet of - still gets written. The cost
+is one extra face per sweep, stated on export rather than left to be found in
+the file.
+
+OpenCASCADE reads the closed ridge back as one solid of one shell. Its volume is
+0.15% under the faceted export's, which is the smooth surface departing from the
+chords: over the ridge's roughly 1280 square units that is an average normal
+displacement of about 0.02, against a tessellation band of 0.0660. Inside what
+the mesh leaves open, which is the whole claim being made.
+
+**What remains** is no longer about declared sweeps: they are recognised, cut
+where they must be, and written. It is the same two items §8 has carried - a
+round trip through SolidWorks and Fusion, which are not OCCT and where the
+failure that started this was seen, and the approximation pass proper, which
+still only measures what is left faceted.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

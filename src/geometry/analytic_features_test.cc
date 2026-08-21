@@ -438,10 +438,14 @@ namespace {
  *
  * The caps matter, and not for the geometry. A cap made of the rim's own
  * vertices is a face every one of whose corners lies on the declared sweep, so
- * the recogniser claims it too and the region closes into a shell with no
- * boundary at all. Fanning to a hub off the sweep keeps the caps out of the
- * region, which is what leaves the tube an annulus - the case a fillet patch
- * never produces and this one always does. */
+ * claiming by corners alone takes it too and the region closes into a shell
+ * with no boundary at all. Fanning to a hub off the sweep keeps the caps out of
+ * the region by both tests - the hub is not a declared point, and the triangle's
+ * middle is not on the sweep either.
+ *
+ * `dimple` replaces one wall quad with four triangles to an apex pushed out
+ * radially, which is a hole in the region that is still a closed mesh: the
+ * quad's edges keep exactly two users, and the triangles are off the sweep. */
 struct FacetedTube {
   std::vector<Vector3d> vertices;
   std::vector<std::vector<int>> loops;
@@ -449,7 +453,7 @@ struct FacetedTube {
   std::vector<char> valid, is_hole;
   int rings, around;
 
-  FacetedTube(int rings_in, int around_in, double r = 5.0, double h = 3.0)
+  FacetedTube(int rings_in, int around_in, bool dimple = false, double r = 5.0, double h = 3.0)
     : rings(rings_in), around(around_in)
   {
     for (int i = 0; i < rings; i++) {
@@ -459,11 +463,25 @@ struct FacetedTube {
         vertices.emplace_back(r * cos(a), r * sin(a), z);
       }
     }
+    const int dimple_ring = rings / 2, dimple_col = around / 3;
     for (int i = 0; i + 1 < rings; i++) {
       for (int j = 0; j < around; j++) {
         const int k = (j + 1) % around;
-        loops.push_back({i * around + j, i * around + k, (i + 1) * around + k, (i + 1) * around + j});
+        const int a0 = i * around + j, b0 = i * around + k;
+        const int c0 = (i + 1) * around + k, d0 = (i + 1) * around + j;
         const double a = 2 * M_PI * (j + 0.5) / around;
+        if (dimple && i == dimple_ring && j == dimple_col) {
+          const int apex = (int)vertices.size();
+          const Vector3d mid = (vertices[a0] + vertices[b0] + vertices[c0] + vertices[d0]) / 4;
+          vertices.emplace_back(mid + Vector3d(cos(a), sin(a), 0.0));
+          const int corner[4] = {a0, b0, c0, d0};
+          for (int e = 0; e < 4; e++) {
+            loops.push_back({corner[e], corner[(e + 1) % 4], apex});
+            normals.emplace_back(cos(a), sin(a), 0.0);
+          }
+          continue;
+        }
+        loops.push_back({a0, b0, c0, d0});
         normals.emplace_back(cos(a), sin(a), 0.0);
       }
     }
@@ -493,58 +511,80 @@ struct FacetedTube {
     return m;
   }
 
-  [[nodiscard]] std::vector<std::shared_ptr<Surface>> declared() const
+  [[nodiscard]] std::vector<std::shared_ptr<Surface>> declared(bool closed) const
   {
     std::vector<Vector3d> net(vertices.begin(), vertices.begin() + rings * around);
     std::vector<std::shared_ptr<Surface>> surfaces;
-    surfaces.push_back(std::make_shared<GridSurface>(rings, around, net, true));
+    surfaces.push_back(std::make_shared<GridSurface>(rings, around, net, closed));
     return surfaces;
   }
 };
 
 }  // namespace
 
-TEST_CASE("a declared sweep that is an annulus keeps both its boundaries", "[analytic][grid]")
+TEST_CASE("a sweep closing around its profile is cut rather than seamed", "[analytic][grid]")
 {
+  // A face on a surface written as an open rectangle cannot be bounded across
+  // its own seam. Writing the surface as closed and carrying a seam edge is the
+  // alternative, and it depends on the region being the whole tube; cutting
+  // does not depend on the trim boundary at all, and the cut runs along mesh
+  // edges the two arcs already share.
   const int rings = 5, around = 12;
   FacetedTube tube(rings, around);
-  const Mesh mesh = tube.mesh();
   const std::vector<char> consumed(tube.loops.size(), 0);
   std::vector<std::string> report;
-  const std::vector<Patch> patches = recogniseGridPatches(mesh, tube.declared(), consumed, report);
+  const std::vector<Patch> patches =
+    recogniseGridPatches(tube.mesh(), tube.declared(true), consumed, report);
+
+  REQUIRE(patches.size() == 2);
+  std::set<std::size_t> seen;
+  std::size_t facets = 0;
+  for (const auto& patch : patches) {
+    REQUIRE(patch.alive);
+    facets += patch.facets.size();
+    for (const std::size_t f : patch.facets) seen.insert(f);
+    // Each arc is a sheet: one boundary, and every run with a single
+    // neighbouring face behind it.
+    std::set<std::size_t> bounds;
+    for (const auto& run : patch.runs) {
+      bounds.insert(run.bound);
+      CHECK(run.kind != Patch::Run::UNRESOLVED);
+    }
+    CHECK(bounds.size() == 1);
+  }
+  // Between them they cover the whole wall exactly once - a cut, not a
+  // reduction, and not an overlap either.
+  CHECK(facets == std::size_t((rings - 1) * around));
+  CHECK(seen.size() == facets);
+  CHECK(tube.loops[*seen.begin()].size() == 4);
+}
+
+TEST_CASE("a declared sweep with a hole in it keeps both its boundaries", "[analytic][grid]")
+{
+  // Two boundary cycles, which is what the walk had to learn: it used to stop
+  // at the first cycle it closed and compare its length against every boundary
+  // edge, so a region with a hole reported that its boundary did not close -
+  // true of the walk, not of the region.
+  const int rings = 5, around = 12;
+  FacetedTube tube(rings, around, /* dimple */ true);
+  const std::vector<char> consumed(tube.loops.size(), 0);
+  std::vector<std::string> report;
+  // Declared open, so the sweep is a ribbon rather than a tube and nothing is
+  // cut; the strip closing the profile is not part of it.
+  const std::vector<Patch> patches =
+    recogniseGridPatches(tube.mesh(), tube.declared(false), consumed, report);
 
   REQUIRE(patches.size() == 1);
   const Patch& patch = patches.front();
   REQUIRE(patch.alive);
-  CHECK(patch.facets.size() == std::size_t((rings - 1) * around));
+  // The wall, less the strip that closes the profile and less the quad the
+  // dimple replaced.
+  CHECK(patch.facets.size() == std::size_t((rings - 1) * (around - 1) - 1));
 
-  SECTION("its boundary is two cycles, not one that failed to close")
-  {
-    // The walk used to stop at the first cycle and compare its length against
-    // every boundary edge, so an annulus reported a boundary that did not
-    // close - which was true of the walk, not of the region.
-    std::set<std::size_t> bounds;
-    for (const auto& run : patch.runs) bounds.insert(run.bound);
-    CHECK(bounds.size() == 2);
+  std::set<std::size_t> bounds;
+  for (const auto& run : patch.runs) {
+    bounds.insert(run.bound);
+    CHECK(run.kind != Patch::Run::UNRESOLVED);
   }
-
-  SECTION("every run borders exactly one face and knows where")
-  {
-    // A run is what has to become a single curve, and it can only do that if
-    // the face on the other side replaces exactly the same segments. Each cap
-    // triangle here meets the rim along one edge, so a rim splits into one run
-    // per triangle - the honest answer, and the one the emitter needs.
-    CHECK(patch.runs.size() == std::size_t(2 * around));
-    for (const auto& run : patch.runs) {
-      CHECK(run.kind != Patch::Run::UNRESOLVED);
-      CHECK(run.verts.size() == 2);
-    }
-  }
-
-  SECTION("the caps are not swallowed by the sweep they sit on")
-  {
-    // Their rim vertices are declared points, so a claim by position alone
-    // would take them and close the region into a shell with no boundary.
-    for (const std::size_t f : patch.facets) CHECK(mesh.loops->at(f).size() == 4);
-  }
+  CHECK(bounds.size() == 2);
 }

@@ -54,13 +54,22 @@ them. What is left is 299 facets forming one sheet with one boundary, split into
 282 runs of at most 7 mesh edges with a single neighbouring face behind each,
 none unresolved.
 
-Nothing is written yet, and what stands in the way is not what it looked like.
 The profile here is declared closed, so the sweep is a tube and its surface is
-closed across v. The claimed facets lie over all four of the profile's spans -
-the region closes around the profile - so the face would have to be bounded
-across the surface's own seam, which a surface written as an open rectangle
-cannot carry. A region covering only some of the spans is a strip, and its
-boundary stays inside the rectangle where it can be written as it stands.
+closed across v, and the claimed facets lie over all four of the profile's
+spans: the region closes around the profile. A face on a surface written as an
+open rectangle cannot be bounded across its own seam, so the region is **cut**
+into two arcs of two spans each, and each arc is written as its own face - 299
+facets replaced by two.
+
+Cutting rather than seaming is a choice about what the operation has to survive.
+Writing the surface as closed across v and carrying a seam edge round the loop
+is how a full cylindrical band is written, and it works when the region is the
+whole tube. Here the region is whatever the boolean left of one, with a trim
+boundary meeting the seam wherever it happens to. The cut does not depend on the
+shape of that boundary at all: each arc of spans is a sheet in its own right,
+and the cut runs along mesh edges the two arcs already share, so the neighbours
+are asked for nothing. The cost is one extra face, and it is stated on export
+rather than left to be discovered in the file.
 
 That the surface covers the closing strip at all is recent: the fourth side of
 this four sided ridge, from the last column back to the first, is named by no
@@ -68,12 +77,21 @@ column of the net, and without it the sweep had a surface over three of its
 sides. Facets on the fourth could be claimed by position, because the generator
 emitted their corners, and never by projection - precisely the half a boolean
 destroys.
+
+OpenCASCADE reads the result back as one solid of one shell. Its volume is 0.15%
+under the faceted export's, which is the smooth surface departing from the
+chords: spread over the ridge's roughly 1280 square units of surface that is an
+average normal displacement of about 0.02, against a tessellation band of 0.0660
+- inside what the mesh leaves open, which is the whole claim being made.
 """
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
 # EXPECT: a declared 60x4 sweep claims 348 facets whole, 185 cut across it, within its tessellation band of 0.0660
 # EXPECT: 49 facets have every corner on the sweep and their middle off it
-# EXPECT: 1 declared sweep covers 299 facets over 1 boundary cycle, split into 282 runs of up to 7 mesh edges, 0 unresolved
-# EXPECT: its facets lie over 4 of the profile's 4 spans - the region closes around the profile, so its face crosses the surface's seam
+# EXPECT: a sweep closing around its profile was cut into 2 faces, so that no face crosses the surface's seam
+# EXPECT: 2 declared sweeps cover 299 facets over 1 boundary cycle, split into 402 runs of up to 7 mesh edges, 0 unresolved
+# EXPECT-NOT: written as one face each
+# APPROX: 2 declared sweeps written as one face each, replacing 299 facets
+# EXPECT: its facets lie over 2 of the profile's 4 spans - the region is a strip, whose boundary stays inside the surface's rectangle
 from pythonscad import *
 import math
 
