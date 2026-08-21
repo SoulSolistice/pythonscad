@@ -1224,11 +1224,52 @@ chords: over the ridge's roughly 1280 square units that is an average normal
 displacement of about 0.02, against a tessellation band of 0.0660. Inside what
 the mesh leaves open, which is the whole claim being made.
 
-**What remains** is no longer about declared sweeps: they are recognised, cut
-where they must be, and written. It is the same two items §8 has carried - a
-round trip through SolidWorks and Fusion, which are not OCCT and where the
-failure that started this was seen, and the approximation pass proper, which
-still only measures what is left faceted.
+### The approximation pass writes
+
+`step-approximate-surfaces` no longer only measures. It fits a cylinder to each
+uncovered smooth region and, where the fit holds, **declares it** - after which
+the ordinary recogniser does everything else. That indirection is the design:
+the approximation contributes a declaration rather than a face, so a fitted
+surface goes through exactly the checks a declared one does - the same fit test,
+the same rim topology, the same refusals - and nothing downstream has to trust
+it or even know where it came from. It is roughly forty lines of fitter and ten
+of wiring, against reimplementing band recognition for guessed surfaces.
+
+`step-approximate-cylinder.py` is a hand-written `polyhedron` tube, which is
+what an imported mesh or a library sweep looks like from the exporter's side:
+**66 facets become 3 faces**, one `CYLINDRICAL_SURFACE` and two planes. OCCT
+reads the radius back as exactly 10 and the volume as 3769.911184 against an
+exact pi*100*12 of 3769.911184 - the fitted solid is *closer* to the intended
+one than the mesh it replaced, which had the volume of a 64-gon.
+
+**The intent gate is the region, not the fit**, and that is what makes guessing
+defensible here at all. §6's standing objection is that a hexagonal prism and a
+six sided tessellation of a cylinder are the same mesh. They do not produce the
+same *region*: regions are grown across edges meeting at less than the smoothing
+angle, 25 degrees by default and settable with `OPENSCAD_STEP_SMOOTH_ANGLE`, and
+a prism's 60 degree dihedrals never form one. The whole judgement is one number
+in one place, and the unit test asserts both sides of it.
+
+**The fit is not itself an approximation.** A tessellated cylinder has its
+vertices *on* the cylinder and only its facets inside it, so the axis and radius
+come back exact and acceptance is the ordinary modelling tolerance rather than
+the band. A region whose vertices do not lie on one common cylinder is refused,
+and so is a flat one - every normal the same makes the scatter matrix rank one,
+and any axis in its plane would fit equally well.
+
+`step-approximate-report.scad` keeps its place by being the negative: a helicoid
+is not a cylinder at any tolerance, so all four of its regions are tried and all
+four refused, and the pass reports both numbers - how many it took and how many
+it left. A pass that quietly wrote nothing would look exactly like one that
+found nothing to write.
+
+**What remains.** Declared sweeps are recognised, cut where they must be, and
+written; the approximation pass writes cylinders. What is left is the round trip
+through SolidWorks and Fusion - which are not OCCT, and where the failure that
+started this was seen - and more shapes for the approximation pass: a sphere and
+a cone are the same fit with a different unknown, and a general fitted spline
+over a region whose grid survives is the case `step-approximate-report` measures
+at 100% regular and still declines.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

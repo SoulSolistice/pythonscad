@@ -34,13 +34,18 @@
 // where each route applies: fit where the generator's grid survives, declare
 // where the boolean took it.
 //
-// Nothing is fitted yet. The pass measures and says so out loud, because a pass
-// which silently did nothing would look exactly like one which found nothing.
-// APPROX: 6 smooth regions left faceted, 2050 facets in all
+// Nothing here is fitted, and that is the point of keeping this fixture once
+// fitting exists. The approximation pass fits cylinders, and a helicoid is not
+// one at any tolerance, so all four regions are tried and all four refused. The
+// pass says both numbers out loud - how many it took and how many it left -
+// because a pass which quietly wrote nothing would look exactly like one which
+// found nothing to write.
+// APPROX: approximation fitted 0 of 4 uncovered regions as cylinders
+// APPROX: 4 smooth regions left faceted, 2048 facets in all
 // APPROX: the tessellation leaves at most 0.0055 to fit inside
 // APPROX: band 0.0053 (typical 0.0051)
 // APPROX: grid 100% regular over 330 interior vertices at valence 6
 // APPROX: the generator's ordering survives, a fit could be made
-// APPROX: approximation is measuring only - all 6 regions stay faceted
+// APPROX: 4 regions stay faceted, no fit having been found for them
 // APPROX-NOT: approximation found nothing left to fit
 linear_extrude(height = 20, twist = 90, $fn = 64) square([10, 4], center = true);

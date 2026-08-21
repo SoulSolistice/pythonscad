@@ -7,7 +7,11 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <set>
+
+#include <Eigen/Dense>
+#include <Eigen/Eigenvalues>
 
 #include "geometry/Surface.h"
 
@@ -357,6 +361,76 @@ double reachAcross(const std::vector<Vector3d>& verts, const std::vector<int>& l
 }
 
 }  // namespace
+
+std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& region, double tol)
+{
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  const std::vector<Vector3d>& normals = *mesh.normals;
+  if (region.facets.size() < 3) return nullptr;
+
+  // The axis is the direction every facet normal is perpendicular to, so it is
+  // the direction the normals' scatter matrix is *smallest* in. Weighting by
+  // area keeps a swarm of tiny facets from outvoting the shape.
+  Eigen::Matrix3d scatter = Eigen::Matrix3d::Zero();
+  std::set<int> verts;
+  for (const std::size_t f : region.facets) {
+    const std::vector<int>& loop = loops[f];
+    if (loop.size() < 3) continue;
+    for (const int v : loop) verts.insert(v);
+    double area = 0;
+    for (std::size_t i = 1; i + 1 < loop.size(); i++) {
+      area += (vertices[loop[i]] - vertices[loop[0]])
+                .cross(vertices[loop[i + 1]] - vertices[loop[0]])
+                .norm() / 2;
+    }
+    const Vector3d n = normals[f].normalized();
+    scatter += area * n * n.transpose();
+  }
+  if (verts.size() < 6) return nullptr;
+
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(scatter);
+  if (solver.info() != Eigen::Success) return nullptr;
+  const Vector3d axis = solver.eigenvectors().col(0).normalized();
+  const double lo = solver.eigenvalues()[0], mid = solver.eigenvalues()[1],
+               hi = solver.eigenvalues()[2];
+  if (!(hi > 0)) return nullptr;
+  // Two conditions, and they refuse different things. The normals must lie in a
+  // plane - or there is no axis - and they must genuinely spread within it, or
+  // the region is flat and every axis in its plane fits equally well.
+  if (lo > 1e-6 * hi) return nullptr;
+  if (mid < 1e-3 * hi) return nullptr;
+
+  // A least squares circle through the vertices projected onto the plane
+  // perpendicular to the axis: x^2 + y^2 + Dx + Ey + F = 0, linear in D, E, F.
+  const Vector3d ref = perpendicular(axis);
+  const Vector3d ref2 = axis.cross(ref);
+  const Vector3d origin = vertices[*verts.begin()];
+  Eigen::Matrix3d ata = Eigen::Matrix3d::Zero();
+  Vector3d atb = Vector3d::Zero();
+  for (const int v : verts) {
+    const Vector3d rel = vertices[v] - origin;
+    const double x = rel.dot(ref), y = rel.dot(ref2);
+    const Vector3d row(x, y, 1.0);
+    ata += row * row.transpose();
+    atb += row * -(x * x + y * y);
+  }
+  if (fabs(ata.determinant()) < 1e-18) return nullptr;
+  const Vector3d sol = ata.inverse() * atb;
+  const double cx = -sol[0] / 2, cy = -sol[1] / 2;
+  const double rsq = cx * cx + cy * cy - sol[2];
+  if (!(rsq > 0)) return nullptr;
+  const double r = sqrt(rsq);
+  if (!(r > tol)) return nullptr;
+
+  const Vector3d centre = origin + ref * cx + ref2 * cy;
+  for (const int v : verts) {
+    const Vector3d rel = vertices[v] - centre;
+    const double radial = (rel - axis * rel.dot(axis)).norm();
+    if (fabs(radial - r) > tol) return nullptr;
+  }
+  return std::make_shared<CylinderSurface>(centre, axis, r);
+}
 
 std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<char>& consumed,
                                            double smooth_angle)

@@ -272,6 +272,26 @@ struct SmoothRegion {
  * across an edge when they meet at less than `smooth_angle`, so a region is a
  * piece of surface a single fitted patch could plausibly cover, and a sharp
  * model edge ends it. */
+/*! The cylinder a smooth region lies on, or null when it lies on none.
+ *
+ * This is the exporter making a declaration the model did not, which every
+ * other path here refuses to do on purpose: a hexagonal prism and a six sided
+ * tessellation of a cylinder are the same mesh, and only the model knows which
+ * it meant. What makes it defensible is the region, not the fit. A region is
+ * grown across edges meeting at less than the smoothing angle, so a genuine
+ * prism - whose dihedrals are tens of degrees - never forms one. The caller
+ * chooses that angle, and it is the whole of the intent judgement.
+ *
+ * The fit itself is not an approximation. A tessellated cylinder has its
+ * vertices *on* the cylinder - only its facets are inside it - so `tol` is a
+ * modelling tolerance rather than the region's band, and a region whose
+ * vertices are not on one common cylinder to within it is refused.
+ *
+ * The axis comes from the facet normals, which on a cylinder are all
+ * perpendicular to it, and the radius from a least squares circle through the
+ * vertices projected onto that plane. */
+std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& region, double tol);
+
 std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<char>& consumed,
                                            double smooth_angle);
 

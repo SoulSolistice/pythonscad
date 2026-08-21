@@ -392,6 +392,12 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // availability line above prints only when the list is non-empty, which
     // makes those two cases look identical - silence.
     if (surfaces.empty()) LOG("STEP export: no analytic surfaces were declared");
+    // How sharp an edge still counts as one surface. It is the whole of the
+    // intent judgement the approximation pass makes, so it is read once, here,
+    // and used by both the fitting and the measuring below.
+    double smooth_angle = 25.0;
+    if (const char *env = getenv("OPENSCAD_STEP_SMOOTH_ANGLE")) smooth_angle = atof(env);
+    smooth_angle *= M_PI / 180.0;
     AnalyticFeatures::Mesh mesh;
     mesh.vertices = &vertices;
     mesh.loops = &loops;
@@ -399,6 +405,50 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     mesh.is_hole = &loop_is_hole;
     mesh.normals = &loop_normals;
     features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol);
+
+    // The approximation pass, and the only place in this exporter where a
+    // surface is written that the model never declared.
+    //
+    // It runs on what the declared pass left over, fits a cylinder to each
+    // smooth region there, and then simply *declares* it - after which the
+    // ordinary recogniser does everything else, including refusing the fit if
+    // the mesh does not lie on it after all. That is the whole design: the
+    // approximation contributes a declaration, not a face, so nothing
+    // downstream has to trust it.
+    //
+    // What makes declaring on the model's behalf defensible is the region
+    // rather than the fit. Regions are grown across edges meeting at less than
+    // the smoothing angle, so a hexagonal prism - which is the same mesh as a
+    // six sided tessellation of a cylinder, and the reason the exact path
+    // refuses to guess - never forms one.
+    std::vector<std::shared_ptr<Surface>> effective = surfaces;
+    if (approximate) {
+      const std::vector<AnalyticFeatures::SmoothRegion> candidates =
+        AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
+      std::size_t fitted = 0, tried = 0;
+      double coarsest = 0;
+      for (const auto& region : candidates) {
+        if (region.facets.size() < 3) continue;
+        tried++;
+        std::shared_ptr<Surface> guess = AnalyticFeatures::fitCylinder(mesh, region, model_tol);
+        if (guess == nullptr) continue;
+        fitted++;
+        coarsest = std::max(coarsest, region.band);
+        addSurfaceUnique(effective, guess);
+      }
+      if (tried > 0) {
+        LOG(
+          "STEP export: approximation fitted %1$d of %2$d uncovered regions as cylinders, "
+          "the coarsest tessellated to %3$.4f",
+          int(fitted), int(tried), coarsest);
+      }
+      if (fitted > 0) {
+        // Re-run with the fits in hand. Cheaper than threading them through the
+        // pass that has already run, and it means a fitted surface goes through
+        // exactly the checks a declared one does.
+        features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol);
+      }
+    }
     for (const auto& line : features.report) LOG("STEP export: %1$s", line);
 
     // Bezier patches are recognised here and written further down, with the
@@ -411,7 +461,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // for.
     std::vector<std::string> patch_report;
     std::vector<AnalyticFeatures::Patch> patches =
-      AnalyticFeatures::recogniseBezierPatches(mesh, surfaces, features.consumed, patch_report);
+      AnalyticFeatures::recogniseBezierPatches(mesh, effective, features.consumed, patch_report);
     for (const auto& line : patch_report) LOG("STEP export: %1$s", line);
     std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
     for (const auto& patch : patches) {
@@ -573,7 +623,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // sweep that was never declared.
     std::vector<std::string> grid_report;
     const std::vector<AnalyticFeatures::Patch> grid_patches =
-      AnalyticFeatures::recogniseGridPatches(mesh, surfaces, features.consumed, grid_report);
+      AnalyticFeatures::recogniseGridPatches(mesh, effective, features.consumed, grid_report);
     for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
 
     // Where the claimed region sits on the sweep, which is the question a face
@@ -641,10 +691,14 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     }
 
     if (approximate) {
-      double smooth_angle = 25.0;
-      if (const char *env = getenv("OPENSCAD_STEP_SMOOTH_ANGLE")) smooth_angle = atof(env);
-      const std::vector<AnalyticFeatures::SmoothRegion> regions =
-        AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle * M_PI / 180.0);
+      // What is left after everything, including the fits above. A region of
+      // one or two facets is not among them: a single flat facet is already
+      // written exactly as a PLANE, and reporting it as something left faceted
+      // says a surface was lost where none was.
+      std::vector<AnalyticFeatures::SmoothRegion> regions;
+      for (auto& region : AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle)) {
+        if (region.facets.size() >= 3) regions.push_back(std::move(region));
+      }
       std::size_t left = 0;
       double worst_band = 0.0;
       for (const auto& region : regions) {
@@ -678,11 +732,12 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
                    ? "the generator's ordering survives, a fit could be made"
                    : "the ordering is gone, only a declaration could describe this"));
         }
-        // Nothing is fitted yet, so nothing is at risk: every region above stays
-        // faceted. Saying so is the point - a pass which silently did nothing
-        // would look exactly like one which found nothing.
+        // These are the ones the fit could not take, and saying so is the point -
+        // a pass which quietly wrote nothing here would look exactly like one
+        // which found nothing to write.
         LOG(message_group::Export_Warning,
-            "STEP export: approximation is measuring only - all %1$d region%2$s stay faceted",
+            "STEP export: %1$d region%2$s stay faceted, no fit having been found for them - "
+            "which is always a valid export",
             int(regions.size()), regions.size() == 1 ? "" : "s");
       }
     }

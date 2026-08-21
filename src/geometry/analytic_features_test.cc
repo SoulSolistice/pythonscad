@@ -588,3 +588,77 @@ TEST_CASE("a declared sweep with a hole in it keeps both its boundaries", "[anal
   }
   CHECK(bounds.size() == 2);
 }
+
+TEST_CASE("the approximation pass fits a cylinder nobody declared", "[analytic][approximate]")
+{
+  // The intent gate is the region, not the fit: regions are grown across edges
+  // meeting at less than the smoothing angle, so what is being asserted here is
+  // that a finely tessellated wall forms one region and a coarse prism does
+  // not.
+  const double smooth = 25 * M_PI / 180.0;
+
+  SECTION("a finely tessellated wall comes back with its exact axis and radius")
+  {
+    FacetedCylinder cyl(64, 10.0, 12.0);
+    const std::vector<char> consumed(cyl.loops.size(), 0);
+    const std::vector<SmoothRegion> regions = uncoveredRegions(cyl.mesh(), consumed, smooth);
+    const SmoothRegion *wall = nullptr;
+    for (const auto& region : regions) {
+      if (region.facets.size() >= 3) wall = &region;
+    }
+    REQUIRE(wall != nullptr);
+    CHECK(wall->facets.size() == 64);
+
+    const std::shared_ptr<Surface> fit = fitCylinder(cyl.mesh(), *wall, 1e-5);
+    REQUIRE(fit != nullptr);
+    const auto *found = dynamic_cast<const CylinderSurface *>(fit.get());
+    REQUIRE(found != nullptr);
+    // A tessellated cylinder has its vertices on the cylinder and only its
+    // facets inside it, so this is exact rather than approximate.
+    CHECK(found->r == Catch::Approx(10.0).margin(1e-9));
+    CHECK(fabs(fabs(found->normdir.normalized().dot(Vector3d(0, 0, 1))) - 1.0) < 1e-9);
+    const Vector3d rel = found->refpt;
+    CHECK((rel - found->normdir * rel.dot(found->normdir)).norm() < 1e-9);
+  }
+
+  SECTION("a hexagonal prism is never even a candidate")
+  {
+    // The same mesh shape, coarse enough that the model plainly meant a prism.
+    // Nothing refuses it downstream - it never becomes a region to fit.
+    FacetedCylinder prism(6, 10.0, 12.0);
+    const std::vector<char> consumed(prism.loops.size(), 0);
+    for (const auto& region : uncoveredRegions(prism.mesh(), consumed, smooth)) {
+      CHECK(region.facets.size() < 3);
+    }
+  }
+
+  SECTION("a wall whose vertices are not on one cylinder is refused")
+  {
+    FacetedCylinder cyl(64, 10.0, 12.0);
+    // One vertex pushed out well beyond the modelling tolerance. The normals
+    // barely move, so the axis is still found and it is the radial test that
+    // has to catch this.
+    cyl.vertices[7] *= 1.001;
+    const std::vector<char> consumed(cyl.loops.size(), 0);
+    const std::vector<SmoothRegion> regions = uncoveredRegions(cyl.mesh(), consumed, smooth);
+    const SmoothRegion *wall = nullptr;
+    for (const auto& region : regions) {
+      if (region.facets.size() >= 3) wall = &region;
+    }
+    REQUIRE(wall != nullptr);
+    CHECK(fitCylinder(cyl.mesh(), *wall, 1e-5) == nullptr);
+  }
+
+  SECTION("a flat region has no axis to find")
+  {
+    // Every normal the same, so the scatter matrix is rank one and any axis in
+    // its plane fits equally well. Fitting one would be inventing geometry.
+    FacetedCylinder cyl(64, 10.0, 12.0, /* fan_top */ true);
+    SmoothRegion flat;
+    for (std::size_t f = 0; f < cyl.loops.size(); f++) {
+      if (fabs(cyl.normals[f][2] - 1.0) < 1e-9) flat.facets.push_back(f);
+    }
+    REQUIRE(flat.facets.size() == 64);
+    CHECK(fitCylinder(cyl.mesh(), flat, 1e-5) == nullptr);
+  }
+}
