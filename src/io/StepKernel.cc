@@ -425,24 +425,38 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     if (approximate) {
       const std::vector<AnalyticFeatures::SmoothRegion> candidates =
         AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
-      std::size_t fitted = 0, tried = 0;
+      std::size_t fitted = 0, recovered = 0, tried = 0;
       double coarsest = 0;
       for (const auto& region : candidates) {
         if (region.facets.size() < 3) continue;
         tried++;
         std::shared_ptr<Surface> guess = AnalyticFeatures::fitCylinder(mesh, region, model_tol);
+        if (guess != nullptr) {
+          fitted++;
+          coarsest = std::max(coarsest, region.band);
+          addSurfaceUnique(effective, guess);
+          continue;
+        }
+        // Not a quadric, but perhaps still a sweep. `regularity` is what says
+        // whether that question can even be asked: fitting needs the facets'
+        // ordering, a mesh straight from a generator still has it at every
+        // interior vertex, and a mesh a boolean has been through does not.
+        // Below the threshold there is nothing to recover and the region is
+        // left alone rather than fitted to something plausible.
+        if (region.regularity < 0.95 || region.interior_vertices == 0) continue;
+        guess = AnalyticFeatures::gridFromRegion(mesh, region, model_tol);
         if (guess == nullptr) continue;
-        fitted++;
+        recovered++;
         coarsest = std::max(coarsest, region.band);
         addSurfaceUnique(effective, guess);
       }
       if (tried > 0) {
         LOG(
-          "STEP export: approximation fitted %1$d of %2$d uncovered regions as cylinders, "
-          "the coarsest tessellated to %3$.4f",
-          int(fitted), int(tried), coarsest);
+          "STEP export: approximation fitted %1$d of %2$d uncovered regions as cylinders and "
+          "recovered %3$d as swept grids, the coarsest tessellated to %4$.4f",
+          int(fitted), int(tried), int(recovered), coarsest);
       }
-      if (fitted > 0) {
+      if (fitted + recovered > 0) {
         // Re-run with the fits in hand. Cheaper than threading them through the
         // pass that has already run, and it means a fitted surface goes through
         // exactly the checks a declared one does.

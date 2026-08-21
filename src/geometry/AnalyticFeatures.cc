@@ -432,6 +432,168 @@ std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& regio
   return std::make_shared<CylinderSurface>(centre, axis, r);
 }
 
+std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& region, double tol)
+{
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  if (region.facets.size() < 2) return nullptr;
+
+  // Recover the quads. A generator's sweep is a quad grid; whether it reaches
+  // here as quads or as pairs of triangles depends on what merged the facets,
+  // so both are accepted. A pair of triangles is one quad when the edge between
+  // them is the longest edge of both - the hypotenuse of each half - which is
+  // what splitting a quad by a diagonal makes it, and what splitting a genuine
+  // triangle fan does not.
+  std::map<EdgeKey, std::vector<std::size_t>> users;
+  for (const std::size_t f : region.facets) {
+    const std::vector<int>& loop = loops[f];
+    for (std::size_t i = 0; i < loop.size(); i++) {
+      users[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
+    }
+  }
+  auto longestEdge = [&](const std::vector<int>& loop) {
+    double best = -1;
+    EdgeKey which(0, 0);
+    for (std::size_t i = 0; i < loop.size(); i++) {
+      const int a = loop[i], b = loop[(i + 1) % loop.size()];
+      const double len = (vertices[a] - vertices[b]).squaredNorm();
+      if (len > best) {
+        best = len;
+        which = edgeKey(a, b);
+      }
+    }
+    return which;
+  };
+
+  std::vector<std::vector<int>> quads;
+  std::set<std::size_t> paired;
+  for (const std::size_t f : region.facets) {
+    if (paired.count(f)) continue;
+    const std::vector<int>& loop = loops[f];
+    if (loop.size() == 4) {
+      quads.push_back(loop);
+      paired.insert(f);
+      continue;
+    }
+    if (loop.size() != 3) return nullptr;
+    const EdgeKey diagonal = longestEdge(loop);
+    const auto it = users.find(diagonal);
+    if (it == users.end() || it->second.size() != 2) return nullptr;
+    const std::size_t other = it->second[0] == f ? it->second[1] : it->second[0];
+    if (paired.count(other) || loops[other].size() != 3) return nullptr;
+    if (!(longestEdge(loops[other]) == diagonal)) return nullptr;
+    // Stitch the two halves into one quad: the diagonal's two ends, with each
+    // triangle's odd vertex between them.
+    auto opposite = [&](std::size_t face) {
+      for (const int v : loops[face]) {
+        if (v != diagonal.first && v != diagonal.second) return v;
+      }
+      return -1;
+    };
+    const int a = opposite(f), b = opposite(other);
+    if (a < 0 || b < 0) return nullptr;
+    quads.push_back({diagonal.first, a, diagonal.second, b});
+    paired.insert(f);
+    paired.insert(other);
+  }
+  if (quads.empty()) return nullptr;
+
+  // Lay the quads out on integer coordinates, by flood fill from one of them.
+  // A quad sharing an edge with a placed quad has two of its corners placed
+  // already, and those two decide where the other two go; a grid that really is
+  // one comes out as a rectangle of coordinates with nothing on top of anything
+  // else, and one that is not disagrees with itself and is refused here.
+  std::map<EdgeKey, std::vector<std::size_t>> quad_users;
+  for (std::size_t q = 0; q < quads.size(); q++) {
+    for (std::size_t i = 0; i < 4; i++) {
+      quad_users[edgeKey(quads[q][i], quads[q][(i + 1) % 4])].push_back(q);
+    }
+  }
+
+  std::map<int, std::pair<int, int>> coord;
+  std::vector<char> placed(quads.size(), 0);
+  auto place = [&](int v, int i, int j) {
+    const auto it = coord.find(v);
+    if (it == coord.end()) {
+      coord[v] = {i, j};
+      return true;
+    }
+    return it->second.first == i && it->second.second == j;
+  };
+  {
+    const std::vector<int>& seed = quads[0];
+    coord[seed[0]] = {0, 0};
+    coord[seed[1]] = {1, 0};
+    coord[seed[2]] = {1, 1};
+    coord[seed[3]] = {0, 1};
+    placed[0] = 1;
+  }
+  for (bool moved = true; moved;) {
+    moved = false;
+    for (std::size_t q = 0; q < quads.size(); q++) {
+      if (placed[q]) continue;
+      const std::vector<int>& quad = quads[q];
+      int known = -1;
+      for (int i = 0; i < 4; i++) {
+        if (coord.count(quad[i]) && coord.count(quad[(i + 1) % 4])) {
+          known = i;
+          break;
+        }
+      }
+      if (known < 0) continue;
+      // The placed edge runs from `known` to `known+1`; the quad continues on
+      // the far side of it, so the other two corners are that edge translated
+      // by the perpendicular step.
+      const std::pair<int, int> a = coord[quad[known]];
+      const std::pair<int, int> b = coord[quad[(known + 1) % 4]];
+      const int di = b.first - a.first, dj = b.second - a.second;
+      if (abs(di) + abs(dj) != 1) return nullptr;  // not a unit step: not a grid
+      const int pi = -dj, pj = di;                 // turn left, into the new quad
+      if (!place(quad[(known + 2) % 4], b.first + pi, b.second + pj)) return nullptr;
+      if (!place(quad[(known + 3) % 4], a.first + pi, a.second + pj)) return nullptr;
+      placed[q] = 1;
+      moved = true;
+    }
+  }
+  for (const char c : placed) {
+    if (!c) return nullptr;  // the region is not one connected sheet of quads
+  }
+
+  int lo_i = 0, hi_i = 0, lo_j = 0, hi_j = 0;
+  bool first = true;
+  for (const auto& entry : coord) {
+    const int i = entry.second.first, j = entry.second.second;
+    lo_i = first ? i : std::min(lo_i, i);
+    hi_i = first ? i : std::max(hi_i, i);
+    lo_j = first ? j : std::min(lo_j, j);
+    hi_j = first ? j : std::max(hi_j, j);
+    first = false;
+  }
+  const int rows = hi_i - lo_i + 1, cols = hi_j - lo_j + 1;
+  if (rows < 2 || cols < 2) return nullptr;
+  if (std::size_t(rows) * cols != coord.size()) return nullptr;  // holes, or a fold
+
+  std::vector<Vector3d> net(std::size_t(rows) * cols, Vector3d::Zero());
+  std::vector<char> filled(std::size_t(rows) * cols, 0);
+  for (const auto& entry : coord) {
+    const std::size_t at = std::size_t(entry.second.first - lo_i) * cols + (entry.second.second - lo_j);
+    net[at] = vertices[entry.first];
+    filled[at] = 1;
+  }
+  for (const char c : filled) {
+    if (!c) return nullptr;
+  }
+
+  // The grid is only worth declaring if the surface it describes passes through
+  // the points it was built from, which is what GridSurface's own interpolation
+  // decides. Cubic along the sweep needs four stations; below that the fit is
+  // the mesh again and buys nothing.
+  if (rows < 4) return nullptr;
+  auto grid = std::make_shared<GridSurface>(rows, cols, net, false);
+  if (grid->tessellationBand() > region.band * 4 + tol) return nullptr;
+  return grid;
+}
+
 std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<char>& consumed,
                                            double smooth_angle)
 {

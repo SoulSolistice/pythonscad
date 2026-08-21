@@ -292,6 +292,21 @@ struct SmoothRegion {
  * vertices projected onto that plane. */
 std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& region, double tol);
 
+/*! The quad grid a smooth region was swept as, or null when it has none.
+ *
+ * The other half of "fit where the generator's grid survives, declare where the
+ * boolean took it". `SmoothRegion::regularity` says whether the ordering is
+ * still there; this recovers it. The facets are paired back into quads - a pair
+ * of triangles is one quad when the edge between them is the longest edge of
+ * both, which is what splitting a quad by a diagonal makes it - and the quads
+ * are laid out on integer coordinates by flood fill. A region that really is a
+ * swept grid comes out as a rectangle of coordinates; one that is not disagrees
+ * with itself, and is refused rather than approximated.
+ *
+ * The result is an ordinary GridSurface, so what happens to it afterwards is
+ * exactly what happens to one the model declared. */
+std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& region, double tol);
+
 std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<char>& consumed,
                                            double smooth_angle);
 
