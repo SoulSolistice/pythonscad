@@ -251,3 +251,57 @@ TEST_CASE("a grid too short for a cubic still reports the surface it is", "[surf
     CHECK((ctrl[std::size_t(i) * cols] - grid.at(i, 0)).norm() < 1e-12);
   }
 }
+
+TEST_CASE("a profile declared closed has a surface over its closing strip", "[surface][grid]")
+{
+  // The strip from the last column back to the first is part of the sweep and
+  // no column of the net names it. Without it a four sided ridge has a surface
+  // over three of its sides: facets on the fourth can be claimed by position,
+  // because the generator emitted their corners, and never by projection -
+  // which is precisely the half a boolean destroys.
+  // A closed profile, so the strip in question is real: the helix() helper
+  // sweeps a straight radial segment, whose closing strip retraces the segment
+  // it came along and lies on the open surface too.
+  const int rows = 24, cols = 4;
+  const double R = 20.0, pitch = 6.0, turns = 1.5;
+  std::vector<Vector3d> net;
+  for (int i = 0; i < rows; i++) {
+    const double t = double(i) / (rows - 1);
+    const double a = 2 * M_PI * turns * t;
+    const double z = pitch * turns * t;
+    const double profile[4][2] = {{0.6, -1.2}, {-1.0, -0.4}, {-1.0, 0.4}, {0.6, 1.2}};
+    for (const auto& p : profile) {
+      net.emplace_back((R + p[0]) * cos(a), (R + p[0]) * sin(a), z + p[1]);
+    }
+  }
+  GridSurface open(rows, cols, net);
+  GridSurface closed(rows, cols, net, true);
+
+  SECTION("the midpoint of the closing strip lies on the closed surface only")
+  {
+    std::vector<Vector3d> scratch;
+    const int row = rows / 2;
+    const Vector3d mid = (closed.at(row, cols - 1) + closed.at(row, 0)) / 2;
+    CHECK(closed.onSurface(mid, closed.tessellationBand()));
+    CHECK_FALSE(open.onSurface(mid, open.tessellationBand()));
+    // and it is not one of the declared points, so position alone cannot save it
+    CHECK_FALSE(closed.isDeclaredPoint(mid));
+    CHECK(closed.pointMember(scratch, mid) == 1);
+  }
+
+  SECTION("the written form repeats the first column rather than stopping short")
+  {
+    int du = 0, dv = 0, nu = 0, nv = 0;
+    std::vector<Vector3d> ctrl;
+    std::vector<double> ku, kv;
+    std::vector<int> mu, mv;
+    REQUIRE(closed.splineForm(du, dv, nu, nv, ctrl, ku, mu, kv, mv));
+    CHECK(nv == cols + 1);
+    int sum_v = 0;
+    for (const int m : mv) sum_v += m;
+    CHECK(sum_v == nv + dv + 1);
+    for (int i = 0; i < nu; i++) {
+      CHECK((ctrl[std::size_t(i) * nv] - ctrl[std::size_t(i) * nv + cols]).norm() < 1e-12);
+    }
+  }
+}

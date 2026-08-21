@@ -1112,14 +1112,41 @@ exactly that reason.
 The 185 runs are the 185 cut facets, one run each, none unresolved - so every
 boundary of this face has a single neighbour that could replace it in step.
 
-**What remains is the curve, not the face.** The exporter's rule for a spline
-face is that each bounding curve is a row or a column of its own control net,
-which is what makes the curve lie on the surface exactly rather than to a
-tolerance. A trimmed grid's runs are neither, so each needs a curve fitted onto
-the surface, and the validator's edge-of-the-net check has to learn the
-difference. Until that lands the pass measures and reports and collapses
-nothing, which is deliberate for the same reason as before - a pass that
-silently did nothing would look exactly like one that found nothing.
+**The surface now covers the whole sweep.** A profile declared closed has one
+more span than it has columns - the strip from the last column back to the first
+- and no column of the net names it. Without it a four sided ridge had a surface
+over three of its sides, and facets on the fourth could be claimed by position,
+because the generator emitted their corners, and never by projection. That is
+precisely the half a boolean destroys, so the gap was in the worst possible
+place. `splineForm` writes the closed case with its first column repeated at the
+end, which is the strip `evaluate` covers and no column carries.
+
+**And then the seam is what stands between recognition and a face**, which is
+not what it looked like from the run structure. The intuition was that a trimmed
+grid's runs are neither rows nor columns of its net - the exporter's rule for a
+curve that provably lies on a spline face - so each would need a curve fitted
+onto the surface. That is true and it is not the blocker, because the
+neighbouring faces here are the mesh's own planar facets: a curve on the sweep
+does not lie in a neighbour's plane, so a shared edge between them can only be
+the chord it already is. The boundary stays as the mesh has it, and the face is
+written on the smooth surface inside it.
+
+The blocker is one layer up. A sweep whose profile is declared closed is a tube,
+its surface is closed across `v`, and the exporter measures whether the claimed
+region closes around it:
+
+```
+its facets lie over 4 of the profile's 4 spans - the region closes around the
+profile, so its face crosses the surface's seam
+```
+
+A face on a surface written as an open rectangle cannot be bounded across that
+seam. A region covering only some of the spans is a strip, whose boundary stays
+inside the rectangle and can be written as it stands - so the two cases are
+reported apart, and the reference ridge is the harder one. Until that is
+resolved the pass measures and reports and collapses nothing, which is
+deliberate for the same reason as before - a pass that silently did nothing
+would look exactly like one that found nothing.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

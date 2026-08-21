@@ -326,6 +326,14 @@ private:
    * at any plausible model size - the same reasoning as VertexSnapper in
    * core/FilletNode.cc, which exists for the same kind of problem. */
   void reindex();
+  /*! How many spans the profile has across it. One more than the number of
+   * columns has gaps between them when the profile is declared closed, because
+   * the strip from the last column back to the first is part of the sweep. */
+  [[nodiscard]] int vspans() const { return closed_v ? cols : cols - 1; }
+  /*! A net with its first column repeated at the end, when the profile is
+   * closed - the columns the closing strip needs and the declaration does not
+   * carry. Returns the net unchanged otherwise. */
+  [[nodiscard]] std::vector<Vector3d> withClosingColumn(const std::vector<Vector3d>& src) const;
   /*! Interpolate the stations, so that `evaluate` describes the sweep and not
    * only the points it passes through. Runs on construction and after a move. */
   void buildSpline();

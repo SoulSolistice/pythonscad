@@ -571,13 +571,51 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     const std::vector<AnalyticFeatures::Patch> grid_patches =
       AnalyticFeatures::recogniseGridPatches(mesh, surfaces, features.consumed, grid_report);
     for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
-    if (!grid_patches.empty()) {
-      // Nothing is written yet: a trimmed sweep's boundary is neither a row nor
-      // a column of its own net, so each run needs a curve fitted onto the
-      // surface before the face can be emitted.
+
+    // Where the claimed region sits on the sweep, which is the question a face
+    // has to answer and a count of facets does not. A sweep whose profile is
+    // declared closed is a tube, and its surface is closed across v: the region
+    // covering every span of the profile wraps that seam, and a face on a
+    // surface written as an open rectangle cannot be bounded across it. One
+    // covering only some spans is a strip, whose boundary stays inside the
+    // rectangle and can be written as it stands.
+    std::size_t wrapping = 0, strips = 0;
+    for (const auto& patch : grid_patches) {
+      if (!patch.alive) continue;
+      const auto *g = dynamic_cast<const GridSurface *>(patch.surface.get());
+      if (g == nullptr) continue;
+      const int segs = g->closed_v ? g->cols : g->cols - 1;
+      if (segs < 1) continue;
+      std::vector<char> span_used(segs, 0);
+      for (const std::size_t f : patch.facets) {
+        Vector3d centroid = Vector3d::Zero();
+        for (const int v : loops[f]) centroid += vertices[v];
+        centroid /= double(loops[f].size());
+        double pu = 0, pv = 0;
+        if (!g->project(centroid, pu, pv)) continue;
+        int span = int(pv * segs);
+        span = std::max(0, std::min(segs - 1, span));
+        span_used[span] = 1;
+      }
+      int used = 0;
+      for (const char c : span_used) used += c ? 1 : 0;
+      const bool wraps = used == segs && g->closed_v;
+      if (wraps) wrapping++;
+      else strips++;
+      LOG("STEP export: its facets lie over %1$d of the profile's %2$d spans - %3$s", used, segs,
+          wraps ? "the region closes around the profile, so its face crosses the surface's seam"
+                : "the region is a strip, whose boundary stays inside the surface's rectangle");
+    }
+
+    if (wrapping > 0 || strips > 0) {
+      // Nothing is written yet, and which sweep is blocked on what is worth
+      // saying apart. A strip is bounded by the mesh's own edges and waits only
+      // on the emitter; one that closes around its profile waits on a seam,
+      // which is a different piece of work.
       LOG(message_group::Export_Warning,
-          "STEP export: declared sweeps are recognised but not yet written - their boundary "
-          "curves are not fitted");
+          "STEP export: declared sweeps are recognised but not yet written - %1$d wrap the "
+          "surface's seam, %2$d are strips",
+          int(wrapping), int(strips));
     }
 
     if (approximate) {

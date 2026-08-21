@@ -660,10 +660,22 @@ void GridSurface::buildSpline()
   for (int j = 0; j < cols; j++) {
     for (int i = 0; i + 1 < m; i++) {
       const double mid = (t[i] + t[i + 1]) / 2;
-      const double v = cols > 1 ? double(j) / (cols - 1) : 0.0;
+      const double v = vspans() > 0 ? double(j) / vspans() : 0.0;
       band = std::max(band, (evaluate(mid, v) - (at(i, j) + at(i + 1, j)) / 2).norm());
     }
   }
+}
+
+std::vector<Vector3d> GridSurface::withClosingColumn(const std::vector<Vector3d>& src) const
+{
+  if (!closed_v || cols < 1) return src;
+  std::vector<Vector3d> out;
+  out.reserve(src.size() + rows);
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < cols; j++) out.push_back(src[std::size_t(i) * cols + j]);
+    out.push_back(src[std::size_t(i) * cols]);
+  }
+  return out;
 }
 
 bool GridSurface::splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
@@ -677,12 +689,17 @@ bool GridSurface::splineForm(int& degree_u, int& degree_v, int& rows_out, int& c
   // declared points themselves and the knots are the parameters evaluate()
   // interpolates at: uniform, clamped, one span per column pair.
   degree_v = 1;
-  cols_out = cols;
+  // A closed profile is written with its first column repeated at the end,
+  // which is the strip evaluate() covers and no column of the net does. Writing
+  // cols columns instead would leave the face open along that strip, on a
+  // surface that is closed there.
+  const int segs = vspans();
+  cols_out = closed_v ? cols + 1 : cols;
   knots_v.clear();
   mults_v.clear();
-  for (int j = 0; j < cols; j++) {
-    knots_v.push_back(double(j) / (cols - 1));
-    mults_v.push_back(j == 0 || j == cols - 1 ? 2 : 1);
+  for (int j = 0; j <= segs; j++) {
+    knots_v.push_back(double(j) / segs);
+    mults_v.push_back(j == 0 || j == segs ? 2 : 1);
   }
 
   rows_out = rows;
@@ -698,12 +715,12 @@ bool GridSurface::splineForm(int& degree_u, int& degree_v, int& rows_out, int& c
       knots_u.push_back(double(i) / (rows - 1));
       mults_u.push_back(i == 0 || i == rows - 1 ? 2 : 1);
     }
-    ctrl = net;
+    ctrl = withClosingColumn(net);
     return true;
   }
 
   degree_u = GRID_DEGREE;
-  ctrl = poles;
+  ctrl = withClosingColumn(poles);
   // uknots is the full knot vector, values repeated; a STEP file wants each
   // value once with the count beside it.
   knots_u.clear();
@@ -723,10 +740,16 @@ Vector3d GridSurface::evaluate(double u, double v) const
 {
   u = std::clamp(u, 0.0, 1.0);
   v = std::clamp(v, 0.0, 1.0);
-  const double vs = v * (cols - 1);
-  int j0 = int(vs);
-  if (j0 > cols - 2) j0 = std::max(0, cols - 2);
-  const double vf = cols > 1 ? vs - j0 : 0.0;
+  // A profile declared closed has one more span than it has columns: the strip
+  // from the last column back to the first is part of the sweep, and leaving it
+  // out made the surface cover only three sides of a four sided ridge. Facets
+  // there could then be claimed by position and never by projection, which is
+  // exactly the half the boolean destroys.
+  const int segs = vspans();
+  const double vs = v * segs;
+  int j0 = segs > 0 ? int(vs) : 0;
+  if (j0 > segs - 1) j0 = std::max(0, segs - 1);
+  const double vf = segs > 0 ? vs - j0 : 0.0;
 
   auto column = [&](int j) -> Vector3d {
     if (poles.empty()) {
@@ -745,8 +768,8 @@ Vector3d GridSurface::evaluate(double u, double v) const
     }
     return acc;
   };
-  if (cols == 1) return column(0);
-  return column(j0) * (1 - vf) + column(j0 + 1) * vf;
+  if (segs < 1) return column(0);
+  return column(j0) * (1 - vf) + column((j0 + 1) % cols) * vf;
 }
 
 bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
@@ -759,7 +782,7 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
   double best = std::numeric_limits<double>::infinity();
   double bu = 0, bv = 0;
   const int usamples = std::max(rows * 2, 8);
-  const int vsamples = std::max((cols - 1) * 2, 2);
+  const int vsamples = std::max(vspans() * 2, 2);
   for (int i = 0; i <= usamples; i++) {
     const double su = double(i) / usamples;
     for (int j = 0; j <= vsamples; j++) {

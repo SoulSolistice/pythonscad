@@ -54,13 +54,25 @@ at the first cycle it closes. The 185 runs are the 185 cut facets: each one
 meets the ridge along its own stretch of the boundary, so there is one run per
 neighbour, none longer than 7 mesh edges, and none unresolved.
 
-Nothing is written yet. A trimmed sweep's boundary is neither a row nor a column
-of its own net, which is the exporter's rule for a curve that lies on a spline
-face exactly, so each run still needs a curve fitted onto the surface.
+Nothing is written yet, and what stands in the way is not what it looked like.
+The profile here is declared closed, so the sweep is a tube and its surface is
+closed across v. The claimed facets lie over all four of the profile's spans -
+the region closes around the profile - so the face would have to be bounded
+across the surface's own seam, which a surface written as an open rectangle
+cannot carry. A region covering only some of the spans is a strip, and its
+boundary stays inside the rectangle where it can be written as it stands.
+
+That the surface covers the closing strip at all is recent: the fourth side of
+this four sided ridge, from the last column back to the first, is named by no
+column of the net, and without it the sweep had a surface over three of its
+sides. Facets on the fourth could be claimed by position, because the generator
+emitted their corners, and never by projection - precisely the half a boolean
+destroys.
 """
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
 # EXPECT: a declared 60x4 sweep claims 348 facets whole, 185 cut across it, within its tessellation band of 0.0660
 # EXPECT: 1 declared sweep covers 348 facets over 2 boundary cycles, split into 185 runs of up to 7 mesh edges, 0 unresolved
+# EXPECT: its facets lie over 4 of the profile's 4 spans - the region closes around the profile, so its face crosses the surface's seam
 from pythonscad import *
 import math
 
