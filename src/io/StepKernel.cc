@@ -561,6 +561,25 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         grid->rows, grid->cols, int(whole), int(partly), grid->tessellationBand());
     }
 
+    // What those claimed facets look like as a face: one sheet, and a boundary
+    // split into the runs that would each have to become one curve. That is the
+    // step between claiming facets and writing them, and it is reported before
+    // anything is written for the same reason the rest of this is - a sweep
+    // that cannot be made into a face has to say so, rather than looking like a
+    // sweep that was never declared.
+    std::vector<std::string> grid_report;
+    const std::vector<AnalyticFeatures::Patch> grid_patches =
+      AnalyticFeatures::recogniseGridPatches(mesh, surfaces, features.consumed, grid_report);
+    for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
+    if (!grid_patches.empty()) {
+      // Nothing is written yet: a trimmed sweep's boundary is neither a row nor
+      // a column of its own net, so each run needs a curve fitted onto the
+      // surface before the face can be emitted.
+      LOG(message_group::Export_Warning,
+          "STEP export: declared sweeps are recognised but not yet written - their boundary "
+          "curves are not fitted");
+    }
+
     if (approximate) {
       double smooth_angle = 25.0;
       if (const char *env = getenv("OPENSCAD_STEP_SMOOTH_ANGLE")) smooth_angle = atof(env);

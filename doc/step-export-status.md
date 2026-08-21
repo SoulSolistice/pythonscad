@@ -1078,15 +1078,48 @@ The positional read of the four lists is kept exactly as it was, because that is
 what catches an interleaved tail: a `(0.,1.)` where `v_multiplicities` belongs
 still fails, now as a parse rather than a string mismatch.
 
-**What remains is the face, not the surface.** A declared grid's boundary is
-wherever the boolean cut it, and the exporter's rule for a spline face is that
-each bounding curve is a row or a column of its own control net - which is what
-makes the curve lie on the surface exactly rather than to a tolerance. A trimmed
-grid's boundary is neither, so it needs curves fitted onto the surface, and the
-validator's edge-of-the-net check has to learn the difference. Until that lands
-the pass measures and reports and collapses nothing, which is deliberate for the
-same reason as before - a pass that silently did nothing would look exactly like
-one that found nothing.
+**The claimed facets are a face's worth of facets.** `recogniseGridPatches`
+answers for a grid what `recogniseBezierPatches` answers for a fillet - one
+sheet, and its boundary split into the runs that each have to become a single
+curve - and it reaches that answer by a different rule, because a declared grid
+is not a patch that covers its own parameter square. A Bezier's boundary lies on
+the four edges of that square, so the split follows the geometry: this stretch
+is `u=0`, that one is `v=1`. A trimmed grid's boundary lies wherever the boolean
+cut it, which is exactly why its facets had to be claimed by projection in the
+first place. So the split follows the topology instead: **one run per stretch of
+consecutive boundary segments with the same face on the far side.** That is the
+property a run actually needs - every segment of it is replaced in one
+neighbouring face, by one curve, or the shell opens - and the parameter square
+was standing in for it all along.
+
+On the reference ridge:
+
+```
+1 declared sweep covers 348 facets over 2 boundary cycles,
+split into 185 runs of up to 7 mesh edges, 0 unresolved
+```
+
+Two things in that line were not free. **The boundary is two cycles**, because a
+sweep closed around its profile and trimmed against a wall is an annulus, and
+the walk inherited from the Bezier path stopped at the first cycle it closed and
+then reported that the boundary did not close - which was true of the walk, not
+of the region. A fillet patch is a disc and never produced the case. **The caps
+are not swallowed**: a face every one of whose corners lies on the sweep gets
+claimed too, and a region that takes its own end caps closes into a shell with
+no boundary at all. The unit test builds a tube fanned to a hub at each end for
+exactly that reason.
+
+The 185 runs are the 185 cut facets, one run each, none unresolved - so every
+boundary of this face has a single neighbour that could replace it in step.
+
+**What remains is the curve, not the face.** The exporter's rule for a spline
+face is that each bounding curve is a row or a column of its own control net,
+which is what makes the curve lie on the surface exactly rather than to a
+tolerance. A trimmed grid's runs are neither, so each needs a curve fitted onto
+the surface, and the validator's edge-of-the-net check has to learn the
+difference. Until that lands the pass measures and reports and collapses
+nothing, which is deliberate for the same reason as before - a pass that
+silently did nothing would look exactly like one that found nothing.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

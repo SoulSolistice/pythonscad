@@ -474,6 +474,75 @@ std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<c
   return out;
 }
 
+namespace {
+
+/*! The boundary of a region of facets, as directed cycles.
+ *
+ * Directed in the sense the region's own facets traverse it. That is what makes
+ * a collapsed face agree with the mesh it replaces, and it is what forces the
+ * neighbour on the far side of every boundary segment to traverse it the other
+ * way round - the invariant that keeps the shell closed. An undirected walk
+ * gives an arbitrary direction, and half the faces then share an edge in the
+ * same direction as their neighbour.
+ *
+ * There can be more than one. A fillet patch is a disc and has exactly one, but
+ * a declared sweep closed around its profile is a tube: trim it against a wall
+ * and what is left is an annulus, whose boundary is two cycles and neither of
+ * them closes over the other. Walking only the first reported that the boundary
+ * did not close, which was true of the walk rather than of the region.
+ *
+ * Returns null on success, or why the region has no such boundary - which is
+ * always a reason to leave it faceted. */
+const char *boundaryCycles(const std::vector<std::vector<int>>& loops,
+                           const std::vector<std::size_t>& facets,
+                           std::vector<std::vector<int>>& cycles)
+{
+  // Edges used by one of the region's facets rather than two. Anything else
+  // means the region is not a simple sheet.
+  std::map<EdgeKey, int> uses;
+  for (const std::size_t f : facets) {
+    const std::vector<int>& loop = loops[f];
+    for (std::size_t i = 0; i < loop.size(); i++) {
+      uses[edgeKey(loop[i], loop[(i + 1) % loop.size()])]++;
+    }
+  }
+  std::map<int, int> next;  // boundary vertex -> the next one along
+  std::size_t boundary_edges = 0;
+  for (const std::size_t f : facets) {
+    const std::vector<int>& loop = loops[f];
+    for (std::size_t i = 0; i < loop.size(); i++) {
+      const int a = loop[i], b = loop[(i + 1) % loop.size()];
+      if (uses[edgeKey(a, b)] != 1) continue;
+      next[a] = b;
+      boundary_edges++;
+    }
+  }
+  if (boundary_edges == 0 || next.size() != boundary_edges) {
+    return "the facets on this patch do not form a simple sheet";
+  }
+
+  cycles.clear();
+  std::set<int> walked;
+  std::size_t seen = 0;
+  for (const auto& entry : next) {
+    if (walked.count(entry.first)) continue;
+    std::vector<int> cycle;
+    int cur = entry.first;
+    do {
+      cycle.push_back(cur);
+      walked.insert(cur);
+      cur = next[cur];
+    } while (cur != entry.first && !walked.count(cur) && cycle.size() <= boundary_edges);
+    if (cur != entry.first) return "the patch boundary does not close";
+    seen += cycle.size();
+    cycles.push_back(std::move(cycle));
+  }
+  if (seen != boundary_edges) return "the patch boundary does not close";
+  return nullptr;
+}
+
+}  // namespace
+
 std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
                                           const std::vector<char>& consumed,
@@ -529,59 +598,19 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
     }
     if (patch.facets.empty()) continue;
 
-    // The boundary of the region: edges used by one of its facets rather than
-    // two. Anything else means the region is not a simple sheet.
-    std::map<EdgeKey, int> uses;
-    for (const std::size_t f : patch.facets) {
-      const std::vector<int>& loop = loops[f];
-      for (std::size_t i = 0; i < loop.size(); i++) {
-        uses[edgeKey(loop[i], loop[(i + 1) % loop.size()])]++;
-      }
-    }
-    // Directed, in the sense the region's own facets traverse it. That is what
-    // makes the collapsed face agree with the mesh it replaces, and it is what
-    // forces the neighbour on the far side of every boundary segment to
-    // traverse it the other way round - the invariant that keeps the shell
-    // closed. An undirected walk gives an arbitrary direction, and half the
-    // faces then share an edge in the same direction as their neighbour.
-    std::map<int, int> next;  // boundary vertex -> the next one along
-    std::size_t boundary_edges = 0;
-    for (const std::size_t f : patch.facets) {
-      const std::vector<int>& loop = loops[f];
-      for (std::size_t i = 0; i < loop.size(); i++) {
-        const int a = loop[i], b = loop[(i + 1) % loop.size()];
-        if (uses[edgeKey(a, b)] != 1) continue;
-        next[a] = b;
-        boundary_edges++;
-      }
-    }
-    bool simple = boundary_edges > 0 && next.size() == boundary_edges;
-    if (!simple) {
-      patch.alive = false;
-      patch.dropped = "the facets on this patch do not form a simple sheet";
-      patches.push_back(std::move(patch));
-      continue;
-    }
-
-    // Walk the boundary once, recording where each vertex sits in the patch's
-    // own parameters. That is what says which edge of the patch a boundary
-    // segment belongs to, and so which segments have to become one curve.
-    std::vector<int> cycle;
     std::vector<int> edge_of;
-    {
-      const int start = next.begin()->first;
-      int cur = start;
-      do {
-        cycle.push_back(cur);
-        cur = next[cur];
-      } while (cur != start && cycle.size() <= boundary_edges);
-    }
-    if (cycle.size() != boundary_edges) {
+    std::vector<std::vector<int>> cycles;
+    const char *why = boundaryCycles(loops, patch.facets, cycles);
+    // A Bezier patch is a disc: one boundary, or it is not the sheet it claims
+    // to be.
+    if (why == nullptr && cycles.size() != 1) why = "the patch boundary does not close";
+    if (why != nullptr) {
       patch.alive = false;
-      patch.dropped = "the patch boundary does not close";
+      patch.dropped = why;
       patches.push_back(std::move(patch));
       continue;
     }
+    const std::vector<int>& cycle = cycles.front();
     // Each *segment* of the boundary is assigned a curve, not each vertex: a
     // segment lies on exactly one, while its endpoints may lie on two.
     const double curve_tol = 1e-7 * std::max(1.0, (hi - lo).norm());
@@ -771,6 +800,212 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
     // nothing - which is the same ambiguity the availability line had.
     report.push_back(format("%d of %d shared seams agree between the two patches meeting there",
                             int(shared_seams - seam_mismatch), int(shared_seams)));
+  }
+  return patches;
+}
+
+std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
+                                        const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                        const std::vector<char>& consumed,
+                                        std::vector<std::string>& report)
+{
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  const std::vector<char>& loop_valid = *mesh.valid;
+  const std::vector<char>& is_hole = *mesh.is_hole;
+
+  std::vector<Patch> patches;
+  std::vector<char> taken(loops.size(), 0);
+
+  // Which faces sit on either side of every edge of the mesh. Needed before the
+  // boundaries are split rather than after, because for a declared grid the
+  // split *is* by neighbour - see below.
+  std::map<EdgeKey, std::vector<std::size_t>> edge_loops;
+  for (std::size_t f = 0; f < loops.size(); f++) {
+    if (!loop_valid[f]) continue;
+    const std::vector<int>& loop = loops[f];
+    for (std::size_t i = 0; i < loop.size(); i++) {
+      edge_loops[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
+    }
+  }
+
+  for (const auto& surface : surfaces) {
+    const auto *grid = dynamic_cast<const GridSurface *>(surface.get());
+    if (grid == nullptr || grid->net.empty()) continue;
+
+    // The declared points bound the sweep, so a box round them rejects most of
+    // the model without projecting anything - the same reason the Bezier path
+    // takes a box round its control net first. The band is added because
+    // membership itself is only accurate to the band.
+    Vector3d lo = grid->net.front(), hi = grid->net.front();
+    for (const auto& p : grid->net) {
+      lo = lo.cwiseMin(p);
+      hi = hi.cwiseMax(p);
+    }
+    const double slack = grid->tessellationBand() + 1e-6 * std::max(1.0, (hi - lo).norm());
+    lo.array() -= slack;
+    hi.array() += slack;
+
+    Patch patch;
+    patch.surface = surface;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
+      bool on = true;
+      for (const int v : loops[f]) {
+        const Vector3d& p = vertices[v];
+        if ((p.array() < lo.array()).any() || (p.array() > hi.array()).any()) {
+          on = false;
+          break;
+        }
+      }
+      if (!on) continue;
+      for (const int v : loops[f]) {
+        std::vector<Vector3d> unused;  // pointMember's scratch argument, as elsewhere
+        if (!const_cast<GridSurface *>(grid)->pointMember(unused, vertices[v])) {
+          on = false;
+          break;
+        }
+      }
+      if (on) patch.facets.push_back(f);
+    }
+    if (patch.facets.empty()) continue;
+
+    std::vector<std::vector<int>> cycles;
+    if (const char *why = boundaryCycles(loops, patch.facets, cycles)) {
+      patch.alive = false;
+      patch.dropped = why;
+      patches.push_back(std::move(patch));
+      continue;
+    }
+
+    // Where a Bezier patch and a declared grid part company.
+    //
+    // A Bezier covers its whole parameter square, so every boundary segment
+    // lies on one of the square's four edges and the split into runs follows
+    // the geometry: this stretch is the curve u=0, that one is v=1. A declared
+    // grid is trimmed wherever the boolean cut it, and its boundary therefore
+    // lies nowhere in particular - which is the whole reason the facets had to
+    // be claimed by projection rather than by position.
+    //
+    // So the split follows the *topology* instead: a run is a maximal stretch
+    // of consecutive boundary segments with the same thing on the far side. That
+    // is the property a run actually needs - every segment of it is replaced in
+    // one neighbouring face, by one curve, or the shell opens - and it is the
+    // one the parameter square was standing in for all along.
+    const std::set<std::size_t> mine(patch.facets.begin(), patch.facets.end());
+    bool ok = true;
+    for (std::size_t ci = 0; ci < cycles.size() && ok; ci++) {
+      const std::vector<int>& cycle = cycles[ci];
+      const std::size_t n = cycle.size();
+      std::vector<std::size_t> across(n, std::size_t(-1));
+      for (std::size_t i = 0; i < n; i++) {
+        const auto it = edge_loops.find(edgeKey(cycle[i], cycle[(i + 1) % n]));
+        if (it == edge_loops.end() || it->second.size() != 2) {
+          ok = false;
+          break;
+        }
+        across[i] = mine.count(it->second[0]) ? it->second[1] : it->second[0];
+      }
+      if (!ok) break;
+
+      std::size_t begin = 0;
+      while (begin < n && across[begin] == across[(begin + n - 1) % n]) begin++;
+      if (begin == n) begin = 0;  // one neighbour all the way round
+      for (std::size_t i = 0; i < n;) {
+        const std::size_t neighbour = across[(begin + i) % n];
+        Patch::Run run;
+        // A grid's run lies on no edge of a parameter square and is straight
+        // only by accident, so neither field means anything here; the emitter
+        // reads `kind`, `verts` and `bound`.
+        run.bound = ci;
+        std::size_t j = i;
+        run.verts.push_back(cycle[(begin + j) % n]);
+        while (j < n && across[(begin + j) % n] == neighbour) {
+          j++;
+          run.verts.push_back(cycle[(begin + j) % n]);
+        }
+        patch.runs.push_back(std::move(run));
+        i = j;
+      }
+    }
+    if (!ok) {
+      patch.alive = false;
+      patch.dropped = "a boundary segment is not shared with exactly one other face";
+      patches.push_back(std::move(patch));
+      continue;
+    }
+
+    for (const std::size_t f : patch.facets) taken[f] = 1;
+    patches.push_back(std::move(patch));
+  }
+
+  // What each run borders. Grouping by neighbour has already answered which
+  // face it is; what is left is where in that face the run sits, which is what
+  // the emitter substitutes into.
+  std::map<std::size_t, std::size_t> patch_of_loop;
+  for (std::size_t pi = 0; pi < patches.size(); pi++) {
+    if (!patches[pi].alive) continue;
+    for (const std::size_t f : patches[pi].facets) patch_of_loop[f] = pi;
+  }
+  for (std::size_t pi = 0; pi < patches.size(); pi++) {
+    if (!patches[pi].alive) continue;
+    for (auto& run : patches[pi].runs) {
+      if (run.verts.size() < 2) continue;  // stays UNRESOLVED
+      const auto it = edge_loops.find(edgeKey(run.verts[0], run.verts[1]));
+      if (it == edge_loops.end() || it->second.size() != 2) continue;
+      const std::size_t f0 = it->second[0], f1 = it->second[1];
+      const auto own = patch_of_loop.find(f0);
+      const std::size_t other = (own != patch_of_loop.end() && own->second == pi) ? f1 : f0;
+      const auto op = patch_of_loop.find(other);
+      if (op != patch_of_loop.end()) {
+        if (op->second == pi) continue;  // folded back on itself
+        run.kind = Patch::Run::OTHER_PATCH;
+        run.patch = op->second;
+        continue;
+      }
+      const std::vector<int>& loop = loops[other];
+      const std::size_t m = loop.size();
+      run.count = run.verts.size() - 1;
+      if (run.count > m) continue;
+      for (std::size_t j = 0; j < m; j++) {
+        bool fwd = true, rev = true;
+        for (std::size_t c = 0; c < run.count; c++) {
+          const int a = loop[(j + c) % m], b = loop[(j + c + 1) % m];
+          fwd = fwd && a == run.verts[c] && b == run.verts[c + 1];
+          rev = rev && a == run.verts[run.count - c] && b == run.verts[run.count - c - 1];
+        }
+        if (!fwd && !rev) continue;
+        run.kind = run.count == m ? Patch::Run::WHOLE_LOOP : Patch::Run::LOOP_RUN;
+        run.loop = other;
+        run.start = j;
+        run.reversed = !fwd;
+        break;
+      }
+    }
+  }
+
+  std::size_t live = 0, facets = 0, runs = 0, stuck = 0, longest = 0, bounds = 0;
+  for (const auto& p : patches) {
+    if (!p.alive) {
+      report.push_back(format("a declared sweep of %d facets was left faceted: %s",
+                              int(p.facets.size()), p.dropped));
+      continue;
+    }
+    live++;
+    facets += p.facets.size();
+    runs += p.runs.size();
+    for (const auto& run : p.runs) {
+      if (run.kind == Patch::Run::UNRESOLVED) stuck++;
+      longest = std::max(longest, run.verts.size() - 1);
+      bounds = std::max(bounds, run.bound + 1);
+    }
+  }
+  if (live > 0) {
+    report.push_back(format("%d declared sweep%s %s %d facets over %d boundary cycle%s, split "
+                            "into %d runs of up to %d mesh edges, %d unresolved",
+                            int(live), live == 1 ? "" : "s", live == 1 ? "covers" : "cover",
+                            int(facets), int(bounds), bounds == 1 ? "" : "s", int(runs),
+                            int(longest), int(stuck)));
   }
   return patches;
 }

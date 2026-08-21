@@ -43,9 +43,24 @@ the number being trusted.
 Claiming 348 rather than 356 is the honest ceiling: the eight are where the
 union actually removed surface, and the 185 cut across it are the facets the
 trim left straddling the ridge's edge.
+
+Those 348 then have to be one *face*, which is a stricter thing than 348 claims:
+a sheet, with a boundary that closes, split into runs each of which a single
+neighbouring face can replace in step. They are, and the shape of the answer is
+the interesting part. The boundary is **two** cycles rather than one, because a
+sweep closed around its profile and trimmed against a wall is an annulus - the
+case a fillet patch never produces, and the reason the boundary walk cannot stop
+at the first cycle it closes. The 185 runs are the 185 cut facets: each one
+meets the ridge along its own stretch of the boundary, so there is one run per
+neighbour, none longer than 7 mesh edges, and none unresolved.
+
+Nothing is written yet. A trimmed sweep's boundary is neither a row nor a column
+of its own net, which is the exporter's rule for a curve that lies on a spline
+face exactly, so each run still needs a curve fitted onto the surface.
 """
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
 # EXPECT: a declared 60x4 sweep claims 348 facets whole, 185 cut across it, within its tessellation band of 0.0660
+# EXPECT: 1 declared sweep covers 348 facets over 2 boundary cycles, split into 185 runs of up to 7 mesh edges, 0 unresolved
 from pythonscad import *
 import math
 

@@ -178,6 +178,12 @@ struct Patch {
     std::size_t patch = 0;             // OTHER_PATCH
     bool reversed = false;             // the neighbour traverses the run backwards
 
+    /*! Which of the region's boundary cycles this run lies on. Always 0 for a
+     * Bezier patch, which is a disc; a trimmed sweep can be an annulus, and
+     * then one cycle is the face's outer bound and the others are holes in
+     * it. */
+    std::size_t bound = 0;
+
     /*! For OTHER_PATCH, the run in that patch covering the same segments.
      *
      * The two have to be the same seam vertex for vertex, because they will
@@ -307,6 +313,24 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
                                           const std::vector<char>& consumed,
                                           std::vector<std::string>& report);
+
+/*! Find the facets which lie on each declared grid, and split their boundaries.
+ *
+ * The same answer as recogniseBezierPatches - a sheet of facets and the runs
+ * its boundary splits into - reached by a different rule, because a declared
+ * grid is not a patch that covers its own parameter square. A Bezier's boundary
+ * lies on the four edges of that square and splits by geometry; a grid is
+ * trimmed wherever the boolean cut it, so its boundary lies nowhere in
+ * particular and splits by topology instead: one run per stretch of consecutive
+ * boundary segments with the same face on the far side.
+ *
+ * `Run::edge` and `Run::straight` are therefore meaningless here and left at
+ * their defaults. As with the Bezier path, loops a patch takes are not marked
+ * consumed - the caller decides that once it knows the patch can be written. */
+std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
+                                        const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                        const std::vector<char>& consumed,
+                                        std::vector<std::string>& report);
 
 /*! Find the bands of facets which were modelled as a surface of revolution.
  *

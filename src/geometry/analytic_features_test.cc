@@ -431,3 +431,120 @@ TEST_CASE("a rational strip is an exact cylinder and a corner an exact sphere",
     CHECK(quadricOfPatch(bez, tol) == nullptr);
   }
 }
+
+namespace {
+
+/*! A tube swept along z, capped at both ends by a fan to a hub on the axis.
+ *
+ * The caps matter, and not for the geometry. A cap made of the rim's own
+ * vertices is a face every one of whose corners lies on the declared sweep, so
+ * the recogniser claims it too and the region closes into a shell with no
+ * boundary at all. Fanning to a hub off the sweep keeps the caps out of the
+ * region, which is what leaves the tube an annulus - the case a fillet patch
+ * never produces and this one always does. */
+struct FacetedTube {
+  std::vector<Vector3d> vertices;
+  std::vector<std::vector<int>> loops;
+  std::vector<Vector3d> normals;
+  std::vector<char> valid, is_hole;
+  int rings, around;
+
+  FacetedTube(int rings_in, int around_in, double r = 5.0, double h = 3.0)
+    : rings(rings_in), around(around_in)
+  {
+    for (int i = 0; i < rings; i++) {
+      const double z = h * i / (rings - 1);
+      for (int j = 0; j < around; j++) {
+        const double a = 2 * M_PI * j / around;
+        vertices.emplace_back(r * cos(a), r * sin(a), z);
+      }
+    }
+    for (int i = 0; i + 1 < rings; i++) {
+      for (int j = 0; j < around; j++) {
+        const int k = (j + 1) % around;
+        loops.push_back({i * around + j, i * around + k, (i + 1) * around + k, (i + 1) * around + j});
+        const double a = 2 * M_PI * (j + 0.5) / around;
+        normals.emplace_back(cos(a), sin(a), 0.0);
+      }
+    }
+    for (int end = 0; end < 2; end++) {
+      const int base = end == 0 ? 0 : (rings - 1) * around;
+      const int hub = (int)vertices.size();
+      vertices.emplace_back(0.0, 0.0, end == 0 ? 0.0 : h);
+      for (int j = 0; j < around; j++) {
+        const int k = (j + 1) % around;
+        if (end == 0) loops.push_back({base + k, base + j, hub});
+        else loops.push_back({base + j, base + k, hub});
+        normals.emplace_back(0.0, 0.0, end == 0 ? -1.0 : 1.0);
+      }
+    }
+    valid.assign(loops.size(), 1);
+    is_hole.assign(loops.size(), 0);
+  }
+
+  [[nodiscard]] Mesh mesh() const
+  {
+    Mesh m;
+    m.vertices = &vertices;
+    m.loops = &loops;
+    m.valid = &valid;
+    m.is_hole = &is_hole;
+    m.normals = &normals;
+    return m;
+  }
+
+  [[nodiscard]] std::vector<std::shared_ptr<Surface>> declared() const
+  {
+    std::vector<Vector3d> net(vertices.begin(), vertices.begin() + rings * around);
+    std::vector<std::shared_ptr<Surface>> surfaces;
+    surfaces.push_back(std::make_shared<GridSurface>(rings, around, net, true));
+    return surfaces;
+  }
+};
+
+}  // namespace
+
+TEST_CASE("a declared sweep that is an annulus keeps both its boundaries", "[analytic][grid]")
+{
+  const int rings = 5, around = 12;
+  FacetedTube tube(rings, around);
+  const Mesh mesh = tube.mesh();
+  const std::vector<char> consumed(tube.loops.size(), 0);
+  std::vector<std::string> report;
+  const std::vector<Patch> patches = recogniseGridPatches(mesh, tube.declared(), consumed, report);
+
+  REQUIRE(patches.size() == 1);
+  const Patch& patch = patches.front();
+  REQUIRE(patch.alive);
+  CHECK(patch.facets.size() == std::size_t((rings - 1) * around));
+
+  SECTION("its boundary is two cycles, not one that failed to close")
+  {
+    // The walk used to stop at the first cycle and compare its length against
+    // every boundary edge, so an annulus reported a boundary that did not
+    // close - which was true of the walk, not of the region.
+    std::set<std::size_t> bounds;
+    for (const auto& run : patch.runs) bounds.insert(run.bound);
+    CHECK(bounds.size() == 2);
+  }
+
+  SECTION("every run borders exactly one face and knows where")
+  {
+    // A run is what has to become a single curve, and it can only do that if
+    // the face on the other side replaces exactly the same segments. Each cap
+    // triangle here meets the rim along one edge, so a rim splits into one run
+    // per triangle - the honest answer, and the one the emitter needs.
+    CHECK(patch.runs.size() == std::size_t(2 * around));
+    for (const auto& run : patch.runs) {
+      CHECK(run.kind != Patch::Run::UNRESOLVED);
+      CHECK(run.verts.size() == 2);
+    }
+  }
+
+  SECTION("the caps are not swallowed by the sweep they sit on")
+  {
+    // Their rim vertices are declared points, so a claim by position alone
+    // would take them and close the region into a shell with no boundary.
+    for (const std::size_t f : patch.facets) CHECK(mesh.loops->at(f).size() == 4);
+  }
+}
