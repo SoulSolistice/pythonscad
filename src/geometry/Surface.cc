@@ -666,6 +666,59 @@ void GridSurface::buildSpline()
   }
 }
 
+bool GridSurface::splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
+                             std::vector<Vector3d>& ctrl, std::vector<double>& knots_u,
+                             std::vector<int>& mults_u, std::vector<double>& knots_v,
+                             std::vector<int>& mults_v) const
+{
+  if (rows < 2 || cols < 2) return false;
+
+  // Across the profile the surface is ruled, so the control points are the
+  // declared points themselves and the knots are the parameters evaluate()
+  // interpolates at: uniform, clamped, one span per column pair.
+  degree_v = 1;
+  cols_out = cols;
+  knots_v.clear();
+  mults_v.clear();
+  for (int j = 0; j < cols; j++) {
+    knots_v.push_back(double(j) / (cols - 1));
+    mults_v.push_back(j == 0 || j == cols - 1 ? 2 : 1);
+  }
+
+  rows_out = rows;
+  ctrl.clear();
+  if (poles.empty()) {
+    // No cubic was fitted - fewer than four stations, or stations that repeat.
+    // evaluate() then walks the declared points linearly, and that is a degree
+    // 1 B-spline with the same uniform clamped knots as the other direction.
+    degree_u = 1;
+    knots_u.clear();
+    mults_u.clear();
+    for (int i = 0; i < rows; i++) {
+      knots_u.push_back(double(i) / (rows - 1));
+      mults_u.push_back(i == 0 || i == rows - 1 ? 2 : 1);
+    }
+    ctrl = net;
+    return true;
+  }
+
+  degree_u = GRID_DEGREE;
+  ctrl = poles;
+  // uknots is the full knot vector, values repeated; a STEP file wants each
+  // value once with the count beside it.
+  knots_u.clear();
+  mults_u.clear();
+  for (const double k : uknots) {
+    if (!knots_u.empty() && std::abs(k - knots_u.back()) <= 1e-12) {
+      mults_u.back()++;
+      continue;
+    }
+    knots_u.push_back(k);
+    mults_u.push_back(1);
+  }
+  return true;
+}
+
 Vector3d GridSurface::evaluate(double u, double v) const
 {
   u = std::clamp(u, 0.0, 1.0);

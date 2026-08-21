@@ -477,14 +477,21 @@ public:
     RoundType(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
   };
 
-  /*! A tensor-product Bezier written as a B-spline with knots.
+  /*! A tensor-product B-spline surface.
    *
-   * A Bezier of degree d is the B-spline whose only knots are 0 and 1, each
-   * with multiplicity d+1, so no knot vector has to be invented: the control
-   * net is written straight out and the parameterisation follows. Both patches
-   * a fillet draws are degree 2 in at least one direction, and the corner's
-   * apex row makes three of its control points coincide - a singular point,
-   * which is how a rounded corner is normally written. */
+   * Two shapes of net arrive here. A fillet's patch is a Bezier: a Bezier of
+   * degree d is the B-spline whose only knots are 0 and 1, each with
+   * multiplicity d+1, so no knot vector has to be invented - the control net is
+   * written straight out and the parameterisation follows. Both patches a
+   * fillet draws are degree 2 in at least one direction, and the corner's apex
+   * row makes three of its control points coincide - a singular point, which is
+   * how a rounded corner is normally written.
+   *
+   * A declared grid is the other shape: many more control points than degree+1,
+   * with interior knots that come from the interpolation and are not derivable
+   * from the degrees. Pass those through `setKnots`, which is the only reason
+   * this class is not Bezier-only; leave them unset and the Bezier knots are
+   * synthesised as before. */
   class BSplineSurface : public SurfaceType
   {
   public:
@@ -520,11 +527,7 @@ public:
       // branches below share these so the two orders cannot drift apart again -
       // which is exactly what had happened, the polynomial one being right and
       // the rational one wrong.
-      const std::string mult_u =
-        "(" + std::to_string(degree_u + 1) + "," + std::to_string(degree_u + 1) + ")";
-      const std::string mult_v =
-        "(" + std::to_string(degree_v + 1) + "," + std::to_string(degree_v + 1) + ")";
-      const std::string knots = mult_u + "," + mult_v + ",(0.,1.),(0.,1.)";
+      const std::string knots = knot_text();
 
       if (weights.empty()) {
         stream_in << "#" << id << " = B_SPLINE_SURFACE_WITH_KNOTS('" << label << "'," << degree_u << ","
@@ -554,9 +557,54 @@ public:
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
 
+    /*! The knots of a surface that is not a Bezier: distinct values and their
+     * multiplicities, per direction. Both directions have to be given together
+     * - a surface with general knots in one direction and Bezier knots in the
+     * other is still a surface with general knots, and the reader is told all
+     * four lists or none. */
+    void setKnots(std::vector<double> ku, std::vector<int> mu, std::vector<double> kv,
+                  std::vector<int> mv)
+    {
+      knots_u = std::move(ku);
+      mults_u = std::move(mu);
+      knots_v = std::move(kv);
+      mults_v = std::move(mv);
+    }
+
     int degree_u = 0, degree_v = 0;
     std::vector<std::vector<Point *>> net;     // net[u][v]
     std::vector<std::vector<double>> weights;  // empty for a polynomial patch
+
+  private:
+    static std::string int_list(const std::vector<int>& v)
+    {
+      std::string out = "(";
+      for (std::size_t i = 0; i < v.size(); i++) out += (i ? "," : "") + std::to_string(v[i]);
+      return out + ")";
+    }
+    static std::string real_list(const std::vector<double>& v)
+    {
+      std::string out = "(";
+      for (std::size_t i = 0; i < v.size(); i++) out += (i ? "," : "") + step_real(v[i]);
+      return out + ")";
+    }
+
+    /*! The four lists, in the order ISO 10303-42 gives them. */
+    std::string knot_text() const
+    {
+      if (!knots_u.empty() && !knots_v.empty()) {
+        return int_list(mults_u) + "," + int_list(mults_v) + "," + real_list(knots_u) + "," +
+               real_list(knots_v);
+      }
+      const std::string mult_u =
+        "(" + std::to_string(degree_u + 1) + "," + std::to_string(degree_u + 1) + ")";
+      const std::string mult_v =
+        "(" + std::to_string(degree_v + 1) + "," + std::to_string(degree_v + 1) + ")";
+      return mult_u + "," + mult_v + ",(0.,1.),(0.,1.)";
+    }
+
+    std::vector<double> knots_u, knots_v;  // empty for a Bezier
+    std::vector<int> mults_u, mults_v;
   };
 
   /*! One boundary curve of such a patch: a row or a column of its net. */

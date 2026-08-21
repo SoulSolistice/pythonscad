@@ -143,3 +143,111 @@ TEST_CASE("a declared grid accepts the points it was built from and nothing else
     CHECK(!grid.sameAs(closed));
   }
 }
+
+TEST_CASE("a declared grid hands out the B-spline a STEP file can carry", "[surface][grid]")
+{
+  const int rows = 24, cols = 4;
+  GridSurface grid(rows, cols, helix(rows, cols));
+
+  int du = 0, dv = 0, nu = 0, nv = 0;
+  std::vector<Vector3d> ctrl;
+  std::vector<double> ku, kv;
+  std::vector<int> mu, mv;
+  REQUIRE(grid.splineForm(du, dv, nu, nv, ctrl, ku, mu, kv, mv));
+
+  SECTION("the knot vectors are the ones the degrees and the net imply")
+  {
+    // sum(multiplicities) = control points + degree + 1 is the whole contract
+    // between the four lists; a reader that disagrees builds a different
+    // surface or none. Both ends clamped, because the patch has to start at the
+    // first station and stop at the last rather than somewhere inside them.
+    CHECK(du == 3);
+    CHECK(dv == 1);
+    CHECK(int(ctrl.size()) == nu * nv);
+
+    int sum_u = 0, sum_v = 0;
+    for (const int m : mu) sum_u += m;
+    for (const int m : mv) sum_v += m;
+    CHECK(sum_u == nu + du + 1);
+    CHECK(sum_v == nv + dv + 1);
+    CHECK(mu.front() == du + 1);
+    CHECK(mu.back() == du + 1);
+    CHECK(mv.front() == dv + 1);
+    CHECK(mv.back() == dv + 1);
+
+    for (std::size_t i = 1; i < ku.size(); i++) CHECK(ku[i] > ku[i - 1]);
+    for (std::size_t i = 1; i < kv.size(); i++) CHECK(kv[i] > kv[i - 1]);
+  }
+
+  SECTION("it has interior knots, which is why they cannot be left implied")
+  {
+    // A Bezier's knots follow from its degree, so the exporter used to
+    // synthesise them. This grid has 24 stations and 20 interior knots that
+    // come from the chord lengths between them; nothing in the file could
+    // reconstruct those, and writing Bezier knots here would describe some
+    // other surface entirely.
+    CHECK(ku.size() > 2);
+    CHECK(kv.size() == std::size_t(cols));
+  }
+
+  SECTION("evaluating that form gives back the surface it came from")
+  {
+    // The form is only worth writing if it is the same surface membership was
+    // answered against. de Boor over the handed-out knots and poles, compared
+    // against evaluate() - if these disagree, a reader gets a surface the
+    // exporter never checked the mesh against.
+    std::vector<double> full;
+    for (std::size_t i = 0; i < ku.size(); i++) {
+      for (int m = 0; m < mu[i]; m++) full.push_back(ku[i]);
+    }
+
+    auto deboor = [&](double u, int col) {
+      int span = du;
+      while (span + 1 < nu && full[span + 1] <= u) span++;
+      std::vector<Vector3d> d(du + 1);
+      for (int i = 0; i <= du; i++) d[i] = ctrl[std::size_t(span - du + i) * nv + col];
+      for (int r = 1; r <= du; r++) {
+        for (int i = du; i >= r; i--) {
+          const int k = span - du + i;
+          const double lo = full[k], hi = full[k + du + 1 - r];
+          const double a = hi > lo ? (u - lo) / (hi - lo) : 0.0;
+          d[i] = d[i - 1] * (1 - a) + d[i] * a;
+        }
+      }
+      return d[du];
+    };
+
+    for (int s = 0; s <= 40; s++) {
+      const double u = std::min(double(s) / 40, 1.0 - 1e-12);
+      for (int col = 0; col < nv; col++) {
+        const double v = double(col) / (nv - 1);
+        CHECK((deboor(u, col) - grid.evaluate(u, v)).norm() < 1e-9);
+      }
+    }
+  }
+}
+
+TEST_CASE("a grid too short for a cubic still reports the surface it is", "[surface][grid]")
+{
+  // Three stations leave no cubic to fit, and evaluate() walks them linearly.
+  // Reporting degree 3 anyway would hand a reader a surface with more control
+  // points than it has, so the form comes back at the degree it really is.
+  const int rows = 3, cols = 2;
+  GridSurface grid(rows, cols, helix(rows, cols));
+
+  int du = 0, dv = 0, nu = 0, nv = 0;
+  std::vector<Vector3d> ctrl;
+  std::vector<double> ku, kv;
+  std::vector<int> mu, mv;
+  REQUIRE(grid.splineForm(du, dv, nu, nv, ctrl, ku, mu, kv, mv));
+  CHECK(du == 1);
+  CHECK(nu == rows);
+  CHECK(ctrl.size() == std::size_t(rows * cols));
+
+  int sum_u = 0;
+  for (const int m : mu) sum_u += m;
+  CHECK(sum_u == nu + du + 1);
+  for (int i = 0; i < rows; i++) {
+    CHECK((ctrl[std::size_t(i) * cols] - grid.at(i, 0)).norm() < 1e-12);
+  }
+}

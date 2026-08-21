@@ -296,6 +296,24 @@ public:
   /*! Whether `pt` is one of the points the generator emitted. Exact, by
    * position - no projection, no tolerance to choose. */
   [[nodiscard]] bool isDeclaredPoint(const Vector3d& pt) const;
+  /*! The same surface `evaluate` describes, in the form a STEP file wants.
+   *
+   * `ctrl` is row major over `rows_out` x `cols_out`, and each direction gets
+   * its distinct knots with their multiplicities - which is the whole reason
+   * this exists separately from `at()`. A fillet's patch is a Bezier and its
+   * knots follow from its degree; an interpolated grid has interior knots that
+   * come from the chord lengths and cannot be derived from anything the file
+   * already carries, so they have to be written out.
+   *
+   * Returns false for a grid too small to describe (fewer than two rows or
+   * columns). A grid of fewer than four rows has no cubic fitted and comes back
+   * as the bilinear surface `evaluate` falls back to, which is the same
+   * surface, honestly reported at degree 1. */
+  [[nodiscard]] bool splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
+                                std::vector<Vector3d>& ctrl, std::vector<double>& knots_u,
+                                std::vector<int>& mults_u, std::vector<double>& knots_v,
+                                std::vector<int>& mults_v) const;
+
 
   int rows = 0, cols = 0;
   bool closed_v = false;

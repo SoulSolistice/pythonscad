@@ -1056,13 +1056,37 @@ count from 63 to 348, at a band of 0.0660 on this ridge. A tolerance chosen for
 fit quality is the wrong instrument here; the right one is the width of the gap
 the tessellation itself left.
 
-So the grid now both carries the ordering and answers membership on it. What
-remains is emission: writing a declared grid as an actual face needs
-`B_SPLINE_SURFACE_WITH_KNOTS` with **general knots**, where the exporter today
-writes only the Bezier-only knot vector, plus the recogniser wiring that hands
-the claimed facets to it. Until that lands the pass measures and reports and
-collapses nothing, which is deliberate for the same reason as before - a pass
-that silently did nothing would look exactly like one that found nothing.
+So the grid now both carries the ordering and answers membership on it.
+
+**General knots are in place.** `GridSurface::splineForm` hands out the same
+surface `evaluate` answers membership against, in the shape a STEP file wants:
+degrees, the control net, and each direction's distinct knots with their
+multiplicities. That last part is why it had to exist. A fillet's patch is a
+Bezier, whose knots follow from its degree, so the exporter synthesised them and
+`BSplineSurface` had no way to be told otherwise; an interpolated grid has one
+interior knot per interior station, coming from the chord lengths between them,
+and nothing already in the file could reconstruct those. `setKnots` is that way,
+and both branches of the emission - polynomial and rational - take their four
+lists from one place, so the ordering that F7 got wrong cannot drift again.
+
+`validatestep.py` had the same Bezier assumption baked in twice over: it derived
+the net's shape from the degrees, and compared the knot tail against a literal
+string. Both are now the general contract - the multiplicities sum to control
+points plus degree plus one, both ends clamped, values increasing, and the net's
+shape read from the multiplicities, which is the only place the file records it.
+The positional read of the four lists is kept exactly as it was, because that is
+what catches an interleaved tail: a `(0.,1.)` where `v_multiplicities` belongs
+still fails, now as a parse rather than a string mismatch.
+
+**What remains is the face, not the surface.** A declared grid's boundary is
+wherever the boolean cut it, and the exporter's rule for a spline face is that
+each bounding curve is a row or a column of its own control net - which is what
+makes the curve lie on the surface exactly rather than to a tolerance. A trimmed
+grid's boundary is neither, so it needs curves fitted onto the surface, and the
+validator's edge-of-the-net check has to learn the difference. Until that lands
+the pass measures and reports and collapses nothing, which is deliberate for the
+same reason as before - a pass that silently did nothing would look exactly like
+one that found nothing.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was
