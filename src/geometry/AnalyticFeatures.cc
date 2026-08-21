@@ -333,6 +333,112 @@ bool runCircle(const Patch& patch, const Patch::Run& run, const std::vector<Vect
   return fabs((mid - centre).norm() - radius) <= 1e-9 * std::max(1.0, radius);
 }
 
+namespace {
+
+/*! Length of the facet across an edge: how far the facet reaches from that edge.
+ *
+ * This is the `c` in the sagitta, and it has to be the span the surface curves
+ * over rather than the edge's own length - a long thin facet curves over its
+ * width, not its length. */
+double reachAcross(const std::vector<Vector3d>& verts, const std::vector<int>& loop, int a, int b)
+{
+  const Vector3d& pa = verts[a];
+  const Vector3d& pb = verts[b];
+  Vector3d along = pb - pa;
+  const double len = along.norm();
+  if (len < 1e-12) return 0.0;
+  along /= len;
+  double reach = 0.0;
+  for (const int v : loop) {
+    const Vector3d rel = verts[v] - pa;
+    reach = std::max(reach, (rel - along * rel.dot(along)).norm());
+  }
+  return reach;
+}
+
+}  // namespace
+
+std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<char>& consumed,
+                                           double smooth_angle)
+{
+  const std::vector<Vector3d>& verts = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  const std::vector<char>& valid = *mesh.valid;
+  const std::vector<char>& is_hole = *mesh.is_hole;
+  const std::vector<Vector3d>& normals = *mesh.normals;
+
+  std::vector<char> eligible(loops.size(), 0);
+  for (std::size_t i = 0; i < loops.size(); i++) {
+    eligible[i] = valid[i] && !is_hole[i] && (i >= consumed.size() || !consumed[i]);
+  }
+
+  // edge -> the eligible facets using it
+  std::map<EdgeKey, std::vector<std::size_t>> users;
+  for (std::size_t i = 0; i < loops.size(); i++) {
+    if (!eligible[i]) continue;
+    const std::vector<int>& loop = loops[i];
+    for (std::size_t j = 0; j < loop.size(); j++) {
+      users[edgeKey(loop[j], loop[(j + 1) % loop.size()])].push_back(i);
+    }
+  }
+
+  std::vector<SmoothRegion> out;
+  std::vector<char> seen(loops.size(), 0);
+  for (std::size_t seed = 0; seed < loops.size(); seed++) {
+    if (!eligible[seed] || seen[seed]) continue;
+    SmoothRegion region;
+    std::vector<double> bands;
+    std::vector<std::size_t> stack{seed};
+    seen[seed] = 1;
+    while (!stack.empty()) {
+      const std::size_t f = stack.back();
+      stack.pop_back();
+      region.facets.push_back(f);
+      const std::vector<int>& loop = loops[f];
+      for (std::size_t j = 0; j < loop.size(); j++) {
+        const int a = loop[j], b = loop[(j + 1) % loop.size()];
+        const auto it = users.find(edgeKey(a, b));
+        if (it == users.end()) continue;
+        for (const std::size_t g : it->second) {
+          if (g == f) continue;
+          const double dot = std::clamp(normals[f].dot(normals[g]), -1.0, 1.0);
+          const double dihedral = acos(dot);
+          if (dihedral > smooth_angle) continue;
+          // The band this edge leaves open: the sagitta of a circular cross
+          // section through the two facets. Measured whether or not the
+          // neighbour is new, because a region's band is a property of all its
+          // interior edges.
+          const double reach =
+            std::max(reachAcross(verts, loops[f], a, b), reachAcross(verts, loops[g], a, b));
+          region.worst_dihedral = std::max(region.worst_dihedral, dihedral);
+          const double sagitta = (reach / 2.0) * tan(dihedral / 4.0);
+          region.band = std::max(region.band, sagitta);
+          bands.push_back(sagitta);
+          if (seen[g]) continue;
+          seen[g] = 1;
+          stack.push_back(g);
+        }
+      }
+    }
+    for (const std::size_t f : region.facets) {
+      const std::vector<int>& loop = loops[f];
+      Vector3d acc = Vector3d::Zero();
+      for (std::size_t j = 1; j + 1 < loop.size(); j++) {
+        acc += (verts[loop[j]] - verts[loop[0]]).cross(verts[loop[j + 1]] - verts[loop[0]]);
+      }
+      region.area += acc.norm() / 2.0;
+    }
+    if (!bands.empty()) {
+      std::nth_element(bands.begin(), bands.begin() + bands.size() / 2, bands.end());
+      region.median_band = bands[bands.size() / 2];
+    }
+    out.push_back(std::move(region));
+  }
+  std::sort(out.begin(), out.end(),
+            [](const SmoothRegion& a, const SmoothRegion& b) { return a.area > b.area; });
+  return out;
+}
+
 std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
                                           const std::vector<char>& consumed,

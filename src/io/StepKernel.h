@@ -1582,7 +1582,7 @@ public:
                       const std::vector<std::shared_ptr<Curve>>& curves,
                       const std::vector<std::shared_ptr<Surface>>& surfaces,
                       const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals,
-                      double tol, bool analytic = false);
+                      double tol, bool analytic = false, bool approximate = false);
   EdgeCurve *get_line_from_map(std::map<std::pair<int, int>, StepKernel::EdgeCurve *>& edge_map,
                                int ind1, int ind2, StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
                                bool& edge_dir, int& merge_cnt);

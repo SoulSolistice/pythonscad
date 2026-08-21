@@ -28,6 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
 #include "StepKernel.h"
 #include "geometry/AnalyticFeatures.h"
+#include "utils/printutils.h"
 #include <algorithm>  // std::reverse
 #include <iostream>
 #include <fstream>
@@ -161,7 +162,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
                                 const std::vector<std::shared_ptr<Curve>>& curves,
                                 const std::vector<std::shared_ptr<Surface>>& surfaces,
                                 const std::vector<int>& faceParents,
-                                const std::vector<Vector4d>& faceNormals, double tol, bool analytic)
+                                const std::vector<Vector4d>& faceNormals, double tol, bool analytic,
+                                bool approximate)
 {
   // `curves` and `surfaces` carry the analytic geometry the model was built
   // from: a ring of N quads is exactly the mesh of an N sided prism, so the
@@ -183,9 +185,9 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       else if (dynamic_cast<const TorusSurface *>(surface.get()) != nullptr) tori++;
       else if (dynamic_cast<const BezierPatchSurface *>(surface.get()) != nullptr) patches++;
     }
-    printf(
-      "STEP export: %d analytic surface%s available (%d cylindrical, %d spherical, %d toroidal, %d "
-      "Bezier)\n",
+    LOG(
+      "STEP export: %1$d analytic surface%2$s available (%3$d cylindrical, %4$d spherical, "
+      "%5$d toroidal, %6$d Bezier)",
       int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres, tori, patches);
   }
 
@@ -340,16 +342,17 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   }
 
   if (degenerated_cnt > 0) {
-    printf("STEP export: skipped %d degenerated face%s\n", degenerated_cnt,
-           degenerated_cnt == 1 ? "" : "s");
+    LOG(message_group::Export_Warning, "STEP export: skipped %1$d degenerated face%2$s", degenerated_cnt,
+        degenerated_cnt == 1 ? "" : "s");
   }
   if (reparented_cnt > 0) {
-    printf("STEP export: moved %d hole%s to the enclosing face\n", reparented_cnt,
-           reparented_cnt == 1 ? "" : "s");
+    LOG(message_group::Export_Warning, "STEP export: moved %1$d hole%2$s to the enclosing face",
+        reparented_cnt, reparented_cnt == 1 ? "" : "s");
   }
   if (orphan_cnt > 0) {
-    printf("STEP export: kept %d reversed loop%s without an enclosing face as %s own face\n", orphan_cnt,
-           orphan_cnt == 1 ? "" : "s", orphan_cnt == 1 ? "its" : "their");
+    LOG(message_group::Export_Warning,
+        "STEP export: kept %1$d reversed loop%2$s without an enclosing face as %3$s own face",
+        orphan_cnt, orphan_cnt == 1 ? "" : "s", orphan_cnt == 1 ? "its" : "their");
   }
 
   std::vector<Face *> sfaces_extra;
@@ -376,7 +379,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // never arrived cannot be mistaken for a build that predates them. The
     // availability line above prints only when the list is non-empty, which
     // makes those two cases look identical - silence.
-    if (surfaces.empty()) printf("STEP export: no analytic surfaces were declared\n");
+    if (surfaces.empty()) LOG("STEP export: no analytic surfaces were declared");
     AnalyticFeatures::Mesh mesh;
     mesh.vertices = &vertices;
     mesh.loops = &loops;
@@ -384,7 +387,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     mesh.is_hole = &loop_is_hole;
     mesh.normals = &loop_normals;
     features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol);
-    for (const auto& line : features.report) printf("STEP export: %s\n", line.c_str());
+    for (const auto& line : features.report) LOG("STEP export: %1$s", line);
 
     // Bezier patches are recognised here and written further down, with the
     // B_SPLINE_SURFACE_WITH_KNOTS faces. The report is emitted either way, and
@@ -397,7 +400,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     std::vector<std::string> patch_report;
     std::vector<AnalyticFeatures::Patch> patches =
       AnalyticFeatures::recogniseBezierPatches(mesh, surfaces, features.consumed, patch_report);
-    for (const auto& line : patch_report) printf("STEP export: %s\n", line.c_str());
+    for (const auto& line : patch_report) LOG("STEP export: %1$s", line);
     std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
     for (const auto& patch : patches) {
       if (!patch.alive) continue;
@@ -409,9 +412,9 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       }
     }
     if (live > 0) {
-      printf(
-        "STEP export: their boundaries are %d curved runs over %d mesh edges, and %d straight "
-        "edges\n",
+      LOG(
+        "STEP export: their boundaries are %1$d curved runs over %2$d mesh edges, and "
+        "%3$d straight edges",
         int(curved_runs), int(mesh_edges), int(straight_runs));
 
       // What each run borders decides whether it can be collapsed at all, and
@@ -429,12 +432,12 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
           }
         }
       }
-      printf(
-        "STEP export: those runs border %d whole faces, %d stretches of a face, %d other patches, "
-        "%d unresolved\n",
+      LOG(
+        "STEP export: those runs border %1$d whole faces, %2$d stretches of a face, "
+        "%3$d other patches, %4$d unresolved",
         whole, part, shared, stuck);
-      printf("STEP export: written as %d faces instead of %d\n", int(face_cnt - covered + live),
-             int(face_cnt));
+      LOG("STEP export: written as %1$d faces instead of %2$d", int(face_cnt - covered + live),
+          int(face_cnt));
     }
     // Only patches whose every boundary can be substituted are written. One
     // that cannot stays faceted, which is always a valid export.
@@ -495,10 +498,63 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       else quad_sph++;
     }
     if (live > 0) {
-      printf("STEP export: %d of %d patches are exactly quadrics - %d cylindrical, %d spherical\n",
-             quad_cyl + quad_sph, int(live), quad_cyl, quad_sph);
+      LOG(
+        "STEP export: %1$d of %2$d patches are exactly quadrics - %3$d cylindrical, "
+        "%4$d spherical",
+        quad_cyl + quad_sph, int(live), quad_cyl, quad_sph);
     }
     bezier_patches = patches;
+
+    // What is left, and what it would take to do better.
+    //
+    // Everything above writes a surface only where the model declared one and
+    // the mesh fits it exactly. What remains is the geometry OpenSCAD never
+    // held the mathematics for - a polyhedron() over a computed point list, a
+    // helical thread - and it is written as planes, which is always correct and
+    // on the reference part is 99.8% of the uncovered area.
+    //
+    // `band` is what makes this measurable rather than a matter of taste. The
+    // mesh does not say where the true surface is; it says the true surface
+    // passes through these vertices and cannot stray further than the sagitta
+    // of the facets between them. A fitted surface inside that band asserts
+    // nothing the mesh does not already allow. One outside it is inventing
+    // geometry - which is exactly what a B-spline fitted through this project's
+    // own thread did at the run-out, overshooting 0.378mm where the band is
+    // 0.109mm, while scoring 1e-13 against the vertices it interpolated.
+    if (approximate) {
+      double smooth_angle = 25.0;
+      if (const char *env = getenv("OPENSCAD_STEP_SMOOTH_ANGLE")) smooth_angle = atof(env);
+      const std::vector<AnalyticFeatures::SmoothRegion> regions =
+        AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle * M_PI / 180.0);
+      std::size_t left = 0;
+      double worst_band = 0.0;
+      for (const auto& region : regions) {
+        left += region.facets.size();
+        worst_band = std::max(worst_band, region.band);
+      }
+      if (regions.empty()) {
+        LOG("STEP export: approximation found nothing left to fit");
+      } else {
+        LOG(
+          "STEP export: %1$d smooth region%2$s left faceted, %3$d facets in all; the "
+          "tessellation leaves at most %4$.4f to fit inside",
+          int(regions.size()), regions.size() == 1 ? "" : "s", int(left), worst_band);
+        const std::size_t show = std::min<std::size_t>(regions.size(), 3);
+        for (std::size_t i = 0; i < show; i++) {
+          LOG(
+            "STEP export:   region of %1$d facets, area %2$.1f, band %3$.4f (typical %4$.4f), "
+            "worst dihedral %5$.1f degrees",
+            int(regions[i].facets.size()), regions[i].area, regions[i].band, regions[i].median_band,
+            regions[i].worst_dihedral * 180.0 / M_PI);
+        }
+        // Nothing is fitted yet, so nothing is at risk: every region above stays
+        // faceted. Saying so is the point - a pass which silently did nothing
+        // would look exactly like one which found nothing.
+        LOG(message_group::Export_Warning,
+            "STEP export: approximation is measuring only - all %1$d region%2$s stay faceted",
+            int(regions.size()), regions.size() == 1 ? "" : "s");
+      }
+    }
   }
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
   const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;
@@ -1145,7 +1201,7 @@ void StepKernel::read_step(std::string file_name)
   std::ifstream stp_file;
   stp_file.open(file_name);
   if (!stp_file) {
-    printf("Cannot open %s\n", file_name.c_str());
+    LOG(message_group::Export_Error, "Cannot open %1$s", file_name);
     return;
   }
   // read the first line to get the iso stuff
@@ -1274,7 +1330,7 @@ void StepKernel::read_step(std::string file_name)
         if (unimplemented) {
           ent = new Line(entities);  // TODO fix
         } else {
-          printf("Unknown Type %s\n", func_name.c_str());
+          LOG(message_group::Export_Warning, "Unknown Type %1$s", func_name);
           ent = new Line(entities);
         }
       }

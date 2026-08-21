@@ -25,6 +25,7 @@ public:
   static const Feature ExperimentalVectorSwizzle;
   static const Feature ExperimentalDiscretizationByError;
   static const Feature ExperimentalStepAnalyticSurfaces;
+  static const Feature ExperimentalStepApproximateSurfaces;
   static const Feature ExperimentalAiFeatures;
 #ifdef ENABLE_PYTHON
   static const Feature ExperimentalPythonEngine;

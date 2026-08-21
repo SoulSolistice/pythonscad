@@ -205,6 +205,52 @@ std::vector<Vector3d> runControlPoints(const Patch& patch, const Patch::Run& run
                                        const std::vector<Vector3d>& vertices,
                                        std::vector<double> *weights_out = nullptr);
 
+/*! A run of facets that both exact passes left faceted, grouped by smoothness.
+ *
+ * These are the faces nothing could describe: a `polyhedron()` over a computed
+ * point list, a helical thread, a warped quad. The exporter writes them as
+ * planes and that is always correct, but on the reference part it is 99.8% of
+ * the uncovered area, so it is worth knowing what is there and what it would
+ * take to do better.
+ *
+ * `band` is the measurement that matters, and it is the honest way to ask "how
+ * wrong could a fitted surface be". The mesh does not say where the true
+ * surface is; it says only that the true surface passes through these vertices
+ * and cannot stray far from these facets. For two facets meeting at a dihedral
+ * theta across a chord c, a circular cross section through them has a sagitta
+ * of (c/2)*tan(theta/4) - so that is how much room the tessellation leaves, and
+ * a fit which stays inside it asserts nothing the mesh does not already allow.
+ * A fit which leaves it is inventing geometry.
+ *
+ * That test is not hypothetical: a B-spline fitted through this project's own
+ * thread mesh overshot by 0.378mm at the run-out where the band is 0.109mm, and
+ * the visible result was a hook. Measured against the band it is rejected 3.5
+ * times over; measured against the vertices it scored 1e-13 and looked perfect. */
+struct SmoothRegion {
+  std::vector<std::size_t> facets;
+  double worst_dihedral = 0;  // radians, across the region's interior edges
+  double band = 0;            // the widest corridor over any interior edge
+  /*! The corridor over the *typical* interior edge.
+   *
+   * A region can be smooth nearly everywhere and still have a handful of edges
+   * that are not, which is what a boolean leaves behind when it trims a swept
+   * body against a wall. `band` is what a single fitted surface has to live
+   * within, so it is the one that decides; `median_band` says whether the
+   * region is broadly smooth with a few bad edges or bad throughout, and those
+   * want different answers - the first can be split, the second cannot. */
+  double median_band = 0;
+  double area = 0;
+};
+
+/*! Group the facets neither pass claimed into smooth regions.
+ *
+ * `consumed` marks the loops a band or patch already took. Facets are joined
+ * across an edge when they meet at less than `smooth_angle`, so a region is a
+ * piece of surface a single fitted patch could plausibly cover, and a sharp
+ * model edge ends it. */
+std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<char>& consumed,
+                                           double smooth_angle);
+
 /*! The quadric a rational Bezier patch lies on exactly, or nullptr.
  *
  * `FilletNode` draws its strips and corners as rational quadratics, which are

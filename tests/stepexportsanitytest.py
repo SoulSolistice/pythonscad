@@ -301,6 +301,44 @@ def surfaces_available(output):
     return int(m.group(1)) if m else 0
 
 
+def check_approximation(openscad, inputfile, stepfile, args):
+    """Run the approximation measurement pass, for fixtures which ask for it.
+
+    Only fixtures carrying APPROX: lines pay for this extra export. The pass
+    reports what the exact passes left faceted and how much room the model's own
+    tessellation leaves to fit inside - see uncoveredRegions() - and writes
+    nothing, so the file it produces still has to be valid and identical in
+    substance to the analytic one."""
+    approxfile = stepfile.replace(".stp", "-approx.stp")
+    print("Re-exporting with --enable=step-approximate-surfaces", file=sys.stderr)
+    output = export(
+        openscad, inputfile, approxfile,
+        args + ["--enable=step-analytic-surfaces", "--enable=step-approximate-surfaces"],
+    )
+    if not validateSTEP(approxfile):
+        print("the approximation export is not valid", file=sys.stderr)
+        return False
+    ok = True
+    flat = " ".join(output.split())
+    with open(inputfile, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.search(r"APPROX(-NOT)?:\s*(.+?)\s*$", line)
+            if not m:
+                continue
+            wanted = " ".join(m.group(2).split())
+            if m.group(1):
+                if wanted in flat:
+                    print("the approximation run said %r and should not have" % wanted,
+                          file=sys.stderr)
+                    ok = False
+            elif wanted not in flat:
+                print("the approximation run did not say %r" % wanted, file=sys.stderr)
+                ok = False
+    if ok:
+        os.unlink(approxfile)
+    return ok
+
+
 # Export once more with the analytic geometry turned on. Every check in
 # validatestep.py applies to that file too - a cylinder written as a
 # CYLINDRICAL_SURFACE still has to leave the shell watertight, its rims still
@@ -370,6 +408,11 @@ if ok:
                 ok = False
             else:
                 os.unlink(cgalfile)
+
+# Fixtures which state APPROX: lines get one more export, with the
+# approximation pass switched on as well.
+if ok and re.search(r"APPROX(-NOT)?:", open(inputfile, encoding="utf-8", errors="replace").read()):
+    ok = check_approximation(args.openscad, inputfile, stepfile, remaining_args)
 
 if ok:
     os.unlink(stepfile)

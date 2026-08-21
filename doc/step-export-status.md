@@ -324,6 +324,23 @@ B-spline at all - item 6 turned all twenty of its patches into quadrics - so the
 one model most likely to be round-tripped by hand had stopped exhibiting the bug
 a commit before it was found. It survived in every *other* filleted body.
 
+### F8 — the whole export report was invisible in the GUI — **fixed**
+
+`StepKernel.cc` had thirteen `printf` calls and no `LOG`, while the rest of
+`src/io/` uses `LOG(message_group::…)` throughout. `printf` goes to stdout, and
+a GUI build has no stdout anyone reads - so on Windows and macOS the entire
+report was gone: the surface counts, the face counts, and every "left faceted:
+…" line.
+
+That is worse than an inconvenience, because this project's design leans on that
+report. `AnalyticFeatures.h` says it plainly: *"A band that is never recognised
+looks exactly like one that was never there, so a caller which swallows this
+loses the only signal that a wall which should have been written was not. Print
+it."* It did print it, to a place no GUI user could see. Now on `LOG`, with the
+corrections the exporter makes to the mesh - dropped degenerate faces, reparented
+holes, kept orphan loops - raised to `Export_Warning` so they stand out from the
+running commentary.
+
 ## 5. What is and is not verified here
 
 A headless build was made in this environment - Manifold and CGAL, no Qt, Release
@@ -917,6 +934,48 @@ shell that does not close reports where rather than merely that: on the committe
 `lid10.stp` it names 18 closed and 6 open free wires with a length and a
 position for each, where the round trip previously said only "0 solids from 1860
 faces". That is now part of the failure path.
+
+### Approximation: the measurement, behind its own flag
+
+`step-approximate-surfaces` is the second gate, and it needs the first. The
+exact pass writes a surface only where the model declared one and the mesh fits
+it exactly; this one is about what is left, which on the reference part is 99.8%
+of the uncovered area and is geometry OpenSCAD never held the mathematics for.
+
+The pass groups those facets into smooth regions and measures **the band**: how
+much room the model's own tessellation leaves for a fitted surface to occupy.
+The mesh does not say where the true surface is. It says the surface passes
+through these vertices and cannot stray further from the facets than their
+sagitta, which for two facets meeting at a dihedral theta across a chord c is
+`(c/2)*tan(theta/4)`. A fit inside that band asserts nothing the mesh does not
+already allow; a fit outside it is inventing geometry.
+
+That criterion is not theoretical - it comes from getting it wrong. A B-spline
+interpolated through this project's own thread mesh overshot **0.378 mm** at the
+run-out where the band is **0.109 mm**, and the visible result was a hook at the
+end of the ridge. Measured against the vertices it interpolated, that fit scored
+1e-13 and looked perfect. Measured against the band it is rejected three and a
+half times over. Vertex error is the wrong question; the band is the right one.
+
+Both the widest band and the typical one are reported, because they answer
+different questions and the reference part needs both:
+
+| | facets | band | typical | worst dihedral |
+| --- | --- | --- | --- | --- |
+| `linear_extrude(twist)` wall | 736 | 0.0053 | 0.0051 | 5.7° |
+| the bayonet's hose thread | 1016 | 0.7813 | 0.0748 | 24.5° |
+
+The twisted wall is uniformly tessellated, so the two agree to within 4% - one
+surface could cover it. The thread does not: it is broadly smooth at 0.075 with
+a ten-fold tail, and those bad edges are where the boolean cut the sweep against
+the socket wall. Same measure, and it tells them apart.
+
+**Nothing is fitted yet, and the pass says so on every run.** That is deliberate:
+a pass which silently did nothing would look exactly like one which found
+nothing - the same trap the band report itself exists for. What the measurement
+buys is a threshold chosen from evidence rather than picked in advance, and the
+first thing it shows is that fitting the *exported* thread is harder than fitting
+the generator's own grid, because the boolean has already trimmed it.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

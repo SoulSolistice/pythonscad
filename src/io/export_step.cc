@@ -63,9 +63,15 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   // --enable=step-analytic-surfaces on the command line - until it has had that
   // exposure.
   const bool analytic = Feature::ExperimentalStepAnalyticSurfaces.is_enabled();
+  // Fitting a surface to what the exact pass could not describe is a further
+  // step out, and a separate opt-in: it is the one place this exporter would
+  // write a surface the model does not prove, so it is bounded by the
+  // tessellation's own tolerance and reports what it did. It has no meaning
+  // without the exact pass, which decides what is left over in the first place.
+  const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceParents, newNormals, 1e-5, analytic);
+                    faceParents, newNormals, 1e-5, analytic, approximate);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;
