@@ -178,17 +178,26 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // out - which is a feature nobody has asked for yet.
   (void)curves;
   if (!surfaces.empty()) {
-    int cylinders = 0, spheres = 0, tori = 0, patches = 0;
+    int cylinders = 0, spheres = 0, tori = 0, patches = 0, grids = 0;
     for (const auto& surface : surfaces) {
       if (dynamic_cast<const CylinderSurface *>(surface.get()) != nullptr) cylinders++;
       else if (dynamic_cast<const SphereSurface *>(surface.get()) != nullptr) spheres++;
       else if (dynamic_cast<const TorusSurface *>(surface.get()) != nullptr) tori++;
       else if (dynamic_cast<const BezierPatchSurface *>(surface.get()) != nullptr) patches++;
+      else if (dynamic_cast<const GridSurface *>(surface.get()) != nullptr) grids++;
     }
+    // Swept grids are named only when there are some. Every other kind is listed
+    // unconditionally because a zero there is informative - a model that meant
+    // to declare a cylinder and did not is what the line exists to expose - but
+    // a grid is declared by hand and by name, so its absence says nothing, and
+    // mentioning it always would churn every fixture quoting this line.
+    std::string extra;
+    if (grids > 0) extra = ", " + std::to_string(grids) + " swept grid";
     LOG(
       "STEP export: %1$d analytic surface%2$s available (%3$d cylindrical, %4$d spherical, "
-      "%5$d toroidal, %6$d Bezier)",
-      int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres, tori, patches);
+      "%5$d toroidal, %6$d Bezier%7$s)",
+      int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres, tori, patches,
+      extra);
   }
 
   const double model_tol = tol > 0 ? tol : 1e-5;
@@ -521,6 +530,32 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // geometry - which is exactly what a B-spline fitted through this project's
     // own thread did at the run-out, overshooting 0.378mm where the band is
     // 0.109mm, while scoring 1e-13 against the vertices it interpolated.
+    // What a declared sweep claims. This is the other half of the measurement
+    // below: uncoveredRegions() says the mesh has lost the ordering a fit would
+    // need, and a GridSurface is the generator handing that ordering back. The
+    // question it has to answer is whether the declaration still matches the
+    // mesh once the booleans have run - a record which matches nothing is
+    // harmless but useless, and looks identical to one that was never made.
+    for (const auto& surface : surfaces) {
+      const auto *grid = dynamic_cast<const GridSurface *>(surface.get());
+      if (grid == nullptr) continue;
+      std::size_t whole = 0, partly = 0;
+      std::vector<Vector3d> unused;  // pointMember's scratch argument, as elsewhere
+      for (std::size_t i = 0; i < loops.size(); i++) {
+        if (!loop_valid[i] || loop_is_hole[i]) continue;
+        std::size_t corners = 0;
+        for (const int v : loops[i]) {
+          corners += const_cast<GridSurface *>(grid)->pointMember(unused, vertices[v]);
+        }
+        if (corners == loops[i].size()) whole++;
+        else if (corners > 0) partly++;
+      }
+      LOG(
+        "STEP export: a declared %1$dx%2$d sweep claims %3$d facets whole, and %4$d more are "
+        "cut across it",
+        grid->rows, grid->cols, int(whole), int(partly));
+    }
+
     if (approximate) {
       double smooth_angle = 25.0;
       if (const char *env = getenv("OPENSCAD_STEP_SMOOTH_ANGLE")) smooth_angle = atof(env);
@@ -553,9 +588,11 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
             "%3$d - %4$s",
             regions[i].regularity * 100.0, int(regions[i].interior_vertices),
             int(regions[i].modal_valence),
-            regions[i].regularity > 0.95
-              ? "the generator's ordering survives, a fit could be made"
-              : "the ordering is gone, only a declaration could describe this");
+            regions[i].interior_vertices == 0
+              ? "too thin to tell - every vertex is on the boundary"
+              : (regions[i].regularity > 0.95
+                   ? "the generator's ordering survives, a fit could be made"
+                   : "the ordering is gone, only a declaration could describe this"));
         }
         // Nothing is fitted yet, so nothing is at risk: every region above stays
         // faceted. Saying so is the point - a pass which silently did nothing

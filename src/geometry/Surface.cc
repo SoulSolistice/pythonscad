@@ -543,3 +543,88 @@ int CylinderSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
 
   return 1;
 }
+
+namespace {
+/*! The 1e-9 grid a GridSurface indexes its points on. */
+std::tuple<int64_t, int64_t, int64_t> gridKey(const Vector3d& pt)
+{
+  const double res = 1e-9;
+  return {(int64_t)llround(pt[0] / res), (int64_t)llround(pt[1] / res), (int64_t)llround(pt[2] / res)};
+}
+}  // namespace
+
+GridSurface::GridSurface(int rows, int cols, std::vector<Vector3d> net, bool closed_v)
+  : rows(rows), cols(cols), closed_v(closed_v), net(std::move(net))
+{
+  // refpt is the grid's own first point and normdir a direction along the
+  // sweep, so that the base class members mean something for a caller which
+  // only knows it has a Surface.
+  if (!this->net.empty()) {
+    refpt = this->net.front();
+    if (rows > 1) {
+      const Vector3d along = this->net[cols] - this->net[0];
+      normdir = along.norm() > 0 ? along.normalized() : Vector3d(0, 0, 1);
+    } else {
+      normdir = Vector3d(0, 0, 1);
+    }
+  }
+  reindex();
+}
+
+void GridSurface::reindex()
+{
+  lookup.clear();
+  for (std::size_t i = 0; i < net.size(); i++) lookup.emplace(gridKey(net[i]), int(i));
+}
+
+void GridSurface::display(const std::vector<Vector3d>& vertices)
+{
+  printf("GridSurface %dx%d%s\n", rows, cols, closed_v ? " (closed)" : "");
+}
+
+int GridSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
+{
+  // A neighbourhood search rather than an exact key, so a point which lands on
+  // the far side of a rounding boundary from the one that was indexed is still
+  // found. Same reason VertexSnapper looks at the 27 cells around its own.
+  const auto key = gridKey(pt);
+  for (int64_t dx = -1; dx <= 1; dx++) {
+    for (int64_t dy = -1; dy <= 1; dy++) {
+      for (int64_t dz = -1; dz <= 1; dz++) {
+        const auto it =
+          lookup.find({std::get<0>(key) + dx, std::get<1>(key) + dy, std::get<2>(key) + dz});
+        if (it != lookup.end()) return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+std::shared_ptr<Surface> GridSurface::clone() const
+{
+  return std::make_shared<GridSurface>(*this);
+}
+
+bool GridSurface::transform(const Transform3d& mat)
+{
+  // Unlike a cylinder this can never fail: the record is a list of points, and
+  // points go anywhere an affine map sends them. A sheared thread is still a
+  // swept grid, just not the one it started as.
+  for (auto& p : net) p = mat * p;
+  refpt = mat * refpt;
+  const Vector3d dir = mat.linear() * normdir;
+  if (dir.norm() > 0) normdir = dir.normalized();
+  reindex();
+  return true;
+}
+
+bool GridSurface::sameAs(const Surface& other) const
+{
+  const auto *o = dynamic_cast<const GridSurface *>(&other);
+  if (o == nullptr) return false;
+  if (o->rows != rows || o->cols != cols || o->closed_v != closed_v) return false;
+  for (std::size_t i = 0; i < net.size(); i++) {
+    if ((net[i] - o->net[i]).norm() > 1e-9) return false;
+  }
+  return true;
+}

@@ -996,7 +996,7 @@ union with the socket wall retriangulated it, and 36% regularity means there is
 no grid left to walk.
 
 **So: fit where the generator's grid survives, declare where the boolean took
-it.** The thread is 99.8% of the uncovered area on this part and falls on the
+it.** `declare_grid()` is that second half - see below. The thread is 99.8% of the uncovered area on this part and falls on the
 declaring side, which puts it back with roadmap item 5 and with §8's standing
 lesson - every item that looked like a recogniser problem turned out to be a
 channel problem one layer down. `hoseRidge` knows it swept a profile along a
@@ -1005,6 +1005,48 @@ helix; nothing downstream can be told to guess it.
 **Nothing is fitted yet, and the pass says so on every run.** That is deliberate:
 a pass which silently did nothing would look exactly like one which found
 nothing - the same trap the band report itself exists for.
+
+### The declaration channel for what has no name
+
+Every other `declare_*` names a surface: a cylinder of this radius about that
+axis, and the exporter checks the mesh against it. A helical thread has no name
+to give - the model built it with `polyhedron()` over a computed point list and
+the surface has no closed form - so `declare_grid()` carries the other thing
+instead, the one the mesh loses and the generator still has: the **order** the
+points were swept in.
+
+`GridSurface` holds that grid, and membership is by *position* rather than by
+projection. These points are mesh vertices, because the generator emitted them,
+so a facet belongs to the sweep exactly when every corner is one of them. There
+is no tolerance to tune and nothing to converge.
+
+Measured on a helical ridge of 356 facets, fused onto a wall the way `hoseRidge`
+is fused onto its socket:
+
+| | claimed whole | cut across |
+| --- | --- | --- |
+| the ridge alone | 356 | 0 |
+| the ridge unioned with a wall it clears | 356 | 0 |
+| the ridge unioned with a wall that cuts its base | **63** | **237** |
+
+The first two lines are the channel working: a declaration survives the boolean
+intact, which is exactly what the older `Surface` records could not promise for
+geometry with no name. The third is the honest limit, and it is worth stating
+precisely rather than as a caveat.
+
+**Those 237 facets are correctly excluded and uselessly so.** They are no longer
+facets of the pure sweep - the trim gave them new corners - so refusing them by
+position is the right answer to the question asked. But they still *lie on* the
+swept surface; only their boundary changed. Claiming them needs the record to
+answer "is this point on the sweep" for points the generator never emitted, and
+that means evaluating the grid as a surface and projecting onto it, the way
+`BezierPatchSurface::project` does for a fillet.
+
+So the grid is what makes that possible and is not yet what does it. That is the
+next step, and it is now a bounded one: the ordering is in hand, the fitting is a
+banded solve against Eigen which is already a dependency, and what is missing is
+evaluation plus projection plus a `B_SPLINE_SURFACE_WITH_KNOTS` emission with
+general knots rather than the Bezier-only knot vector the exporter writes today.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

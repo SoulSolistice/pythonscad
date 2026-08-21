@@ -1000,6 +1000,14 @@ PyMethodDef PyOpenSCADFunctions[] = {
   {"declare_torus", (PyCFunction)python_declare_torus, METH_VARARGS | METH_KEYWORDS,
    "Declare that part of an object was meant to be a torus.\n"
    "declare_torus(obj, r_major=10, r_minor=3, center=[0, 0, 0], axis=[0, 0, 1])"},
+  {"declare_grid", (PyCFunction)python_declare_grid, METH_VARARGS | METH_KEYWORDS,
+   "Declare the ordered grid of points a generator swept, for geometry no\n"
+   "primitive can name - a helical thread, a cam ramp, anything built with\n"
+   "polyhedron() over a computed point list. The other declare_* functions name\n"
+   "a surface; this one carries the ordering, which is what a boolean destroys\n"
+   "and the generator still has. A facet belongs to the sweep when every corner\n"
+   "is a point given here, so facets a boolean created stay faceted.\n"
+   "declare_grid(obj, points=[[p, p, ...], [p, p, ...], ...], closed=False)"},
   {NULL, NULL, 0, NULL}};
 
 #define OO_METHOD_ENTRY(name, desc) \
@@ -1047,18 +1055,20 @@ PyMethodDef PyOpenSCADMethods[] = {
                                       only, "Only Object") OO_METHOD_ENTRY(show, "Show Object")
                                       OO_METHOD_ENTRY(projection, "Projection Object")
                                         OO_METHOD_ENTRY(pull, "Pull Obejct apart") OO_METHOD_ENTRY(
-                                          wrap, "Wrap Object around Cylinder")
-                                          OO_METHOD_ENTRY(render, "Render Object")
-                                            OO_METHOD_ENTRY(clone, "Clone Object") OO_METHOD_ENTRY(
-                                              hasattr, "Check if an attribute exists")
-                                              OO_METHOD_ENTRY(setattr, "Sets an attribute on a solid")
-                                                OO_METHOD_ENTRY(getattr,
-                                                                "Gets an attribute from a solid")
-                                                  OO_METHOD_ENTRY(_repr_mimebundle_,
-                                                                  "Jupyter display hook")
-                                                    OO_METHOD_ENTRY(dict, "return all dictionary")
-                                                      OO_METHOD_ENTRY(declare_cylinder,
-                                                                      "Declare a cylindrical surface")
+                                          wrap,
+                                          "Wrap Object around Cylinder") OO_METHOD_ENTRY(render,
+                                                                                         "Render Object")
+                                          OO_METHOD_ENTRY(clone, "Clone Object") OO_METHOD_ENTRY(
+                                            hasattr, "Check if an attribute exists")
+                                            OO_METHOD_ENTRY(setattr, "Sets an attribute on a solid")
+                                              OO_METHOD_ENTRY(getattr, "Gets an attribute from a solid")
+                                                OO_METHOD_ENTRY(_repr_mimebundle_,
+                                                                "Jupyter display hook")
+                                                  OO_METHOD_ENTRY(dict, "return all dictionary")
+                                                    OO_METHOD_ENTRY(declare_cylinder,
+                                                                    "Declare a cylindrical surface")
+                                                      OO_METHOD_ENTRY(declare_grid,
+                                                                      "Declare a swept point grid")
                                                         OO_METHOD_ENTRY(declare_sphere,
                                                                         "Declare a spherical surface")
                                                           OO_METHOD_ENTRY(declare_torus,

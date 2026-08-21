@@ -421,6 +421,88 @@ static PyObject *python_declare_torus_core(PyObject *obj, double r_major, double
   return python_declare_core(obj, std::make_shared<TorusSurface>(c, a, major, minor));
 }
 
+/*! Declare the ordered grid of points a generator swept.
+ *
+ * The other declare_* functions name a surface - a cylinder of this radius
+ * about that axis - and the exporter checks the mesh against it. For a helical
+ * thread or a cam ramp there is no name to give: the model built it with
+ * polyhedron() over a computed point list and the surface has no closed form.
+ *
+ * What the generator can still hand over is the *ordering*, and that is the
+ * part the mesh loses. A swept quad grid straight from a generator puts every
+ * interior vertex at valence 6; the same grid after a boolean has trimmed it
+ * measures 36% regular on the reference part, and at that point nothing can
+ * recover which facet follows which along the sweep. The grid says so directly.
+ *
+ * Membership is by position, so a facet belongs to the sweep exactly when every
+ * corner is a point given here. Facets a boolean created are not, and stay
+ * faceted - which is the correct answer, not a limitation. */
+static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int closed)
+{
+  if (points == nullptr || !PySequence_Check(points) || PyUnicode_Check(points)) {
+    PyErr_SetString(PyExc_TypeError, "declare_grid: points must be a sequence of rows");
+    return nullptr;
+  }
+  const Py_ssize_t rows = PySequence_Size(points);
+  if (rows < 2) {
+    PyErr_SetString(PyExc_TypeError, "declare_grid: needs at least two rows of points");
+    return nullptr;
+  }
+  std::vector<Vector3d> net;
+  Py_ssize_t cols = -1;
+  for (Py_ssize_t i = 0; i < rows; i++) {
+    auto row = py_owned(PySequence_GetItem(points, i));
+    if (row.get() == nullptr || !PySequence_Check(row.get())) {
+      PyErr_Format(PyExc_TypeError, "declare_grid: row %zd is not a sequence of points", i);
+      return nullptr;
+    }
+    const Py_ssize_t n = PySequence_Size(row.get());
+    if (cols < 0) cols = n;
+    if (n != cols) {
+      // A ragged grid has no ordering to speak of, which is the one thing this
+      // record exists to carry.
+      PyErr_Format(PyExc_TypeError,
+                   "declare_grid: row %zd has %zd points, the first row has %zd - every row "
+                   "must be the same length",
+                   i, n, cols);
+      return nullptr;
+    }
+    for (Py_ssize_t j = 0; j < n; j++) {
+      auto item = py_owned(PySequence_GetItem(row.get(), j));
+      double x = 0, y = 0, z = 0;
+      if (item.get() == nullptr || python_vectorval(item.get(), 3, 3, &x, &y, &z)) {
+        PyErr_Format(PyExc_TypeError, "declare_grid: point [%zd][%zd] must be three numbers", i, j);
+        return nullptr;
+      }
+      net.emplace_back(x, y, z);
+    }
+  }
+  if (cols < 2) {
+    PyErr_SetString(PyExc_TypeError, "declare_grid: needs at least two points per row");
+    return nullptr;
+  }
+  return python_declare_core(
+    obj, std::make_shared<GridSurface>(int(rows), int(cols), std::move(net), closed != 0));
+}
+
+PyObject *python_declare_grid(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"obj", "points", "closed", nullptr};
+  PyObject *obj = nullptr, *points = nullptr;
+  int closed = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|p", kwlist, &obj, &points, &closed)) return nullptr;
+  return python_declare_grid_core(obj, points, closed);
+}
+
+PyObject *python_oo_declare_grid(PyObject *obj, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"points", "closed", nullptr};
+  PyObject *points = nullptr;
+  int closed = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|p", kwlist, &points, &closed)) return nullptr;
+  return python_declare_grid_core(obj, points, closed);
+}
+
 #define DECLARE_ENTRY(name, first, second)                                                          \
   PyObject *python_declare_##name(PyObject *self, PyObject *args, PyObject *kwargs)                 \
   {                                                                                                 \

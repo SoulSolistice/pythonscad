@@ -1,6 +1,8 @@
 #pragma once
 
+#include <map>
 #include <memory>
+#include <tuple>
 #include <vector>
 #include "geometry/linalg.h"
 
@@ -208,4 +210,58 @@ public:
 
 private:
   virtual int operator==(const Surface& other) { return 0; }
+};
+
+/*! An ordered grid of points a generator swept, declared by that generator.
+ *
+ * This is the channel for the geometry OpenSCAD has no primitive for: a helical
+ * thread, a cam ramp, anything a model builds with `polyhedron()` over a
+ * computed point list. Every other record here says *what* surface the facets
+ * lie on - a cylinder of this radius about that axis. This one cannot, because
+ * there is no name for the surface. What it says instead is the one thing the
+ * mesh loses and the generator still has: the **ordering**.
+ *
+ * That distinction is measured rather than assumed. Fitting a surface to a run
+ * of facets needs to know which follows which along the sweep, and nothing
+ * recovers that from an unordered set - a swept quad grid straight from a
+ * generator puts every interior vertex at valence 6, but after a boolean has
+ * trimmed it against a wall the valence spreads and the ordering is gone. On
+ * the reference part the untouched case measures 100% regular and the trimmed
+ * one 36%. See uncoveredRegions() in AnalyticFeatures.
+ *
+ * So the generator hands over its own grid, `rows` stations by `cols` profile
+ * points, in the order it generated them. `closed_v` marks a profile which
+ * wraps, as a swept tube's does.
+ *
+ * Membership is by position rather than by projection, and that is deliberate.
+ * These points *are* mesh vertices - the generator emitted them - so a facet
+ * belongs to the sweep exactly when all its corners are grid points. A boolean
+ * which cuts the sweep introduces vertices that are not in the grid, and those
+ * facets are correctly excluded rather than approximated. No tolerance to tune
+ * and no projection to converge. */
+class GridSurface : public Surface
+{
+public:
+  GridSurface(int rows, int cols, std::vector<Vector3d> net, bool closed_v = false);
+  void display(const std::vector<Vector3d>& vertices) override;
+  int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
+  [[nodiscard]] std::shared_ptr<Surface> clone() const override;
+  bool transform(const Transform3d& mat) override;
+  [[nodiscard]] bool sameAs(const Surface& other) const override;
+
+  [[nodiscard]] const Vector3d& at(int row, int col) const { return net[row * cols + col]; }
+
+  int rows = 0, cols = 0;
+  bool closed_v = false;
+  std::vector<Vector3d> net;
+
+private:
+  /*! Positions rounded to a grid, so membership is a lookup rather than a scan
+   * over every declared point for every vertex of the mesh. Rebuilt whenever
+   * the points move. 1e-9 is far below anything measured and far above one ulp
+   * at any plausible model size - the same reasoning as VertexSnapper in
+   * core/FilletNode.cc, which exists for the same kind of problem. */
+  void reindex();
+  std::map<std::tuple<int64_t, int64_t, int64_t>, int> lookup;
+  int operator==(const Surface& other) override { return 0; }
 };
