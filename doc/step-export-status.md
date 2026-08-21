@@ -1015,10 +1015,20 @@ the surface has no closed form - so `declare_grid()` carries the other thing
 instead, the one the mesh loses and the generator still has: the **order** the
 points were swept in.
 
-`GridSurface` holds that grid, and membership is by *position* rather than by
-projection. These points are mesh vertices, because the generator emitted them,
-so a facet belongs to the sweep exactly when every corner is one of them. There
-is no tolerance to tune and nothing to converge.
+`GridSurface` holds that grid, and membership is answered twice. A facet whose
+every corner is one of the emitted points belongs to the sweep by *position* -
+no tolerance, nothing to converge, and that is the exact answer for the facets
+the generator itself produced. For every other facet the grid is evaluated as a
+surface and its corners are projected onto it.
+
+The interpolant is deliberately lopsided: cubic B-spline along the sweep, where
+the samples are dense and the surface is smooth, and ruled - degree 1 - across
+the profile, so a thread flank's corners stay corners instead of being rounded
+away by a spline that was never told they were creases. Parameters are
+chord-length, averaged across columns, with clamped averaged knots; the solve is
+one banded `Eigen::PartialPivLU` factorisation reused per column. Projection is
+Gauss-Newton from a coarse pre-sample, because a helix passes near itself once
+per pitch and a single seed converges to the wrong turn.
 
 Measured on a helical ridge of 356 facets, fused onto a wall the way `hoseRidge`
 is fused onto its socket:
@@ -1027,26 +1037,32 @@ is fused onto its socket:
 | --- | --- | --- |
 | the ridge alone | 356 | 0 |
 | the ridge unioned with a wall it clears | 356 | 0 |
-| the ridge unioned with a wall that cuts its base | **63** | **237** |
+| the ridge unioned with a wall that cuts its base, by position alone | 63 | 237 |
+| the same, with projection onto the interpolated grid | **348** | **185** |
 
 The first two lines are the channel working: a declaration survives the boolean
 intact, which is exactly what the older `Surface` records could not promise for
-geometry with no name. The third is the honest limit, and it is worth stating
-precisely rather than as a caveat.
+geometry with no name. The last two are the interesting pair, and the distance
+between them was not free.
 
-**Those 237 facets are correctly excluded and uselessly so.** They are no longer
-facets of the pure sweep - the trim gave them new corners - so refusing them by
-position is the right answer to the question asked. But they still *lie on* the
-swept surface; only their boundary changed. Claiming them needs the record to
-answer "is this point on the sweep" for points the generator never emitted, and
-that means evaluating the grid as a surface and projecting onto it, the way
-`BezierPatchSurface::project` does for a fillet.
+**The tolerance has to be the tessellation band, not a fitting tolerance.**
+Projecting at 1e-7 moved the count from 63 to 66 - three facets, which is to say
+nothing. The reason is that the boolean cuts the *faceted* mesh, not the smooth
+surface it approximates, so a vertex the trim invents sits on a chord and can be
+a full sagitta away from the interpolant. That distance is a property of the
+tessellation, not an error: it is exactly what `tessellationBand()` already
+reports for the claims line. Using it as the projection tolerance takes the
+count from 63 to 348, at a band of 0.0660 on this ridge. A tolerance chosen for
+fit quality is the wrong instrument here; the right one is the width of the gap
+the tessellation itself left.
 
-So the grid is what makes that possible and is not yet what does it. That is the
-next step, and it is now a bounded one: the ordering is in hand, the fitting is a
-banded solve against Eigen which is already a dependency, and what is missing is
-evaluation plus projection plus a `B_SPLINE_SURFACE_WITH_KNOTS` emission with
-general knots rather than the Bezier-only knot vector the exporter writes today.
+So the grid now both carries the ordering and answers membership on it. What
+remains is emission: writing a declared grid as an actual face needs
+`B_SPLINE_SURFACE_WITH_KNOTS` with **general knots**, where the exporter today
+writes only the Bezier-only knot vector, plus the recogniser wiring that hands
+the claimed facets to it. Until that lands the pass measures and reports and
+collapses nothing, which is deliberate for the same reason as before - a pass
+that silently did nothing would look exactly like one that found nothing.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

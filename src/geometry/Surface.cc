@@ -2,6 +2,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstddef>
+#include <Eigen/Dense>
+#include <Eigen/LU>
+#include <limits>
 #include <memory>
 #include <typeinfo>
 #include <vector>
@@ -553,6 +556,217 @@ std::tuple<int64_t, int64_t, int64_t> gridKey(const Vector3d& pt)
 }
 }  // namespace
 
+namespace {
+
+constexpr int GRID_DEGREE = 3;
+
+/*! Which knot span `t` falls in, for a clamped knot vector. */
+int findSpan(const std::vector<double>& knots, int n, double t)
+{
+  if (t >= knots[n]) return n - 1;
+  if (t <= knots[GRID_DEGREE]) return GRID_DEGREE;
+  int lo = GRID_DEGREE, hi = n, mid = (lo + hi) / 2;
+  while (t < knots[mid] || t >= knots[mid + 1]) {
+    if (t < knots[mid]) hi = mid;
+    else lo = mid;
+    mid = (lo + hi) / 2;
+  }
+  return mid;
+}
+
+/*! The four non-zero cubic basis functions at `t` in its span. */
+void basisFuns(const std::vector<double>& knots, int span, double t, double out[GRID_DEGREE + 1])
+{
+  double left[GRID_DEGREE + 1], right[GRID_DEGREE + 1];
+  out[0] = 1.0;
+  for (int j = 1; j <= GRID_DEGREE; j++) {
+    left[j] = t - knots[span + 1 - j];
+    right[j] = knots[span + j] - t;
+    double saved = 0.0;
+    for (int r = 0; r < j; r++) {
+      const double denom = right[r + 1] + left[j - r];
+      const double temp = denom != 0.0 ? out[r] / denom : 0.0;
+      out[r] = saved + right[r + 1] * temp;
+      saved = left[j - r] * temp;
+    }
+    out[j] = saved;
+  }
+}
+
+}  // namespace
+
+void GridSurface::buildSpline()
+{
+  uknots.clear();
+  poles.clear();
+  // Below four stations there is no cubic to fit; evaluate() then reads the
+  // declared points directly, which is exact at them and linear between.
+  if (rows < GRID_DEGREE + 1 || cols < 1) return;
+
+  const int m = rows;
+  // Chord length parameters, averaged over the columns. They have to share one
+  // parameterisation, or the result is not a tensor product and cannot be
+  // written as one surface.
+  std::vector<double> t(m, 0.0);
+  for (int j = 0; j < cols; j++) {
+    double total = 0.0;
+    std::vector<double> run(m, 0.0);
+    for (int i = 1; i < m; i++) {
+      total += (at(i, j) - at(i - 1, j)).norm();
+      run[i] = total;
+    }
+    if (!(total > 0)) return;
+    for (int i = 1; i < m; i++) t[i] += run[i] / total / cols;
+  }
+  t[0] = 0.0;
+  t[m - 1] = 1.0;
+  for (int i = 1; i < m; i++) {
+    if (!(t[i] > t[i - 1])) return;  // coincident stations leave no parameter
+  }
+
+  // Clamped averaged knots - the standard choice for interpolation, and the one
+  // that keeps the system banded and non singular.
+  uknots.assign(std::size_t(m) + GRID_DEGREE + 1, 0.0);
+  for (int i = 0; i <= GRID_DEGREE; i++) uknots[m + i] = 1.0;
+  for (int j = 1; j <= m - GRID_DEGREE - 1; j++) {
+    double acc = 0.0;
+    for (int i = j; i <= j + GRID_DEGREE - 1; i++) acc += t[i];
+    uknots[j + GRID_DEGREE] = acc / GRID_DEGREE;
+  }
+
+  // The matrix depends only on the parameters, so it is factored once and
+  // applied to every column.
+  Eigen::MatrixXd A = Eigen::MatrixXd::Zero(m, m);
+  for (int i = 0; i < m; i++) {
+    const int span = findSpan(uknots, m, t[i]);
+    double basis[GRID_DEGREE + 1];
+    basisFuns(uknots, span, t[i], basis);
+    for (int k = 0; k <= GRID_DEGREE; k++) A(i, span - GRID_DEGREE + k) = basis[k];
+  }
+  const Eigen::PartialPivLU<Eigen::MatrixXd> lu(A);
+
+  poles.assign(std::size_t(m) * cols, Vector3d::Zero());
+  Eigen::MatrixXd rhs(m, 3);
+  for (int j = 0; j < cols; j++) {
+    for (int i = 0; i < m; i++) rhs.row(i) = at(i, j).transpose();
+    const Eigen::MatrixXd sol = lu.solve(rhs);
+    for (int i = 0; i < m; i++) poles[std::size_t(i) * cols + j] = sol.row(i).transpose();
+  }
+
+  // How far this surface stands off the facets that approximate it: the widest
+  // gap between the interpolant and the chords through the points it was built
+  // from. See tessellationBand() for why membership needs it.
+  band = 0;
+  for (int j = 0; j < cols; j++) {
+    for (int i = 0; i + 1 < m; i++) {
+      const double mid = (t[i] + t[i + 1]) / 2;
+      const double v = cols > 1 ? double(j) / (cols - 1) : 0.0;
+      band = std::max(band, (evaluate(mid, v) - (at(i, j) + at(i + 1, j)) / 2).norm());
+    }
+  }
+}
+
+Vector3d GridSurface::evaluate(double u, double v) const
+{
+  u = std::clamp(u, 0.0, 1.0);
+  v = std::clamp(v, 0.0, 1.0);
+  const double vs = v * (cols - 1);
+  int j0 = int(vs);
+  if (j0 > cols - 2) j0 = std::max(0, cols - 2);
+  const double vf = cols > 1 ? vs - j0 : 0.0;
+
+  auto column = [&](int j) -> Vector3d {
+    if (poles.empty()) {
+      const double us = u * (rows - 1);
+      int i0 = int(us);
+      if (i0 > rows - 2) i0 = std::max(0, rows - 2);
+      const double uf = rows > 1 ? us - i0 : 0.0;
+      return at(i0, j) * (1 - uf) + at(std::min(i0 + 1, rows - 1), j) * uf;
+    }
+    const int span = findSpan(uknots, rows, u);
+    double basis[GRID_DEGREE + 1];
+    basisFuns(uknots, span, u, basis);
+    Vector3d acc = Vector3d::Zero();
+    for (int k = 0; k <= GRID_DEGREE; k++) {
+      acc += poles[std::size_t(span - GRID_DEGREE + k) * cols + j] * basis[k];
+    }
+    return acc;
+  };
+  if (cols == 1) return column(0);
+  return column(j0) * (1 - vf) + column(j0 + 1) * vf;
+}
+
+bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
+{
+  if (rows < 2 || cols < 1) return false;
+  // A coarse sample first. Newton on a swept surface has as many local minima
+  // as the sweep has turns - a helix passes near itself once a pitch - so a
+  // single start finds the wrong one. Sampling at the stations cannot be out by
+  // more than a span.
+  double best = std::numeric_limits<double>::infinity();
+  double bu = 0, bv = 0;
+  const int usamples = std::max(rows * 2, 8);
+  const int vsamples = std::max((cols - 1) * 2, 2);
+  for (int i = 0; i <= usamples; i++) {
+    const double su = double(i) / usamples;
+    for (int j = 0; j <= vsamples; j++) {
+      const double sv = double(j) / vsamples;
+      const double d = (evaluate(su, sv) - pt).squaredNorm();
+      if (d < best) {
+        best = d;
+        bu = su;
+        bv = sv;
+      }
+    }
+  }
+  // Then Gauss-Newton on the squared distance, by finite differences: the
+  // surface is piecewise polynomial and this only has to converge locally.
+  const double h = 1e-6;
+  for (int iter = 0; iter < 24; iter++) {
+    const Vector3d r = evaluate(bu, bv) - pt;
+    const Vector3d du =
+      (evaluate(std::min(1.0, bu + h), bv) - evaluate(std::max(0.0, bu - h), bv)) / (2 * h);
+    const Vector3d dv =
+      (evaluate(bu, std::min(1.0, bv + h)) - evaluate(bu, std::max(0.0, bv - h))) / (2 * h);
+    Eigen::Matrix2d jtj;
+    jtj << du.dot(du), du.dot(dv), du.dot(dv), dv.dot(dv);
+    const Eigen::Vector2d rhs(-r.dot(du), -r.dot(dv));
+    if (fabs(jtj.determinant()) < 1e-20) break;
+    const Eigen::Vector2d step = jtj.inverse() * rhs;
+    const double nu = std::clamp(bu + step[0], 0.0, 1.0);
+    const double nv = std::clamp(bv + step[1], 0.0, 1.0);
+    const bool settled = fabs(nu - bu) < 1e-12 && fabs(nv - bv) < 1e-12;
+    bu = nu;
+    bv = nv;
+    if (settled) break;
+  }
+  u = bu;
+  v = bv;
+  return true;
+}
+
+bool GridSurface::onSurface(const Vector3d& pt, double tol) const
+{
+  double u = 0, v = 0;
+  if (!project(pt, u, v)) return false;
+  return (evaluate(u, v) - pt).norm() <= tol;
+}
+
+bool GridSurface::isDeclaredPoint(const Vector3d& pt) const
+{
+  const auto key = gridKey(pt);
+  for (int64_t dx = -1; dx <= 1; dx++) {
+    for (int64_t dy = -1; dy <= 1; dy++) {
+      for (int64_t dz = -1; dz <= 1; dz++) {
+        if (lookup.count({std::get<0>(key) + dx, std::get<1>(key) + dy, std::get<2>(key) + dz})) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 GridSurface::GridSurface(int rows, int cols, std::vector<Vector3d> net, bool closed_v)
   : rows(rows), cols(cols), closed_v(closed_v), net(std::move(net))
 {
@@ -569,6 +783,7 @@ GridSurface::GridSurface(int rows, int cols, std::vector<Vector3d> net, bool clo
     }
   }
   reindex();
+  buildSpline();
 }
 
 void GridSurface::reindex()
@@ -584,20 +799,13 @@ void GridSurface::display(const std::vector<Vector3d>& vertices)
 
 int GridSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
 {
-  // A neighbourhood search rather than an exact key, so a point which lands on
-  // the far side of a rounding boundary from the one that was indexed is still
-  // found. Same reason VertexSnapper looks at the 27 cells around its own.
-  const auto key = gridKey(pt);
-  for (int64_t dx = -1; dx <= 1; dx++) {
-    for (int64_t dy = -1; dy <= 1; dy++) {
-      for (int64_t dz = -1; dz <= 1; dz++) {
-        const auto it =
-          lookup.find({std::get<0>(key) + dx, std::get<1>(key) + dy, std::get<2>(key) + dz});
-        if (it != lookup.end()) return 1;
-      }
-    }
-  }
-  return 0;
+  // On the *surface*, which is what every other Surface means by this and what
+  // the exporter needs. A declared point is on it by construction and is
+  // checked first, because that is a lookup rather than a projection - but a
+  // point a boolean created is on it too, and refusing those was the whole
+  // shortfall of declaring the grid alone.
+  if (isDeclaredPoint(pt)) return 1;
+  return onSurface(pt, std::max(band, 1e-7)) ? 1 : 0;
 }
 
 std::shared_ptr<Surface> GridSurface::clone() const
@@ -615,6 +823,7 @@ bool GridSurface::transform(const Transform3d& mat)
   const Vector3d dir = mat.linear() * normdir;
   if (dir.norm() > 0) normdir = dir.normalized();
   reindex();
+  buildSpline();
   return true;
 }
 

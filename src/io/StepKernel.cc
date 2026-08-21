@@ -196,8 +196,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     LOG(
       "STEP export: %1$d analytic surface%2$s available (%3$d cylindrical, %4$d spherical, "
       "%5$d toroidal, %6$d Bezier%7$s)",
-      int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres, tori, patches,
-      extra);
+      int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres, tori, patches, extra);
   }
 
   const double model_tol = tol > 0 ? tol : 1e-5;
@@ -551,9 +550,15 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         else if (corners > 0) partly++;
       }
       LOG(
-        "STEP export: a declared %1$dx%2$d sweep claims %3$d facets whole, and %4$d more are "
-        "cut across it",
-        grid->rows, grid->cols, int(whole), int(partly));
+        // The band is printed because it is the tolerance being trusted. A
+        // declared sweep is smooth and the mesh is its tessellation, so a
+        // vertex the boolean created lies on a facet rather than on the
+        // surface, up to the sagitta of a station away. That is the widest a
+        // claim here can be wrong by, and it is the model's own resolution
+        // rather than a constant somebody chose.
+        "STEP export: a declared %1$dx%2$d sweep claims %3$d facets whole, %4$d cut across it, "
+        "within its tessellation band of %5$.4f",
+        grid->rows, grid->cols, int(whole), int(partly), grid->tessellationBand());
     }
 
     if (approximate) {

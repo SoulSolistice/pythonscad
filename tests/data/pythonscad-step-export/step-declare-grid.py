@@ -18,23 +18,34 @@ This model is the ridge fused onto a wall, which is the case that matters,
 because a sweep standing alone is not what any real model exports. The union
 cuts the ridge along its base, and the numbers below say exactly what that costs:
 
-  the ridge alone                     356 facets claimed whole, 0 cut
-  the ridge fused onto the wall        63 claimed whole, 237 cut across
+  the ridge alone                              356 claimed whole,   0 cut
+  fused onto the wall, by declared points       63 claimed whole, 237 cut
+  fused onto the wall, by the surface          348 claimed whole, 185 cut
 
-The 63 are the facets the boolean never touched, and they are claimed exactly -
-membership is by position, so a corner the generator emitted matches and one the
-boolean created does not. That is the correct answer rather than a limitation:
-a trimmed facet is genuinely no longer a facet of the pure sweep.
+The middle line is what declaring the grid alone achieved, and it was not
+enough: only the facets the boolean never touched were claimed, because
+membership was a lookup of the points the generator emitted.
 
-It is also not yet a useful one, and the fixture records that honestly. Those
-237 facets still *lie on* the swept surface - the trim changed their boundary,
-not the surface underneath - so claiming them needs the record to answer "is
-this point on the sweep" for points the generator never emitted. That means
-evaluating the grid as a surface and projecting onto it, rather than looking the
-point up. The grid is what makes that possible; it is not what does it.
+The last line is the grid used as a *surface*. The stations are interpolated by
+a cubic B-spline along the sweep, ruled across the profile - cubic where the
+sweep curves and linear across, because the profile is a polyline whose corners
+the model means to keep - and membership becomes a projection onto it.
+
+The tolerance that makes that work is the interesting part, and it cannot be a
+constant. The declared sweep is smooth; the mesh is its tessellation; a boolean
+cuts the *tessellation*, so the vertices it creates lie on facets, standing off
+the smooth surface by up to the sagitta of a station. At 1e-7 every one is
+refused - projection alone moved 63 to 66. So the tolerance is the grid's own
+tessellation band, the widest the interpolant departs from the chords through
+the points it was built from: 0.0660 here, printed on every export because it is
+the number being trusted.
+
+Claiming 348 rather than 356 is the honest ceiling: the eight are where the
+union actually removed surface, and the 185 cut across it are the facets the
+trim left straddling the ridge's edge.
 """
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
-# EXPECT: a declared 60x4 sweep claims 63 facets whole, and 237 more are cut across it
+# EXPECT: a declared 60x4 sweep claims 348 facets whole, 185 cut across it, within its tessellation band of 0.0660
 from pythonscad import *
 import math
 

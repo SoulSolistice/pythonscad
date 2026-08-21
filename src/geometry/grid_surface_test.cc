@@ -50,16 +50,66 @@ TEST_CASE("a declared grid accepts the points it was built from and nothing else
     CHECK(found == rows * cols);
   }
 
-  SECTION("a point the boolean would have created is not")
+  SECTION("a point the boolean created, but on the sweep, is a member too")
   {
-    // The midpoint of two adjacent stations lies *on* the swept surface to well
-    // within any modelling tolerance, and is still correctly refused: it is not
-    // a point the generator emitted, so the facets a trim builds around it are
-    // not part of the declared sweep. Refusing them is the whole point - it is
-    // what keeps a cut region faceted instead of approximated.
-    const Vector3d between = (grid.at(5, 0) + grid.at(6, 0)) / 2.0;
-    CHECK(grid.pointMember(scratch, between) == 0);
+    // The declared points alone are not enough, and this is the case that says
+    // so. A boolean which trims the sweep gives its facets new corners; those
+    // corners still lie on the swept surface, and refusing them left 237 of 300
+    // facets unclaimed on a ridge cut at its base. So membership is by the
+    // surface, and a point the generator never emitted but which lies on the
+    // sweep is a member.
+    const Vector3d on = grid.evaluate(0.371, 0.5);
+    CHECK(grid.pointMember(scratch, on) == 1);
+
+    // A chord midpoint *is* a member, and deliberately so. The mesh is the
+    // tessellation of this surface, so a boolean cutting it produces vertices
+    // on the chords; refusing them is what left 63 facets of 300 claimed.
+    // Membership is therefore within the grid's own tessellation band - the
+    // widest the interpolant stands off its own chords - which is exactly the
+    // resolution the model was built at and no looser.
+    const Vector3d chord = (grid.at(5, 0) + grid.at(6, 0)) / 2.0;
+    CHECK(grid.pointMember(scratch, chord) == 1);
+    CHECK(grid.tessellationBand() > 0);
+
+    // Ten bands off the surface is not a member, so the tolerance is a bound
+    // and not a licence.
+    double u = 0, v = 0;
+    REQUIRE(grid.project(on, u, v));
+    const Vector3d du = grid.evaluate(std::min(1.0, u + 1e-4), v) - grid.evaluate(u, v);
+    const Vector3d dv = grid.evaluate(u, std::min(1.0, v + 1e-4)) - grid.evaluate(u, v);
+    const Vector3d away = du.cross(dv).normalized() * (10 * grid.tessellationBand());
+    CHECK(grid.pointMember(scratch, on + away) == 0);
     CHECK(grid.pointMember(scratch, Vector3d(0, 0, 0)) == 0);
+  }
+
+  SECTION("the interpolant passes through the stations it was built from")
+  {
+    // A cubic B-spline fitted to the columns, so this is interpolation and not
+    // approximation: the declared points have to come back exactly, or the
+    // surface describes something other than what was swept.
+    double worst = 0;
+    for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < cols; j++) {
+        double u = 0, v = 0;
+        REQUIRE(grid.project(grid.at(i, j), u, v));
+        worst = std::max(worst, (grid.evaluate(u, v) - grid.at(i, j)).norm());
+      }
+    }
+    INFO("worst station deviation " << worst);
+    CHECK(worst < 1e-9);
+  }
+
+  SECTION("projection finds the near turn of a helix, not a neighbouring one")
+  {
+    // A helix passes close to itself once per pitch, so a projection which
+    // starts from the middle of the parameter square converges onto the wrong
+    // turn and reports a point as on the surface when it is a pitch away. The
+    // coarse sample before Newton is what prevents that.
+    const Vector3d target = grid.evaluate(0.5, 0.0);
+    double u = 0, v = 0;
+    REQUIRE(grid.project(target, u, v));
+    CHECK(u == Catch::Approx(0.5).margin(0.02));
+    CHECK((grid.evaluate(u, v) - target).norm() < 1e-9);
   }
 
   SECTION("membership survives an affine move, which a cylinder would not")

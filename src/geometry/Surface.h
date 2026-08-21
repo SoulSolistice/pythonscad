@@ -251,6 +251,52 @@ public:
 
   [[nodiscard]] const Vector3d& at(int row, int col) const { return net[row * cols + col]; }
 
+  /*! The swept surface itself, not just the points it was declared with.
+   *
+   * A cubic B-spline interpolating the stations along the sweep, ruled across
+   * the profile. Cubic along u because that is the direction the sweep curves
+   * in and the stations are dense there; degree 1 across v because the profile
+   * is a polyline with corners the model means to keep - a thread's flanks meet
+   * at an angle that resists the hose pulling out, and smoothing across them
+   * would round away the feature. The same reason the fillet mockup fitted one
+   * surface per flank rather than one around the tube.
+   *
+   * `u` and `v` run 0..1. Available because membership by position alone claims
+   * only the facets a boolean never touched - 63 of 300 on a ridge cut at its
+   * base - while the other 237 still lie on this surface and only lost their
+   * original corners. */
+  [[nodiscard]] Vector3d evaluate(double u, double v) const;
+
+  /*! Closest point on the swept surface, by Newton from a coarse sample.
+   *
+   * Returns false when it does not converge, which the caller must treat as
+   * "not on this surface" rather than as an answer. */
+  bool project(const Vector3d& pt, double& u, double& v) const;
+
+  /*! Whether `pt` lies on the swept surface, as opposed to being one of the
+   * points it was declared with. `tol` is absolute. */
+  [[nodiscard]] bool onSurface(const Vector3d& pt, double tol) const;
+
+  /*! How far the swept surface departs from the facets that approximate it.
+   *
+   * The tolerance membership has to use, and it cannot be a constant. The
+   * declared grid describes the smooth surface the generator meant; the mesh is
+   * its tessellation, and a boolean cuts the *tessellation* - so the vertices it
+   * creates lie on the facets, which stand off the smooth surface by up to the
+   * sagitta of a station. At 1e-7 every one of them is refused, which is why
+   * declaring the grid alone claimed 63 facets of 300 and projection alone
+   * moved that only to 66.
+   *
+   * So the tolerance is the grid's own: the widest gap between the interpolant
+   * and the chords joining the points it was built from. A point within it is
+   * indistinguishable from the declared surface at the resolution the model was
+   * tessellated at, which is the most any mesh can say. */
+  [[nodiscard]] double tessellationBand() const { return band; }
+
+  /*! Whether `pt` is one of the points the generator emitted. Exact, by
+   * position - no projection, no tolerance to choose. */
+  [[nodiscard]] bool isDeclaredPoint(const Vector3d& pt) const;
+
   int rows = 0, cols = 0;
   bool closed_v = false;
   std::vector<Vector3d> net;
@@ -262,6 +308,12 @@ private:
    * at any plausible model size - the same reasoning as VertexSnapper in
    * core/FilletNode.cc, which exists for the same kind of problem. */
   void reindex();
+  /*! Interpolate the stations, so that `evaluate` describes the sweep and not
+   * only the points it passes through. Runs on construction and after a move. */
+  void buildSpline();
   std::map<std::tuple<int64_t, int64_t, int64_t>, int> lookup;
+  std::vector<double> uknots;   // clamped, averaged; empty when rows < 4
+  std::vector<Vector3d> poles;  // rows * cols, parallel to net
+  double band = 0;              // see tessellationBand()
   int operator==(const Surface& other) override { return 0; }
 };
