@@ -378,6 +378,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // specific half, turning its answer into entities.
   AnalyticFeatures::Result features;
   std::vector<AnalyticFeatures::Patch> bezier_patches;
+  // Runs whose curve is exactly a circular arc, keyed by their vertices - which
+  // is how the emitter shares one EdgeCurve between the two faces that meet
+  // there. Decided per run rather than per face; see where it is filled.
+  std::set<std::set<int>> circular_runs;
   // Declared sweeps whose claimed region can be written as one face: a strip,
   // whose boundary stays inside the surface's parameter rectangle. One closing
   // around its profile crosses the surface's seam and is left faceted.
@@ -552,25 +556,49 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       if (bez != nullptr) patch_quadric[p] = AnalyticFeatures::quadricOfPatch(*bez, model_tol);
     }
 
-    // A curved run shared with another patch becomes one EdgeCurve used by
-    // both, so the two have to agree on what kind of curve it is: a quadric
-    // face is bounded by CIRCLEs and a spline face by curves read off its own
-    // net, and a face bounded by the other kind is one no importer can check
-    // against its surface. Withdrawing a patch whose partner is not a quadric
-    // can withdraw that partner's own partner in turn, so this runs to a fixed
-    // point rather than once. A *straight* run is a LINE either way and
-    // constrains nothing.
-    for (bool changed = true; changed;) {
-      changed = false;
-      for (std::size_t p = 0; p < patches.size(); p++) {
-        if (patch_quadric[p] == nullptr) continue;
-        for (const auto& run : patches[p].runs) {
-          if (run.straight || run.kind != AnalyticFeatures::Patch::Run::OTHER_PATCH) continue;
-          if (run.patch < patch_quadric.size() && patch_quadric[run.patch] != nullptr) continue;
-          patch_quadric[p] = nullptr;
-          changed = true;
-          break;
+    // A curved run shared with two patches becomes one EdgeCurve used by both,
+    // so the two have to agree on what kind of curve it is.
+    //
+    // This used to be settled by withdrawing the quadric: a quadric face was
+    // bounded by CIRCLEs and a spline face by curves read off its own net, so a
+    // patch whose partner was not a quadric gave up being one, to a fixed point
+    // because withdrawing one could withdraw its partner's partner in turn. It
+    // cost real faces - OCCT reported six of step-fillet-refusals' thirty
+    // splines as exact cylinders of radius sqrt(3), which is exactly the set
+    // this rule withdrew.
+    //
+    // The question it was answering is better asked of the *run*. runCircle
+    // reads the declared control net, weights and all, so it says whether that
+    // boundary is exactly a circular arc rather than whether the face beside it
+    // is a quadric. When both sides say so about the same circle, a CIRCLE lies
+    // on both surfaces exactly and bounding either with it is sound - and a
+    // kernel offsets and patterns along a circle where it merely tolerates a
+    // spline. When they disagree, or only one side is a patch at all, the run
+    // stays a spline and it is the *curve* that gives way rather than the face.
+    for (std::size_t p = 0; p < patches.size(); p++) {
+      if (!patches[p].alive) continue;
+      for (const auto& run : patches[p].runs) {
+        if (run.straight) continue;
+        Vector3d centre, normal;
+        double radius = 0;
+        if (!AnalyticFeatures::runCircle(patches[p], run, vertices, centre, normal, radius)) {
+          continue;
         }
+        if (run.kind == AnalyticFeatures::Patch::Run::OTHER_PATCH) {
+          // Both nets have to describe the same circle, or the two faces would
+          // be bounded by a curve only one of them lies on.
+          if (run.patch >= patches.size() || !patches[run.patch].alive) continue;
+          const AnalyticFeatures::Patch& other = patches[run.patch];
+          if (run.partner >= other.runs.size()) continue;
+          Vector3d c2, n2;
+          double r2 = 0;
+          if (!AnalyticFeatures::runCircle(other, other.runs[run.partner], vertices, c2, n2, r2)) {
+            continue;
+          }
+          const double scale = std::max(1.0, radius);
+          if (fabs(r2 - radius) > 1e-9 * scale || (c2 - centre).norm() > 1e-9 * scale) continue;
+        }
+        circular_runs.insert(std::set<int>(run.verts.begin(), run.verts.end()));
       }
     }
 
@@ -1098,7 +1126,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
           // far side of a shared run agrees about which of the two it is.
           Vector3d centre, normal;
           double radius = 0;
-          if (quadric != nullptr &&
+          if (circular_runs.count(key) &&
               AnalyticFeatures::runCircle(patch, run, vertices, centre, normal, radius)) {
             const Vector3d ref = (vertices[run.verts.front()] - centre).normalized();
             auto circle = new Circle(entities, "", placement(centre, normal, ref), radius);
