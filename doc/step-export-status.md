@@ -1314,14 +1314,77 @@ arrive with a wild band and admit everything. A grid whose interpolant bows by
 more than a quarter of a cell is refused - a property of the grid itself, not of
 the caller's bookkeeping.
 
-**What remains.** Declared sweeps are recognised, cut where they must be, and
-written; the approximation pass writes both cylinders and recovered sweeps. What
-is left is the round trip through SolidWorks and Fusion - which are not OCCT, and
-where the failure that started this was seen - and more shapes for the quadric
-fit: a sphere is a linear least squares through the vertices and a cone a linear
-one through the tangent planes, but neither collapses through this exporter's
-band path, which takes a cone as two rims matching declared cylinders. That is a
-different piece of work from the fit itself.
+### Turned surfaces, and where the axis comes from
+
+The approximation pass now also takes cones and spheres, and the shape of that
+work is not what this section previously predicted. Neither has a surface type
+to declare here, which is deliberate rather than missing: `primitives.cc`
+expresses a frustum as two rims matching declared cylinders, and a sphere as a
+stack of those bands absorbed into a spherical zone. So `fitRevolved` hands over
+*rings*, one `CylinderSurface` each, and the band pass makes the surfaces out of
+them with no new emission code. `step-approximate-turned.py` is a bare
+`polyhedron` frustum and sphere: **48 wall facets become one
+`CONICAL_SURFACE`**, at a volume OCCT reads as 1960.353816 against an exact
+1960.35, and **480 become one `SPHERICAL_SURFACE`** of radius exactly 10 - one
+face rather than the fifteen the rings alone would give, because a
+`SphereSurface` among the declarations lets the zone pass absorb the whole
+stack.
+
+**Finding the axis is the whole difficulty, and two closed forms are degenerate
+on exactly the shapes that matter.** Both were implemented and measured before
+being replaced, and both are worth recording:
+
+- **The rims.** A frustum has two and they give the axis directly. A sphere's
+  cap meets the band beside it at the angle of one ring - 11 degrees on a 32x16
+  sphere - which is well inside the smoothing angle, so the caps *join* the
+  region and it has no boundary left to read.
+- **A screw fit.** Every normal of a turned surface is coplanar with the axis
+  and the radial direction, `n . (a x (c - p)) = 0`, which is linear in six
+  unknowns and solvable as a null space. A cone and a sphere both have every
+  normal line through one point, and the null space comes out **three**
+  dimensional rather than one - three eigenvalues at 1e-16 on the frustum.
+
+So the axis is *proposed and then verified*. A rim proposes one, a cap that
+joined the region proposes its normal, and the apex - which every tangent plane
+of a cone contains, so a linear least squares finds it - proposes the mean
+ruling direction. What accepts a candidate is the ring test: every vertex on the
+circle its own height puts it on. That test is strict enough that a wrong axis
+cannot survive it, which is what lets the proposals be rough.
+
+One bug in it is worth keeping because it hid so well. Rings are grouped by
+quantised height, and using the quantised key *as* the height rounds every ring
+to the quantum. A cylinder does not care - it is infinite along its axis - so
+cones kept working, while the sphere test, which measures heights against a
+radius, failed silently. Carrying the true mean height alongside the key is what
+turned fifteen faces into one.
+
+### What a refused patch says
+
+`quadricOfPatch` had eight ways to refuse and reported none of them, so a patch
+left as a spline looked exactly like one the recogniser was failing to see -
+which is not hypothetical, since OCCT named six exact cylinders among
+`step-fillet-refusals`' thirty splines while the pass reported a bare zero. Each
+gate now names itself, and the counts settle what was left open when those six
+were recovered:
+
+```
+12 patches are not quadrics because the rails are parallel but not coaxial
+12 patches are not quadrics because its two meridians have different radii
+6 of 30 patches are exactly quadrics - 6 cylindrical, 0 spherical
+```
+
+The twelve top and bottom strips are equal circles in parallel planes whose
+centres are offset sideways as well as along the edge, which rules an *oblique*
+cylinder - correctly refused. The twelve corners are blends rather than octants,
+which is what that fixture exists to assert. And OCCT closes the argument rather
+than the reasoning: its canonical census now reports all twenty four remaining
+splines as genuine splines. The third party that named the loss reports none.
+
+**What remains.** The round trip through SolidWorks and Fusion, which are not
+OCCT and where the failure that started this was seen; roadmap item 4, trimmed
+faces, which nothing has attempted; and non-separable weight nets for fully
+skewed fillet corners, which is a modelling question rather than an exporter
+one.
 
 **What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
 their own readers and their own opinions, and the failure that started this was

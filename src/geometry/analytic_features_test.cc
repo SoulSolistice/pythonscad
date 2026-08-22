@@ -802,3 +802,96 @@ TEST_CASE("a swept grid is recovered from the facets it was tessellated into", "
     CHECK(std::string(why).size() > 0);
   }
 }
+
+TEST_CASE("a turned surface is recovered as the rings that made it", "[analytic][approximate]")
+{
+  // A cone and a sphere are declared here as rings rather than as shapes, so
+  // what fitRevolved has to get right is the axis - and its two closed forms
+  // are both degenerate, which is why it proposes candidates and verifies them.
+  const double smooth = 25 * M_PI / 180.0;
+
+  SECTION("a frustum comes back as two rims on a common axis")
+  {
+    // Its rims propose the axis. The screw fit cannot: every normal line of a
+    // cone passes through the apex, so the null space is three dimensional.
+    FacetedTube frustum(2, 48);
+    // Taper the top ring, which turns the tube into a frustum without
+    // disturbing anything else about the mesh.
+    for (int j = 0; j < 48; j++) {
+      Vector3d& p = frustum.vertices[48 + j];
+      p[0] *= 0.4;
+      p[1] *= 0.4;
+    }
+    for (std::size_t f = 0; f < frustum.loops.size(); f++) {
+      if (frustum.loops[f].size() != 4) continue;
+      const std::vector<int>& loop = frustum.loops[f];
+      Vector3d n = (frustum.vertices[loop[1]] - frustum.vertices[loop[0]])
+                     .cross(frustum.vertices[loop[2]] - frustum.vertices[loop[0]]);
+      frustum.normals[f] = n.normalized();
+    }
+    const std::vector<char> consumed(frustum.loops.size(), 0);
+    SmoothRegion wall;
+    for (std::size_t f = 0; f < frustum.loops.size(); f++) {
+      if (frustum.loops[f].size() == 4) wall.facets.push_back(f);
+    }
+    REQUIRE(wall.facets.size() == 48);
+
+    const char *why = "";
+    const std::vector<std::shared_ptr<Surface>> rings =
+      fitRevolved(frustum.mesh(), wall, 1e-5, &why);
+    INFO(why);
+    REQUIRE(rings.size() == 2);
+    std::vector<double> radii;
+    for (const auto& ring : rings) {
+      const auto *cyl = dynamic_cast<const CylinderSurface *>(ring.get());
+      REQUIRE(cyl != nullptr);
+      radii.push_back(cyl->r);
+      CHECK(fabs(fabs(cyl->normdir.normalized().dot(Vector3d(0, 0, 1))) - 1.0) < 1e-6);
+    }
+    std::sort(radii.begin(), radii.end());
+    CHECK(radii[0] == Catch::Approx(2.0).margin(1e-9));
+    CHECK(radii[1] == Catch::Approx(5.0).margin(1e-9));
+  }
+
+  SECTION("a cylinder's own region is refused, having been taken already")
+  {
+    // Not a failure: fitCylinder runs first and answers this shape exactly.
+    // What matters is that the ring path does not also claim it with some
+    // other axis, which the ring test is what prevents.
+    FacetedCylinder cyl(64, 10.0, 12.0);
+    const std::vector<char> consumed(cyl.loops.size(), 0);
+    const std::vector<SmoothRegion> regions = uncoveredRegions(cyl.mesh(), consumed, smooth);
+    const SmoothRegion *wall = nullptr;
+    for (const auto& region : regions) {
+      if (region.facets.size() >= 3) wall = &region;
+    }
+    REQUIRE(wall != nullptr);
+    const std::vector<std::shared_ptr<Surface>> rings = fitRevolved(cyl.mesh(), *wall, 1e-5);
+    // Two rims of equal radius on the axis - the same surface fitCylinder
+    // names, described the long way round.
+    for (const auto& ring : rings) {
+      const auto *found = dynamic_cast<const CylinderSurface *>(ring.get());
+      REQUIRE(found != nullptr);
+      CHECK(found->r == Catch::Approx(10.0).margin(1e-9));
+    }
+  }
+
+  SECTION("a box is not turned, and says which test refused it")
+  {
+    std::vector<Vector3d> verts{{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}};
+    std::vector<std::vector<int>> loops{{0, 1, 2, 3}};
+    std::vector<Vector3d> normals{{0, 0, 1}};
+    std::vector<char> valid{1}, is_hole{0};
+    Mesh m;
+    m.vertices = &verts;
+    m.loops = &loops;
+    m.valid = &valid;
+    m.is_hole = &is_hole;
+    m.normals = &normals;
+    SmoothRegion region;
+    region.facets.push_back(0);
+    const char *why = "";
+    CHECK(fitRevolved(m, region, 1e-5, &why).empty());
+    CHECK(std::string(why).size() > 0);
+  }
+}

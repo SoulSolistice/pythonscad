@@ -429,7 +429,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     if (approximate) {
       const std::vector<AnalyticFeatures::SmoothRegion> candidates =
         AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
-      std::size_t fitted = 0, recovered = 0, tried = 0;
+      std::size_t fitted = 0, recovered = 0, turned = 0, tried = 0;
+      std::map<std::string, int> turned_refusals;
       double coarsest = 0;
       for (const auto& region : candidates) {
         if (region.facets.size() < 3) continue;
@@ -447,6 +448,20 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         // interior vertex, and a mesh a boolean has been through does not.
         // Below the threshold there is nothing to recover and the region is
         // left alone rather than fitted to something plausible.
+        // Or a surface of revolution the model turned but could not name. A
+        // cone and a sphere are declared here as rings rather than as shapes,
+        // so this contributes one cylinder per ring and the band pass makes
+        // the cones out of them.
+        const char *not_turned = "no reason was given";
+        const std::vector<std::shared_ptr<Surface>> rings =
+          AnalyticFeatures::fitRevolved(mesh, region, model_tol, &not_turned);
+        if (rings.empty()) turned_refusals[not_turned]++;
+        if (!rings.empty()) {
+          turned++;
+          coarsest = std::max(coarsest, region.band);
+          for (const auto& ring : rings) addSurfaceUnique(effective, ring);
+          continue;
+        }
         if (region.regularity < 0.95 || region.interior_vertices == 0) continue;
         const char *why = "no reason was given";
         guess = AnalyticFeatures::gridFromRegion(mesh, region, model_tol, &why);
@@ -461,13 +476,19 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         coarsest = std::max(coarsest, region.band);
         addSurfaceUnique(effective, guess);
       }
+      for (const auto& entry : turned_refusals) {
+        LOG("STEP export: %1$d regions are not turned surfaces because %2$s", int(entry.second),
+            entry.first.c_str());
+      }
       if (tried > 0) {
         LOG(
-          "STEP export: approximation fitted %1$d of %2$d uncovered regions as cylinders and "
-          "recovered %3$d as swept grids, the coarsest tessellated to %4$.4f",
-          int(fitted), int(tried), int(recovered), coarsest);
+          "STEP export: approximation took %1$d of %2$d uncovered regions - %3$d as cylinders, "
+          "%4$d as rings of a turned surface, %5$d as swept grids - the coarsest tessellated "
+          "to %6$.4f",
+          int(fitted + turned + recovered), int(tried), int(fitted), int(turned), int(recovered),
+          coarsest);
       }
-      if (fitted + recovered > 0) {
+      if (fitted + turned + recovered > 0) {
         // Re-run with the fits in hand. Cheaper than threading them through the
         // pass that has already run, and it means a fitted surface goes through
         // exactly the checks a declared one does.

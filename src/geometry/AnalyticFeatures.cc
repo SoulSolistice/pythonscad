@@ -1172,6 +1172,211 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
   return patches;
 }
 
+std::vector<std::shared_ptr<Surface>> fitRevolved(const Mesh& mesh, const SmoothRegion& region,
+                                                  double tol, const char **why)
+{
+  auto refuse = [&](const char *reason) {
+    if (why != nullptr) *why = reason;
+    return std::vector<std::shared_ptr<Surface>>();
+  };
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  if (region.facets.size() < 3) return refuse("it is too small to be a surface of revolution");
+
+  // The axis, which is the whole difficulty and has no single source.
+  //
+  // Two closed-form fits were tried and both are degenerate on the shapes that
+  // matter. The rims give it directly - a frustum's two, a sphere's two cap
+  // circles - and a sphere's cap meets the band beside it at the angle of one
+  // ring, 11 degrees on a 32x16 sphere, so the caps join the region and it has
+  // no boundary at all. A screw-axis fit over the facet normals, solving
+  // n . (a x (c - p)) = 0 as a null space, is degenerate the other way: a cone
+  // and a sphere both have every normal line through one point, and the null
+  // space comes out three dimensional rather than one. Measured, not assumed.
+  //
+  // So the axis is *proposed* and then verified. Every source of a plausible
+  // direction contributes a candidate, and the ring test below - every vertex
+  // on the circle its height puts it on - is what accepts one. That test is
+  // strict enough that a wrong candidate cannot survive it, which is what lets
+  // the proposals be as rough as they like.
+  const std::vector<Vector3d>& normals = *mesh.normals;
+  Vector3d anchor = Vector3d::Zero();
+  double anchor_n = 0;
+  std::set<int> region_verts;
+  for (const std::size_t f : region.facets) {
+    for (const int v : loops[f]) {
+      if (!region_verts.insert(v).second) continue;
+      anchor += vertices[v];
+      anchor_n += 1;
+    }
+  }
+  if (!(anchor_n > 2)) return refuse("it has too few vertices");
+  anchor /= anchor_n;
+
+  std::vector<Vector3d> candidates;
+  auto propose = [&](const Vector3d& dir) {
+    if (dir.norm() < 1e-9) return;
+    const Vector3d unit = dir.normalized();
+    for (const auto& had : candidates) {
+      if (fabs(fabs(had.dot(unit)) - 1.0) < 1e-6) return;
+    }
+    candidates.push_back(unit);
+  };
+
+  // A rim, where the region has one. This is the frustum's case and the
+  // cheapest to trust: the plane of a boundary circle is perpendicular to the
+  // axis by construction.
+  std::vector<std::vector<int>> cycles;
+  if (boundaryCycles(loops, region.facets, cycles) == nullptr) {
+    for (const auto& cycle : cycles) {
+      if (cycle.size() < 3) continue;
+      Vector3d centre = Vector3d::Zero();
+      for (const int v : cycle) centre += vertices[v];
+      centre /= double(cycle.size());
+      Vector3d area = Vector3d::Zero();
+      for (std::size_t i = 0; i < cycle.size(); i++) {
+        area += (vertices[cycle[i]] - centre).cross(vertices[cycle[(i + 1) % cycle.size()]] - centre);
+      }
+      propose(area);
+    }
+  }
+
+  // A cap that joined the region. A turned surface is tessellated into quads,
+  // so a face with more corners than that is the polygon closing one end, and
+  // its normal is the axis.
+  for (const std::size_t f : region.facets) {
+    if (loops[f].size() > 4) propose(normals[f]);
+  }
+
+  // And the apex, for a cone. Every tangent plane of a cone contains its apex,
+  // which is a linear least squares over the facet planes; the rulings from
+  // there make a constant angle with the axis, so their mean direction is it.
+  {
+    Eigen::Matrix3d nn = Eigen::Matrix3d::Zero();
+    Vector3d nb = Vector3d::Zero();
+    for (const std::size_t f : region.facets) {
+      const std::vector<int>& loop = loops[f];
+      if (loop.empty()) continue;
+      const Vector3d n = normals[f].normalized();
+      nn += n * n.transpose();
+      nb += n * n.dot(vertices[loop[0]]);
+    }
+    if (fabs(nn.determinant()) > 1e-12) {
+      const Vector3d apex = nn.inverse() * nb;
+      Vector3d mean = Vector3d::Zero();
+      for (const int v : region_verts) {
+        const Vector3d rel = vertices[v] - apex;
+        if (rel.norm() > tol) mean += rel.normalized();
+      }
+      propose(mean);
+    }
+  }
+  if (candidates.empty()) return refuse("nothing proposes an axis for it");
+
+  // Each candidate in turn, accepted only by the ring test.
+  const char *last = "no candidate axis described a turned surface";
+  auto tryAxis = [&](const Vector3d& axis) {
+    auto give_up = [&](const char *reason) {
+      last = reason;
+      return std::vector<std::shared_ptr<Surface>>();
+    };
+    // Which ring each vertex belongs to: its height along the axis. A frustum has
+    // only the two rims; a sphere has one ring per row of its tessellation, and
+    // every one of them has to be declared or the bands between them are not
+    // bounded by anything the recogniser can match.
+    // Keyed by quantised height, but carrying the true mean height as well. The
+    // key is only how vertices are grouped; using it as the height in its own
+    // right rounds every ring to the quantum, which a cylinder does not care
+    // about - it is infinite along its axis - and which defeats the sphere test
+    // below outright, since that measures heights against a radius.
+    struct Ring {
+      double radius = 0, height = 0;
+      int count = 0;
+    };
+    std::map<long long, Ring> rings;
+    const double quantum = std::max(tol, 1e-9) * 100;
+    std::set<int> seen;
+    for (const std::size_t f : region.facets) {
+      for (const int v : loops[f]) {
+        if (!seen.insert(v).second) continue;
+        const Vector3d rel = vertices[v] - anchor;
+        const double along = rel.dot(axis);
+        Ring& ring = rings[(long long)llround(along / quantum)];
+        ring.radius += (rel - axis * along).norm();
+        ring.height += along;
+        ring.count += 1;
+      }
+    }
+    if (rings.size() < 2) return give_up("its vertices do not lie on rings");
+
+    // Every vertex on the ring its height puts it in, which is what makes this a
+    // surface of revolution rather than a swarm that happens to have two round
+    // ends.
+    for (const std::size_t f : region.facets) {
+      for (const int v : loops[f]) {
+        const Vector3d rel = vertices[v] - anchor;
+        const double along = rel.dot(axis);
+        const Ring& ring = rings[(long long)llround(along / quantum)];
+        const double radius = ring.radius / ring.count;
+        if (fabs((rel - axis * along).norm() - radius) > tol) {
+          return give_up("a vertex is off the ring its height puts it on");
+        }
+      }
+    }
+
+    std::vector<std::shared_ptr<Surface>> found;
+    for (const auto& entry : rings) {
+      const double radius = entry.second.radius / entry.second.count;
+      if (!(radius > tol)) continue;  // an apex is not a rim; there is no circle there
+      const Vector3d at = anchor + axis * (entry.second.height / entry.second.count);
+      found.push_back(std::make_shared<CylinderSurface>(at, axis, radius));
+    }
+    if (found.size() < 2) return give_up("fewer than two rings carry a circle");
+
+    // And the sphere the rings may lie on, which is worth one more test because
+    // of what the band pass does with it. The rings alone already collapse a
+    // tessellated sphere into a stack of exact cones - that is how a declared
+    // sphere collapses too - but a SphereSurface among the declarations lets the
+    // zone pass absorb that whole stack into one SPHERICAL_SURFACE. On a 32x16
+    // sphere it is the difference between fifteen faces and one.
+    //
+    // For a ring at height h and radius r on a sphere centred at t along the
+    // axis, (h - t)^2 + r^2 is the same for every ring, which is linear in t.
+    if (rings.size() >= 3) {
+      std::vector<std::pair<double, double>> hr;
+      for (const auto& entry : rings) {
+        hr.emplace_back(entry.second.height / entry.second.count,
+                        entry.second.radius / entry.second.count);
+      }
+      const double h0 = hr.front().first, r0 = hr.front().second;
+      const double h1 = hr.back().first, r1 = hr.back().second;
+      if (fabs(h0 - h1) > tol) {
+        const double t = (h0 * h0 + r0 * r0 - h1 * h1 - r1 * r1) / (2 * (h0 - h1));
+        const double rsq = (h0 - t) * (h0 - t) + r0 * r0;
+        if (rsq > 0) {
+          const double radius = sqrt(rsq);
+          bool spherical = true;
+          for (const auto& entry : hr) {
+            const double want = (entry.first - t) * (entry.first - t) + entry.second * entry.second;
+            spherical = spherical && fabs(sqrt(want) - radius) <= tol;
+          }
+          if (spherical) {
+            found.push_back(std::make_shared<SphereSurface>(anchor + axis * t, axis, radius));
+          }
+        }
+      }
+    }
+      return found;
+    };
+
+
+  for (const auto& axis : candidates) {
+    std::vector<std::shared_ptr<Surface>> found = tryAxis(axis);
+    if (!found.empty()) return found;
+  }
+  return refuse(last);
+}
+
 std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
                                         const std::vector<std::shared_ptr<Surface>>& surfaces,
                                         const std::vector<char>& consumed,

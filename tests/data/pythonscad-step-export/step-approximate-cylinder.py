@@ -37,7 +37,7 @@ the mesh it replaced, which had the volume of a 64-gon.
 """
 # EXPECT: no analytic surfaces were declared
 # EXPECT-NOT: surface recognised
-# APPROX: approximation fitted 1 of 1 uncovered regions as cylinders
+# APPROX: approximation took 1 of 1 uncovered regions - 1 as cylinders, 0 as rings of a turned surface, 0 as swept grids
 # APPROX: 1 surface recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 64 facets replaced
 # APPROX: approximation found nothing left to fit
 from pythonscad import *

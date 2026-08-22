@@ -308,6 +308,23 @@ std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& regio
 std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& region, double tol,
                                         const char **why = nullptr);
 
+/*! The rings a smooth region was turned on, or empty when it was not.
+ *
+ * A cone and a sphere have no surface type to declare in this exporter, and
+ * that is deliberate rather than missing: primitives.cc expresses a frustum as
+ * two rims matching declared cylinders, and a sphere as a stack of those bands
+ * absorbed into a spherical zone. So a fit has to produce *rings*, and this
+ * returns one CylinderSurface per ring of the tessellation - after which the
+ * ordinary band recogniser makes cones out of them with no new machinery.
+ *
+ * The region's own boundary is the way in. A frustum's two rims and a sphere's
+ * two cap circles are its boundary cycles, and a circle fitted to one gives
+ * both a radius to declare and, in its normal, the axis every other ring is
+ * measured along. An apex contributes nothing - there is no circle there, and a
+ * radius of zero would match every other radius of zero. */
+std::vector<std::shared_ptr<Surface>> fitRevolved(const Mesh& mesh, const SmoothRegion& region,
+                                                  double tol, const char **why = nullptr);
+
 std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<char>& consumed,
                                            double smooth_angle);
 

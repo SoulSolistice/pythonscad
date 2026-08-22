@@ -36,9 +36,11 @@
 // are what the approximation pass now acts on rather than only reports.
 //
 // And now it is fitted, which is what those two measurements were for. A
-// helicoid is not a cylinder at any tolerance, so the quadric fit refuses all
-// four regions; the grid recovery takes all four, because 100% regularity means
-// the ordering is still there to recover. 2048 facets become 4 faces.
+// helicoid is neither a cylinder nor a surface of revolution, so both quadric
+// routes refuse all four regions - the second of them because a vertex is off
+// the ring its height puts it on, which is the twist saying so. The grid
+// recovery then takes all four, because 100% regularity means the ordering is
+// still there to recover. 2048 facets become 4 faces.
 //
 // The recovered grid is handed to the recogniser as a declaration, so what
 // happens to it afterwards is what happens to one the model made: the same
@@ -49,7 +51,8 @@
 // against the faceted export's 800.717. Over the walls' 570 square units that
 // is an average normal displacement of 0.0035, well inside the band - the
 // smooth surface cutting the corners the chords left standing.
-// APPROX: approximation fitted 0 of 4 uncovered regions as cylinders and recovered 4 as swept grids
+// APPROX: approximation took 4 of 4 uncovered regions - 0 as cylinders, 0 as rings of a turned surface, 4 as swept grids
+// APPROX: 4 regions are not turned surfaces because a vertex is off the ring its height puts it on
 // APPROX: a declared 24x17 cubic sweep claims 736 facets whole
 // APPROX: 4 declared sweeps written as one face each, replacing 2048 facets
 // APPROX: approximation found nothing left to fit
