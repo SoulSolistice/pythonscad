@@ -213,14 +213,19 @@ double deviationFrom(const Surface& surface, const Vector3d& pt)
 
 }  // namespace
 
-std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double tol)
+std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double tol, const char **why)
 {
+  auto refuse = [&](const char *reason) -> std::shared_ptr<Surface> {
+    if (why != nullptr) *why = reason;
+    return nullptr;
+  };
   // Only the two shapes FilletNode draws. A patch of any other degree was
   // declared by something else and has no reason to be a quadric.
   const bool strip = bez.degree_u == 2 && bez.degree_v == 1;
   const bool corner = bez.degree_u == 2 && bez.degree_v == 2;
-  if (!strip && !corner) return nullptr;
-  if (!bez.isRational()) return nullptr;  // a polynomial patch is a parabola
+  if (!strip && !corner) return refuse("it is not a shape fillet() draws");
+  // A polynomial patch is a parabola, not an arc.
+  if (!bez.isRational()) return refuse("it is polynomial, so its arcs are parabolas");
 
   std::shared_ptr<Surface> candidate;
 
@@ -235,16 +240,21 @@ std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double to
     // strip stays a B-spline, which is exact and describes it correctly.
     Vector3d c0, n0, c1, n1;
     double r0 = 0, r1 = 0;
-    if (!arcCircle(bez.control(0, 0), bez.control(1, 0), bez.control(2, 0), c0, n0, r0)) return nullptr;
-    if (!arcCircle(bez.control(0, 1), bez.control(1, 1), bez.control(2, 1), c1, n1, r1)) return nullptr;
-    if (fabs(r0 - r1) > tol) return nullptr;
+    if (!arcCircle(bez.control(0, 0), bez.control(1, 0), bez.control(2, 0), c0, n0, r0)) {
+      return refuse("one rail is not a circular arc");
+    }
+    if (!arcCircle(bez.control(0, 1), bez.control(1, 1), bez.control(2, 1), c1, n1, r1)) {
+      return refuse("the other rail is not a circular arc");
+    }
+    if (fabs(r0 - r1) > tol) return refuse("the two rails have different radii, so it is a cone");
     Vector3d axis = c1 - c0;
-    if (axis.norm() < tol) return nullptr;  // the two rails coincide
+    if (axis.norm() < tol) return refuse("the two rails coincide");
     axis.normalize();
     // Both rails perpendicular to the line joining their centres is what makes
     // the pair coaxial rather than merely parallel.
-    if (fabs(fabs(axis.dot(n0)) - 1.0) > 1e-9) return nullptr;
-    if (fabs(fabs(axis.dot(n1)) - 1.0) > 1e-9) return nullptr;
+    if (fabs(fabs(axis.dot(n0)) - 1.0) > 1e-9 || fabs(fabs(axis.dot(n1)) - 1.0) > 1e-9) {
+      return refuse("the rails are parallel but not coaxial");
+    }
     // Orient the axis so the rail sweeps counter clockwise about it. The face
     // is then a region of the surface's own parameterisation running forwards
     // from the reference direction rather than one wrapping through the seam.
@@ -255,21 +265,24 @@ std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double to
     // column are two arcs meeting there - concentric and of one radius exactly
     // when the patch is an octant of that sphere.
     const Vector3d apex = bez.control(2, 0);
-    if ((bez.control(2, 1) - apex).norm() > tol) return nullptr;
-    if ((bez.control(2, 2) - apex).norm() > tol) return nullptr;
+    if ((bez.control(2, 1) - apex).norm() > tol || (bez.control(2, 2) - apex).norm() > tol) {
+      return refuse("its apex row is not a single point");
+    }
     Vector3d cu, nu, cv, nv;
     double ru = 0, rv = 0;
-    if (!arcCircle(bez.control(0, 0), bez.control(0, 1), bez.control(0, 2), cv, nv, rv)) return nullptr;
-    if (!arcCircle(bez.control(0, 0), bez.control(1, 0), bez.control(2, 0), cu, nu, ru)) return nullptr;
-    if (fabs(ru - rv) > tol) return nullptr;
-    if ((cu - cv).norm() > tol) return nullptr;
+    if (!arcCircle(bez.control(0, 0), bez.control(0, 1), bez.control(0, 2), cv, nv, rv) ||
+        !arcCircle(bez.control(0, 0), bez.control(1, 0), bez.control(2, 0), cu, nu, ru)) {
+      return refuse("one of its meridians is not a circular arc");
+    }
+    if (fabs(ru - rv) > tol) return refuse("its two meridians have different radii");
+    if ((cu - cv).norm() > tol) return refuse("its two meridians are not concentric");
     // The apex is where the two meridians meet, so it is the pole of the
     // parameterisation that keeps this face inside one (theta, phi) rectangle:
     // the row at u = 0 is then the equator arc and the columns are meridians
     // climbing to it. A sphere looks the same from every direction, so this
     // choice costs nothing geometrically and buys a face with no seam in it.
     const Vector3d polar = apex - cu;
-    if (polar.norm() < tol) return nullptr;
+    if (polar.norm() < tol) return refuse("its apex sits on its own centre");
     candidate = std::make_shared<SphereSurface>(cu, polar.normalized(), ru);
   }
 
@@ -284,7 +297,9 @@ std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double to
   for (int i = 0; i <= STEPS; i++) {
     for (int j = 0; j <= STEPS; j++) {
       const Vector3d pt = bez.evaluate(double(i) / STEPS, double(j) / STEPS);
-      if (deviationFrom(*candidate, pt) > tol) return nullptr;
+      if (deviationFrom(*candidate, pt) > tol) {
+        return refuse("its boundary fits but its middle bulges off the quadric");
+      }
     }
   }
   return candidate;

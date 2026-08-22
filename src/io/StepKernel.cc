@@ -550,10 +550,14 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // radius, faces that are not perpendicular - is a genuine spline and stays
     // one.
     patch_quadric.assign(patches.size(), nullptr);
+    std::map<std::string, int> quadric_refusals;
     for (std::size_t p = 0; p < patches.size(); p++) {
       if (!patches[p].alive) continue;
       const auto *bez = dynamic_cast<const BezierPatchSurface *>(patches[p].surface.get());
-      if (bez != nullptr) patch_quadric[p] = AnalyticFeatures::quadricOfPatch(*bez, model_tol);
+      if (bez == nullptr) continue;
+      const char *why = "no reason was given";
+      patch_quadric[p] = AnalyticFeatures::quadricOfPatch(*bez, model_tol, &why);
+      if (patch_quadric[p] == nullptr) quadric_refusals[why]++;
     }
 
     // A curved run shared with two patches becomes one EdgeCurve used by both,
@@ -600,6 +604,16 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         }
         circular_runs.insert(std::set<int>(run.verts.begin(), run.verts.end()));
       }
+    }
+
+    // Why the rest are not, counted by reason. A patch refused for a reason
+    // nobody expected is the only way to tell a genuine spline from a quadric
+    // the recogniser is failing to see, and this suite had exactly that: OCCT
+    // named six exact cylinders among the splines while this pass reported a
+    // bare zero.
+    for (const auto& entry : quadric_refusals) {
+      LOG("STEP export: %1$d patches are not quadrics because %2$s", int(entry.second),
+          entry.first.c_str());
     }
 
     int quad_cyl = 0, quad_sph = 0;

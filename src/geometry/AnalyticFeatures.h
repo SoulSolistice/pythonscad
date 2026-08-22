@@ -328,7 +328,8 @@ std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<c
  * which is the exporter's rule everywhere - exact fit or stay faceted.
  *
  * Returns a CylinderSurface or a SphereSurface. */
-std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double tol);
+std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double tol,
+                                       const char **why = nullptr);
 
 /*! The circle one curved boundary run of a patch lies on, oriented so the run
  * sweeps counter clockwise about `normal` - the direction a STEP CIRCLE is
