@@ -45,7 +45,14 @@ wasm-test/node_modules/
 .idea/
 
 .cache/
-.claude/
+# The contents rather than the directory, because git cannot re-include
+# anything inside an excluded directory - and two things in here are meant to
+# be shared. The session-start hook only does its job once it is on the default
+# branch: it is what installs the submodules, the system packages and the build
+# configuration a fresh web container arrives without.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 .clangd/
 /*.scad
 **/out*.*
