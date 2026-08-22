@@ -690,8 +690,8 @@ void GridSurface::buildSpline()
         for (const double b : samples) {
           const double u = t[i] + a * (t[i + 1] - t[i]);
           const double v = (double(j) + b) / segs;
-          const Vector3d flat = p00 * (1 - a) * (1 - b) + p10 * a * (1 - b) + p11 * a * b +
-                                p01 * (1 - a) * b;
+          const Vector3d flat =
+            p00 * (1 - a) * (1 - b) + p10 * a * (1 - b) + p11 * a * b + p01 * (1 - a) * b;
           band = std::max(band, (evaluate(u, v) - flat).norm() + warp / 2);
         }
       }

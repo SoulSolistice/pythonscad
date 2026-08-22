@@ -380,9 +380,9 @@ std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& regio
     for (const int v : loop) verts.insert(v);
     double area = 0;
     for (std::size_t i = 1; i + 1 < loop.size(); i++) {
-      area += (vertices[loop[i]] - vertices[loop[0]])
-                .cross(vertices[loop[i + 1]] - vertices[loop[0]])
-                .norm() / 2;
+      area +=
+        (vertices[loop[i]] - vertices[loop[0]]).cross(vertices[loop[i + 1]] - vertices[loop[0]]).norm() /
+        2;
     }
     const Vector3d n = normals[f].normalized();
     scatter += area * n * n.transpose();
@@ -392,8 +392,7 @@ std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& regio
   Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(scatter);
   if (solver.info() != Eigen::Success) return nullptr;
   const Vector3d axis = solver.eigenvectors().col(0).normalized();
-  const double lo = solver.eigenvalues()[0], mid = solver.eigenvalues()[1],
-               hi = solver.eigenvalues()[2];
+  const double lo = solver.eigenvalues()[0], mid = solver.eigenvalues()[1], hi = solver.eigenvalues()[2];
   if (!(hi > 0)) return nullptr;
   // Two conditions, and they refuse different things. The normals must lie in a
   // plane - or there is no axis - and they must genuinely spread within it, or
@@ -526,11 +525,9 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
     if (!found) continue;
     const Vector3d p0 = vertices[v], p1 = vertices[a];
     const Vector3d p2 = vertices[u], p3 = vertices[b];
-    const double perimeter =
-      (p1 - p0).norm() + (p2 - p1).norm() + (p3 - p2).norm() + (p0 - p3).norm();
+    const double perimeter = (p1 - p0).norm() + (p2 - p1).norm() + (p3 - p2).norm() + (p0 - p3).norm();
     if (!(perimeter > 0)) continue;
-    const double skew =
-      ((p1 - p0) - (p2 - p3)).norm() + ((p2 - p1) - (p3 - p0)).norm();
+    const double skew = ((p1 - p0) - (p2 - p3)).norm() + ((p2 - p1) - (p3 - p0)).norm();
     candidates.push_back({skew / perimeter, f, g, {v, a, u, b}});
   }
   std::sort(candidates.begin(), candidates.end(),
@@ -556,30 +553,30 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
     partner[candidate.a] = candidate.b;
     partner[candidate.b] = candidate.a;
   }
-  std::function<bool(std::size_t, std::set<std::size_t>&)> augment =
-    [&](std::size_t u, std::set<std::size_t>& seen) {
-      for (const std::size_t v : neighbours[u]) {
-        if (seen.count(v)) continue;
-        seen.insert(v);
-        const auto held = partner.find(v);
-        if (held == partner.end()) {
-          partner[v] = u;
-          partner[u] = v;
-          return true;
-        }
-        const std::size_t displaced = held->second;
-        partner.erase(displaced);
-        partner.erase(v);
-        if (augment(displaced, seen)) {
-          partner[v] = u;
-          partner[u] = v;
-          return true;
-        }
-        partner[v] = displaced;
-        partner[displaced] = v;
+  std::function<bool(std::size_t, std::set<std::size_t>&)> augment = [&](std::size_t u,
+                                                                         std::set<std::size_t>& seen) {
+    for (const std::size_t v : neighbours[u]) {
+      if (seen.count(v)) continue;
+      seen.insert(v);
+      const auto held = partner.find(v);
+      if (held == partner.end()) {
+        partner[v] = u;
+        partner[u] = v;
+        return true;
       }
-      return false;
-    };
+      const std::size_t displaced = held->second;
+      partner.erase(displaced);
+      partner.erase(v);
+      if (augment(displaced, seen)) {
+        partner[v] = u;
+        partner[u] = v;
+        return true;
+      }
+      partner[v] = displaced;
+      partner[displaced] = v;
+    }
+    return false;
+  };
   for (const std::size_t f : triangles) {
     if (partner.count(f)) continue;
     std::set<std::size_t> seen{f};
@@ -645,7 +642,7 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
       const std::pair<int, int> b = coord[quad[(known + 1) % 4]];
       const int di = b.first - a.first, dj = b.second - a.second;
       if (abs(di) + abs(dj) != 1) return refuse("the quads do not step by one, so they are not a grid");
-      const int pi = -dj, pj = di;                 // turn left, into the new quad
+      const int pi = -dj, pj = di;  // turn left, into the new quad
       if (!place(quad[(known + 2) % 4], b.first + pi, b.second + pj)) {
         return refuse("the layout disagrees with itself, so the region folds or wraps");
       }
@@ -672,7 +669,8 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
   }
   const int rows = hi_i - lo_i + 1, cols = hi_j - lo_j + 1;
   if (rows < 2 || cols < 2) return refuse("the recovered grid is one row or one column");
-  if (std::size_t(rows) * cols != coord.size()) return refuse("the recovered grid is not a full rectangle");
+  if (std::size_t(rows) * cols != coord.size())
+    return refuse("the recovered grid is not a full rectangle");
 
   std::vector<Vector3d> net(std::size_t(rows) * cols, Vector3d::Zero());
   std::vector<char> filled(std::size_t(rows) * cols, 0);
@@ -850,8 +848,7 @@ namespace {
  * Returns null on success, or why the region has no such boundary - which is
  * always a reason to leave it faceted. */
 const char *boundaryCycles(const std::vector<std::vector<int>>& loops,
-                           const std::vector<std::size_t>& facets,
-                           std::vector<std::vector<int>>& cycles)
+                           const std::vector<std::size_t>& facets, std::vector<std::vector<int>>& cycles)
 {
   // Edges used by one of the region's facets rather than two. Anything else
   // means the region is not a simple sheet.
@@ -1172,8 +1169,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
 
   std::vector<Patch> patches;
   std::vector<char> taken(loops.size(), 0);
-  std::size_t corners_only = 0;  // every corner on the sweep, the middle not
-  std::size_t cut_into = 0;      // faces a wrapping claim had to be cut into
+  std::size_t corners_only = 0;               // every corner on the sweep, the middle not
+  std::size_t cut_into = 0;                   // faces a wrapping claim had to be cut into
   double worst_miss = 0, missed_against = 0;  // how far off, and what was allowed
 
   // Which faces sit on either side of every edge of the mesh. Needed before the
@@ -1445,8 +1442,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
   std::size_t live = 0, facets = 0, runs = 0, stuck = 0, longest = 0, bounds = 0;
   for (const auto& p : patches) {
     if (!p.alive) {
-      report.push_back(format("a declared sweep of %d facets was left faceted: %s",
-                              int(p.facets.size()), p.dropped));
+      report.push_back(
+        format("a declared sweep of %d facets was left faceted: %s", int(p.facets.size()), p.dropped));
       continue;
     }
     live++;
@@ -1461,25 +1458,27 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
   if (cut_into > 0) {
     // Said out loud, because it is a face count the model did not ask for and
     // the alternative to it is a seam.
-    report.push_back(format("a sweep closing around its profile was cut into %d faces, so that "
-                            "no face crosses the surface's seam",
-                            int(cut_into)));
+    report.push_back(
+      format("a sweep closing around its profile was cut into %d faces, so that "
+             "no face crosses the surface's seam",
+             int(cut_into)));
   }
   if (corners_only > 0) {
     // Worth a line of its own: it is the difference between the facets a
     // declaration claims and the facets that are actually on it, and the
     // biggest single contributor is a face closing the profile of a grid
     // declared open, every corner of which the generator emitted.
-    report.push_back(format("%d facets have every corner on the sweep and their middle off it, "
-                            "by up to %.4f against an allowance of %.4f",
-                            int(corners_only), worst_miss, missed_against));
+    report.push_back(
+      format("%d facets have every corner on the sweep and their middle off it, "
+             "by up to %.4f against an allowance of %.4f",
+             int(corners_only), worst_miss, missed_against));
   }
   if (live > 0) {
-    report.push_back(format("%d declared sweep%s %s %d facets over %d boundary cycle%s, split "
-                            "into %d runs of up to %d mesh edges, %d unresolved",
-                            int(live), live == 1 ? "" : "s", live == 1 ? "covers" : "cover",
-                            int(facets), int(bounds), bounds == 1 ? "" : "s", int(runs),
-                            int(longest), int(stuck)));
+    report.push_back(
+      format("%d declared sweep%s %s %d facets over %d boundary cycle%s, split "
+             "into %d runs of up to %d mesh edges, %d unresolved",
+             int(live), live == 1 ? "" : "s", live == 1 ? "covers" : "cover", int(facets), int(bounds),
+             bounds == 1 ? "" : "s", int(runs), int(longest), int(stuck)));
   }
   return patches;
 }

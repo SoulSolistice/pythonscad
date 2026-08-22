@@ -726,8 +726,7 @@ struct TriangulatedPatch {
 
 }  // namespace
 
-TEST_CASE("a swept grid is recovered from the facets it was tessellated into",
-          "[analytic][approximate]")
+TEST_CASE("a swept grid is recovered from the facets it was tessellated into", "[analytic][approximate]")
 {
   const int rows = 8, cols = 5;
 
@@ -739,8 +738,7 @@ TEST_CASE("a swept grid is recovered from the facets it was tessellated into",
     for (const bool flip : {false, true}) {
       TriangulatedPatch patch(rows, cols, flip);
       const char *why = "";
-      const std::shared_ptr<Surface> found =
-        gridFromRegion(patch.mesh(), patch.region(), 1e-5, &why);
+      const std::shared_ptr<Surface> found = gridFromRegion(patch.mesh(), patch.region(), 1e-5, &why);
       INFO((flip ? "alternating diagonals: " : "uniform diagonals: ") << why);
       REQUIRE(found != nullptr);
       const auto *grid = dynamic_cast<const GridSurface *>(found.get());

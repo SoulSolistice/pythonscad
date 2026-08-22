@@ -1305,10 +1305,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       double pu = 0, pv = 0;
       grid->project(centroid, pu, pv);
       const double h = 1e-5;
-      const Vector3d d_u = grid->evaluate(std::min(1.0, pu + h), pv) -
-                           grid->evaluate(std::max(0.0, pu - h), pv);
-      const Vector3d d_v = grid->evaluate(pu, std::min(1.0, pv + h)) -
-                           grid->evaluate(pu, std::max(0.0, pv - h));
+      const Vector3d d_u =
+        grid->evaluate(std::min(1.0, pu + h), pv) - grid->evaluate(std::max(0.0, pu - h), pv);
+      const Vector3d d_v =
+        grid->evaluate(pu, std::min(1.0, pv + h)) - grid->evaluate(pu, std::max(0.0, pv - h));
       outward = d_u.cross(d_v).dot(loop_normals[patch.facets.front()]) > 0;
     }
 

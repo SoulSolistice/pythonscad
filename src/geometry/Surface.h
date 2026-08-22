@@ -328,7 +328,6 @@ public:
                                 std::vector<int>& mults_u, std::vector<double>& knots_v,
                                 std::vector<int>& mults_v) const;
 
-
   int rows = 0, cols = 0;
   bool closed_v = false;
   std::vector<Vector3d> net;
