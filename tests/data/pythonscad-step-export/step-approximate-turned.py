@@ -60,6 +60,10 @@ def turned(profile, fn, at):
             faces.append([i * fn + j, (i + 1) * fn + j, (i + 1) * fn + k, i * fn + k])
     faces.append(list(range(fn)))
     faces.append(list(range((len(profile) - 1) * fn, len(profile) * fn))[::-1])
+    # Clockwise seen from outside, which is OpenSCAD's order for a polyhedron:
+    # the right-hand normal of a face points into the solid. Built the other way
+    # round these exported inside out.
+    faces = [f[::-1] for f in faces]
     return polyhedron(points=pts, faces=faces)
 
 

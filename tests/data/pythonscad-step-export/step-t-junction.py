@@ -43,4 +43,11 @@ faces = [
     [4, 8, 5],
 ]
 
+# OpenSCAD orders a polyhedron's face clockwise seen from outside, so the
+# right-hand normal of each face points *into* the solid. Written the other way
+# round the cube exports inside out - which is exactly what it did until
+# validatestep.py learned to measure the volume a shell encloses, and read this
+# unit cube as -1.
+faces = [f[::-1] for f in faces]
+
 show(polyhedron(points=points, faces=faces))

@@ -56,4 +56,8 @@ for i in range(fn):
     faces.append([i, j, j + fn, i + fn])
 faces.append(list(range(fn - 1, -1, -1)))
 faces.append(list(range(fn, 2 * fn)))
+# Clockwise seen from outside, which is OpenSCAD's order for a polyhedron: the
+# right-hand normal of a face points into the solid. Built the other way round
+# this exported inside out.
+faces = [f[::-1] for f in faces]
 polyhedron(points=pts, faces=faces).show()
