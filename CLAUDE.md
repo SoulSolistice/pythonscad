@@ -489,6 +489,23 @@ Note also that `ninja -t commands` prints the compiler as a Windows path with
 backslashes, which bash then eats. Rebuild single objects with
 `ninja -C build <object-path>` rather than by replaying that command.
 
+#### Configure costs a full rebuild
+
+`cmake -B build` re-runs configure, which regenerates the build files and leaves
+everything out of date — so it costs a **full rebuild**, about an hour here,
+every time. `cmake --build build` on its own is incremental and is what you want
+almost always:
+
+| change | what to run |
+| --- | --- |
+| edited an existing source file | `cmake --build build -jN` — never configure |
+| **added** a source file | configure first; sources are found by glob, and the full rebuild is unavoidable |
+| **added** a test or fixture | configure first, or ctest will not see the new test at all |
+
+Do not put a configure step into a script "to be safe": that quietly turns every
+run into a full rebuild. `scripts/msys2-build.sh` therefore skips it unless the
+build directory has no cache yet, or `--configure` is passed.
+
 #### Running the built binary
 
 **A freshly linked `build/pythonscad.exe` cannot run.** It fails with exit 127,
@@ -540,9 +557,13 @@ that looks unrelated to what it is:
   than through `PYTHONHOME` (which does not work — it was tried). Copy them
   beside the build binary, or tests that import `asyncio`, `socket` or `ctypes`
   fail with `ModuleNotFoundError: No module named '_socket'` / `'_ctypes'`.
-- **`LANG=C`.** The echo tests compare against English diagnostics. On a
-  non-English system gettext translates them and the comparison fails on the
-  translation rather than on any behaviour.
+- **`LC_ALL=C.UTF-8`.** The echo tests compare against English diagnostics, so
+  on a non-English system gettext translates them and the comparison fails on
+  the translation rather than on any behaviour. It must be `C.UTF-8`, not plain
+  `C`: the C locale is not UTF-8, and under it five tests carrying non-ASCII
+  paths (`astdump_include-tests`, `echo_include-tests`, `echo_use-tests`,
+  `dump_use-tests`, `preview-cgal_utf8-import`) fail instead. `en_US.UTF-8`
+  works equally well.
 
 `ipython-smoke` and `repl-smoke` cannot pass from the build tree at all: they
 drive the REPL, which spawns `pythonscad.exe` as a child, and ctest replaces the

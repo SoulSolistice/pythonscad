@@ -14,10 +14,18 @@
 #
 # This script does them in order. Run it from inside an MSYS2 UCRT64 shell:
 #
-#   ./scripts/msys2-build.sh                 # configure, build, stage
+#   ./scripts/msys2-build.sh                 # build and stage, incrementally
 #   ./scripts/msys2-build.sh --test          # ... and run the full suite
 #   ./scripts/msys2-build.sh --test -R step  # ... a subset
 #   ./scripts/msys2-build.sh -j8 --test      # override the job count
+#   ./scripts/msys2-build.sh --configure     # after ADDING a file (see below)
+#
+# It does NOT configure by default, and that is deliberate: re-running configure
+# regenerates the build files and everything is then out of date, so `cmake -B
+# build` costs a FULL rebuild - about an hour here - every single time. Editing
+# existing sources never needs it. Pass --configure only when you have added a
+# file: sources are picked up by glob, and a newly added test needs a configure
+# before ctest will see it at all.
 #
 # From PowerShell, drive it non-interactively with:
 #
@@ -34,14 +42,16 @@ cd "$ROOT"
 BUILD_DIR="build"
 JOBS=""
 RUN_TESTS=0
+DO_CONFIGURE=0
 CTEST_ARGS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --test) RUN_TESTS=1; shift ;;
+    --configure) DO_CONFIGURE=1; shift ;;
     -j*) JOBS="${1#-j}"; shift ;;
     --build-dir) BUILD_DIR="$2"; shift 2 ;;
-    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) CTEST_ARGS+=("$1"); shift ;;
   esac
 done
@@ -59,8 +69,15 @@ if [ "${MSYSTEM:-}" != "UCRT64" ]; then
   echo "         Start this from an MSYS2 UCRT64 shell, or set MSYSTEM=UCRT64." >&2
 fi
 
-echo "==> configure ($BUILD_DIR)"
-cmake -B "$BUILD_DIR"
+if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
+  echo "==> configure ($BUILD_DIR) - no cache yet"
+  cmake -B "$BUILD_DIR"
+elif [ "$DO_CONFIGURE" -eq 1 ]; then
+  echo "==> configure ($BUILD_DIR) - asked for, expect a full rebuild"
+  cmake -B "$BUILD_DIR"
+else
+  echo "==> skipping configure (pass --configure after adding a file)"
+fi
 
 echo "==> build -j$JOBS"
 cmake --build "$BUILD_DIR" -j"$JOBS"
@@ -94,11 +111,14 @@ if [ "$RUN_TESTS" -eq 1 ]; then
   #               beside pythonscad.com. Without them, tests that import
   #               asyncio, socket or ctypes fail with ModuleNotFoundError on
   #               _socket / _ctypes.
-  #   LANG=C      the echo tests compare against English messages. On a
+  #   LC_ALL      the echo tests compare against English messages, so on a
   #               non-English system gettext translates them and the comparison
-  #               fails on the translation, not on the behaviour.
+  #               fails on the translation rather than on any behaviour. It has
+  #               to be C.UTF-8 and not plain C: the C locale is not UTF-8, and
+  #               five tests which carry non-ASCII paths (the include/use tests
+  #               and utf8-import) fail under it instead.
   export PATH="$ROOT/$BUILD_DIR/staging:$PATH"
-  export LANG=C LC_ALL=C
+  export LANG=C.UTF-8 LC_ALL=C.UTF-8
   cp -n "$ROOT/$BUILD_DIR/staging"/*.pyd "$ROOT/$BUILD_DIR/" 2>/dev/null || true
 
   echo "==> ctest -j$JOBS ${CTEST_ARGS[*]:-}"
