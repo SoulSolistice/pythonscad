@@ -76,7 +76,7 @@ The doc's numbering, with the tree's answer beside it.
 | torus | done, one `TOROIDAL_SURFACE` | confirmed: `TorusSurface`, `TOROIDAL_SURFACE`, `step-torus` |
 | 3 — spheres | done, one `SPHERICAL_SURFACE` | confirmed: `SphereSurface`, `SPHERICAL_SURFACE`, `step-sphere` |
 | 2 — fillet B-splines | recognition done, "what remains is entity writing" | **further along than the doc**: emission, validator check and mutation harness all landed (`1310d1a`, `8e96e6c`, `tests/bspline-check-mutations.py`) |
-| 4 — trimmed faces | last; 14 faces of the bayonet | unchanged; nothing in the tree attempts it |
+| 4 — trimmed faces | last; 14 faces of the bayonet | **measured and blocked**: still 14 faces (0.8%, 803.6 of area), and every one of them borders faceted geometry with no analytic surface, so there is no exact trim curve to write. Blocked on item 5, not on effort — see §10 |
 | 5 — swept surfaces | blocked on a user-facing declaration | **measured, and closed as far as declarations can take it.** `declare_*` exists in both languages, but on the reference part a declaration recovers *nothing*: 99.8% of the uncovered area is one helical thread built as a hand-written `polyhedron` (§6) |
 
 Item 5 changing category is the most consequential ledger movement and the doc
@@ -1660,9 +1660,45 @@ Installed on the same machine, never tried. The kit is already written; only
 outstanding item by some distance, and a third kernel is worth more than a
 second was.
 
-### 4. Roadmap item 4, trimmed faces
+### 4. Roadmap item 4, trimmed faces - blocked on item 5, not on effort
 
-Still nothing in the tree attempts it. Fourteen faces of the bayonet.
+Measured rather than assumed. The remainder is still fourteen faces - 0.8% of
+the bayonet, 803.6 of its area - lying on four surfaces the recogniser already
+knows:
+
+```
+8 facets  cylinder r=78          3 facets  cone r=80.6-1*z
+2 facets  cylinder r=78.1        1 facet   cylinder r=74.2356
+```
+
+`doc/step-export.md` says of these that "the curve has to come from the
+generator". Asking what is on the other side of each trim says something
+stronger: **every one of the fourteen borders geometry the recogniser classifies
+as uncovered** - a region with no analytic surface at all.
+
+| faces | on | borders |
+| --- | --- | --- |
+| 8 | cylinder r=78, z 85..95 | one uncovered face each - the bayonet cam ramps |
+| 3 | cone, r 79.4..80.6, z 0..1.2 | one or two uncovered |
+| 2 | cylinder r=78.1, z 65..75 | three uncovered each |
+| 1 | cylinder r=74.2356, z 64.2..66.6 | four uncovered - this is the hose thread's root, r 74.24 |
+
+A trim curve is the intersection of two surfaces. Where the second surface is
+only a mesh there is no exact curve to compute and none for a generator to
+declare, because the geometry on that side does not come from a PythonSCAD node
+at all - §7 item 4 establishes that all 999 uncovered faces come from three
+hand-written places in the model.
+
+So item 4 cannot be finished before item 5, and item 5 is not an implementation
+task: a circular helix is not a NURBS curve, so a thread can only be
+approximated within a tolerance, and that breaks the *exact fit or stay faceted*
+rule this exporter is built on. That is a decision for the maintainers rather
+than a piece of work, and it is the same decision §8 already records.
+
+**Completing item 4 would therefore not complete the feature set**, and nothing
+here is waiting on effort. What would change the picture is a declaration
+channel for the thread and the ramps - which is item 5 - or a maintainer's
+decision to relax the exactness rule.
 
 ### 5. The committed bayonet artifact is stale
 
