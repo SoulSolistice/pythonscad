@@ -237,6 +237,13 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   std::vector<char> loop_is_hole(face_cnt, 0);
   std::vector<int> parents(face_cnt, -1);
   int degenerated_cnt = 0;
+  // Which gate rejected them, and how much area went with it. A skipped face
+  // leaves every one of its edges used by one face only, so the shell stops
+  // being closed - and "skipped 15 degenerated faces" does not say whether that
+  // is 15 slivers a merge left behind or 15 real faces being dropped on the
+  // floor. The two want opposite responses, so name them apart.
+  int collapsed_cnt = 0, zero_area_cnt = 0;
+  double lost_area = 0.0;
 
   for (std::size_t i = 0; i < face_cnt; i++) {
     std::vector<int> loop;
@@ -248,7 +255,9 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     }
     while (loop.size() >= 2 && loop.front() == loop.back()) loop.pop_back();
     if (loop.size() < 3) {
+      // Fewer than three distinct points left: the loop closed on itself.
       degenerated_cnt++;
+      collapsed_cnt++;
       continue;
     }
 
@@ -257,6 +266,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       // zero area polygon, exporting it would create a face without a usable
       // surface normal
       degenerated_cnt++;
+      zero_area_cnt++;
+      lost_area += 0.5 * norm.norm();
       continue;
     }
     norm.normalize();
@@ -350,8 +361,12 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   }
 
   if (degenerated_cnt > 0) {
-    LOG(message_group::Export_Warning, "STEP export: skipped %1$d degenerated face%2$s", degenerated_cnt,
-        degenerated_cnt == 1 ? "" : "s");
+    LOG(message_group::Export_Warning,
+        "STEP export: skipped %1$d degenerated face%2$s - %3$d collapsed to fewer "
+        "than three distinct points, %4$d had no area (%5$.3g in total). Their edges "
+        "are left used by one face only, so the shell will not be closed.",
+        degenerated_cnt, degenerated_cnt == 1 ? "" : "s", collapsed_cnt, zero_area_cnt,
+        lost_area);
   }
   if (reparented_cnt > 0) {
     LOG(message_group::Export_Warning, "STEP export: moved %1$d hole%2$s to the enclosing face",
