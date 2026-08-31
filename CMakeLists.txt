@@ -66,6 +66,12 @@ option(OFFLINE_DOCS "Download Documentation for offline usage" OFF)
 option(USE_MIMALLOC "Use mimalloc as malloc replacement." ON)
 option(USE_BUILTIN_OPENCSG "Use OpenCSG from submodule." OFF)
 option(USE_CCACHE "Use ccache to speed up compilation." ON)
+
+if(APPLE AND (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$" OR CMAKE_OSX_ARCHITECTURES MATCHES "(^|;)arm64($|;)"))
+  set(USE_MIMALLOC OFF CACHE BOOL "Use mimalloc as malloc replacement." FORCE)
+  message(STATUS "Disabling mimalloc for arm64 macOS target")
+endif()
+
 set(ENABLE_CAIRO "AUTO" CACHE STRING "Enable support for cairo vector graphics library")
 set_property(CACHE ENABLE_CAIRO PROPERTY STRINGS "AUTO" "ON" "OFF")
 
@@ -103,6 +109,11 @@ endif()
 
 # Note: CMAKE_OSX_DEPLOYMENT_TARGET must be set before the project() invocation
 set(CMAKE_OSX_DEPLOYMENT_TARGET ${DEPLOYMENT_TARGET} CACHE STRING "Minimum OS X deployment version")
+
+# Default ON so later targets (OpenSCADPy, tests, …) appear in
+# compile_commands.json. No FORCE: -DCMAKE_EXPORT_COMPILE_COMMANDS=OFF wins.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL
+  "Generate compile_commands.json for clangd/clang-tidy")
 
 project(OpenSCAD
   VERSION ${PROJECT_VERSION}
@@ -1027,6 +1038,7 @@ if(ENABLE_PYTHON)
   set_property(TARGET OpenSCADPy PROPERTY CXX_STANDARD 17)
   set_property(TARGET OpenSCADPy PROPERTY CXX_EXTENSIONS OFF)
   set_property(TARGET OpenSCADPy PROPERTY CXX_STANDARD_REQUIRED ON)
+  set_property(TARGET OpenSCADPy PROPERTY EXPORT_COMPILE_COMMANDS ON)
   target_compile_definitions(OpenSCADPy PRIVATE "STACKSIZE=${STACKSIZE}")
   target_compile_options(OpenSCADPy PRIVATE "$<$<CONFIG:DEBUG>:-DDEBUG>")
   target_compile_definitions(OpenSCADPy PRIVATE
@@ -1882,6 +1894,7 @@ set(GUI_SOURCES
   src/gui/ai/AIDock.cc
   src/gui/ai/ChatWidget.cc
   src/gui/ai/ChatInputEdit.cc
+  src/gui/ai/ViewportGrabber.cc
   ${INPUT_DRIVER_SOURCES}
   )
 

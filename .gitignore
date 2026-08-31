@@ -43,6 +43,7 @@ wasm-test/node_modules/
 .vscode/
 *.code-workspace
 .idea/
+.zed/
 
 .cache/
 # The contents rather than the directory, because git cannot re-include
@@ -191,3 +192,4 @@ _openscad*.so
 # MkDocs build output
 web/site/
 web/.venv/
+/builddir
