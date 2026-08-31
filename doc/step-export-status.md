@@ -3,9 +3,10 @@
 A status assessment of the STEP exporter, taken against `doc/step-export.md` and
 checked against the tree rather than read off it.
 
-- **Basis:** `doc/step-export.md` as of `e764969`, tree at `0e8ab94`
-  (`claude/step-export-feature-detection-7e75pq`, merged with upstream master
-  2026-08-15).
+- **Basis:** written against `doc/step-export.md` as of `e764969` and the tree
+  at `0e8ab94` (`claude/step-export-feature-detection-7e75pq`, upstream master of
+  2026-08-15), and maintained since. §9 and the F1 rewrite are from
+  `claude/pythonscad-step-export-next-lmcu01`, upstream master of 2026-08-31.
 - **Method:** it began as a static reading of the four exporter files and the
   test wiring, plus two things actually run - `scripts/step-analytic-probe.py`
   and `tests/validatestep.py` over the two committed exports in
@@ -17,8 +18,8 @@ checked against the tree rather than read off it.
 
 ## Headline
 
-The faceted path is finished and guarded: eleven checks in `validatestep.py`,
-twenty-five fixtures, one check per historical defect, and every fixture now
+The faceted path is finished and guarded: twelve checks in `validatestep.py`,
+thirty-one fixtures, one check per historical defect, and every fixture now
 asserts the exporter's own report rather than only its validity. The analytic
 path — behind `step-analytic-surfaces`, still off by default — writes cylinders,
 cones, spheres, tori and B-spline patches. On the reference model the recogniser
@@ -53,8 +54,8 @@ Two things are true of the current state that the doc does not say:
 | Declarable surface types | `SphereSurface`, `TorusSurface`, `BezierPatchSurface`, `CylinderSurface` — `src/geometry/Surface.h:66,89,133,167` |
 | Model-level declaration, both languages | `declare_cylinder` / `declare_sphere` / `declare_torus` — `src/python/pyfunctions.cc:990-1002`, plus the object methods at `:1060` |
 | Recogniser separated from the format | `src/geometry/AnalyticFeatures.cc` (1408 lines) against `src/io/StepKernel.cc` (1114) and `src/io/export_step.cc` (94) |
-| Validator | 11 checks: real literals, references, units/context, directions, topology, shared vertices, face normals, hole nesting, cylindrical faces, B-spline faces, shells (`tests/validatestep.py`) |
-| Fixtures | 14 SCAD in `tests/data/scad/step-export/`, 2 Python in `tests/data/pythonscad-step-export/`, both wired by glob at `tests/CMakeLists.txt:1162-1165` |
+| Validator | 12 checks: real literals, references, units/context, directions, topology, shared vertices, face normals, hole nesting, cylindrical faces, B-spline faces, shell volumes, shells (`tests/validatestep.py`) |
+| Fixtures | 22 SCAD in `tests/data/scad/step-export/`, 9 Python in `tests/data/pythonscad-step-export/`, both wired by glob at `tests/CMakeLists.txt:1162-1165` |
 | Feature gate | `src/Feature.cc:53` |
 
 The three-gate model the doc describes (geometry / intent / topology) is visible
@@ -376,7 +377,53 @@ corrections the exporter makes to the mesh - dropped degenerate faces, reparente
 holes, kept orphan loops - raised to `Export_Warning` so they stand out from the
 running commentary.
 
+### F9 — three fixtures were exporting inside out — **fixed**
+
+Found by the twelfth validator check on its first run, and by nothing before it.
+All three of the suite's hand-written polyhedra were built with their faces the
+wrong way round:
+
+```
+step-t-junction              -1.0000  ->  +1.0000
+step-approximate-cylinder    -3763.86 ->  +3763.86
+step-approximate-turned      -6076.75 ->  +6076.75
+```
+
+OpenSCAD orders a polyhedron's face clockwise seen from outside, so the
+right-hand normal of each face points *into* the solid. Written the other way
+round the exported solid is inverted.
+
+Nothing noticed because nothing was looking. Winding does not affect topology:
+the shells still close, the edges still pair in opposite directions, each face
+still agrees with its own surface normal, and the recogniser still finds the
+same cylinder and the same sphere. Every `EXPECT:` line in all three fixtures
+still holds after the fix, which is the point - the counts they assert were
+never sensitive to it.
+
+`step-t-junction` is the one worth remembering: it was added to prove the
+T-junction weld, and it was a unit cube of volume -1. A fixture written to
+demonstrate a correctness fix was itself wrong in a way the suite could not see.
+
+**The check that found it, and why the obvious one would not have.** Conserving
+the *total* volume of an export catches nothing here: the bayonet lid's two
+shells sum to the correct 223482 precisely because one carries the sign that
+cancels the other. Only the sign of each shell on its own says anything, so
+`check_shell_volumes` measures that. It speaks only for shells made entirely of
+planes, where the number is exact - the polygon through samples of a curved
+face's boundary is not that face, and on the analytic lid that error moved the
+total by a third.
+
 ## 5. What is and is not verified here
+
+**On OpenCASCADE.** Every OCCT number in this document came from the headless
+container build, where `cadquery-ocp` is installed. It is *not* installed in the
+Windows MSYS2 environment the later sections were measured in: `import OCP`
+fails there and `tests/stepexportsanitytest.py` prints "OpenCASCADE is not
+installed, skipping the CAD kernel round trip" on every run. That is by design -
+the round trip is optional - but it means the kernel check below is not
+exercised by a routine local run, and §9's second opinion comes from SOLIDWORKS
+rather than from OCCT.
+
 
 A headless build was made in this environment - Manifold and CGAL, no Qt, Release
 - so most of what this section used to disclaim is now measured. What runs:
@@ -384,7 +431,7 @@ A headless build was made in this environment - Manifold and CGAL, no Qt, Releas
 - **all 23 fixtures**, each asserting the exporter's own report through
   `EXPECT:` lines, measured on that build rather than transcribed;
 - **the sanity driver's three invariants** - the locale-identical re-export, the
-  analytic pass validating under the same eleven checks, and the CGAL/Manifold
+  analytic pass validating under the same twelve checks, and the CGAL/Manifold
   declaration-count agreement - on every fixture, every run;
 - the unit tests (808 assertions) and the B-spline mutation harness.
 
@@ -795,7 +842,9 @@ three and what they cannot reach.
    that are not mutually perpendicular is not a sphere, and the fixed point
    withdraws the strips with it. So a non right angled body writes no quadric.
    That conservatism is guarded by unit tests over the nets rather than by a
-   fixture, because there is currently no such body that exports at all (F6).
+   fixture. It was written when F6 meant no such body exported at all; F6 is
+   fixed and `step-fillet-oblique.py` is exactly such a body, so a fixture is
+   available now and the unit tests are simply where the guard happens to live.
 7. ~~**Give the remaining fixtures their `EXPECT:` lines.**~~ Done: all 23 state
    their counts as assertions now, measured on the headless build rather than
    transcribed, and calibrated by mutation - changing step-sphere's 480 facets
@@ -1538,3 +1587,103 @@ meeting it would not care about the distinction.
 
 Fusion is installed on the same machine and has not been tried. The same kit
 runs against it; only the driver is SOLIDWORKS-specific.
+
+
+## 10. Open work
+
+§7's list is closed - every item on it is struck through - and §8's "what to do
+next" predates the SOLIDWORKS round trip. This is what is actually left, in the
+order it is worth doing.
+
+### 1. The lid exports one solid as two shells
+
+The only correctness defect currently known. `examples/step_test/lid10.scad`
+with its own parameter set is a single connected surface - 6780 triangles, every
+edge shared by exactly two faces, signed volume 223482.298 - and exports as two
+`CLOSED_SHELL`s, one of them inverted. SOLIDWORKS reads two bodies and adds
+them: 612665 + 385455 = 998121.
+
+It is localised. 213 input triangles straddle the two shells, all of them on the
+z=95 rim annulus, where coplanar neighbours end up in different shells. Four
+explanations have been measured and ruled out, so nobody need repeat them:
+
+- **geometry lost in the merge** - no; area is conserved to 0.0115 in 107314,
+  and every one of the 2479 merged loops is accounted for (2449 faces, 15
+  degenerate, 15 holes folded into parents, none unexplained);
+- **the changes of 2026-08-31** - no; bisected individually, the split survives
+  the T-junction weld, both `mergeTriangles` tolerance changes and the
+  containment probe;
+- **near-duplicate vertices at the seam** - no; the gap is a real 0.6, and the
+  two shells share no vertex at all;
+- **the dropped slivers were the connective tissue** - no; restoring their
+  connectivity leaves the component count at two.
+
+The next measurement is to tag each input triangle with the merged loop that
+claims it and find an input edge whose two triangles land in different
+components. That edge is where connectivity is dropped. `check_shell_volumes`
+now fails the file locally, so this no longer needs SOLIDWORKS to reproduce.
+
+### 2. Whether the analytic path stops being experimental
+
+§8 left this open pending round trip evidence. §9 now supplies it: on every
+coupon, in a second kernel, the analytic export imports as a solid, measures
+exact where an exact value exists, and survives a round trip with its surfaces
+intact. Against that stands item 1 - not a defect of the analytic path, since
+the faceted control fails the same way, but a distinction a user meeting it
+would not care about. The decision is a maintainer's, and it is the only thing
+blocking it.
+
+### 3. Fusion
+
+Installed on the same machine, never tried. The kit is already written; only
+`scripts/step-interop-solidworks.ps1` is SOLIDWORKS-specific. Cheapest
+outstanding item by some distance, and a third kernel is worth more than a
+second was.
+
+### 4. Roadmap item 4, trimmed faces
+
+Still nothing in the tree attempts it. Fourteen faces of the bayonet.
+
+### 5. The committed bayonet artifact is stale
+
+`examples/step_test/bayonet_container_v1-2.stp` was exported 2026-08-10 and
+fails `validatestep.py` today. A fresh export of the same part is clean at the
+same 1685 faces, so regenerating would move no documented probe figure - but it
+is the input to `scripts/step-analytic-probe.py` and appears in two documents,
+so it is a decision rather than a cleanup. `examples/step_test/README.md`
+records the situation.
+
+### 6. `pointMember`'s absolute tolerance
+
+`Surface.cc` asks whether a point lies on a surface with an absolute `1e-5`,
+where `AnalyticFeatures.cc` scales everything to the geometry. On a model in
+microns it would accept almost anything; in kilometres, almost nothing, dropping
+every surface to facets in silence. The obvious fix is 78 times looser on the
+bayonet lid than the measurements in this document were taken against, and no
+fixture is far enough from unit scale to say whether it helps. It wants a
+large-model fixture first. The reasoning is at the top of `Surface.cc`.
+
+### 7. Known-imperfect, fail-safe, and low priority
+
+Each of these costs a missed optimisation rather than wrong output, and each
+falls back to faceted:
+
+- `gridFromRegion`'s augmenting path has no blossom contraction, so it can miss
+  a pairing around an odd cycle, and it gives up past a recursion depth of 4096;
+- `boundaryCycles` treats two boundary loops meeting at a pinch vertex as a hard
+  failure rather than splitting them, though its Bezier caller demands a single
+  cycle anyway;
+- `StepKernel`'s entities are arena-owned and do not leak, but a derived
+  constructor throwing would leave a dangling pointer. Closing it means taking
+  self-registration out of 126 construction sites for a path only reachable on
+  allocation failure.
+
+### 8. Not tasks, and recorded so they are not mistaken for tasks
+
+The helical thread cannot be written exactly by anything - a circular helix is
+not a NURBS curve - so writing it means approximating within a tolerance, which
+breaks the *exact fit or stay faceted* rule the exporter is built on. Fully
+skewed fillet corners want non-separable weight nets, which is a modelling
+question. §8's *what not to do* list stands unchanged: `SURFACE_OF_REVOLUTION`
+and per-face provenance both collapse zero faces, and the bayonet's last
+36-facet rejection is geometrically necessary.
