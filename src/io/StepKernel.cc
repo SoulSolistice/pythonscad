@@ -85,7 +85,11 @@ static void recordSliverSpan(const std::vector<Vector3d>& vertices, const std::v
   for (std::size_t i = 0; i < pts.size(); i++) {
     for (std::size_t j = i + 1; j < pts.size(); j++) {
       const double d = (vertices[pts[j]] - vertices[pts[i]]).squaredNorm();
-      if (d > best) { best = d; a = i; b = j; }
+      if (d > best) {
+        best = d;
+        a = i;
+        b = j;
+      }
     }
   }
   if (best <= 0.0) return;
@@ -113,7 +117,10 @@ static void recordSliverSpan(const std::vector<Vector3d>& vertices, const std::v
     const double at = forward ? o.first : 1.0 - o.first;
     bool seen = false;
     for (const auto& have : slot) {
-      if (have.second == o.second) { seen = true; break; }
+      if (have.second == o.second) {
+        seen = true;
+        break;
+      }
     }
     if (!seen) slot.emplace_back(at, o.second);
   }
@@ -546,8 +553,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     LOG(message_group::Export_Warning,
         "STEP export: skipped %1$d degenerated face%2$s - %3$d collapsed to fewer "
         "than three distinct points, %4$d had no area (%5$.3g in total)",
-        degenerated_cnt, degenerated_cnt == 1 ? "" : "s", collapsed_cnt, zero_area_cnt,
-        lost_area);
+        degenerated_cnt, degenerated_cnt == 1 ? "" : "s", collapsed_cnt, zero_area_cnt, lost_area);
   }
   if (zero_area_cnt > welded_span_cnt) {
     // A sliver whose span no face turned out to cross is one this pass could
@@ -1180,11 +1186,29 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       if (band.closed) {
         const int seam = bottom ? band.seam_bottom : band.seam_top;
         const Vector3d seam_rel = vertices[seam] - centre;
-        auto circle =
-          new Circle(entities, "", placement(centre, band.axis, seam_rel.normalized()), radius);
+        RoundType *curve = nullptr;
+        if (!bottom && band.top_tilted) {
+          // The rim is the section of the cylinder by a plane which is not
+          // perpendicular to the axis, so it is an ellipse. Its minor axis has
+          // the cylinder's own radius and lies where the cut plane meets the
+          // plane through the centre perpendicular to it; its major axis runs
+          // up the steepest ascent of the cut and is longer by exactly the
+          // secant of the tilt.
+          //
+          // Unlike a circle the reference direction is not free - it is what
+          // says which semi-axis is which - so the seam vertex does not sit at
+          // the start of the parameterisation here. A closed edge does not
+          // require it to.
+          const Vector3d n = band.top_normal;
+          const double cos_tilt = n.dot(band.axis);
+          const Vector3d major = (band.axis - n * cos_tilt).normalized();
+          curve = new Ellipse(entities, "", placement(centre, n, major), radius / cos_tilt, radius);
+        } else {
+          curve = new Circle(entities, "", placement(centre, band.axis, seam_rel.normalized()), radius);
+        }
         Vertex *vert = get_vertex(seam);
         // a full circle is one edge whose two ends are the same vertex
-        rim_edge[side] = new EdgeCurve(entities, vert, vert, circle, true);
+        rim_edge[side] = new EdgeCurve(entities, vert, vert, curve, true);
         rim_sense[side] = rim.wall_ccw;
         if (rim.kind == AnalyticFeatures::RimRef::OTHER_BAND)
           shared_rim_edges.emplace(key, rim_edge[side]);
@@ -1858,6 +1882,7 @@ void StepKernel::read_step(std::string file_name)
       else if (func_name == "VECTOR") ent = new Vector(entities);
       else if (func_name == "LINE") ent = new Line(entities);
       else if (func_name == "CIRCLE") ent = new Circle(entities);
+      else if (func_name == "ELLIPSE") ent = new Ellipse(entities);
       else if (func_name == "CYLINDRICAL_SURFACE") ent = new CylindricalSurface(entities);
       else if (func_name == "CONICAL_SURFACE") ent = new ConicalSurface(entities);
       else if (func_name == "PCURVE") unimplemented = true;

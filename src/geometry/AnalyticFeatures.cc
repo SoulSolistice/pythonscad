@@ -52,6 +52,49 @@ bool fitCircleCentre(const std::vector<Vector3d>& vertices, const std::vector<in
   return true;
 }
 
+/*! The plane through a set of points, if they all lie on one.
+ *
+ * Three points fix a plane and the rest are the test. The three are picked for
+ * spread rather than taken in order, because consecutive vertices of a rim are
+ * nearly collinear and a normal taken from those is worth nothing.
+ */
+bool fitPlane(const std::vector<Vector3d>& vertices, const std::vector<int>& ids, double tol,
+              Vector3d& normal)
+{
+  if (ids.size() < 3) return false;
+  Vector3d centroid(0, 0, 0);
+  for (const int v : ids) centroid += vertices[v];
+  centroid /= double(ids.size());
+
+  double best = 0;
+  Vector3d u(0, 0, 0);
+  for (const int v : ids) {
+    const Vector3d rel = vertices[v] - centroid;
+    if (rel.squaredNorm() > best) {
+      best = rel.squaredNorm();
+      u = rel;
+    }
+  }
+  if (u.norm() < tol) return false;
+
+  best = 0;
+  Vector3d n(0, 0, 0);
+  for (const int v : ids) {
+    const Vector3d c = u.cross(vertices[v] - centroid);
+    if (c.norm() > best) {
+      best = c.norm();
+      n = c;
+    }
+  }
+  if (n.norm() < tol) return false;
+
+  normal = n.normalized();
+  for (const int v : ids) {
+    if (fabs(normal.dot(vertices[v] - centroid)) > tol) return false;
+  }
+  return true;
+}
+
 double distanceToAxis(const Vector3d& pt, const Vector3d& base, const Vector3d& axis)
 {
   const Vector3d rel = pt - base;
@@ -582,29 +625,29 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
   const std::size_t augment_max_depth = 4096;
   std::function<bool(std::size_t, std::set<std::size_t>&, std::size_t)> augment =
     [&](std::size_t u, std::set<std::size_t>& seen, std::size_t depth) {
-    if (depth >= augment_max_depth) return false;
-    for (const std::size_t v : neighbours[u]) {
-      if (seen.count(v)) continue;
-      seen.insert(v);
-      const auto held = partner.find(v);
-      if (held == partner.end()) {
-        partner[v] = u;
-        partner[u] = v;
-        return true;
+      if (depth >= augment_max_depth) return false;
+      for (const std::size_t v : neighbours[u]) {
+        if (seen.count(v)) continue;
+        seen.insert(v);
+        const auto held = partner.find(v);
+        if (held == partner.end()) {
+          partner[v] = u;
+          partner[u] = v;
+          return true;
+        }
+        const std::size_t displaced = held->second;
+        partner.erase(displaced);
+        partner.erase(v);
+        if (augment(displaced, seen, depth + 1)) {
+          partner[v] = u;
+          partner[u] = v;
+          return true;
+        }
+        partner[v] = displaced;
+        partner[displaced] = v;
       }
-      const std::size_t displaced = held->second;
-      partner.erase(displaced);
-      partner.erase(v);
-      if (augment(displaced, seen, depth + 1)) {
-        partner[v] = u;
-        partner[u] = v;
-        return true;
-      }
-      partner[v] = displaced;
-      partner[displaced] = v;
-    }
-    return false;
-  };
+      return false;
+    };
   for (const std::size_t f : triangles) {
     if (partner.count(f)) continue;
     std::set<std::size_t> seen{f};
@@ -1379,9 +1422,8 @@ std::vector<std::shared_ptr<Surface>> fitRevolved(const Mesh& mesh, const Smooth
         }
       }
     }
-      return found;
-    };
-
+    return found;
+  };
 
   for (const auto& axis : candidates) {
     std::vector<std::shared_ptr<Surface>> found = tryAxis(axis);
@@ -1818,6 +1860,35 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     return chords;
   };
 
+  // The rulings of a set of facets: the edges the walk crosses.
+  auto rulings_of = [&](const std::vector<std::size_t>& walls, const std::map<std::size_t, int>& entry) {
+    std::vector<Vector3d> rulings;
+    for (const std::size_t f : walls) {
+      const int r = entry.at(f);
+      for (const int s : {r, (r + 2) % 4}) {
+        const Vector3d dir = vertices[loops[f][(s + 1) % 4]] - vertices[loops[f][s]];
+        if (dir.norm() > 1e-12) rulings.push_back(dir.normalized());
+      }
+    }
+    return rulings;
+  };
+
+  // On a cylinder every ruling is parallel to the axis, which fixes it with no
+  // pairing at all. Worth trying first because the chord route below assumes
+  // every chord lies in a plane perpendicular to the axis, and a trim which is
+  // not perpendicular breaks that: crossing a chord of the flat rim with a
+  // chord of the cut gives an axis pointing nowhere in particular. A cone has
+  // no parallel rulings and still needs the chords.
+  auto axis_from_rulings = [](const std::vector<Vector3d>& rulings) {
+    if (rulings.empty()) return Vector3d(0, 0, 0);
+    Vector3d axis = rulings[0];
+    for (const Vector3d& r : rulings) {
+      if (fabs(fabs(r.dot(axis)) - 1.0) > 1e-9) return Vector3d(0, 0, 0);
+    }
+    if (axis[2] < 0 || (axis[2] == 0 && axis[0] < 0)) axis = -axis;
+    return axis;
+  };
+
   // Two chords which are not parallel fix the axis exactly.
   auto axis_from = [](const std::vector<Vector3d>& chords) {
     for (std::size_t c = 1; c < chords.size(); c++) {
@@ -1878,7 +1949,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         }
         if (joined) near.push_back(f);
       }
-      const Vector3d axis = axis_from(chords_of(near, entry));
+      // Not const: a band whose tilted rim comes out at the bottom is turned
+      // over below, because the rim rules are written for a tilted top.
+      Vector3d axis = axis_from_rulings(rulings_of(near, entry));
+      if (axis.norm() < 0.5) axis = axis_from(chords_of(near, entry));
       if (axis.norm() < 0.5) continue;
 
       // Fit the surface from the seed and its first two neighbours - four
@@ -1901,21 +1975,38 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         }
         Vector3d probe_base, probe_top_centre;
         if (!fitCircleCentre(vertices, probe_bottom, axis, probe_lo, probe_base)) continue;
-        if (!fitCircleCentre(vertices, probe_top, axis, probe_hi, probe_top_centre)) continue;
-        double probe_r0 = 0, probe_r1 = 0;
+        double probe_r0 = 0;
         for (const int v : probe_bottom) probe_r0 += distanceToAxis(vertices[v], probe_base, axis);
-        for (const int v : probe_top) probe_r1 += distanceToAxis(vertices[v], probe_base, axis);
         probe_r0 /= double(probe_bottom.size());
-        probe_r1 /= double(probe_top.size());
+
+        // A far rim which is not flat has no circle to fit, and needs none: on
+        // a cylinder the far radius is the near radius. Only a far rim which
+        // *is* flat, and fits a circle of its own, can make this a cone - so
+        // the probe assumes a cylinder unless it is shown a second rim.
+        double probe_r1 = probe_r0;
+        if (probe_top.size() >= 3 &&
+            fitCircleCentre(vertices, probe_top, axis, probe_hi, probe_top_centre)) {
+          probe_r1 = 0;
+          for (const int v : probe_top) probe_r1 += distanceToAxis(vertices[v], probe_base, axis);
+          probe_r1 /= double(probe_top.size());
+        }
         const double probe_scale = std::max(probe_r0, probe_r1);
         if (probe_scale < model_tol) continue;
 
+        // On a cylinder a vertex which is on the surface is on it at any
+        // height, so a vertex between the probe's two rims is admitted rather
+        // than rejected. That is what lets a trim which is not perpendicular
+        // to the axis stay in the band; without it the walk stops at the
+        // first facet the trim clipped. A cone has to keep the stricter test,
+        // because there the radius is what the height says it is.
+        const bool cylindrical = fabs(probe_r0 - probe_r1) <= 1e-7 * probe_scale;
         const OnSurface on_surface = [&](std::size_t f) {
           for (const int v : loops[f]) {
             const double t = axis.dot(vertices[v]);
-            const double want = fabs(t - probe_lo) < model_tol
-                                  ? probe_r0
-                                  : (fabs(t - probe_hi) < model_tol ? probe_r1 : -1.0);
+            const double want =
+              fabs(t - probe_lo) < model_tol
+                ? probe_r0
+                : (fabs(t - probe_hi) < model_tol ? probe_r1 : (cylindrical ? probe_r0 : -1.0));
             if (want < 0) return false;
             if (fabs(distanceToAxis(vertices[v], probe_base, axis) - want) > 1e-7 * probe_scale) {
               return false;
@@ -1927,18 +2018,15 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         if (walls.size() < 3) continue;
       }
 
-      // Now that the walk is confined to one surface, the whole band has to
-      // agree with the axis the seed's neighbourhood gave. This is the test
-      // that used to run against the free walk, moved to the only set of
-      // facets it can be asked of meaningfully - a seed whose neighbourhood
-      // happens to give a wrong axis is still rejected here, just later.
-      if (!perpendicular_to(chords_of(walls, entry), axis)) continue;
-
       // every wall vertex has to sit on one of the two rims
       std::map<int, double> along;
-      for (const std::size_t f : walls) {
-        for (const int v : loops[f]) along[v] = axis.dot(vertices[v]);
-      }
+      auto measure_along = [&]() {
+        along.clear();
+        for (const std::size_t f : walls) {
+          for (const int v : loops[f]) along[v] = axis.dot(vertices[v]);
+        }
+      };
+      measure_along();
       double lo = along.begin()->second, hi = lo;
       for (const auto& kv : along) {
         lo = std::min(lo, kv.second);
@@ -1946,14 +2034,70 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       }
       if (hi - lo < model_tol) continue;
 
+      auto count_at = [&](double level) {
+        std::size_t n = 0;
+        for (const auto& kv : along) {
+          if (fabs(kv.second - level) < model_tol) n++;
+        }
+        return n;
+      };
+
+      // A band trimmed square at both ends has every vertex at one end or the
+      // other. One trimmed at an angle has a full rim at one end and a spread
+      // at the other, and everything below is written for that spread being
+      // the *top*, so a band which came out the other way up is turned over.
+      // The axis sign is arbitrary - axis_from only normalises it - so this
+      // costs nothing but re-measuring.
+      if (count_at(lo) < walls.size() && count_at(hi) > count_at(lo)) {
+        axis = -axis;
+        measure_along();
+        const double was_lo = lo;
+        lo = -hi;
+        hi = -was_lo;
+      }
+
       std::vector<int> bottom_set, top_set;
-      bool split_ok = true;
+      bool tilted = false;
       for (const auto& kv : along) {
         if (fabs(kv.second - lo) < model_tol) bottom_set.push_back(kv.first);
         else if (fabs(kv.second - hi) < model_tol) top_set.push_back(kv.first);
-        else split_ok = false;
+        else tilted = true;
       }
-      if (!split_ok) continue;
+
+      Vector3d top_normal(0, 0, 0);
+      if (tilted) {
+        // Everything off the flat rim has to lie on one plane, and that plane
+        // has to cross the axis rather than run along it: a plane containing
+        // the axis direction cuts a cylinder in straight lines, not an
+        // ellipse, and there is no rim there to write.
+        top_set.clear();
+        for (const auto& kv : along) {
+          if (fabs(kv.second - lo) >= model_tol) top_set.push_back(kv.first);
+        }
+        if (!fitPlane(vertices, top_set, model_tol, top_normal)) continue;
+        if (top_normal.dot(axis) < 0) top_normal = -top_normal;
+        if (top_normal.dot(axis) < 1e-3) continue;
+      }
+
+      // Now that the walk is confined to one surface, the whole band has to
+      // agree with the axis the seed's neighbourhood gave. This is the test
+      // that used to run against the free walk, moved to the only set of
+      // facets it can be asked of meaningfully - a seed whose neighbourhood
+      // happens to give a wrong axis is still rejected here, just later.
+      //
+      // A tilted band has chords in the cut plane too, which are not
+      // perpendicular to anything. Those are already known to be coplanar, so
+      // what this has left to catch there is a chord running between the two
+      // rims - a ruling the walk mistook for a chord, which is neither.
+      if (!tilted) {
+        if (!perpendicular_to(chords_of(walls, entry), axis)) continue;
+      } else {
+        bool chords_ok = true;
+        for (const Vector3d& c : chords_of(walls, entry)) {
+          if (fabs(c.dot(axis)) >= 1e-9 && fabs(c.dot(top_normal)) >= 1e-9) chords_ok = false;
+        }
+        if (!chords_ok) continue;
+      }
 
       // A band which closes on itself has one rim vertex per facet; one which
       // stops short of a full turn has one more, the far end of the last
@@ -1962,13 +2106,29 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       const bool part_turn = bottom_set.size() == walls.size() + 1 && top_set.size() == walls.size() + 1;
       if (!full_turn && !part_turn) continue;
 
+      // A tilted rim which stops short of a full turn would need an elliptical
+      // *arc*, and the arc machinery - which run of which loop the rim
+      // replaces, which end is which - is written for circles. A full turn
+      // needs none of that: it is one closed curve.
+      if (tilted && !full_turn) continue;
+
       // Fit each rim on its own: the centroid of a full rim lies on the axis
       // but the centroid of an arc sits inside its chord, and the two rims of
       // a frustum have different radii anyway.
       Vector3d base, top_centre;
       if (!fitCircleCentre(vertices, bottom_set, axis, lo, base)) continue;
-      if (!fitCircleCentre(vertices, top_set, axis, hi, top_centre)) continue;
-      if (distanceToAxis(top_centre, base, axis) > 1e-6) continue;  // coaxial
+      if (tilted) {
+        // Where the axis pierces the cut plane. That is the ellipse's centre,
+        // and it is not the centroid of the rim's vertices unless the
+        // tessellation happens to be symmetric about it.
+        Vector3d centroid(0, 0, 0);
+        for (const int v : top_set) centroid += vertices[v];
+        centroid /= double(top_set.size());
+        top_centre = base + axis * (top_normal.dot(centroid - base) / top_normal.dot(axis));
+      } else {
+        if (!fitCircleCentre(vertices, top_set, axis, hi, top_centre)) continue;
+        if (distanceToAxis(top_centre, base, axis) > 1e-6) continue;  // coaxial
+      }
 
       double r_bottom = 0, r_top = 0;
       for (const int v : bottom_set) r_bottom += distanceToAxis(vertices[v], base, axis);
@@ -1992,6 +2152,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       // between them. Both of its rims matching a declared cylinder is the
       // same statement of intent, made by two primitives instead of one.
       const bool is_cone = fabs(r_bottom - r_top) > 1e-9 * scale;
+      // A cone cut off-axis gives a conic whose rim has no single radius, and
+      // the ellipse written below would be the wrong curve rather than an
+      // imprecise one. Only a cylinder may be tilted.
+      if (tilted && is_cone) continue;
       if (is_cone) {
         if (!declared_cylinder(r_bottom, axis, base)) continue;
         if (!declared_cylinder(r_top, axis, base)) continue;
@@ -2005,10 +2169,12 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       info.base = base;
       info.r_bottom = r_bottom;
       info.r_top = r_top;
-      info.height = hi - lo;
+      info.height = tilted ? axis.dot(top_centre - base) : hi - lo;
       info.closed = full_turn;
       info.bottom_set = bottom_set;
       info.top_set = top_set;
+      info.top_tilted = tilted;
+      info.top_normal = top_normal;
 
       const Vector3d probe = vertices[loops[walls[0]][0]];
       const Vector3d radial = (probe - base) - axis * axis.dot(probe - base);

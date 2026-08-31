@@ -63,6 +63,20 @@ struct Band {
   bool closed = false;   // covers the full turn, so the face is periodic
   bool outward = false;  // wall normals point away from the axis
   std::vector<int> bottom_set, top_set;
+
+  /*! Set when the top rim is a planar section which is not perpendicular to
+   * the axis, so it is an ellipse rather than a circle.
+   *
+   * A cylinder cut at an angle is still a cylinder, and every vertex of the
+   * cut still lies on it - what stops being true is that the rim sits at one
+   * height, which is what the two-rim band model assumes throughout. The
+   * plane is kept here so the rim can be written as the conic it is; nothing
+   * else about the band changes, and `height` is measured to where the axis
+   * pierces this plane. Only a cylinder can be tilted this way: a cone cut
+   * off-axis gives a conic the rim machinery has no radius for. */
+  bool top_tilted = false;
+  Vector3d top_normal{0, 0, 0};  // unit, oriented so that top_normal.dot(axis) > 0
+
   int seam_bottom = -1, seam_top = -1;  // the ruling the seam runs along
   bool alive = true;
   const char *dropped = nullptr;  // why it was left faceted, for the report
@@ -346,7 +360,7 @@ std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<c
  *
  * Returns a CylinderSurface or a SphereSurface. */
 std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double tol,
-                                       const char **why = nullptr);
+                                        const char **why = nullptr);
 
 /*! The circle one curved boundary run of a patch lies on, oriented so the run
  * sweeps counter clockwise about `normal` - the direction a STEP CIRCLE is

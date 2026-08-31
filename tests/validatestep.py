@@ -904,6 +904,7 @@ def check_cylindrical_faces(entities, problems):
         # line between the same two vertices is a chord off the surface.
         circles, lines, closed = [], [], 0
         arcs = []
+        ellipses = []
         for oid in oriented:
             geom = _edge_geometry(entities, oid)
             ends = _edge_endpoints(entities, oid)
@@ -916,6 +917,13 @@ def check_cylindrical_faces(entities, problems):
                     closed += 1
                 else:
                     arcs.append((oid, ends))
+            elif geom.name == "ELLIPSE":
+                # A cylinder cut by a plane which is not perpendicular to its
+                # axis. That is still a rim and still closed, so it counts as
+                # one of the two; what differs is the radius rule below.
+                ellipses.append((oid, geom, ends))
+                if ends[0] == ends[1]:
+                    closed += 1
             else:
                 lines.append((oid, ends))
         else:
@@ -923,12 +931,33 @@ def check_cylindrical_faces(entities, problems):
             # face is split the rim is split with it, and a face then carries
             # several consecutive arcs along one rim - which is exactly what
             # SolidWorks produces when it re-saves one of ours.
-            if len(circles) < 2:
+            if len(circles) + len(ellipses) < 2:
                 problems.append(
                     "#%d: %s face is bounded by %d circular edges, expected at least 2"
-                    % (face.id, surface.name, len(circles))
+                    % (face.id, surface.name, len(circles) + len(ellipses))
                 )
                 continue
+            for _, geom, _ends in ellipses:
+                if surface.name != "CYLINDRICAL_SURFACE":
+                    problems.append(
+                        "#%d: ELLIPSE #%d bounds a %s, where a plane section is not one"
+                        % (face.id, geom.id, surface.name)
+                    )
+                    continue
+                axes = geom.floats()
+                if len(axes) < 2 or axes[1] <= 0 or axes[0] < axes[1]:
+                    problems.append(
+                        "#%d: rim ELLIPSE #%d has semi-axes %s, wanted a major then a "
+                        "positive minor" % (face.id, geom.id, axes)
+                    )
+                elif abs(axes[1] - radius) > 1e-6 * max(1.0, radius):
+                    # The minor axis of a plane section of a cylinder is the
+                    # cylinder's own radius, whatever the angle of the cut. A
+                    # rim which is not that wide is on some other surface.
+                    problems.append(
+                        "#%d: rim ELLIPSE #%d has minor semi-axis %s, but its cylinder has %s"
+                        % (face.id, geom.id, axes[1], radius)
+                    )
             for _, geom, _ends in circles:
                 cr = geom.floats()[-1] if geom.floats() else None
                 if cr is None or cr <= 0:
@@ -963,7 +992,7 @@ def check_cylindrical_faces(entities, problems):
                 # direction. Over a sphere that seam is an arc, so it is not
                 # required to be a LINE - only to be a single edge used twice.
                 seam_edges = line_edges | distinct(arcs)
-                if len(circles) - closed != len(arcs):
+                if len(circles) + len(ellipses) - closed != len(arcs):
                     problems.append("#%d: periodic face mixes rim shapes" % face.id)
                 if len(seam_edges) != 1:
                     problems.append(

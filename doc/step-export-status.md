@@ -76,7 +76,7 @@ The doc's numbering, with the tree's answer beside it.
 | torus | done, one `TOROIDAL_SURFACE` | confirmed: `TorusSurface`, `TOROIDAL_SURFACE`, `step-torus` |
 | 3 — spheres | done, one `SPHERICAL_SURFACE` | confirmed: `SphereSurface`, `SPHERICAL_SURFACE`, `step-sphere` |
 | 2 — fillet B-splines | recognition done, "what remains is entity writing" | **further along than the doc**: emission, validator check and mutation harness all landed (`1310d1a`, `8e96e6c`, `tests/bspline-check-mutations.py`) |
-| 4 — trimmed faces | last; 14 faces of the bayonet | **measured and blocked**: still 14 faces (0.8%, 803.6 of area), and every one of them borders faceted geometry with no analytic surface, so there is no exact trim curve to write. Blocked on item 5, not on effort — see §10 |
+| 4 — trimmed faces | last; 14 faces of the bayonet | **partly done, and the remainder is still blocked**: a quadric trimmed by a plane at *any* angle now works, because there the trim curve is exactly representable — an ellipse (`step-oblique-trim`, §12). The bayonet's own 14 faces are untouched by that and stay blocked for the reason below: each borders faceted geometry with no analytic surface, so there is no exact curve on the other side. Blocked on item 5, not on effort — see §10 |
 | 5 — swept surfaces | blocked on a user-facing declaration | **done.** The blocker was real but narrower than it read: `declare_grid` existed only in Python, and the reference part is `.scad`. With it registered as an OpenSCAD builtin the thread declares its own sweep — one wrapper in `hoseRidge` — and the part goes from 1137 faces to 652, the thread contributing two `B_SPLINE_SURFACE` faces OpenCASCADE reads as surfaces. The faceted export is byte identical, so every probe figure here still holds. See §11 |
 
 Item 5 changing category is the most consequential ledger movement and the doc
@@ -1725,8 +1725,14 @@ r=20 stays faceted, with both sides of its trim now carrying a surface, because
 the curve where they meet still has no representation.
 
 That is item 4 entire, in miniature: not a missing surface but a missing curve.
-What it needs is `SURFACE_CURVE` with a pcurve on each face, which the exporter
-does not write.
+
+**One rung of it has since been climbed, and it says the pcurve half of that
+sentence was wrong.** Where the second surface *is* known - a plane, at any
+angle - the trim curve is exactly representable, and §12 now writes it. The
+prediction here was that this would need `SURFACE_CURVE` with a pcurve on each
+face; measuring it says otherwise, and the measurement is in §12. What survives
+unchanged is everything above about the bayonet's fourteen: those border a
+*mesh*, and no entity choice rescues a curve that does not exist.
 
 ### 5. The committed bayonet artifact is stale
 
@@ -1827,3 +1833,95 @@ B-spline count to 7 fails the test.
 **This does not finish item 4.** Declaring the thread gives the trim's other side
 a surface; the curve where the two meet still has no representation. §10 item 4
 carries the demonstration on a model small enough to read.
+
+## 12. Item 4, the rung that could be climbed
+
+Item 4 is "a quadric trimmed by a curve that is not a circle". It was recorded
+above as blocked, and for the bayonet's fourteen faces it still is. But that
+blockage has a specific cause - the surface on the *other* side of the trim is
+only a mesh, so no exact curve exists - and it does not apply when the other
+side is something the exporter knows. The cheapest such case is a plane at an
+angle, and it is now handled.
+
+### What was actually in the way
+
+Three probes at `$fn = 32`, cutting the same `cylinder(r = 10, h = 20)`:
+
+| | trim | before | after |
+| --- | --- | --- | --- |
+| A | plane perpendicular to the axis | `Cylinder 2, Plane 3` | unchanged |
+| B | plane tilted 20 degrees | `Plane 34` - nothing | `Cylinder 1, Plane 2` |
+| C | a cross bore | `Cylinder 2, Plane 54` | unchanged |
+
+B is the interesting one and it failed *silently*: one declared cylinder went
+out as 32 planes and the report gave no reason, because the rejection was three
+separate `continue`s in the band walk, none of which records anything.
+
+They are all the same assumption - that a band is two rims at constant height
+along its axis:
+
+- the axis came from crossing two chords, which is only valid when every chord
+  lies in a plane perpendicular to the axis. Cross a chord of the flat rim with
+  a chord of the tilted cut and the axis points nowhere in particular.
+- the probe fitted a circle to each rim. A tilted rim has one vertex at the
+  extreme, and a circle through one point is not a circle.
+- every wall vertex had to sit at one of two heights.
+
+None of that is about the geometry being unrepresentable. A cylinder cut at an
+angle is still a cylinder, and every vertex of the cut lies on it *exactly*,
+because those vertices are where the exact plane meets the prism's exact
+rulings. Only the rim's shape changes: radius r cut by a plane whose normal
+makes cos t with the axis gives an ellipse with semi-axes r/cos t and r.
+
+So the axis is now taken from the rulings, where a cylinder states it exactly
+and with no pairing at all; the probe assumes a cylinder unless the far rim is
+flat enough to fit a circle of its own and make it a cone; and the vertices off
+the flat rim have to be *coplanar* rather than level.
+
+### The pcurve question, measured rather than assumed
+
+§10 predicted this would need `SURFACE_CURVE` with a pcurve on each face. It
+does not, and the cheapest way to find out was to ask OpenCASCADE what it writes
+for the same solid and then take that away again.
+
+OCCT writes the trim as `ELLIPSE(#,10.641777724759,10.)` - which is r/cos 20 and
+r, as above - wrapped in a `SURFACE_CURVE` carrying two `PCURVE`s, one of which
+is a `B_SPLINE_CURVE_WITH_KNOTS` because an ellipse unrolls to a sinusoid in the
+cylinder's own (theta, z) parameterisation. Repointing each `EDGE_CURVE` at the
+plain 3D curve and dropping the pcurves leaves the file reading identically: one
+solid, one shell, `Cylinder 1, Plane 2`, valid, volume 5026.5588 against
+5026.5482 with them. That is 2e-6 of the radius, the reader re-projecting
+instead of reading a stored parameterisation, and it is far inside the mesh's
+own tessellation band.
+
+The exporter already ships pcurve-free circular edges that both OpenCASCADE and
+SOLIDWORKS accept, so the ellipse is written the same way and the expensive half
+of item 4 is not paid for. `StepKernel::Ellipse` records this where someone
+would otherwise re-derive it.
+
+### What the fixture asserts
+
+`step-oblique-trim` is the cylinder cut at 20 degrees. It pins the report (one
+surface recognised, 32 facets replaced), the kernel's surface census
+(`Cylinder=1 Plane=2`), the radius, and - the line that matters most here - the
+*edge* census `Circle=1 Ellipse=1 Line=1`, which is what would notice a kernel
+quietly resampling the trim into a spline or splitting it into arcs.
+
+The volume is the check that the surface is the *right* one and not merely a
+surface. The exact solid has mean height 26 - 10/cos 20 = 15.3582223, so its
+volume is pi*100*that = 4824.9153; OpenCASCADE reads back 4824.915473. The mesh
+itself measures 4793.98, short by exactly the chord deficit of a 32-gon against
+its circle - 0.993558 of the area, measured 0.99356. The fit hands that back and
+claims nothing beyond it.
+
+### What is still refused, and why
+
+- **A cone cut off-axis.** Its rim has no single radius, so the ellipse written
+  here would be the wrong curve rather than an imprecise one. Refused outright.
+- **A tilted trim that stops short of a full turn.** That needs an elliptical
+  *arc*, and the arc machinery - which run of which loop a rim replaces, which
+  end is which - is written for circles throughout.
+- **Probe C, the cross bore.** Two cylinders meet in a quartic. It is not
+  planar, so no conic describes it, and this is the part of item 4 that is
+  genuinely open. Note that C already loses nothing today: the partial-band path
+  writes the arc-bounded parts of both cylinders and leaves the mouth faceted.

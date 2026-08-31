@@ -716,6 +716,63 @@ public:
     Axis2Placement *axis;
   };
 
+  /*! The section of a cylinder by a plane which is not perpendicular to its
+   * axis.
+   *
+   * semi_axis_1 runs along the placement's reference direction and
+   * semi_axis_2 along the other in-plane direction, so a rim of radius r cut
+   * at an angle whose plane normal makes cos t with the axis is written with
+   * the reference direction along the steepest ascent, semi_axis_1 = r/cos t
+   * and semi_axis_2 = r.
+   *
+   * ISO 10303 also allows the trim to carry a pcurve in the cylinder's own
+   * (theta, z) parameterisation, where an ellipse unrolls to a sinusoid and
+   * has to be written as a B-spline. That is not emitted here: it is
+   * derivable from the 3D curve, and a kernel reading this file recovers it
+   * to 2e-6 of the radius, which is inside the mesh's own tessellation band.
+   * See doc/step-export-status.md. */
+  class Ellipse : public RoundType
+  {
+  public:
+    Ellipse(std::vector<Entity *>& ent_list) : RoundType(ent_list)
+    {
+      axis = 0;
+      semi_1 = 0;
+      semi_2 = 0;
+    }
+
+    Ellipse(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+            double semi_1_in, double semi_2_in)
+      : RoundType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      semi_1 = semi_1_in;
+      semi_2 = semi_2_in;
+    }
+    virtual ~Ellipse() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = ELLIPSE('" << label << "',#" << axis->id << "," << step_real(semi_1)
+                << "," << step_real(semi_2) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> semi_1 >> semi_2;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double semi_1, semi_2;
+    Axis2Placement *axis;
+  };
+
   class OrientedEdge;
 
   class EdgeLoop : public Entity

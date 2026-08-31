@@ -424,6 +424,15 @@ the repo root with:
 C:/msys64/msys2_shell.cmd -defterm -here -no-start -ucrt64 -shell bash
 ```
 
+**Use that, not a bare `bash.exe -lc`.** MSYS2 replaces the Windows `PATH`
+rather than extending it, so a bare invocation loses `System32` and the
+binary in `build/` then fails to load with exit `3221225781`
+(`0xC0000135`, DLL not found) - reported by ctest as every test failing at
+once, which looks like a catastrophic regression and is not one. The staged
+copy is immune because `cmake --install` puts the CRT DLLs beside it, so
+"staging works, `build/` does not" is the signature. If a bare shell is
+unavoidable, set `MSYS2_PATH_TYPE=inherit`.
+
 Inside that shell, install/update the package set used by CI:
 
 ```bash
