@@ -670,6 +670,33 @@ def _point_in_loop(poly, pt):
     return inside
 
 
+def _interior_point(poly):
+    """A point strictly inside a projected loop.
+
+    The loop's first vertex is not usable as a probe: _point_in_loop casts an
+    even-odd ray, which is ambiguous for a point lying exactly on an edge or at
+    a corner of the polygon being tested - and a hole's corner sitting on its
+    own parent's boundary is the normal case on a mesh carrying T-junctions, not
+    a rare one. Asking with that vertex reports the hole as outside a face it is
+    genuinely inside.
+
+    The centroid is interior for a convex loop and for most others; where it is
+    not, the centroid of some three consecutive vertices is."""
+    if not poly:
+        return (0.0, 0.0)
+    cx = sum(p[0] for p in poly) / len(poly)
+    cy = sum(p[1] for p in poly) / len(poly)
+    if _point_in_loop(poly, (cx, cy)):
+        return (cx, cy)
+    n = len(poly)
+    for i in range(n):
+        a, b, c = poly[i], poly[(i + 1) % n], poly[(i + 2) % n]
+        ear = ((a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0)
+        if _point_in_loop(poly, ear):
+            return ear
+    return (cx, cy)
+
+
 def check_hole_nesting(entities, problems):
     """A hole has to sit directly inside the outer bound of the face carrying it.
 
@@ -725,7 +752,7 @@ def check_hole_nesting(entities, problems):
             hpts = _loop_points(entities, hid)
             if not hpts:
                 continue
-            probe = _project(hpts, drop)[0]
+            probe = _interior_point(_project(hpts, drop))
             outer_poly = _project(outer_pts, drop)
             if not _point_in_loop(outer_poly, probe):
                 problems.append(
