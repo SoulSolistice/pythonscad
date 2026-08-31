@@ -1219,6 +1219,86 @@ def check_bspline_faces(entities, problems):
                     )
 
 
+def check_shell_volumes(entities, problems):
+    """Every CLOSED_SHELL has to enclose a positive volume.
+
+    A shell wound inward encloses a negative one. Written as its own
+    MANIFOLD_SOLID_BREP that is a body turned inside out, and nothing else here
+    notices: each face still agrees with its own surface normal, every edge is
+    still used exactly twice in opposite directions, and the shell still closes.
+    The file passes, and a CAD system reads a solid whose surface area comes back
+    negative or whose volume comes back zero.
+
+    It is also the shape of the failure when one solid is split into two shells
+    by mistake: the pieces still sum to the right volume, because one of them
+    carries the sign that cancels the other, so a check on the total sees nothing.
+    Only the sign of each shell on its own does.
+
+    The boundary of a curved face is a polyline through its own vertices here, so
+    the number is the volume of the polyhedron through those points rather than
+    of the true surface. That is close enough for a sign, which is all this asks.
+    """
+    shells = [e for e in entities.values() if e.name == "CLOSED_SHELL"]
+    if len(shells) < 1:
+        return
+
+    for shell in shells:
+        volume = 0.0
+        complete = True
+        for fid in shell.refs():
+            face = entities.get(fid)
+            if face is None or face.name != "ADVANCED_FACE":
+                continue
+            # ADVANCED_FACE(..., surface, same_sense); the flag says whether the
+            # face normal follows the surface or opposes it.
+            same_sense = ".F." not in face.args.rsplit(",", 1)[-1]
+            # Only a shell made entirely of planes gives an exact answer. The
+            # polygon through samples of a curved face's boundary is not that
+            # face, and the error does not cancel: on an analytic export of the
+            # bayonet lid it moved the total by a third and put the sign of both
+            # shells in doubt. A check which is exact on some files and a guess
+            # on others is worse than one which only speaks when it is sure.
+            surf = entities.get(face.refs()[-1]) if face.refs() else None
+            if surf is None or surf.name != "PLANE":
+                complete = False
+                break
+            face_acc = 0.0
+            for bid in face.refs()[:-1]:
+                b = entities.get(bid)
+                if b is None or b.name not in ("FACE_OUTER_BOUND", "FACE_BOUND"):
+                    continue
+                # _loop_polyline, not _loop_points: the latter gives up on any
+                # loop carrying an arc, and a face contributing nothing to the
+                # sum is indistinguishable here from one contributing zero. Half
+                # a shell's faces produce a number, and a sign, that mean
+                # nothing - which is how this check first read every analytic
+                # export as inside out.
+                pts = _loop_polyline(entities, bid)
+                if pts is None or len(pts) < 3:
+                    complete = False
+                    break
+                # Fan from the first point; holes wind the other way and so
+                # subtract themselves.
+                a = pts[0]
+                for i in range(1, len(pts) - 1):
+                    b_, c = pts[i], pts[i + 1]
+                    face_acc += (a[0] * (b_[1] * c[2] - b_[2] * c[1])
+                                 - a[1] * (b_[0] * c[2] - b_[2] * c[0])
+                                 + a[2] * (b_[0] * c[1] - b_[1] * c[0]))
+            if not complete:
+                break
+            volume += face_acc if same_sense else -face_acc
+        if not complete:
+            # A curved face, or geometry this cannot sample. Say nothing rather
+            # than accuse the file on half of it.
+            continue
+        volume /= 6.0
+        if volume < 0:
+            problems.append(
+                "CLOSED_SHELL #%d encloses a negative volume (%.4f) - it is wound "
+                "inside out, or one body was split into two shells" % (shell.id, volume)
+            )
+
 def check_shells(entities, problems):
     """Faces which are not connected by a shared edge belong to different bodies
     and must not share one CLOSED_SHELL."""
@@ -1281,6 +1361,7 @@ def validateSTEP(filename):
         check_cylindrical_faces(entities, problems)
         check_bspline_faces(entities, problems)
         check_shells(entities, problems)
+        check_shell_volumes(entities, problems)
 
     if problems:
         print("STEP validation failed for %s:" % filename, file=sys.stderr)
