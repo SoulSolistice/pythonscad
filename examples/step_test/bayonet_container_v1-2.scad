@@ -771,17 +771,26 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 	assert(span > 0,
 	       "hose socket is shallower than one thread root: raise _hoseThreadTurns");
 
-	points = [
+	// One station per row, so the order the ridge was swept in survives into the
+	// export. That order is the one thing the generator has and the mesh loses:
+	// a boolean cuts the tessellation, and this ridge measures 36% regular once
+	// the socket wall has trimmed it, at which point nothing can be fitted to it
+	// from the mesh alone. declare_grid() below hands the ordering over.
+	rows = [
 		for (i = [0 : steps])
 		let (t = i/steps,
 		     a = 360*turns*t,
 		     z = zStart + span*t,
 		     r = radius0 + slope*min(z, taperLength),
 		     f = max(0, min(1, t/leadIn, (1 - t)/leadOut)))
-		for (p = [[back, -rootWidth/2], [-ridgeDepth*f, -crestWidth/2],
-		          [-ridgeDepth*f, crestWidth/2], [back, rootWidth/2]])
-			[(r + p[0])*cos(a), (r + p[0])*sin(a), z + p[1]]
+		[ for (p = [[back, -rootWidth/2], [-ridgeDepth*f, -crestWidth/2],
+		            [-ridgeDepth*f, crestWidth/2], [back, rootWidth/2]])
+			[(r + p[0])*cos(a), (r + p[0])*sin(a), z + p[1]] ]
 	];
+
+	// The same points flat, for the polyhedron - derived from rows rather than
+	// generated again, so the two cannot come to disagree about the geometry.
+	points = [for (row = rows) for (p = row) p];
 
 	faces = concat(
 		[ for (i = [0 : steps - 1]) for (j = [0 : np - 1]) for (k = [0, 1])
@@ -794,7 +803,16 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 		[ [steps*np + 3, steps*np + 2, steps*np + 1, steps*np] ]
 	);
 
-	polyhedron(points = points, faces = faces, convexity = 8);
+	// The profile is a closed loop of four, so the surface wraps across v.
+	//
+	// This changes nothing about the mesh, and so nothing about a faceted
+	// export: the STEP written without step-analytic-surfaces is byte identical
+	// with and without this wrapper. It only gives the exporter something to
+	// recognise the swept facets as when the analytic and approximation flags
+	// are both on, where it takes the part from 1137 faces to 652.
+	declare_grid(points = rows, closed = true) {
+		polyhedron(points = points, faces = faces, convexity = 8);
+	}
 }
 
 

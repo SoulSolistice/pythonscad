@@ -77,7 +77,7 @@ The doc's numbering, with the tree's answer beside it.
 | 3 — spheres | done, one `SPHERICAL_SURFACE` | confirmed: `SphereSurface`, `SPHERICAL_SURFACE`, `step-sphere` |
 | 2 — fillet B-splines | recognition done, "what remains is entity writing" | **further along than the doc**: emission, validator check and mutation harness all landed (`1310d1a`, `8e96e6c`, `tests/bspline-check-mutations.py`) |
 | 4 — trimmed faces | last; 14 faces of the bayonet | **measured and blocked**: still 14 faces (0.8%, 803.6 of area), and every one of them borders faceted geometry with no analytic surface, so there is no exact trim curve to write. Blocked on item 5, not on effort — see §10 |
-| 5 — swept surfaces | blocked on a user-facing declaration | **measured, and closed as far as declarations can take it.** `declare_*` exists in both languages, but on the reference part a declaration recovers *nothing*: 99.8% of the uncovered area is one helical thread built as a hand-written `polyhedron` (§6) |
+| 5 — swept surfaces | blocked on a user-facing declaration | **done.** The blocker was real but narrower than it read: `declare_grid` existed only in Python, and the reference part is `.scad`. With it registered as an OpenSCAD builtin the thread declares its own sweep — one wrapper in `hoseRidge` — and the part goes from 1137 faces to 652, the thread contributing two `B_SPLINE_SURFACE` faces OpenCASCADE reads as surfaces. The faceted export is byte identical, so every probe figure here still holds. See §11 |
 
 Item 5 changing category is the most consequential ledger movement and the doc
 does not register it. Its stated blocker was that a `polyhedron()` sweep has no
@@ -1771,3 +1771,59 @@ skewed fillet corners want non-separable weight nets, which is a modelling
 question. §8's *what not to do* list stands unchanged: `SURFACE_OF_REVOLUTION`
 and per-face provenance both collapse zero faces, and the bayonet's last
 36-facet rejection is geometrically necessary.
+
+
+## 11. Item 5, closed
+
+The blocker was "a `polyhedron()` sweep has no generator to speak for it". That
+had already been half-answered - `declare_grid` hands over the order the points
+were swept in, which is the one thing the generator has and the mesh loses - but
+only in Python, and `examples/step_test/bayonet_container_v1-2.scad` is
+OpenSCAD. The capability ledger claimed model-level declaration in both
+languages and was wrong about the one case that needed it.
+
+`declare_grid` is now an OpenSCAD builtin, and `hoseRidge` uses it. The change to
+the model is one wrapper and a reshaped list comprehension - the same expression,
+emitted as rows rather than flat, with the flat list derived from the rows so the
+two cannot disagree.
+
+| | shipped | thread declared |
+| --- | --- | --- |
+| faces, analytic + approximate | 1137 | **652** |
+| what OpenCASCADE reads | — | `BSplineSurface 2, Cone 6, Cylinder 18, Plane 627` |
+| kernel round trip | — | ok, one solid, one shell |
+| faceted export | — | byte identical |
+
+That last row is what made the change safe to make. A declaration attaches a
+surface record and changes no geometry, so `bayonet_container_v1-2.stp` and every
+probe figure in §3 and in `doc/step-export.md` are untouched - checked, not
+assumed: the two faceted exports differ only in the filename inside `PRODUCT`.
+
+**What it recovers, and what it does not.** The declared sweep claims 490 facets
+whole and finds 452 more cut across it by the boolean, of which it can use
+neither. Four facets are refused outright - "every corner on the sweep and their
+middle off it, by up to 16.0455 against an allowance of 0.2527" - which is the
+tessellation band doing its job. So roughly half the thread becomes surface and
+the rest stays faceted, which is the honest ceiling for a region a boolean has
+cut.
+
+**It is a fit, not an exact surface**, and that is the difference between this
+declaration and its siblings. `declare_cylinder` names a surface with a closed
+form; `declare_grid` hands over an ordering and the exporter interpolates. So it
+is written only under `step-approximate-surfaces` as well as
+`step-analytic-surfaces`. `step-declare-grid-scad.scad` asserts both states, and
+asserts what a kernel makes of each rather than inferring it from a face count:
+
+```
+ROUNDTRIP:        Cylinder=1 Plane=244            # analytic alone: sweep left faceted
+ROUNDTRIP-APPROX: BSplineSurface=1 Cylinder=1 Plane=84
+```
+
+`ROUNDTRIP-APPROX:` is new. The approximated export was previously round-tripped
+but not censused, so nothing stopped a fitted surface from being read back as the
+160 planes it replaced. Both lines are calibrated by mutation: changing the
+B-spline count to 7 fails the test.
+
+**This does not finish item 4.** Declaring the thread gives the trim's other side
+a surface; the curve where the two meet still has no representation. §10 item 4
+carries the demonstration on a model small enough to read.
