@@ -58,6 +58,68 @@ namespace {
 // is stable for concave corners (where the cross product points the wrong way)
 // and for polygons whose first three vertices happen to be collinear (where
 // the cross product collapses to zero). The magnitude is twice the area.
+// A face of no area is three or more collinear points, and the mesh uses it to
+// stitch a vertex sitting in the interior of another face's edge back into the
+// surface. Sort its points along their common line: the two extremes are the
+// span some neighbouring face still crosses in one edge, and everything between
+// them is a T-junction that neighbour has to be told about.
+//
+// Records nothing when the points are not collinear to within weld_eps, which
+// is deliberately far tighter than model_tol - these points are collinear to
+// within rounding (about 1e-13 on the lid), so anything looser would start
+// moving vertices that were never on the edge at all.
+static void recordSliverSpan(const std::vector<Vector3d>& vertices, const std::vector<int>& loop,
+                             std::map<std::pair<int, int>, std::vector<std::pair<double, int>>>& spans)
+{
+  const double weld_eps = 1e-9;
+
+  std::vector<int> pts;
+  for (const int ind : loop) {
+    if (std::find(pts.begin(), pts.end(), ind) == pts.end()) pts.push_back(ind);
+  }
+  if (pts.size() < 3) return;
+
+  // The longest chord is the span; measure everything along it.
+  std::size_t a = 0, b = 1;
+  double best = -1.0;
+  for (std::size_t i = 0; i < pts.size(); i++) {
+    for (std::size_t j = i + 1; j < pts.size(); j++) {
+      const double d = (vertices[pts[j]] - vertices[pts[i]]).squaredNorm();
+      if (d > best) { best = d; a = i; b = j; }
+    }
+  }
+  if (best <= 0.0) return;
+
+  const Vector3d& from = vertices[pts[a]];
+  const Vector3d axis = vertices[pts[b]] - from;
+  const double axis_len = axis.norm();
+
+  std::vector<std::pair<double, int>> ordered;
+  for (std::size_t i = 0; i < pts.size(); i++) {
+    if (i == a || i == b) continue;
+    const Vector3d off = vertices[pts[i]] - from;
+    if (axis.cross(off).norm() > weld_eps * axis_len) return;  // not collinear
+    ordered.emplace_back(off.dot(axis) / axis.squaredNorm(), pts[i]);
+  }
+  if (ordered.empty()) return;
+  std::sort(ordered.begin(), ordered.end());
+
+  // Key on the span, and measure every middle point from its lower-numbered
+  // end so entries from different slivers are directly comparable.
+  const int lo = pts[a], hi = pts[b];
+  const bool forward = lo < hi;
+  auto& slot = spans[forward ? std::make_pair(lo, hi) : std::make_pair(hi, lo)];
+  for (const auto& o : ordered) {
+    const double at = forward ? o.first : 1.0 - o.first;
+    bool seen = false;
+    for (const auto& have : slot) {
+      if (have.second == o.second) { seen = true; break; }
+    }
+    if (!seen) slot.emplace_back(at, o.second);
+  }
+  std::sort(slot.begin(), slot.end());
+}
+
 Vector3d polygonNormal(const std::vector<Vector3d>& vertices, const std::vector<int>& poly)
 {
   Vector3d norm(0, 0, 0);
@@ -244,6 +306,15 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // floor. The two want opposite responses, so name them apart.
   int collapsed_cnt = 0, zero_area_cnt = 0;
   double lost_area = 0.0;
+  // The corners of every sliver we drop. They are wanted again below: a sliver
+  // of no area is how a mesh stitches a T-junction, and the vertex in the
+  // middle of it has to be put back into the edge that runs past it.
+  // Keyed by the two ends of the sliver's span, valued by the points in
+  // between, in order along it.
+  // Each middle point is kept with its position along the span, measured from
+  // the lower-numbered end, so two slivers which share a span merge rather than
+  // one replacing the other.
+  std::map<std::pair<int, int>, std::vector<std::pair<double, int>>> sliver_spans;
 
   for (std::size_t i = 0; i < face_cnt; i++) {
     std::vector<int> loop;
@@ -268,6 +339,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       degenerated_cnt++;
       zero_area_cnt++;
       lost_area += 0.5 * norm.norm();
+      recordSliverSpan(vertices, loop, sliver_spans);
       continue;
     }
     norm.normalize();
@@ -285,6 +357,74 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     loops[i] = loop;
     loop_normals[i] = norm;
     loop_valid[i] = 1;
+  }
+
+  // Put the T-junctions back that the skipped slivers were holding shut.
+  //
+  // A face of no area is not noise. It is three or more collinear points, and
+  // the mesh uses it to stitch a vertex sitting in the interior of another
+  // face's edge back into the surface - which is why the longest edge of such
+  // a sliver is exactly the sum of the others. Refusing to write it is right:
+  // a face with no normal has no surface to be written on. Dropping it and
+  // stopping there is not. The neighbour still spans the whole edge, the
+  // vertex in the middle belongs to no face at all, and every edge the sliver
+  // carried is left used once - which is exactly the "shell is not closed" an
+  // importer reports, from a mesh that was manifold when it arrived.
+  //
+  // So split the edge that runs past the vertex. The neighbour's two halves
+  // then pair with the two faces that met at the junction, and nothing needs
+  // the sliver in order to say so.
+  //
+  // The tolerance is tight on purpose. These points are collinear to within
+  // rounding - the perpendicular distance measured on the lid is around
+  // 1e-13 - so there is no reason to reach for model_tol here, and good reason
+  // not to: at 1e-5 this would start moving vertices that were never on the
+  // edge in the first place.
+  int split_cnt = 0;
+  std::set<int> welded_verts;
+  std::set<std::pair<int, int>> welded_spans;
+  if (!sliver_spans.empty()) {
+    for (std::size_t i = 0; i < face_cnt; i++) {
+      if (!loop_valid[i]) continue;
+      const std::size_t n = loops[i].size();
+      std::vector<int> out;
+      out.reserve(n);
+      bool changed = false;
+      for (std::size_t j = 0; j < n; j++) {
+        const int p = loops[i][j];
+        const int q = loops[i][(j + 1) % n];
+        out.push_back(p);
+
+        // Only an edge that *is* a sliver's span gets split, and only by that
+        // sliver's own middle points. Splitting every edge which merely passes
+        // through one of them is too much: two faces can share a span, and
+        // both would then hand the same half-edge to a third face.
+        const auto it = sliver_spans.find(p < q ? std::make_pair(p, q) : std::make_pair(q, p));
+        if (it == sliver_spans.end()) continue;
+
+        // Stored low-to-high along the span; this edge may run either way.
+        const std::vector<std::pair<double, int>>& between = it->second;
+        if (p < q) {
+          for (auto m = between.begin(); m != between.end(); ++m) {
+            if (out.back() == m->second) continue;
+            out.push_back(m->second);
+            welded_verts.insert(m->second);
+          }
+        } else {
+          for (auto m = between.rbegin(); m != between.rend(); ++m) {
+            if (out.back() == m->second) continue;
+            out.push_back(m->second);
+            welded_verts.insert(m->second);
+          }
+        }
+        split_cnt++;
+        welded_spans.insert(it->first);
+        changed = true;
+      }
+      // Collinear insertions cannot change the plane, so loop_normals[i] and
+      // everything derived from it downstream stay as they were.
+      if (changed) loops[i] = out;
+    }
   }
 
   // Work out which face each hole belongs to.
@@ -360,13 +500,28 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     }
   }
 
+  const int welded_span_cnt = int(welded_spans.size());
   if (degenerated_cnt > 0) {
     LOG(message_group::Export_Warning,
         "STEP export: skipped %1$d degenerated face%2$s - %3$d collapsed to fewer "
-        "than three distinct points, %4$d had no area (%5$.3g in total). Their edges "
-        "are left used by one face only, so the shell will not be closed.",
+        "than three distinct points, %4$d had no area (%5$.3g in total)",
         degenerated_cnt, degenerated_cnt == 1 ? "" : "s", collapsed_cnt, zero_area_cnt,
         lost_area);
+  }
+  if (zero_area_cnt > welded_span_cnt) {
+    // A sliver whose span no face turned out to cross is one this pass could
+    // not put back, and its edges stay used once.
+    LOG(message_group::Export_Warning,
+        "STEP export: %1$d skipped sliver%2$s had no neighbouring edge to weld into, so "
+        "the shell may not be closed there",
+        zero_area_cnt - welded_span_cnt, zero_area_cnt - welded_span_cnt == 1 ? "" : "s");
+  }
+  if (!welded_verts.empty()) {
+    const int wv = int(welded_verts.size());
+    LOG(message_group::Export_Warning,
+        "STEP export: welded %1$d T-junction vertex%2$s back into %3$d edge%4$s, so the "
+        "faces beside the skipped slivers still pair up",
+        wv, wv == 1 ? "" : "es", split_cnt, split_cnt == 1 ? "" : "s");
   }
   if (reparented_cnt > 0) {
     LOG(message_group::Export_Warning, "STEP export: moved %1$d hole%2$s to the enclosing face",
