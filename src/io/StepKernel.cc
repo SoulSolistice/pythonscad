@@ -192,6 +192,15 @@ bool pointInLoop2d(const std::vector<std::array<double, 2>>& poly, const std::ar
 static bool loopContains(const std::vector<Vector3d>& vertices, const std::vector<int>& outer,
                          const std::vector<int>& inner, int drop)
 {
+  // A hole which touches its own outer bound is not a hole. Three on the
+  // bayonet lid share exactly one vertex with the loop carrying them - pinched
+  // to the boundary at a point - and a point on the boundary is where an
+  // even-odd ray is ambiguous, so the containment test below calls all of its
+  // corners inside and OpenCASCADE still refuses the face. Vertex indices are
+  // exact where the geometry is not, so ask them first.
+  for (const int v : inner) {
+    if (std::find(outer.begin(), outer.end(), v) != outer.end()) return false;
+  }
   std::vector<std::array<double, 2>> poly;
   projectLoop(vertices, outer, drop, poly);
   for (const int v : inner) {
