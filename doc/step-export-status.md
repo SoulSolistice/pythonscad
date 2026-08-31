@@ -1421,10 +1421,8 @@ faces, which nothing has attempted; and non-separable weight nets for fully
 skewed fillet corners, which is a modelling question rather than an exporter
 one.
 
-**What is still not covered:** OCCT is one kernel. SolidWorks and Fusion have
-their own readers and their own opinions, and the failure that started this was
-observed in SolidWorks. A round trip through those is still worth doing - but it
-is now a second opinion rather than the only one.
+**This has now been done, and OCCT is no longer the only kernel that has read
+these files.** See *The SOLIDWORKS round trip* below. Fusion is still untried.
 
 **What not to do, and why, so nobody re-derives it:**
 
@@ -1448,3 +1446,95 @@ is now a second opinion rather than the only one.
 still behind `step-analytic-surfaces`, off by default. Everything above makes it
 better; none of it decides when it becomes the default. That wants the round trip
 evidence first.
+
+## 9. The SOLIDWORKS round trip
+
+The failure that started this work was seen in SOLIDWORKS, and until now every
+number in this document came from OpenCASCADE. `scripts/step-interop-kit.py`
+writes fourteen coupons, each exported twice - analytic, and faceted as a
+control - and `scripts/step-interop-solidworks.ps1` drives SOLIDWORKS 2026 over
+all twenty-eight through its API.
+
+**Every file imports as a solid body with zero errors, and all fourteen coupons
+pass.** Not one analytic export failed where its faceted control succeeded,
+which is the only shape a finding could have taken.
+
+Where an exact value exists, the analytic export matches it:
+
+| coupon | SOLIDWORKS reads | exact |
+| --- | --- | --- |
+| c01 cylinder | 6283.1853 | pi*10^2*20 = 6283.18531 |
+| c07 fillet quadrics | 975.5870 | Minkowski 975.587, as quoted in §7 |
+| c04 sphere | 4188.6448 | 4188.7902 |
+
+The sphere's shortfall is its two flat polar discs and nothing else - the
+analytic export is one `SPHERICAL_SURFACE` plus two `PLANE`s, which is the two
+unreplaced facets `step-sphere` already asserts. Solving the cap volume backwards
+gives a latitude of 84.3755 degrees where the tessellation puts it at 84.3750.
+
+### What SOLIDWORKS writes back
+
+`scripts/step-interop-roundtrip.ps1` reads a coupon in and saves it straight out
+again, which settles two things this document previously asserted without
+checking.
+
+The first is §7's claim about the fillet - "entity for entity what SolidWorks
+writes for the same part". It is exactly true, and now measured rather than
+reasoned:
+
+| c07 fillet | ours | SOLIDWORKS |
+| --- | --- | --- |
+| `ADVANCED_FACE` | 26 | 26 |
+| `PLANE` | 6 | 6 |
+| `CYLINDRICAL_SURFACE` | 12 | 12 |
+| `SPHERICAL_SURFACE` | 8 | 8 |
+| `CIRCLE` / `LINE` | 24 / 24 | 24 / 24 |
+
+The second is the question an importing user actually has, which no validity
+check answers: having read a `CYLINDRICAL_SURFACE`, does the receiving system
+still believe in it? **No quadric was downgraded to a spline anywhere in the
+kit.** `c09`'s twenty-four `RATIONAL_B_SPLINE_SURFACE` complex instances - the
+highest risk in `doc/step-interop-validation.md`, and the class of defect F7 was
+- come back as twenty-four. SOLIDWORKS accepts the form and re-emits it.
+
+Where it differs, it is splitting periodic surfaces at their seams rather than
+losing anything: our one-face cylinder returns as two, our one-face torus as
+four. That is a representation choice, and on this evidence ours is the more
+compact of the two.
+
+### The one finding
+
+`examples/step_test/lid10` exported with its own parameter set comes back as two
+bodies whose mass properties are impossible - the faceted one reads volume and
+area of exactly zero, the analytic one a *negative* surface area. Its mesh is a
+single connected surface of 6780 triangles, every edge shared by exactly two
+faces, signed volume 223482.298; the export writes two `CLOSED_SHELL`s, and
+SOLIDWORKS adds them: 612665 + 385455 = 998121.
+
+`tests/validatestep.py` now catches this without SOLIDWORKS, by measuring the
+volume each shell encloses: one of them is negative. Conserving the *total*
+would not have done - the two sum to the right answer precisely because one
+carries the sign that cancels the other.
+
+The cause is still open. It is localised: 213 input triangles straddle the two
+shells, all of them on the z=95 rim annulus, where coplanar neighbours end up in
+different shells. Four explanations have been measured and ruled out - geometry
+lost in the merge (area is conserved to 0.0115 in 107314), the T-junction weld
+and the other changes of 2026-08-31 (bisected, the split survives all of them),
+near-duplicate vertices at the seam (the gap is a real 0.6), and the dropped
+slivers being the connective tissue (restoring them changes nothing).
+
+### What this licenses, and what it does not
+
+The open decision in §8 was whether the analytic path stops being experimental,
+and that this wanted round trip evidence first. The evidence now says: on every
+coupon, in a second kernel, the analytic export imports as a solid, measures
+exact where an exact value exists, and survives a round trip with its surfaces
+intact. That is the case for turning it on.
+
+Against it stands one real part which exports as two bodies. The defect is not
+in the analytic path - the faceted control fails the same way - but a user
+meeting it would not care about the distinction.
+
+Fusion is installed on the same machine and has not been tried. The same kit
+runs against it; only the driver is SOLIDWORKS-specific.
