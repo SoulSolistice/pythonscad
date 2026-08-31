@@ -119,7 +119,7 @@ answer. It is used below for validity only.
 Ranked by what they cost. F1 is the only one that is a question about
 correctness; the rest are hygiene and drift.
 
-### F1 — a committed analytic export is not a closed shell — **fixed**
+### F1 — a committed analytic export is not a closed shell — **closed, on the third attempt**
 
 `tests/validatestep.py` over `examples/step_test/lid10.stp`
 (`FILE_NAME` says pythonscad, 2026-08-13):
@@ -158,6 +158,41 @@ The fix is reasoned from the artifact, not run: confirming it is one export of
 carries the two commands. If the reversal decision were ever wrong the validator
 catches it — a backwards face fails the winding check, and an inconsistently
 wound one fails the edge-use rule.
+
+**That confirmation was never done, and the fix above was not the end of it.**
+Marking this fixed was premature in two ways. The re-export said to validate
+cleanly was of the model's *default* component rather than the lid — `lid10.scad`
+selects its part through `lid10.json`, and without `-p`/`-P` it renders something
+else entirely. Exported as shipped, it still failed. And the committed artifact
+itself was never regenerated, so it sat in the tree failing the project's own
+validator for the whole time this section claimed otherwise.
+
+What was actually wrong took three defects, none of them the dropped loop above:
+
+1. **T-junction slivers.** The mesh is manifold and contains 26 zero-area
+   triangles of three collinear points, which is how a mesh stitches a vertex
+   lying inside another face's edge. The exporter rightly refuses to write a
+   face with no normal, and wrongly *dropped* it — reopening every junction, for
+   48 edges used once. A sliver's span is now split at the vertex it was holding.
+2. **The merge warped flat input.** 6780 planar triangles in, 26 non-planar
+   merged faces out, worst 0.1636. The hole re-insertion in `mergeTriangles`
+   moved triangles between planes on a 2.56 degree normal test, which at this
+   part's radius of 78 permits 3.5 of out-of-plane error. Those arrive wound the
+   other way, which is where the reversed loops came from — so the pass this
+   section credits was treating a symptom.
+3. **The containment probe.** Both exporter and validator asked which face
+   encloses a hole using the hole's *first vertex*, which on a T-junction mesh
+   sits exactly on the parent's boundary, where an even-odd ray is ambiguous.
+
+With all three, `examples/step_test/lid10.stp` regenerates and validates:
+53417 entities, 1977 faces. The artifact in the tree is now that export rather
+than the 2026-08-13 one.
+
+The lesson worth keeping is not about geometry. Every number in this section was
+correct; the conclusion was wrong because the confirming run was skipped and the
+section still said **fixed**. A finding is closed by a measurement, not by a
+diagnosis — and where a model carries a parameter set, exporting it without one
+measures a different part.
 
 ### F2 — the doc understates item 2, and a code comment contradicts the code — **fixed**
 

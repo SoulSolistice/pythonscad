@@ -10,9 +10,9 @@ only be measured on something real.
 | file | what it is |
 | --- | --- |
 | `bayonet_container_v1-2.scad`, `.json` | the model and its parameter set |
-| `bayonet_container_v1-2.stp` | **faceted** export of the base, `$fn = 60`, 2026-08-10 |
+| `bayonet_container_v1-2.stp` | **faceted** export of the base, `$fn = 60`, 2026-08-10 — predates the F1 fixes and still fails `validatestep.py`; a fresh export of the same part is clean at the same 1685 faces, so regenerating it would not move the probe figures |
 | `lid10.scad`, `.json` | the same model, lid part |
-| `lid10.stp` | **analytic** export of the lid, 2026-08-13 |
+| `lid10.stp` | **analytic** export of the lid, 2026-08-31 (validates: 1977 faces) |
 
 ## What each one is for
 
