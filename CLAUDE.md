@@ -467,8 +467,131 @@ powershell -ExecutionPolicy Bypass -File scripts\release-smoke\test-windows.ps1 
   --skip-download --artifact-dir build --keep-workdir
 ```
 
+#### Driving the MSYS2 shell non-interactively
+
+`msys2_shell.cmd` opens an interactive terminal, which a script or an agent
+cannot use. For scripted runs, call `bash` directly and set the subsystem:
+
+```powershell
+$env:MSYSTEM='UCRT64'; $env:CHERE_INVOKING='1'
+C:\msys64\usr\bin\bash.exe -lc "cd /e/path/to/pythonscad && cmake --build build -j12"
+```
+
+`-l` matters: the login profile is what puts `/ucrt64/bin` on PATH, so without
+it `cmake`, `ninja` and `g++` are all missing.
+
+**Put anything non-trivial in a script file and run `bash <file>`.** A command
+passed inline crosses PowerShell's quoting rules and then bash's, and the two
+disagree about backslashes, `$`, and quotes; PowerShell here-strings do not
+survive the trip either. Writing the script to disk first sidesteps all of it.
+
+Note also that `ninja -t commands` prints the compiler as a Windows path with
+backslashes, which bash then eats. Rebuild single objects with
+`ninja -C build <object-path>` rather than by replaying that command.
+
+#### Running the built binary
+
+**A freshly linked `build/pythonscad.exe` cannot run.** It fails with exit 127,
+or `0xC0000135` (3221225781) when launched by Windows, and
+`error while loading shared libraries: python314.dll`. This is not a build
+failure. The link pulls the bundled portable Python at
+`python_mingw/ucrt64/lib/libpython3.14.dll.a`, a git-ignored tree that ships
+headers and an import library but **no DLL**, so nothing in the build tree can
+satisfy the import.
+
+The two packaging steps above are what produce a runnable tree:
+
+```bash
+BUNDLE_PY_AUTO_INSTALL_PIP_LICENSES=1 \
+  ./scripts/bundle-runtime-python.sh build/pythonscad-bundled-py --python python
+cmake --install build --prefix build/staging
+```
+
+Run the binary from the staging **root** — `build/staging/pythonscad.exe`, which
+sits beside all ~70 DLLs. `build/staging/bin/pythonscad.exe` also exists, has no
+DLLs next to it, and still fails.
+
+Do not work around this by copying `python314.dll` out of an installed
+PythonSCAD or by putting that install on PATH: that pulls a different build's Qt
+and other DLLs into the process and makes every result untrustworthy.
+
+#### Running the test suite on Windows
+
+ctest drives `build/pythonscad.com`, which has the same missing-DLL problem, so
+a bare `ctest` fails every test with
+`PythonSCAD exited with status 3221225781` — a DLL-not-found code that reads
+like a crash. Stage first, then put the staging directory on PATH:
+
+```bash
+export PATH="$PWD/build/staging:$PATH"
+ctest --test-dir build -j12
+```
+
+The DLLs in `build/staging` come from the same build, so this is consistent
+rather than a fudge. The suite is ~3000 tests. Unlike the container build, the
+GL/PNG comparison tests need no virtual framebuffer here — they use the real
+desktop and GPU.
+
+Two more things are needed for a fully green run, and each fails as something
+that looks unrelated to what it is:
+
+- **The 22 stdlib `.pyd` extension modules** are installed only into staging,
+  and the embedded interpreter resolves them relative to the executable rather
+  than through `PYTHONHOME` (which does not work — it was tried). Copy them
+  beside the build binary, or tests that import `asyncio`, `socket` or `ctypes`
+  fail with `ModuleNotFoundError: No module named '_socket'` / `'_ctypes'`.
+- **`LANG=C`.** The echo tests compare against English diagnostics. On a
+  non-English system gettext translates them and the comparison fails on the
+  translation rather than on any behaviour.
+
+`ipython-smoke` and `repl-smoke` cannot pass from the build tree at all: they
+drive the REPL, which spawns `pythonscad.exe` as a child, and ctest replaces the
+test environment wholesale so the PATH above never reaches it. Run those two
+against the staged binary directly:
+
+```bash
+python tests/test_ipython_cli.py build/staging/pythonscad.com
+python tests/test_repl_cli.py    build/staging/pythonscad.com
+```
+
+`scripts/msys2-build.sh` does the whole sequence — configure, build, bundle,
+install, then test with all of the above applied:
+
+```bash
+./scripts/msys2-build.sh --test
+```
+
+The `-j3` / `-j4` figures elsewhere in this file describe a memory-constrained
+4-core agent sandbox. On a real workstation, size the job count to the machine;
+memory is still the binding constraint, at roughly 2 GB per CGAL translation
+unit.
+
+#### Tests that do not compile against this fork
+
+`ENABLE_TESTS=ON` globs test sources recursively, and a few files in the tree do
+not build against the code as it stands. They are excluded by name in
+`CMakeLists.txt`, each with a note saying what porting it would take —
+`src/core/surface_node_test.cc` is one, imported from upstream OpenSCAD and
+written against a `SurfaceNode` this fork has diverged from in three ways.
+Removing a line from that `foreach(stale_test ...)` list is the last step of
+porting one, not the first.
+
 See `doc/win-build.md` for the older MSVC/vcpkg build notes. The historical MXE
 cross-build path is `./scripts/mingw-x-build-dependencies.sh 64`.
+
+### STEP export interop
+
+The analytic STEP path is validated against OpenCASCADE only. To get a second
+opinion from a commercial kernel, `scripts/step-interop-kit.py` builds a set of
+coupons — each exported twice, once analytic and once faceted as a control — and
+a CSV to record the target system's answers:
+
+```bash
+python3 scripts/step-interop-kit.py --binary build/staging/pythonscad.exe --outdir build/interop-kit
+```
+
+`doc/step-interop-validation.md` explains what each coupon isolates and gives
+the per-file procedure and pass criteria.
 
 ### WebAssembly Build
 
