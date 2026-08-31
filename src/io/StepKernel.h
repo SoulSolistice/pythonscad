@@ -113,6 +113,23 @@ inline std::string step_string(const std::string& str)
 class StepKernel
 {
 public:
+  // Entities are arena owned: every one registers itself here in its base
+  // constructor, and ~StepKernel deletes the arena. Nothing else owns an
+  // Entity, and nothing should delete one.
+  //
+  // Registering in the *base* constructor is what makes that safe. It runs
+  // before any derived member is initialised, so an entity built as an argument
+  // to another entity's constructor is already in the arena by the time the
+  // outer one is being built, and is freed even if the outer never completes.
+  // Entities therefore do not leak on a throw.
+  //
+  // The one hole, recorded rather than fixed: if a *derived* constructor throws
+  // after this one has run, the runtime frees the storage and the arena is left
+  // holding a dangling pointer to it, which the destructor then deletes again.
+  // Closing it properly means taking self-registration out of the constructor
+  // across 126 construction sites, which is not worth doing for a path only
+  // reachable on allocation failure - but it is worth knowing about before
+  // anyone adds a constructor here that can throw for an ordinary reason.
   class Entity
   {
   public:

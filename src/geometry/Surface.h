@@ -11,7 +11,6 @@ class Surface
 public:
   virtual ~Surface() = default;
   Vector3d refpt, normdir;
-  virtual void display(const std::vector<Vector3d>& vertices);
   virtual void reverse(void);
   virtual int operator==(const Surface& other);
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
@@ -75,7 +74,6 @@ class SphereSurface : public Surface
 {
 public:
   SphereSurface(Vector3d center, Vector3d normdir, double r);
-  void display(const std::vector<Vector3d>& vertices);
   int operator==(const SphereSurface& other);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
@@ -98,7 +96,6 @@ class TorusSurface : public Surface
 {
 public:
   TorusSurface(Vector3d center, Vector3d normdir, double r_major, double r_minor);
-  void display(const std::vector<Vector3d>& vertices);
   void reverse(void);
   int operator==(const TorusSurface& other);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
@@ -153,7 +150,6 @@ public:
    * or the declaration describes a different surface from the mesh. */
   BezierPatchSurface(int degree_u, int degree_v, std::vector<Vector3d> net,
                      std::vector<double> weights = {});
-  void display(const std::vector<Vector3d>& vertices) override;
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
@@ -198,7 +194,6 @@ class CylinderSurface : public Surface
 {
 public:
   CylinderSurface(Vector3d center, Vector3d normdir, double r);
-  void display(const std::vector<Vector3d>& vertices);
   void reverse(void);
   int operator==(const CylinderSurface& other);
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
@@ -243,7 +238,6 @@ class GridSurface : public Surface
 {
 public:
   GridSurface(int rows, int cols, std::vector<Vector3d> net, bool closed_v = false);
-  void display(const std::vector<Vector3d>& vertices) override;
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;

@@ -11,10 +11,32 @@
 #include "geometry/linalg.h"
 #include "geometry/Surface.h"
 
-void Surface::display(const std::vector<Vector3d>& vertices)
-{
-  printf("refpt is (%g/%g/%g)\n", this->refpt[0], this->refpt[1], this->refpt[2]);
-}
+// Tolerances in this file, and how they relate to the ones next door.
+//
+// AnalyticFeatures.cc scales its tolerances to the geometry - `1e-9 *
+// max(r_bottom, r_top)` for a radius, `1e-6 * max(1.0, (hi - lo).norm())` for a
+// span, `1e-7 * radius` for a curve. The two here do not:
+//
+//   sameAs      1e-9 absolute, comparing two surface *records* - a radius, an
+//               axis, a reference point. Records come from declarations rather
+//               than from measurement, so two that mean the same surface agree
+//               to the last place or were never the same surface. Absolute is
+//               right here.
+//
+//   pointMember 1e-5 absolute, asking whether a point lies on a surface. This
+//               one is scale dependent and it is the real gap. On a part a few
+//               hundred units across it is tight but workable; on a model in
+//               microns it would accept almost anything, and on one in
+//               kilometres it would accept almost nothing and quietly drop
+//               every surface to facets.
+//
+// It has not been made relative, and deliberately so: the obvious form,
+// `1e-5 * max(1.0, r)`, is 78 times looser on the bayonet lid than what every
+// measurement in doc/step-export-status.md was taken against, and no fixture in
+// the suite is far enough from unit scale to show whether that is an
+// improvement or a new source of wrong surfaces. It wants a large-model fixture
+// and a measurement first, not a change made on the strength of the argument
+// above.
 
 void Surface::reverse(void)
 {
@@ -138,11 +160,6 @@ SphereSurface::SphereSurface(Vector3d refpt, Vector3d normdir, double r)
   this->r = r;
 }
 
-void SphereSurface::display(const std::vector<Vector3d>& vertices)
-{
-  printf("SphereSurface r=%g at (%g/%g/%g)\n", r, refpt[0], refpt[1], refpt[2]);
-}
-
 std::shared_ptr<Surface> SphereSurface::clone() const
 {
   return std::make_shared<SphereSurface>(*this);
@@ -182,11 +199,6 @@ TorusSurface::TorusSurface(Vector3d refpt, Vector3d normdir, double r_major, dou
   this->normdir = normdir;
   this->r_major = r_major;
   this->r_minor = r_minor;
-}
-
-void TorusSurface::display(const std::vector<Vector3d>& vertices)
-{
-  printf("TorusSurface R=%g r=%g at (%g/%g/%g)\n", r_major, r_minor, refpt[0], refpt[1], refpt[2]);
 }
 
 void TorusSurface::reverse(void)
@@ -299,11 +311,6 @@ BezierPatchSurface::BezierPatchSurface(int degree_u, int degree_v, std::vector<V
   // is stable under everything that can move the patch.
   this->refpt = this->net.empty() ? Vector3d::Zero() : this->net.front();
   this->normdir = Vector3d(0, 0, 1);
-}
-
-void BezierPatchSurface::display(const std::vector<Vector3d>& vertices)
-{
-  printf("BezierPatchSurface degree (%d,%d), %zu control points\n", degree_u, degree_v, net.size());
 }
 
 std::shared_ptr<Surface> BezierPatchSurface::clone() const
@@ -494,14 +501,6 @@ CylinderSurface::CylinderSurface(Vector3d refpt, Vector3d normdir, double r)
   this->refpt = refpt;
   this->normdir = normdir;
   this->r = r;
-}
-
-void CylinderSurface::display(const std::vector<Vector3d>& vertices)
-{
-  printf("CylinderSurface\n");
-  //    printf("(%g/%g/%g) - %d(%g/%g/%g) cent=(%g/%g/%g), normdir=(%g/%g/%g) r=%g\n",>start, start[0],
-  //    start[1], start[2], this->end, end[0], end[1], end[2], refpt[0], refpt[1], refpt[2], normdir[0],
-  //    normdir[1], normdir[2], r);
 }
 
 void CylinderSurface::reverse(void)
@@ -899,11 +898,6 @@ void GridSurface::reindex()
 {
   lookup.clear();
   for (std::size_t i = 0; i < net.size(); i++) lookup.emplace(gridKey(net[i]), int(i));
-}
-
-void GridSurface::display(const std::vector<Vector3d>& vertices)
-{
-  printf("GridSurface %dx%d%s\n", rows, cols, closed_v ? " (closed)" : "");
 }
 
 int GridSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)

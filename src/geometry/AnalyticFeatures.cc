@@ -568,8 +568,21 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
     partner[candidate.a] = candidate.b;
     partner[candidate.b] = candidate.a;
   }
-  std::function<bool(std::size_t, std::set<std::size_t>&)> augment = [&](std::size_t u,
-                                                                         std::set<std::size_t>& seen) {
+  // The repair is a heuristic, not a maximum matching. Triangle adjacency is not
+  // bipartite in general, and a plain augmenting path without blossom
+  // contraction can miss a path that exists around an odd cycle. That costs a
+  // quad, never a wrong one: a triangle left unpaired refuses the grid and the
+  // region goes out faceted.
+  //
+  // The depth limit is the part that matters. Each level inserts a triangle into
+  // `seen` before recursing, so depth is bounded only by the number of triangles
+  // in the region - tens of thousands on a large sweep, one stack frame each.
+  // Running out of stack would take the process down; giving up returns the same
+  // faceted fallback an unpairable triangle already produces.
+  const std::size_t augment_max_depth = 4096;
+  std::function<bool(std::size_t, std::set<std::size_t>&, std::size_t)> augment =
+    [&](std::size_t u, std::set<std::size_t>& seen, std::size_t depth) {
+    if (depth >= augment_max_depth) return false;
     for (const std::size_t v : neighbours[u]) {
       if (seen.count(v)) continue;
       seen.insert(v);
@@ -582,7 +595,7 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
       const std::size_t displaced = held->second;
       partner.erase(displaced);
       partner.erase(v);
-      if (augment(displaced, seen)) {
+      if (augment(displaced, seen, depth + 1)) {
         partner[v] = u;
         partner[u] = v;
         return true;
@@ -595,7 +608,7 @@ std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& re
   for (const std::size_t f : triangles) {
     if (partner.count(f)) continue;
     std::set<std::size_t> seen{f};
-    if (!augment(f, seen)) return refuse("a triangle pairs with no neighbour into a quad");
+    if (!augment(f, seen, 0)) return refuse("a triangle pairs with no neighbour into a quad");
   }
   for (const auto& entry : partner) {
     if (entry.first > entry.second) continue;  // once per pair
