@@ -181,6 +181,25 @@ bool pointInLoop2d(const std::vector<std::array<double, 2>>& poly, const std::ar
   return inside;
 }
 
+// Does `outer` hold every corner of `inner`, both projected along `drop`?
+//
+// One probe point says a loop *starts* inside a candidate; it does not say the
+// loop is inside it. A hole whose corners fall outside the face carrying it is
+// not a hole of that face, and OpenCASCADE says so - InvalidImbricationOfWires,
+// on three faces of the bayonet lid, where the chosen parent held 1, 2 and 3 of
+// the loop's corners rather than all of them. Every genuine hole on that model
+// sits wholly inside its parent, so ask for all of them.
+static bool loopContains(const std::vector<Vector3d>& vertices, const std::vector<int>& outer,
+                         const std::vector<int>& inner, int drop)
+{
+  std::vector<std::array<double, 2>> poly;
+  projectLoop(vertices, outer, drop, poly);
+  for (const int v : inner) {
+    if (!pointInLoop2d(poly, projectPoint(vertices[v], drop))) return false;
+  }
+  return true;
+}
+
 /*! One run of loop edges replaced by a single arc. */
 struct ArcSubstitution {
   std::size_t start = 0, count = 0;
@@ -469,6 +488,9 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
 
       projectLoop(vertices, loops[j], drop, cand);
       if (!pointInLoop2d(cand, probe)) continue;
+      // One probe point says the loop starts inside this candidate; it does not
+      // say the loop *is* inside it. See loopContains.
+      if (!loopContains(vertices, loops[j], loops[i], drop)) continue;
       const double area = loopArea2d(cand);
       if (found == -1 || area < best_area) {
         found = int(j);
@@ -479,8 +501,13 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     if (found != -1) {
       parents[i] = found;
       if (found != previous) reparented_cnt++;
-    } else if (previous != -1 && loop_valid[previous] && !loop_is_hole[previous]) {
-      parents[i] = previous;  // keep what mergeTriangles found
+    } else if (previous != -1 && loop_valid[previous] && !loop_is_hole[previous] &&
+               loopContains(vertices, loops[previous], loops[i], drop)) {
+      // Keep what mergeTriangles found, but only if it actually holds the loop.
+      // Without that condition this branch puts back the very parent the search
+      // above just rejected, which is how three faces of the bayonet lid kept
+      // their InvalidImbricationOfWires after the search learned to check.
+      parents[i] = previous;
     } else {
       // Nothing encloses it, which is the evidence that it is not the boundary
       // of a hole in anything: it is an outer bound. It used to be marked
@@ -492,18 +519,15 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       // *The dropped loop* in doc/step-export.md.
       parents[i] = -1;
       loop_is_hole[i] = 0;
-      // Reverse it only if that is what marked it a hole. The rule above also
-      // marks a loop a hole because mergeTriangles() gave it a parent, and such
-      // a loop can be wound the right way already - reversing it would then turn
-      // a correct face into a backwards one. Wind it so the face agrees with the
-      // mesh normal, and therefore with the neighbours it shares edges with.
-      if (i < faceNormals.size()) {
-        const Vector3d ref = faceNormals[i].head<3>();
-        if (ref.squaredNorm() > 0.5 && ref.dot(loop_normals[i]) < 0) {
-          std::reverse(loops[i].begin(), loops[i].end());
-          loop_normals[i] = -loop_normals[i];
-        }
-      }
+      // Keep the winding the loop arrived with. It used to be reversed to agree
+      // with the bucket's mesh normal, on the reasoning that a face should agree
+      // with the neighbours it shares edges with - but the bucket normal is the
+      // wrong reference for exactly the loops which reach this branch. They are
+      // the ones nothing encloses, and on the bayonet lid they are notches at
+      // the rim whose own winding is what the mesh said; turning them over is
+      // what made them disagree with their neighbours. Reversing produced 15
+      // edges used twice in the same direction there, and not reversing
+      // produces none.
       orphan_cnt++;
     }
   }
