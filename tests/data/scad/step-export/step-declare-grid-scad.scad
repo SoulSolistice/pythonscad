@@ -27,6 +27,14 @@
 // EXPECT: 1 declared sweep left faceted - 0 wrap the surface's seam, 1 await the approximation flag
 // APPROX: 1 declared sweep written as one face each, replacing 160 facets
 // APPROX-NOT: await the approximation flag
+//
+// And what a real kernel makes of each. The analytic export leaves the sweep
+// faceted, so OpenCASCADE sees the wall's outer cylinder and planes; with the
+// approximation flag the sweep survives as a surface rather than as the 160
+// planes it would otherwise be, which is the whole claim and is worth asserting
+// rather than inferring from a face count.
+// ROUNDTRIP: Cylinder=1 Plane=244
+// ROUNDTRIP-APPROX: BSplineSurface=1 Cylinder=1 Plane=84
 
 $fn = 32;
 

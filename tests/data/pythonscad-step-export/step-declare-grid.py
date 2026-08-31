@@ -92,6 +92,13 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # EXPECT-NOT: written as one face each
 # APPROX: 2 declared sweeps written as one face each, replacing 300 facets
 # EXPECT: its facets lie over 2 of the profile's 4 spans - the region is a strip, whose boundary stays inside the surface's rectangle
+#
+# What a kernel makes of each export: the declared sweep survives as a surface, not as the facets it claimed.
+# Validity says the file is well formed; only this says the surface
+# survived as one. A fit read back as the planes it replaced would
+# pass every other check in this fixture.
+# ROUNDTRIP: Plane=534
+# ROUNDTRIP-APPROX: BSplineSurface=2 Plane=234
 from pythonscad import *
 import math
 

@@ -40,6 +40,13 @@ the mesh it replaced, which had the volume of a 64-gon.
 # APPROX: approximation took 1 of 1 uncovered regions - 1 as cylinders, 0 as rings of a turned surface, 0 as swept grids
 # APPROX: 1 surface recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 64 facets replaced
 # APPROX: approximation found nothing left to fit
+#
+# What a kernel makes of each export: the fitted wall is read as a cylinder, which is the point of fitting one.
+# Validity says the file is well formed; only this says the surface
+# survived as one. A fit read back as the planes it replaced would
+# pass every other check in this fixture.
+# ROUNDTRIP: Plane=66
+# ROUNDTRIP-APPROX: Cylinder=1 Plane=2
 from pythonscad import *
 import math
 

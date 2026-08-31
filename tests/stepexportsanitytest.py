@@ -89,6 +89,10 @@ def normalized(path):
 
 
 def expectations(path):
+    # Directive names are matched as whole words. Without that guard one name is
+    # a substring of another - ROUNDTRIP-APPROX: was read as an APPROX: line and
+    # its surface census asserted against the exporter's own report, which fails
+    # in a way that looks like the fixture being wrong rather than the parser.
     """The EXPECT:/EXPECT-NOT: lines a fixture states about itself.
 
     A fixture documents what the exporter should make of it in prose anyway;
@@ -105,7 +109,7 @@ def expectations(path):
     want, unwanted = [], []
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
-            m = re.search(r"EXPECT(-NOT)?:\s*(.+?)\s*$", line)
+            m = re.search(r"(?<![-\w])EXPECT(-NOT)?:\s*(.+?)\s*$", line)
             if m:
                 (unwanted if m.group(1) else want).append(" ".join(m.group(2).split()))
     return want, unwanted
@@ -127,7 +131,7 @@ def roundtrip_expectations(path):
     wanted = {}
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
-            m = re.search(r"ROUNDTRIP:\s*(.+?)\s*$", line)
+            m = re.search(r"(?<![-\w])ROUNDTRIP:\s*(.+?)\s*$", line)
             if not m:
                 continue
             for token in m.group(1).split():
@@ -140,7 +144,7 @@ def roundtrip_expectations(path):
 def keyed_expectations(path, marker, cast=int):
     """A fixture line of `Key=value` tokens under `marker`."""
     wanted = {}
-    pattern = re.compile(r"%s:\s*(.+?)\s*$" % marker)
+    pattern = re.compile(r"(?<![-\w])%s:\s*(.+?)\s*$" % marker)
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             m = pattern.search(line)
@@ -171,7 +175,7 @@ def canonical_expectations(path):
     wanted = {}
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
-            m = re.search(r"CANONICAL:\s*(.+?)\s*$", line)
+            m = re.search(r"(?<![-\w])CANONICAL:\s*(.+?)\s*$", line)
             if not m:
                 continue
             for token in m.group(1).split():
@@ -324,13 +328,23 @@ def check_approximation(openscad, inputfile, stepfile, args):
     # theoretical difference - a B-spline surface whose knot lists were written
     # in the wrong order passed every check here and was silently dropped by
     # OpenCASCADE, taking its face with it.
-    if not check_roundtrip(inputfile, approxfile, "approximation"):
+    # A fixture may say what the kernel should make of the approximated export,
+    # the same way ROUNDTRIP: does for the analytic one:
+    #
+    #     # ROUNDTRIP-APPROX: BSplineSurface=1 Cylinder=1 Plane=84
+    #
+    # Without it the approximation is checked only for being a valid solid,
+    # which does not say that the surface it fitted survived as a surface. A
+    # declared sweep written as a B-spline and then read back as 160 planes
+    # would pass every other check in this file.
+    if not check_roundtrip(inputfile, approxfile, "approximation",
+                           keyed_expectations(inputfile, "ROUNDTRIP-APPROX") or None):
         return False
     ok = True
     flat = " ".join(output.split())
     with open(inputfile, encoding="utf-8", errors="replace") as f:
         for line in f:
-            m = re.search(r"APPROX(-NOT)?:\s*(.+?)\s*$", line)
+            m = re.search(r"(?<![-\w])APPROX(-NOT)?:\s*(.+?)\s*$", line)
             if not m:
                 continue
             wanted = " ".join(m.group(2).split())
@@ -419,7 +433,7 @@ if ok:
 
 # Fixtures which state APPROX: lines get one more export, with the
 # approximation pass switched on as well.
-if ok and re.search(r"APPROX(-NOT)?:", open(inputfile, encoding="utf-8", errors="replace").read()):
+if ok and re.search(r"(?<![-\w])APPROX(-NOT)?:", open(inputfile, encoding="utf-8", errors="replace").read()):
     ok = check_approximation(args.openscad, inputfile, stepfile, remaining_args)
 
 if ok:

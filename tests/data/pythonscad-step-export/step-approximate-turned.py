@@ -43,6 +43,13 @@ among the declarations lets the zone pass absorb the whole stack of cones.
 # APPROX: approximation took 2 of 2 uncovered regions - 0 as cylinders, 2 as rings of a turned surface, 0 as swept grids
 # APPROX: 2 surfaces recognised (0 toroidal, 1 spherical, 1 conical, 0 partial), 528 facets replaced
 # APPROX: approximation found nothing left to fit
+#
+# What a kernel makes of each export: the frustum comes back a cone and the ball a sphere, from rings alone.
+# Validity says the file is well formed; only this says the surface
+# survived as one. A fit read back as the planes it replaced would
+# pass every other check in this fixture.
+# ROUNDTRIP: Plane=532
+# ROUNDTRIP-APPROX: Cone=1 Plane=4 Sphere=1
 from pythonscad import *
 import math
 

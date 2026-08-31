@@ -46,6 +46,13 @@ standing off the chords by about that band, in the direction it should.
 # EXPECT: the region is a strip, whose boundary stays inside the surface's rectangle
 # EXPECT-NOT: written as one face each
 # APPROX: 1 declared sweep written as one face each, replacing 241 facets
+#
+# What a kernel makes of each export: the declared strip survives as a surface.
+# Validity says the file is well formed; only this says the surface
+# survived as one. A fit read back as the planes it replaced would
+# pass every other check in this fixture.
+# ROUNDTRIP: Plane=534
+# ROUNDTRIP-APPROX: BSplineSurface=2 Plane=293
 from pythonscad import *
 import math
 

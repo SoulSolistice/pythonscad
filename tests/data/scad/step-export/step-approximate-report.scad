@@ -57,4 +57,11 @@
 // APPROX: 4 declared sweeps written as one face each, replacing 2048 facets
 // APPROX: approximation found nothing left to fit
 // APPROX-NOT: regions stay faceted
+//
+// What a kernel makes of each export: the four walls come back as four surfaces, not the 2048 facets they replaced.
+// Validity says the file is well formed; only this says the surface
+// survived as one. A fit read back as the planes it replaced would
+// pass every other check in this fixture.
+// ROUNDTRIP: Plane=2050
+// ROUNDTRIP-APPROX: BSplineSurface=4 Plane=2
 linear_extrude(height = 20, twist = 90, $fn = 64) square([10, 4], center = true);
