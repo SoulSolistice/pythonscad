@@ -28,6 +28,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "core/Builtins.h"
 #include "core/Children.h"
@@ -148,6 +149,62 @@ std::shared_ptr<AbstractNode> builtin_declare_torus(
   return withSurface(inst, children, std::move(surface));
 }
 
+std::shared_ptr<AbstractNode> builtin_declare_grid(
+  const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
+{
+  Parameters parameters =
+    Parameters::parse(std::move(arguments), inst->location(), {"points", "closed"});
+  std::shared_ptr<Surface> surface;
+
+  // Only the extraction is OpenSCAD's business; what makes a grid a grid is
+  // GridSurface::fromRows, shared with the Python channel so the two cannot
+  // drift apart about which declarations are legal.
+  if (parameters["points"].type() != Value::Type::VECTOR) {
+    LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
+        "declare_grid: points must be a vector of rows, got %1$s",
+        parameters["points"].toEchoStringNoThrow());
+  } else {
+    std::vector<std::vector<Vector3d>> grid;
+    bool ok = true;
+    std::size_t i = 0;
+    for (const Value& rowValue : parameters["points"].toVector()) {
+      if (rowValue.type() != Value::Type::VECTOR) {
+        LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
+            "declare_grid: row %1$d is not a vector of points", int(i));
+        ok = false;
+        break;
+      }
+      std::vector<Vector3d> row;
+      std::size_t j = 0;
+      for (const Value& pointValue : rowValue.toVector()) {
+        Vector3d p(0, 0, 0);
+        if (!pointValue.getVec3(p[0], p[1], p[2], 0.0) || !std::isfinite(p[0]) ||
+            !std::isfinite(p[1]) || !std::isfinite(p[2])) {
+          LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
+              "declare_grid: point [%1$d][%2$d] must be three finite numbers", int(i), int(j));
+          ok = false;
+          break;
+        }
+        row.push_back(p);
+        j++;
+      }
+      if (!ok) break;
+      grid.push_back(std::move(row));
+      i++;
+    }
+    if (ok) {
+      const bool closed = parameters["closed"].type() == Value::Type::BOOL &&
+                          parameters["closed"].toBool();
+      std::string why;
+      surface = GridSurface::fromRows(grid, closed, why);
+      if (surface == nullptr) {
+        LOG(message_group::Warning, inst->location(), parameters.documentRoot(), "%1$s", why);
+      }
+    }
+  }
+  return withSurface(inst, children, std::move(surface));
+}
+
 }  // namespace
 
 void register_builtin_declare_surface()
@@ -167,5 +224,15 @@ void register_builtin_declare_surface()
                    "declare_torus(r_major = 10, r_minor = 3) { ... }",
                    "declare_torus(r_major = 10, r_minor = 3, center = [x, y, z], axis = [x, y, z]) { "
                    "... }",
+                 });
+  // Unlike its siblings this one does not name an exact surface. It hands over
+  // the order the points were swept in, and the exporter fits a surface through
+  // them - so a declared grid is written only with step-approximate-surfaces as
+  // well as step-analytic-surfaces, and only where the fit stays inside the band
+  // the model's own tessellation already leaves open.
+  Builtins::init("declare_grid", new BuiltinModule(builtin_declare_grid),
+                 {
+                   "declare_grid(points = [[p, p, ...], [p, p, ...], ...]) { ... }",
+                   "declare_grid(points = [[...], ...], closed = true) { ... }",
                  });
 }

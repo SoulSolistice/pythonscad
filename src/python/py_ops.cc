@@ -439,17 +439,16 @@ static PyObject *python_declare_torus_core(PyObject *obj, double r_major, double
  * faceted - which is the correct answer, not a limitation. */
 static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int closed)
 {
+  // Extract the shape Python happens to be holding; the rules about what makes
+  // it a grid live in GridSurface::fromRows, which the OpenSCAD builtin uses
+  // too. Only the extraction is language specific.
   if (points == nullptr || !PySequence_Check(points) || PyUnicode_Check(points)) {
     PyErr_SetString(PyExc_TypeError, "declare_grid: points must be a sequence of rows");
     return nullptr;
   }
   const Py_ssize_t rows = PySequence_Size(points);
-  if (rows < 2) {
-    PyErr_SetString(PyExc_TypeError, "declare_grid: needs at least two rows of points");
-    return nullptr;
-  }
-  std::vector<Vector3d> net;
-  Py_ssize_t cols = -1;
+  std::vector<std::vector<Vector3d>> grid;
+  grid.reserve(rows < 0 ? 0 : std::size_t(rows));
   for (Py_ssize_t i = 0; i < rows; i++) {
     auto row = py_owned(PySequence_GetItem(points, i));
     if (row.get() == nullptr || !PySequence_Check(row.get())) {
@@ -457,16 +456,8 @@ static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int c
       return nullptr;
     }
     const Py_ssize_t n = PySequence_Size(row.get());
-    if (cols < 0) cols = n;
-    if (n != cols) {
-      // A ragged grid has no ordering to speak of, which is the one thing this
-      // record exists to carry.
-      PyErr_Format(PyExc_TypeError,
-                   "declare_grid: row %zd has %zd points, the first row has %zd - every row "
-                   "must be the same length",
-                   i, n, cols);
-      return nullptr;
-    }
+    std::vector<Vector3d> out;
+    out.reserve(n < 0 ? 0 : std::size_t(n));
     for (Py_ssize_t j = 0; j < n; j++) {
       auto item = py_owned(PySequence_GetItem(row.get(), j));
       double x = 0, y = 0, z = 0;
@@ -474,15 +465,18 @@ static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int c
         PyErr_Format(PyExc_TypeError, "declare_grid: point [%zd][%zd] must be three numbers", i, j);
         return nullptr;
       }
-      net.emplace_back(x, y, z);
+      out.emplace_back(x, y, z);
     }
+    grid.push_back(std::move(out));
   }
-  if (cols < 2) {
-    PyErr_SetString(PyExc_TypeError, "declare_grid: needs at least two points per row");
+
+  std::string why;
+  auto surface = GridSurface::fromRows(grid, closed != 0, why);
+  if (surface == nullptr) {
+    PyErr_SetString(PyExc_TypeError, why.c_str());
     return nullptr;
   }
-  return python_declare_core(
-    obj, std::make_shared<GridSurface>(int(rows), int(cols), std::move(net), closed != 0));
+  return python_declare_core(obj, std::move(surface));
 }
 
 PyObject *python_declare_grid(PyObject *self, PyObject *args, PyObject *kwargs)

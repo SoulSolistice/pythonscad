@@ -875,6 +875,37 @@ bool GridSurface::isDeclaredPoint(const Vector3d& pt) const
   return false;
 }
 
+std::shared_ptr<GridSurface> GridSurface::fromRows(const std::vector<std::vector<Vector3d>>& rows,
+                                                   bool closed_v, std::string& why)
+{
+  why.clear();
+  if (rows.size() < 2) {
+    why = "declare_grid: needs at least two rows of points";
+    return nullptr;
+  }
+  const std::size_t cols = rows[0].size();
+  for (std::size_t i = 0; i < rows.size(); i++) {
+    if (rows[i].size() != cols) {
+      // A ragged grid has no ordering to speak of, which is the one thing this
+      // record exists to carry.
+      why = "declare_grid: row " + std::to_string(i) + " has " + std::to_string(rows[i].size()) +
+            " points, the first row has " + std::to_string(cols) +
+            " - every row must be the same length";
+      return nullptr;
+    }
+  }
+  if (cols < 2) {
+    why = "declare_grid: needs at least two points per row";
+    return nullptr;
+  }
+  std::vector<Vector3d> net;
+  net.reserve(rows.size() * cols);
+  for (const auto& row : rows) {
+    for (const auto& p : row) net.push_back(p);
+  }
+  return std::make_shared<GridSurface>(int(rows.size()), int(cols), std::move(net), closed_v);
+}
+
 GridSurface::GridSurface(int rows, int cols, std::vector<Vector3d> net, bool closed_v)
   : rows(rows), cols(cols), closed_v(closed_v), net(std::move(net))
 {

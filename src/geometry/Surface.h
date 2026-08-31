@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <vector>
 #include "geometry/linalg.h"
@@ -238,6 +239,21 @@ class GridSurface : public Surface
 {
 public:
   GridSurface(int rows, int cols, std::vector<Vector3d> net, bool closed_v = false);
+
+  /*! Build one from a declared grid of rows, or say why the grid is not one.
+   *
+   * The rules live here rather than in either front end because both languages
+   * declare the same thing and must reject the same grids for the same reasons.
+   * They were written twice once - against the Python C API and again against
+   * OpenSCAD's Value - and two copies of a validation rule drift, which on a
+   * declaration channel is the worst place for it: a grid wrongly accepted is a
+   * surface the exporter then measures facets against.
+   *
+   * Returns nullptr and fills `why` on failure. `why` is a complete sentence
+   * naming the offending row, so a caller can put it straight in front of a
+   * user. */
+  static std::shared_ptr<GridSurface> fromRows(const std::vector<std::vector<Vector3d>>& rows,
+                                               bool closed_v, std::string& why);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;

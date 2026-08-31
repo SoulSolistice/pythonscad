@@ -52,7 +52,7 @@ Two things are true of the current state that the doc does not say:
 | `SPHERICAL_SURFACE`, `TOROIDAL_SURFACE` | `src/io/StepKernel.h:408`, `:364` |
 | `B_SPLINE_SURFACE_WITH_KNOTS`, `B_SPLINE_CURVE_WITH_KNOTS` | `src/io/StepKernel.h:505`, `:539`; emission at `src/io/StepKernel.cc:649-720` |
 | Declarable surface types | `SphereSurface`, `TorusSurface`, `BezierPatchSurface`, `CylinderSurface` — `src/geometry/Surface.h:66,89,133,167` |
-| Model-level declaration, both languages | `declare_cylinder` / `declare_sphere` / `declare_torus` — `src/python/pyfunctions.cc:990-1002`, plus the object methods at `:1060` |
+| Model-level declaration, both languages | `declare_cylinder` / `declare_sphere` / `declare_torus` / `declare_grid` — Python at `src/python/pyfunctions.cc:990-1010` plus the object methods at `:1060`, OpenSCAD builtins in `src/core/DeclareSurfaceNode.cc`. The rules a declared grid must satisfy live once, in `GridSurface::fromRows`, because both front ends must reject the same grids for the same reasons |
 | Recogniser separated from the format | `src/geometry/AnalyticFeatures.cc` (1408 lines) against `src/io/StepKernel.cc` (1114) and `src/io/export_step.cc` (94) |
 | Validator | 12 checks: real literals, references, units/context, directions, topology, shared vertices, face normals, hole nesting, cylindrical faces, B-spline faces, shell volumes, shells (`tests/validatestep.py`) |
 | Fixtures | 22 SCAD in `tests/data/scad/step-export/`, 9 Python in `tests/data/pythonscad-step-export/`, both wired by glob at `tests/CMakeLists.txt:1162-1165` |
@@ -1477,6 +1477,18 @@ these files.** See *The SOLIDWORKS round trip* below. Fusion is still untried.
 
 **What not to do, and why, so nobody re-derives it:**
 
+- **A resolution parameter for the approximation.** Facetting is an
+  approximation with a knob, so a tolerance for the surface fit looks like the
+  matching idea. It already has one: the fit is accepted only inside the
+  tessellation band, `(c/2)*tan(theta/4)` over a chord `c` at a dihedral
+  `theta`, and both shrink as `$fn` rises - 0.6000 on a coarse declared ridge,
+  0.3101 at the bayonet's thread scale, 0.0963 on a leftover region. Raise the
+  resolution and the fit is held to a tighter standard, with no second knob to
+  keep consistent. A knob which *widened* the band would be worse than
+  redundant: a fit inside the band asserts nothing the mesh does not already
+  allow, and one outside it invents geometry, which is the rule the whole
+  exporter is built on. A tighten-only cap would be safe, and is unnecessary for
+  the same reason - the output is never worse than `$fn` already dictates.
 - `SURFACE_OF_LINEAR_EXTRUSION` / `SURFACE_OF_REVOLUTION` (§6 item 2) collapse
   **zero** faces on every fixture and both real parts, and quadrics are the
   better representation where they apply. The only thing they uniquely express is
@@ -1696,9 +1708,25 @@ rule this exporter is built on. That is a decision for the maintainers rather
 than a piece of work, and it is the same decision §8 already records.
 
 **Completing item 4 would therefore not complete the feature set**, and nothing
-here is waiting on effort. What would change the picture is a declaration
-channel for the thread and the ramps - which is item 5 - or a maintainer's
-decision to relax the exactness rule.
+here is waiting on effort.
+
+**Nor does the declaration channel finish it, which is worth knowing before
+anyone assumes otherwise.** `declare_grid` reaching OpenSCAD unblocks item 5 -
+the thread can now speak for itself in the language the model is written in, and
+the proof of concept turns 1470 of its facets into four B-spline faces at the
+shipped part's own scale. Item 4 does not follow.
+
+`step-declare-grid-scad.scad` shows why on a model small enough to read. A ridge
+is declared and written as a B-spline; it is fused into a wall of two cylinders,
+one of which it cuts. The export reports two cylindrical surfaces available and
+one recognised, and the file contains exactly one: `CYLINDRICAL_SURFACE('',#4,
+22.5)`, the *outer* wall, which the ridge does not touch. The inner wall at
+r=20 stays faceted, with both sides of its trim now carrying a surface, because
+the curve where they meet still has no representation.
+
+That is item 4 entire, in miniature: not a missing surface but a missing curve.
+What it needs is `SURFACE_CURVE` with a pcurve on each face, which the exporter
+does not write.
 
 ### 5. The committed bayonet artifact is stale
 
