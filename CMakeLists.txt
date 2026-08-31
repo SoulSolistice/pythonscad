@@ -1041,15 +1041,11 @@ if(ENABLE_PYTHON)
   set_property(TARGET OpenSCADPy PROPERTY EXPORT_COMPILE_COMMANDS ON)
   target_compile_definitions(OpenSCADPy PRIVATE "STACKSIZE=${STACKSIZE}")
   target_compile_options(OpenSCADPy PRIVATE "$<$<CONFIG:DEBUG>:-DDEBUG>")
-  target_compile_definitions(OpenSCADPy PRIVATE
-    OPENSCAD_VERSION=${OPENSCAD_VERSION}
-    OPENSCAD_SHORTVERSION=${OPENSCAD_SHORTVERSION}
-    OPENSCAD_MAJOR=${OPENSCAD_MAJOR}
-    OPENSCAD_MINOR=${OPENSCAD_MINOR}
-    OPENSCAD_PATCH=${OPENSCAD_PATCH}
-    OPENSCAD_YEAR=${OPENSCAD_YEAR}
-    OPENSCAD_MONTH=${OPENSCAD_MONTH}
-    OPENSCAD_DAY=${OPENSCAD_DAY})
+  # The version definitions are NOT repeated here. They are attached per source
+  # file, further down, to the handful which include version.h - pyfunctions.cc
+  # among them, and source file properties apply in every target that compiles
+  # the file. Putting them back on the whole target would mean every commit
+  # rebuilt all of OpenSCADPy again. See OPENSCAD_VERSION_SOURCES.
   target_include_directories(OpenSCADPy SYSTEM PRIVATE ${Boost_INCLUDE_DIRS})
   target_include_directories(OpenSCADPy SYSTEM PRIVATE ${GLIB2_INCLUDE_DIRS})
   target_include_directories(OpenSCADPy PRIVATE
@@ -1428,18 +1424,51 @@ if(USE_CCACHE)
   endif()
 endif()
 
-target_compile_definitions(OpenSCADLibInternal PUBLIC
-  OPENSCAD_VERSION=${OPENSCAD_VERSION}
-  OPENSCAD_SHORTVERSION=${OPENSCAD_SHORTVERSION}
-  OPENSCAD_MAJOR=${OPENSCAD_MAJOR}
-  OPENSCAD_MINOR=${OPENSCAD_MINOR}
-  OPENSCAD_PATCH=${OPENSCAD_PATCH}
-  OPENSCAD_YEAR=${OPENSCAD_YEAR}
-  OPENSCAD_MONTH=${OPENSCAD_MONTH}
-  OPENSCAD_DAY=${OPENSCAD_DAY})
+# The version string comes from `git describe`, so it changes on every commit
+# and whenever the working tree flips between clean and dirty. These used to be
+# PUBLIC on OpenSCADLibInternal, which put them on the compile command line of
+# every translation unit linking it - all of them - so one commit invalidated
+# every object, and the next configure cost a full rebuild of the whole tree.
+#
+# Nothing reads these except through version.h, and only the files below include
+# it. Scoping the definitions to exactly those files means a new commit rebuilds
+# thirteen objects instead of the entire build.
+#
+# Adding a new #include "version.h" anywhere means adding that file here too.
+# version.h has an #error which says so, because without the definitions the
+# stringify would quietly yield the literal text "OPENSCAD_VERSION" rather than
+# failing.
+set(OPENSCAD_VERSION_SOURCES
+  src/LibraryInfo.cc
+  src/core/builtin_functions.cc
+  src/gui/AboutDialog.cc
+  src/gui/LaunchingScreen.cc
+  src/gui/MainWindow.cc
+  src/gui/SparkleAutoUpdater.mm
+  src/gui/UIUtils.cc
+  src/io/export_amf.cc
+  src/openscad.cc
+  src/openscad_gui.cc
+  src/platform/PlatformUtils-mac.mm
+  src/platform/PlatformUtils-posix.cc
+  src/platform/PlatformUtils-win.cc
+  src/python/pyfunctions.cc)
+
+set(OPENSCAD_VERSION_DEFINES
+  "OPENSCAD_VERSION=${OPENSCAD_VERSION}"
+  "OPENSCAD_SHORTVERSION=${OPENSCAD_SHORTVERSION}"
+  "OPENSCAD_MAJOR=${OPENSCAD_MAJOR}"
+  "OPENSCAD_MINOR=${OPENSCAD_MINOR}"
+  "OPENSCAD_PATCH=${OPENSCAD_PATCH}"
+  "OPENSCAD_YEAR=${OPENSCAD_YEAR}"
+  "OPENSCAD_MONTH=${OPENSCAD_MONTH}"
+  "OPENSCAD_DAY=${OPENSCAD_DAY}")
 if(DEFINED OPENSCAD_COMMIT)
-  target_compile_definitions(OpenSCADLibInternal PUBLIC OPENSCAD_COMMIT=${OPENSCAD_COMMIT})
+  list(APPEND OPENSCAD_VERSION_DEFINES "OPENSCAD_COMMIT=${OPENSCAD_COMMIT}")
 endif()
+
+set_source_files_properties(${OPENSCAD_VERSION_SOURCES}
+  PROPERTIES COMPILE_DEFINITIONS "${OPENSCAD_VERSION_DEFINES}")
 
 #
 # Platform specific settings
@@ -1823,6 +1852,7 @@ set(INPUT_DRIVER_SOURCES
 set(GUI_SOURCES
   ${GUI_SOURCES}
   src/openscad_gui.cc
+  src/gui/AboutDialog.cc
   src/gui/AutoUpdater.cc
   src/gui/CGALWorker.cc
   src/gui/CSGWorker.cc
