@@ -1553,31 +1553,54 @@ losing anything: our one-face cylinder returns as two, our one-face torus as
 four. That is a representation choice, and on this evidence ours is the more
 compact of the two.
 
-### The one finding, and what it turned out to be
+### The one finding, and how it closed
 
 `examples/step_test/lid10` exported with its own parameter set came back from
-SOLIDWORKS as two bodies whose mass properties were impossible - the faceted one
-reading volume and area of exactly zero, the analytic one a *negative* surface
-area - while its mesh is a single connected surface of signed volume 223482.298.
-SOLIDWORKS added the two: 612665 + 385455 = 998121.
+SOLIDWORKS as two bodies whose mass properties were impossible. Two separate
+things were wrong, and only one of them was in the exporter as it stood.
 
-**That was a regression introduced the same day, not a defect SOLIDWORKS
-uncovered in the exporter as it stood.** Probing for a hole's enclosing face
-with a point interior to the loop rather than with the loop's first vertex finds
-more enclosing faces; on concentric rings it parents a hole onto a face which
-does not own it, and the solid comes apart. Reverted, the lid exports one shell
-and OpenCASCADE reads 223482.298444 against a mesh of 223482.30.
+**The two-shell split was a regression introduced the same day**, by probing for
+a hole's enclosing face with a point interior to the loop instead of the loop's
+first vertex. That finds more enclosing faces, which sounds strictly better and
+is not: on concentric rings it parents a hole onto a face which does not own it,
+and the solid comes apart. It was bisected against the lid at the time and
+cleared - but the bisection compared edge counts and never the shell count,
+which is where the damage was. Reverted.
 
-It is recorded here rather than deleted because of how it was missed. The change
-was bisected against the lid at the time and cleared, but the bisection compared
-*edge counts* and never the shell count - which is where the damage was. And the
-kit SOLIDWORKS measured was generated from the regressed build, so §9's numbers
-above are sound for the coupons and were not for this part.
+**What remained was real, and OpenCASCADE is what made it tractable.** It does
+not merely say a file is bad; it names the face and the defect. Three faces of
+2451, all `InvalidImbricationOfWires`, all quadrants of the annulus at z=84.9,
+each carrying a three-corner wire of span about 1. Three fixes followed, in the
+order the kernel pointed at them:
 
-What is actually wrong with the lid is smaller, and open. With both probes back
-to their original form it exports one shell of the right volume, and still has
-six edges used twice in the same direction, one hole outside the face carrying
-it, and three faces of 2451 that OpenCASCADE rejects for `InvalidImbricationOfWires`.
+1. **A hole belongs to a face only if the face holds all of it.** One probe point
+   says a loop *starts* inside a candidate; it does not say the loop is inside
+   it. The parents chosen for three of the eight small loops on that plane held
+   1, 2 and 3 corners out of 3, 3 and 5.
+2. **The fallback had to learn the same test.** Doing (1) alone changed nothing:
+   when the search rejects every candidate the code falls back to the parent
+   `mergeTriangles` proposed, which is the one just rejected.
+3. **A hole pinched to its own boundary is not a hole.** Three shared exactly one
+   vertex with the loop carrying them, and a point on a boundary is where an
+   even-odd ray is ambiguous - so containment called all five corners inside
+   while BRepCheck still refused the face. Vertex indices are exact where the
+   geometry is not, so they are asked first.
+
+Along the way the orphan branch stopped reversing loops nothing encloses. It had
+been winding them to agree with the bucket's mesh normal, which is the wrong
+reference for exactly those loops: on this model they are notches at the rim
+whose own winding is what the mesh said. Reversing gave fifteen edges used twice
+in the same direction; not reversing gives none.
+
+The result, and the first clean kernel round trip this part has had:
+
+| | lid | bayonet control |
+| --- | --- | --- |
+| `validatestep.py` | ok, 2457 faces, 1 shell | ok |
+| OpenCASCADE | round trip ok, 0 faces rejected | ok |
+| OCCT volume | 223482.298444 | 234864.242474 |
+| mesh volume | 223482.30 | 234864.24 |
+| SOLIDWORKS, faceted | 223482.2984 | 234864.2425 |
 
 ### What this licenses, and what it does not
 
@@ -1587,9 +1610,16 @@ coupon, in a second kernel, the analytic export imports as a solid, measures
 exact where an exact value exists, and survives a round trip with its surfaces
 intact. That is the case for turning it on.
 
-Against it stands one real part which exports as two bodies. The defect is not
-in the analytic path - the faceted control fails the same way - but a user
-meeting it would not care about the distinction.
+Nothing stands against it on the evidence. The one real part that failed has
+been fixed, and both real parts now round trip through OpenCASCADE and import
+into SOLIDWORKS as single solids of the right volume. The decision is a
+maintainer's, and this is the case rather than the verdict.
+
+What the evidence does not cover is worth saying plainly. Two kernels are not
+every kernel; every coupon is small and every model here is within a couple of
+hundred units of the origin; and none of this says whether the faces are laid
+out the way a mechanical engineer would want them, which is a judgement rather
+than a measurement.
 
 Fusion is installed on the same machine and has not been tried. The same kit
 runs against it; only the driver is SOLIDWORKS-specific.
@@ -1601,26 +1631,17 @@ runs against it; only the driver is SOLIDWORKS-specific.
 next" predates the SOLIDWORKS round trip. This is what is actually left, in the
 order it is worth doing.
 
-### 1. The lid's hole nesting
+### 1. ~~The lid's hole nesting~~ - closed
 
-`examples/step_test/lid10.scad` with its own parameter set exports one shell of
-the correct volume - OpenCASCADE reads 223482.298444 against a mesh of
-223482.30 - and is still wrong in three related ways:
+Fixed; see §9. The lid round trips through OpenCASCADE with no face rejected and
+a volume of 223482.298444 against a mesh of 223482.30, and the whole interop kit
+of 28 files is clean in both SOLIDWORKS and OCCT.
 
-- six edges used twice in the same direction, which are the three edges each of
-  two tiny orphan triangles at z=84.9 that no coplanar loop encloses;
-- one hole reported outside the outer bound of the face carrying it;
-- three faces of 2451 rejected by OpenCASCADE as `InvalidImbricationOfWires`,
-  which is the kernel's name for the same thing: a face whose wires are not
-  properly nested.
-
-All three are the hole-to-parent assignment, and the obvious fix has already
-been tried and reverted: probing with a point interior to the hole instead of
-its first vertex parents holes onto faces which do not own them, splits the
-solid into two shells, and is what an earlier version of this section reported
-as a pre-existing defect. Whatever is done here has to be measured against the
-kernel round trip, not against `validatestep.py` alone - the validator passed
-the two-shell file that OpenCASCADE rejected.
+The one thing worth carrying forward is the method. `validatestep.py` passed
+every one of the files OpenCASCADE refused - the two-shell one, and each of the
+three stages of the hole nesting defect. A validator says whether a file is well
+formed; only a kernel says whether it is the solid the mesh was, and only a
+kernel names the face.
 
 ### 2. Whether the analytic path stops being experimental
 
