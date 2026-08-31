@@ -415,14 +415,16 @@ total by a third.
 
 ## 5. What is and is not verified here
 
-**On OpenCASCADE.** Every OCCT number in this document came from the headless
-container build, where `cadquery-ocp` is installed. It is *not* installed in the
-Windows MSYS2 environment the later sections were measured in: `import OCP`
-fails there and `tests/stepexportsanitytest.py` prints "OpenCASCADE is not
-installed, skipping the CAD kernel round trip" on every run. That is by design -
-the round trip is optional - but it means the kernel check below is not
-exercised by a routine local run, and §9's second opinion comes from SOLIDWORKS
-rather than from OCCT.
+**On OpenCASCADE.** The round trip is optional and skips silently when `OCP` is
+absent, which is how every number in §9 came to be measured without it. It is
+installed now - `pip install cadquery-ocp` into the interpreter CMake finds,
+which on Windows is the one ctest drives the tests with, not MSYS2's - and all
+31 STEP fixtures exercise it on every run.
+
+It earned that immediately: it rejected `step-nested-rings` within minutes of
+being installed, on a regression `validatestep.py` had passed. The lesson is
+worth keeping - the validator checks that a file is well formed, and only a
+kernel checks that it is the solid the mesh was.
 
 
 A headless build was made in this environment - Manifold and CGAL, no Qt, Release
@@ -1551,27 +1553,31 @@ losing anything: our one-face cylinder returns as two, our one-face torus as
 four. That is a representation choice, and on this evidence ours is the more
 compact of the two.
 
-### The one finding
+### The one finding, and what it turned out to be
 
-`examples/step_test/lid10` exported with its own parameter set comes back as two
-bodies whose mass properties are impossible - the faceted one reads volume and
-area of exactly zero, the analytic one a *negative* surface area. Its mesh is a
-single connected surface of 6780 triangles, every edge shared by exactly two
-faces, signed volume 223482.298; the export writes two `CLOSED_SHELL`s, and
-SOLIDWORKS adds them: 612665 + 385455 = 998121.
+`examples/step_test/lid10` exported with its own parameter set came back from
+SOLIDWORKS as two bodies whose mass properties were impossible - the faceted one
+reading volume and area of exactly zero, the analytic one a *negative* surface
+area - while its mesh is a single connected surface of signed volume 223482.298.
+SOLIDWORKS added the two: 612665 + 385455 = 998121.
 
-`tests/validatestep.py` now catches this without SOLIDWORKS, by measuring the
-volume each shell encloses: one of them is negative. Conserving the *total*
-would not have done - the two sum to the right answer precisely because one
-carries the sign that cancels the other.
+**That was a regression introduced the same day, not a defect SOLIDWORKS
+uncovered in the exporter as it stood.** Probing for a hole's enclosing face
+with a point interior to the loop rather than with the loop's first vertex finds
+more enclosing faces; on concentric rings it parents a hole onto a face which
+does not own it, and the solid comes apart. Reverted, the lid exports one shell
+and OpenCASCADE reads 223482.298444 against a mesh of 223482.30.
 
-The cause is still open. It is localised: 213 input triangles straddle the two
-shells, all of them on the z=95 rim annulus, where coplanar neighbours end up in
-different shells. Four explanations have been measured and ruled out - geometry
-lost in the merge (area is conserved to 0.0115 in 107314), the T-junction weld
-and the other changes of 2026-08-31 (bisected, the split survives all of them),
-near-duplicate vertices at the seam (the gap is a real 0.6), and the dropped
-slivers being the connective tissue (restoring them changes nothing).
+It is recorded here rather than deleted because of how it was missed. The change
+was bisected against the lid at the time and cleared, but the bisection compared
+*edge counts* and never the shell count - which is where the damage was. And the
+kit SOLIDWORKS measured was generated from the regressed build, so §9's numbers
+above are sound for the coupons and were not for this part.
+
+What is actually wrong with the lid is smaller, and open. With both probes back
+to their original form it exports one shell of the right volume, and still has
+six edges used twice in the same direction, one hole outside the face carrying
+it, and three faces of 2451 that OpenCASCADE rejects for `InvalidImbricationOfWires`.
 
 ### What this licenses, and what it does not
 
@@ -1595,33 +1601,26 @@ runs against it; only the driver is SOLIDWORKS-specific.
 next" predates the SOLIDWORKS round trip. This is what is actually left, in the
 order it is worth doing.
 
-### 1. The lid exports one solid as two shells
+### 1. The lid's hole nesting
 
-The only correctness defect currently known. `examples/step_test/lid10.scad`
-with its own parameter set is a single connected surface - 6780 triangles, every
-edge shared by exactly two faces, signed volume 223482.298 - and exports as two
-`CLOSED_SHELL`s, one of them inverted. SOLIDWORKS reads two bodies and adds
-them: 612665 + 385455 = 998121.
+`examples/step_test/lid10.scad` with its own parameter set exports one shell of
+the correct volume - OpenCASCADE reads 223482.298444 against a mesh of
+223482.30 - and is still wrong in three related ways:
 
-It is localised. 213 input triangles straddle the two shells, all of them on the
-z=95 rim annulus, where coplanar neighbours end up in different shells. Four
-explanations have been measured and ruled out, so nobody need repeat them:
+- six edges used twice in the same direction, which are the three edges each of
+  two tiny orphan triangles at z=84.9 that no coplanar loop encloses;
+- one hole reported outside the outer bound of the face carrying it;
+- three faces of 2451 rejected by OpenCASCADE as `InvalidImbricationOfWires`,
+  which is the kernel's name for the same thing: a face whose wires are not
+  properly nested.
 
-- **geometry lost in the merge** - no; area is conserved to 0.0115 in 107314,
-  and every one of the 2479 merged loops is accounted for (2449 faces, 15
-  degenerate, 15 holes folded into parents, none unexplained);
-- **the changes of 2026-08-31** - no; bisected individually, the split survives
-  the T-junction weld, both `mergeTriangles` tolerance changes and the
-  containment probe;
-- **near-duplicate vertices at the seam** - no; the gap is a real 0.6, and the
-  two shells share no vertex at all;
-- **the dropped slivers were the connective tissue** - no; restoring their
-  connectivity leaves the component count at two.
-
-The next measurement is to tag each input triangle with the merged loop that
-claims it and find an input edge whose two triangles land in different
-components. That edge is where connectivity is dropped. `check_shell_volumes`
-now fails the file locally, so this no longer needs SOLIDWORKS to reproduce.
+All three are the hole-to-parent assignment, and the obvious fix has already
+been tried and reverted: probing with a point interior to the hole instead of
+its first vertex parents holes onto faces which do not own them, splits the
+solid into two shells, and is what an earlier version of this section reported
+as a pre-existing defect. Whatever is done here has to be measured against the
+kernel round trip, not against `validatestep.py` alone - the validator passed
+the two-shell file that OpenCASCADE rejected.
 
 ### 2. Whether the analytic path stops being experimental
 

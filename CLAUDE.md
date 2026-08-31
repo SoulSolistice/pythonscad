@@ -582,6 +582,27 @@ install, then test with all of the above applied:
 ./scripts/msys2-build.sh --test
 ```
 
+#### Install the CAD kernel round trip
+
+`tests/steproundtrip.py` reads each STEP export back with OpenCASCADE and checks
+it comes back as a solid a kernel can use — the one thing the exporter's own
+validator cannot answer. It is optional and **skips silently** when absent, so a
+green suite does not mean it ran.
+
+Install it, and note *which* interpreter: it imports `OCP`, the `cadquery-ocp`
+bindings, not MSYS2's OpenCASCADE libraries — `pacman -S ...opencascade` will not
+make `import OCP` work. It has to go into the interpreter CMake found, which on
+Windows is the system Python ctest drives the tests with, not MSYS2's:
+
+```bash
+"$(grep -ao 'Python3_EXECUTABLE:INTERNAL=[^;]*' build/CMakeCache.txt | cut -d= -f2)" -m pip install cadquery-ocp
+```
+
+Worth doing before touching the exporter. On the day it was installed here it
+rejected `step-nested-rings` within minutes, on a regression `validatestep.py`
+had passed: the validator checks that a file is well formed, and only a kernel
+checks that it is the solid the mesh was.
+
 The `-j3` / `-j4` figures elsewhere in this file describe a memory-constrained
 4-core agent sandbox. On a real workstation, size the job count to the machine;
 memory is still the binding constraint, at roughly 2 GB per CGAL translation
