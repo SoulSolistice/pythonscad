@@ -181,42 +181,6 @@ bool pointInLoop2d(const std::vector<std::array<double, 2>>& poly, const std::ar
   return inside;
 }
 
-// A point strictly inside a projected loop, for asking which face encloses it.
-//
-// The obvious probe - the loop's first vertex - is the one thing that cannot be
-// used: pointInLoop2d casts an even-odd ray, which is ambiguous for a point
-// lying exactly on an edge or at a corner of the polygon being tested, and on a
-// mesh carrying T-junctions a hole's corner sitting on its own parent's
-// boundary is the normal case rather than a rare one. When that test says "no",
-// the hole is promoted to a face of its own, wound the other way from every
-// neighbour it shares an edge with.
-//
-// The centroid is interior for a convex loop and for most others; where it is
-// not, the centroid of some three consecutive vertices is. Both are strictly
-// inside whenever they answer at all, which is what the ray cast needs.
-static std::array<double, 2> interiorPoint2d(const std::vector<std::array<double, 2>>& poly)
-{
-  std::array<double, 2> centre{0.0, 0.0};
-  if (poly.empty()) return centre;
-  for (const auto& p : poly) {
-    centre[0] += p[0];
-    centre[1] += p[1];
-  }
-  centre[0] /= double(poly.size());
-  centre[1] /= double(poly.size());
-  if (pointInLoop2d(poly, centre)) return centre;
-
-  const std::size_t n = poly.size();
-  for (std::size_t i = 0; i < n; i++) {
-    const std::array<double, 2>& a = poly[i];
-    const std::array<double, 2>& b = poly[(i + 1) % n];
-    const std::array<double, 2>& c = poly[(i + 2) % n];
-    const std::array<double, 2> ear{(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0};
-    if (pointInLoop2d(poly, ear)) return ear;
-  }
-  return centre;
-}
-
 /*! One run of loop edges replaced by a single arc. */
 struct ArcSubstitution {
   std::size_t start = 0, count = 0;
@@ -483,9 +447,15 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
 
     const int previous = parents[i];
     const int drop = dominantAxis(loop_normals[i]);
-    std::vector<std::array<double, 2>> hole_proj;
-    projectLoop(vertices, loops[i], drop, hole_proj);
-    const std::array<double, 2> probe = interiorPoint2d(hole_proj);
+    // The loop's first vertex, and not a point interior to it. Probing with an
+    // interior point finds more enclosing faces, which sounds strictly better
+    // and is not: on concentric rings it parents a hole onto a face which does
+    // not own it, and the solid comes apart into two shells. OpenCASCADE reads
+    // the result as two solids and adds them - 68422 where step-nested-rings
+    // measures 31901, and 998121 where the bayonet lid measures 223482 - and
+    // rejects the faces with InvalidImbricationOfWires. Tried, measured,
+    // reverted; see doc/step-export-status.md.
+    const std::array<double, 2> probe = projectPoint(vertices[loops[i][0]], drop);
     std::vector<std::array<double, 2>> cand;
     int found = -1;
     double best_area = 0;
