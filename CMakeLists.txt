@@ -2117,11 +2117,10 @@ file(GLOB_RECURSE ALL_TEST_SOURCES
   "src/*_test.cc"
 )
 
-# Two of those have never been compiled by any build, and neither one builds
-# against the code as it now stands. They are excluded by name rather than
-# deleted, because each records an intent worth keeping, and each carries a note
-# at the top saying what it would take to bring it back. Removing a line here is
-# the last step of porting one.
+# Three of those do not build against the code as it now stands. They are
+# excluded by name rather than deleted, because each records an intent worth
+# keeping, and each carries a note at the top saying what it would take to bring
+# it back. Removing a line here is the last step of porting one.
 #
 #   Measurement_test.cc     wants Measurement::Template<GLView> and a Result
 #                           type. The class has neither: it is a plain
@@ -2132,9 +2131,22 @@ file(GLOB_RECURSE ALL_TEST_SOURCES
 #                           this fork at all, and assemblePolySetForManifold has
 #                           since taken colours and changed its references.
 #                           Link error.
+#   surface_node_test.cc    arrived from upstream OpenSCAD via 1ee676b0e and is
+#                           written against stock OpenSCAD's SurfaceNode, which
+#                           this fork's has diverged from in three ways: it
+#                           default-constructs SurfaceNode (ours takes a
+#                           ModuleInstantiation), it calls a member
+#                           SurfaceNode::read_png_or_dat (ours keeps that as a
+#                           free function in utils/png_util.h), and it compares
+#                           img_data_t elements against Catch::Approx (ours are
+#                           Vector3f, not a scalar). 39 compile errors. Porting
+#                           it means deciding which channel of that Vector3f
+#                           carries the height, which is a question for the
+#                           maintainers of the fork's surface() colour support.
 foreach(stale_test
     "src/gui/Measurement_test.cc"
-    "src/geometry/linear_extrude_test.cc")
+    "src/geometry/linear_extrude_test.cc"
+    "src/core/surface_node_test.cc")
   list(REMOVE_ITEM ALL_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${stale_test}")
 endforeach()
 
