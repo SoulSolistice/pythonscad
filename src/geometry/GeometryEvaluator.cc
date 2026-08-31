@@ -540,6 +540,47 @@ void reduceColinearPointsGlobal(std::vector<IndexedFace>& indices, const std::ve
     if (face_new.size() >= 3) face = face_new;
   }
 }
+// How far a point may sit off a plane and still be called coplanar.
+//
+// The bucketing used to ask two questions of a candidate triangle - is its
+// normal within 0.99999 of the bucket's, and is its plane offset within 0.001 -
+// and neither carries a length scale. An angular tolerance alone does not bound
+// anything: 0.99999 permits 0.256 degrees between the normals, which at a
+// distance L from the foot of the plane is L*0.00447 of out-of-plane error.
+// That is 0.045 at L=10 and 0.35 at L=78, so on a part of any size triangles
+// which are visibly not coplanar land in one bucket. The merged loop then comes
+// out warped, and a warped loop is written as a PLANE face whose own boundary
+// does not lie in that plane.
+//
+// So measure the thing that matters instead - the distance from each corner to
+// the bucket's plane - and scale the allowance to the model rather than fixing
+// it. Triangles that really are coplanar agree to within rounding, many orders
+// below this.
+static double coplanarTolerance(const std::vector<Vector3d>& vert)
+{
+  if (vert.empty()) return 1e-9;
+  Vector3d lo = vert[0], hi = vert[0];
+  for (const auto& v : vert) {
+    lo = lo.cwiseMin(v);
+    hi = hi.cwiseMax(v);
+  }
+  const double diagonal = (hi - lo).norm();
+  return std::max(1e-9, 1e-8 * diagonal);
+}
+
+// Every corner of the triangle within tol of the bucket's plane, and facing the
+// same way. The direction test stays: it is what keeps the two sides of a thin
+// wall, which are coplanar to any tolerance, in separate buckets.
+static bool triangleOnPlane(const std::vector<Vector3d>& vert, const IndexedFace& triangle,
+                            const Vector4d& plane, double tol)
+{
+  const Vector3d n = plane.head<3>();
+  for (const int vi : triangle) {
+    if (fabs(n.dot(vert[vi]) - plane[3]) > tol) return false;
+  }
+  return true;
+}
+
 std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
                                         const std::vector<Vector4d> normals,
                                         std::vector<Vector4d>& newNormals, std::vector<int>& faceParents,
@@ -548,6 +589,7 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
   indexedFaceList emptyList;
   std::vector<Vector4d> norm_list;
   std::vector<indexedFaceList> polygons_sorted;
+  const double plane_tol = coplanarTolerance(vert);
   // sort polygons into buckets of same orientation
   for (unsigned int i = 0; i < polygons.size(); i++) {
     Vector4d norm = normals[i];
@@ -556,7 +598,8 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
     int norm_ind = -1;
     for (unsigned int j = 0; norm_ind == -1 && j < norm_list.size(); j++) {
       const auto& cur = norm_list[j];
-      if (cur.head<3>().dot(norm.head<3>()) > 0.99999 && fabs(cur[3] - norm[3]) < 0.001) {
+      if (cur.head<3>().dot(norm.head<3>()) > 0.99999 &&
+          triangleOnPlane(vert, triangle, cur, plane_tol)) {
         norm_ind = j;
       }
       if (cur.norm() < 1e-6 && norm.norm() < 1e-6) norm_ind = j;  // zero vector matches zero vector
@@ -596,7 +639,17 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
           polygons_sorted[i_].erase(polygons_sorted[i_].begin() + l);
           k--;
           l--;
-        } else if (pointInPolygon(vert, poly, hole[0])) {
+        } else if (triangleOnPlane(vert, hole, norm_list[i], plane_tol) &&
+                   pointInPolygon(vert, poly, hole[0])) {
+          // The plane test is not redundant with the search for the opposite
+          // bucket above. That search accepts a normal within dot -0.999, which
+          // is 2.56 degrees - ten times looser than the bucketing - and at a
+          // radius of 78 that is 3.5 of out-of-plane error. Moving such a
+          // triangle into this bucket warps the loop it ends up in, and the
+          // loop is then written as a PLANE face whose own boundary does not
+          // lie in that plane. It also arrives wound the other way, which is
+          // what leaves the exporter holding a reversed loop that nothing
+          // encloses.
           polygons_sorted[i].push_back(hole);
           polygons_sorted[i_].erase(polygons_sorted[i_].begin() + l);
           l--;  // could have more holes
@@ -650,6 +703,7 @@ std::vector<IndexedColorFace> mergeTriangles(const std::vector<IndexedColorFace>
   std::vector<Vector4d> norm_list;
   std::vector<int> color_list;
   std::vector<indexedFaceList> polygons_sorted;
+  const double plane_tol = coplanarTolerance(vert);
   // sort polygons into buckets of same orientation and color
   for (unsigned int i = 0; i < polygons.size(); i++) {
     Vector4d norm = normals[i];
@@ -659,7 +713,8 @@ std::vector<IndexedColorFace> mergeTriangles(const std::vector<IndexedColorFace>
     for (unsigned int j = 0; bucket_ind == -1 && j < norm_list.size(); j++) {
       if (polygons[i].color == color_list[j]) {
         const auto& cur_norm = norm_list[j];
-        if (cur_norm.head<3>().dot(norm.head<3>()) > 0.99999 && fabs(cur_norm[3] - norm[3]) < 0.001) {
+        if (cur_norm.head<3>().dot(norm.head<3>()) > 0.99999 &&
+            triangleOnPlane(vert, triangle.face, cur_norm, plane_tol)) {
           bucket_ind = j;
         }
         if (cur_norm.norm() < 1e-6 && norm.norm() < 1e-6)
@@ -702,7 +757,17 @@ std::vector<IndexedColorFace> mergeTriangles(const std::vector<IndexedColorFace>
           polygons_sorted[i_].erase(polygons_sorted[i_].begin() + l);
           k--;
           l--;
-        } else if (pointInPolygon(vert, poly, hole[0])) {
+        } else if (triangleOnPlane(vert, hole, norm_list[i], plane_tol) &&
+                   pointInPolygon(vert, poly, hole[0])) {
+          // The plane test is not redundant with the search for the opposite
+          // bucket above. That search accepts a normal within dot -0.999, which
+          // is 2.56 degrees - ten times looser than the bucketing - and at a
+          // radius of 78 that is 3.5 of out-of-plane error. Moving such a
+          // triangle into this bucket warps the loop it ends up in, and the
+          // loop is then written as a PLANE face whose own boundary does not
+          // lie in that plane. It also arrives wound the other way, which is
+          // what leaves the exporter holding a reversed loop that nothing
+          // encloses.
           polygons_sorted[i].push_back(hole);
           polygons_sorted[i_].erase(polygons_sorted[i_].begin() + l);
           l--;  // could have more holes
