@@ -88,7 +88,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   output << "FILE_NAME('" << step_string(exportInfo.sourceFilePath) << "','" << iso_time.str() << "',('"
          << author << "'),('" << org << "'),' ','pythonscad',' ');\n";
   output << "FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\n";
-  output << "ENDSEC; \n";
+  output << "ENDSEC;\n";
 
   // data section
   output << "DATA;\n";

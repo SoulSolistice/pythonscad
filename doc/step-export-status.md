@@ -1975,6 +1975,18 @@ units the claimed facets cover that is a mean normal displacement of 0.022,
 against a reported band of 0.2527 - the smooth surface cutting the corners the
 chords left standing, and well inside what the mesh already allows.
 
+`examples/step_test/lid10.stp` is regenerated to match, because the committed
+one predated all of this and carried no B-spline at all. Note the flag it needs:
+a declared grid is a *fit*, so it is written only when
+`step-approximate-surfaces` is on as well as `step-analytic-surfaces`. Exported
+with the analytic flag alone the thread stays faceted and the file has 1985
+faces, which looks exactly like the feature not working.
+
+And it still looks faceted, because it largely is: 1491 of the 1500 faces are
+planes. The thread's own 452 cut facets remain, and so do 33 other regions the
+approximation found no fit for. What changed is that the thread's body is two
+surfaces a kernel can offset and pattern, not that the part became smooth.
+
 Note what this is and is not evidence for. `examples/step_test/lid10.scad` is
 the specimen the adversarial cases were found on, not a deliverable; the number
 that matters here is not that one part improved by 24% but that a generator
