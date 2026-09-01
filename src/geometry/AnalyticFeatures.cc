@@ -1432,6 +1432,91 @@ std::vector<std::shared_ptr<Surface>> fitRevolved(const Mesh& mesh, const Smooth
   return refuse(last);
 }
 
+/*! One Patch out of a set of facets: its boundary cycles, and the runs those
+ * split into.
+ *
+ * Shared rather than written twice because it depends on nothing about which
+ * kind of surface claimed the facets. A Bezier covers its whole parameter
+ * square, so its boundary could be split by geometry - this stretch is u=0,
+ * that one is v=1. Nothing else can: a declared grid is trimmed wherever the
+ * boolean cut it, and a quadric region is whatever the booleans left of it.
+ * The split here follows the *topology* instead, which is what a run actually
+ * needs to be - a maximal stretch of consecutive boundary segments with the
+ * same face on the far side, because every segment of it has to be replaced
+ * in that one neighbour by one curve or the shell opens. */
+Patch patchFromFacets(const std::vector<std::vector<int>>& loops,
+                      const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops,
+                      const std::shared_ptr<const Surface>& surface,
+                      const std::vector<std::size_t>& facets)
+{
+  Patch patch;
+  patch.surface = surface;
+  patch.facets = facets;
+
+  std::vector<std::vector<int>> cycles;
+  if (const char *why = boundaryCycles(loops, patch.facets, cycles)) {
+    patch.alive = false;
+    patch.dropped = why;
+    return patch;
+  }
+
+  // Where a Bezier patch and a declared grid part company.
+  //
+  // A Bezier covers its whole parameter square, so every boundary segment
+  // lies on one of the square's four edges and the split into runs follows
+  // the geometry: this stretch is the curve u=0, that one is v=1. A declared
+  // grid is trimmed wherever the boolean cut it, and its boundary therefore
+  // lies nowhere in particular - which is the whole reason the facets had to
+  // be claimed by projection rather than by position.
+  //
+  // So the split follows the *topology* instead: a run is a maximal stretch
+  // of consecutive boundary segments with the same thing on the far side.
+  // That is the property a run actually needs - every segment of it is
+  // replaced in one neighbouring face, by one curve, or the shell opens -
+  // and it is the one the parameter square was standing in for all along.
+  const std::set<std::size_t> mine(patch.facets.begin(), patch.facets.end());
+  bool ok = true;
+  for (std::size_t ci = 0; ci < cycles.size() && ok; ci++) {
+    const std::vector<int>& cycle = cycles[ci];
+    const std::size_t n = cycle.size();
+    std::vector<std::size_t> across(n, std::size_t(-1));
+    for (std::size_t i = 0; i < n; i++) {
+      const auto it = edge_loops.find(edgeKey(cycle[i], cycle[(i + 1) % n]));
+      if (it == edge_loops.end() || it->second.size() != 2) {
+        ok = false;
+        break;
+      }
+      across[i] = mine.count(it->second[0]) ? it->second[1] : it->second[0];
+    }
+    if (!ok) break;
+
+    std::size_t begin = 0;
+    while (begin < n && across[begin] == across[(begin + n - 1) % n]) begin++;
+    if (begin == n) begin = 0;  // one neighbour all the way round
+    for (std::size_t i = 0; i < n;) {
+      const std::size_t neighbour = across[(begin + i) % n];
+      Patch::Run run;
+      // A grid's run lies on no edge of a parameter square and is straight
+      // only by accident, so neither field means anything here; the emitter
+      // reads `kind`, `verts` and `bound`.
+      run.bound = ci;
+      std::size_t j = i;
+      run.verts.push_back(cycle[(begin + j) % n]);
+      while (j < n && across[(begin + j) % n] == neighbour) {
+        j++;
+        run.verts.push_back(cycle[(begin + j) % n]);
+      }
+      patch.runs.push_back(std::move(run));
+      i = j;
+    }
+  }
+  if (!ok) {
+    patch.alive = false;
+    patch.dropped = "a boundary segment is not shared with exactly one other face";
+  }
+  return patch;
+}
+
 std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
                                         const std::vector<std::shared_ptr<Surface>>& surfaces,
                                         const std::vector<char>& consumed,
@@ -1532,73 +1617,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     // Build one Patch out of a set of facets: its boundary cycles, and the runs
     // those split into. Called once for the whole claim, or once per group when
     // the claim has to be cut - see below.
-    auto buildPatch = [&](const std::vector<std::size_t>& facets) {
-      Patch patch;
-      patch.surface = surface;
-      patch.facets = facets;
-
-      std::vector<std::vector<int>> cycles;
-      if (const char *why = boundaryCycles(loops, patch.facets, cycles)) {
-        patch.alive = false;
-        patch.dropped = why;
-        return patch;
-      }
-
-      // Where a Bezier patch and a declared grid part company.
-      //
-      // A Bezier covers its whole parameter square, so every boundary segment
-      // lies on one of the square's four edges and the split into runs follows
-      // the geometry: this stretch is the curve u=0, that one is v=1. A declared
-      // grid is trimmed wherever the boolean cut it, and its boundary therefore
-      // lies nowhere in particular - which is the whole reason the facets had to
-      // be claimed by projection rather than by position.
-      //
-      // So the split follows the *topology* instead: a run is a maximal stretch
-      // of consecutive boundary segments with the same thing on the far side.
-      // That is the property a run actually needs - every segment of it is
-      // replaced in one neighbouring face, by one curve, or the shell opens -
-      // and it is the one the parameter square was standing in for all along.
-      const std::set<std::size_t> mine(patch.facets.begin(), patch.facets.end());
-      bool ok = true;
-      for (std::size_t ci = 0; ci < cycles.size() && ok; ci++) {
-        const std::vector<int>& cycle = cycles[ci];
-        const std::size_t n = cycle.size();
-        std::vector<std::size_t> across(n, std::size_t(-1));
-        for (std::size_t i = 0; i < n; i++) {
-          const auto it = edge_loops.find(edgeKey(cycle[i], cycle[(i + 1) % n]));
-          if (it == edge_loops.end() || it->second.size() != 2) {
-            ok = false;
-            break;
-          }
-          across[i] = mine.count(it->second[0]) ? it->second[1] : it->second[0];
-        }
-        if (!ok) break;
-
-        std::size_t begin = 0;
-        while (begin < n && across[begin] == across[(begin + n - 1) % n]) begin++;
-        if (begin == n) begin = 0;  // one neighbour all the way round
-        for (std::size_t i = 0; i < n;) {
-          const std::size_t neighbour = across[(begin + i) % n];
-          Patch::Run run;
-          // A grid's run lies on no edge of a parameter square and is straight
-          // only by accident, so neither field means anything here; the emitter
-          // reads `kind`, `verts` and `bound`.
-          run.bound = ci;
-          std::size_t j = i;
-          run.verts.push_back(cycle[(begin + j) % n]);
-          while (j < n && across[(begin + j) % n] == neighbour) {
-            j++;
-            run.verts.push_back(cycle[(begin + j) % n]);
-          }
-          patch.runs.push_back(std::move(run));
-          i = j;
-        }
-      }
-      if (!ok) {
-        patch.alive = false;
-        patch.dropped = "a boundary segment is not shared with exactly one other face";
-      }
-      return patch;
+    auto buildPatch = [&](const std::vector<std::size_t>& fs) {
+      return patchFromFacets(loops, edge_loops, surface, fs);
     };
 
     // Does the claim close around the profile? Only a closed profile can, and
