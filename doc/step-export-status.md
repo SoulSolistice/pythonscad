@@ -2082,3 +2082,48 @@ integral, `8*int_0^4 sqrt((16-x^2)(100-x^2)) dx = 984.779688`, so the solid is
 `pi*100*20` less that, 5298.405619. OpenCASCADE building the same solid from its
 own primitives measures 5298.405182 - agreement to 8e-8 between two methods that
 share nothing.
+
+## 15. Where the fitted sweep actually is
+
+An earlier session mocked up the sweep fit outside the exporter and found
+something worth keeping: interpolating the declared grid as a *surface* over an
+Nx2 net overshoots at the ends of the sweep - 0.378 against a facet chord sag of
+0.109, so *worse than the facets it replaced*, at the one place it mattered,
+while being thousands of times better everywhere else. Two fixes failed
+(segmenting at the kinks made it 0.62, because short segments get their own free
+ends; clamping tangents estimated by first difference gave 0.24) and the one
+that worked was to interpolate each **rail as a curve** and rule between them,
+which brought the worst to 0.026.
+
+**The shipped code already does that**, and it is worth writing down that it
+does, because the two forms are hard to tell apart from the outside.
+`GridSurface::splineForm` writes `degree_v = 1` - the profile direction is ruled,
+not fitted - and the poles are solved one column at a time against a shared
+chord-length parameterisation. That is rails as curves.
+
+What was missing was the other half of the lesson: **measure at the ends, not in
+the bulk**. The exporter has always tested it - a facet is claimed only if its
+*centroid* projects onto the surface within the tessellation band, and a
+centroid is the cheapest point that is not one of the interpolated stations, so
+the test samples exactly where overshoot lives. It just never said what it
+found. It does now, and the fixtures pin it:
+
+| | worst, between stations | band |
+| --- | --- | --- |
+| `step-declare-grid` | 0.0660 | 0.1290 |
+| `step-declare-grid-strip` | 0.0609 | 0.1290 |
+| `step-declare-grid-scad` | 0.1873 | 0.6000 |
+| `lid10` thread | 0.1724 | 0.2527 |
+
+All inside their bands, the lid at 68% of its. Captured rather than derived -
+there is no closed form for a deviation - but pinned, because it is the number a
+change to the fit would move, and the mockup showed that such a change can be a
+large regression at the ends while looking like an improvement on average.
+
+One figure in the same report is *not* this and should not be read as it: `4
+facets have every corner on the sweep and their middle off it, by up to
+16.0455`. Those are the two caps closing the ridge polyhedron. Every corner of a
+cap is a point the generator emitted, so position alone would claim it, and its
+middle is on the cap rather than on the sweep - which is precisely what the
+centroid test exists to catch. They are excluded, and 16 is the distance from a
+cap to the surface it is not on, not an error in the fit.

@@ -1530,6 +1530,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
   std::vector<Patch> patches;
   std::vector<char> taken(loops.size(), 0);
   std::size_t corners_only = 0;               // every corner on the sweep, the middle not
+  double worst_claimed = 0.0;                 // the furthest a *claimed* facet's middle strays
+  double claim_band = 0.0;                    // the allowance it was measured against
   std::size_t cut_into = 0;                   // faces a wrapping claim had to be cut into
   double worst_miss = 0, missed_against = 0;  // how far off, and what was allowed
 
@@ -1610,6 +1612,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         continue;
       }
       claimed.push_back(f);
+      worst_claimed = std::max(worst_claimed, miss);
+      claim_band = std::max(claim_band, grid->membershipTolerance());
       span_of.push_back(segs > 0 ? std::max(0, std::min(segs - 1, int(pv * segs))) : 0);
     }
     if (claimed.empty()) continue;
@@ -1757,6 +1761,19 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
       format("a sweep closing around its profile was cut into %d faces, so that "
              "no face crosses the surface's seam",
              int(cut_into)));
+  }
+  if (!patches.empty()) {
+    // Where the fitted surface actually is, rather than where it is on average.
+    // A cubic interpolated through stations passes through every one of them
+    // exactly, so measuring at the data says nothing; what moves is the surface
+    // *between* them, and it moves most at the ends of the sweep, where the
+    // model's uniform sampling is thinnest against geometry that is changing
+    // fastest. The facet centroid is the cheapest point that is not a declared
+    // point, so this is that deviation over every facet the sweep claimed.
+    report.push_back(
+      format("the fitted sweep passes within %.4f of the middle of every facet it claims, against a "
+             "tessellation band of %.4f",
+             worst_claimed, claim_band));
   }
   if (corners_only > 0) {
     // Worth a line of its own: it is the difference between the facets a

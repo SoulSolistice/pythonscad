@@ -44,6 +44,15 @@
 // face written on an open rectangle cannot wrap, so each wall is cut at the
 // seam.
 // APPROX: 2 trimmed quadrics written as one face each, replacing 76 facets
+// How far the fitted surface strays *between* the stations it was
+// interpolated through, which is the only place it can. A cubic passes
+// through its data exactly, so measuring at the data says nothing; what
+// moves is the surface between, and it moves most at the ends of a sweep
+// where uniform sampling is thinnest against geometry changing fastest.
+// Captured rather than derived - there is no closed form for it - and
+// pinned because it is what a change to the fit would move. The figure
+// that matters is that it is below the band beside it.
+// EXPECT: the fitted sweep passes within 0.1873 of the middle of every facet it claims, against a tessellation band of 0.6000
 // ROUNDTRIP-APPROX: BSplineSurface=1 Cylinder=9 Plane=8
 
 $fn = 32;

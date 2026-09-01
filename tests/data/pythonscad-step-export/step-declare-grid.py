@@ -91,6 +91,15 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # EXPECT: 2 declared sweeps cover 300 facets over 1 boundary cycle, split into 401 runs of up to 8 mesh edges, 0 unresolved
 # EXPECT-NOT: written as one face each
 # APPROX: 2 declared sweeps written as one face each, replacing 300 facets
+# How far the fitted surface strays *between* the stations it was
+# interpolated through, which is the only place it can. A cubic passes
+# through its data exactly, so measuring at the data says nothing; what
+# moves is the surface between, and it moves most at the ends of a sweep
+# where uniform sampling is thinnest against geometry changing fastest.
+# Captured rather than derived - there is no closed form for it - and
+# pinned because it is what a change to the fit would move. The figure
+# that matters is that it is below the band beside it.
+# EXPECT: the fitted sweep passes within 0.0660 of the middle of every facet it claims, against a tessellation band of 0.1290
 # APPROX: 2 trimmed quadrics written as one face each, replacing 230 facets
 # EXPECT: its facets lie over 2 of the profile's 4 spans - the region is a strip, whose boundary stays inside the surface's rectangle
 #
