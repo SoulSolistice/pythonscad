@@ -14,7 +14,11 @@ Fusion has no out-of-process automation of the kind the SOLIDWORKS driver uses,
 so this runs *inside* Fusion:
 
     Utilities -> ADD-INS -> Scripts and Add-Ins -> Scripts -> the green +
-    -> pick this file -> Run
+    -> pick this folder -> Run
+
+That dialog takes a *folder*, not a file, and Fusion then writes a .vscode
+directory beside the script - which is why this one lives in a directory of its
+own rather than next to the other interop scripts.
 
 It asks for the kit folder, imports every .stp in it, and writes
 `fusion-results.csv` beside them. Each import opens a document and closes it
@@ -30,9 +34,9 @@ two can be read side by side:
     faces     against the count the exporter wrote.
     volume    zero for a surface body, since there is no solid to measure.
 
-Written but not yet run against a real Fusion - the API calls follow the
-documented interface, and if it fails it should be read as "this script is
-wrong" before "the export is wrong".
+Run against Fusion, and it accepted all six files of the focused kit as single
+valid solids - including the two SOLIDWORKS refuses. The results and what they
+settle are in doc/step-interop-validation.md.
 """
 
 import csv

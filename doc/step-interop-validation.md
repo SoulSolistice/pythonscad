@@ -420,3 +420,64 @@ finding.
 
 A focused kit for that question is what `build/interop-fusion` holds: the two
 parts that fail, the one that passes, and a faceted control for each.
+
+## What Fusion said
+
+Fusion imports all six files as one valid solid body each - the two parts
+SOLIDWORKS refuses included.
+
+| file | Fusion | SOLIDWORKS | faces (OCCT / Fusion / SW) | volume cm3 |
+| --- | --- | --- | --- | --- |
+| r01-lid10-analytic | solid | **SURFACE** | 1327 / 1327 / 1306 | 226.7486 |
+| r01-lid10-faceted | solid | solid | 2457 / 2457 / 2441 | 223.4823 |
+| r02-bayonet-analytic | solid | **SURFACE** | 586 / 582 / 576 | 236.9718 |
+| r02-bayonet-faceted | solid | solid | 1685 / 1685 / 1685 | 234.8642 |
+| r03-coupler-analytic | solid | not run | 2840 / 2844 / - | 227.3047 |
+| r03-coupler-faceted | solid | not run | 7108 / 7108 / - | 227.1335 |
+
+Two independent kernels read the files as closed solids and one does not, so
+SOLIDWORKS is the outlier rather than the exporter. That answers the question
+the third opinion was asked to settle, and it does not mean nothing is wrong:
+an importer being stricter than two others is still an interoperability defect
+if the strictness is about something real.
+
+On the faceted files Fusion's volumes agree with SOLIDWORKS to every digit
+reported - 223.4823 against 223482.2984 mm3, 234.8642 against 234864.2425 - so
+the two are measuring the same solid and the disagreement is confined to the
+analytic path. The face counts differ slightly and harmlessly: SOLIDWORKS is
+low by 21 and 16 on lid10's two variants and by 9 and 0 on the bayonet's, which
+is coplanar-face merging on import, not dropped faces. It happens on the
+faceted file it accepts as readily as on the analytic one it refuses.
+
+### The first metric that separates them
+
+Every measure in the diff above pointed the wrong way. One does not: how far
+the recovered analytic surfaces sit from the mesh they were recovered from,
+read as the volume the analytic export gains over the faceted one. A cylinder
+fitted through facet vertices bulges outside the chords, so the difference is
+always positive and scales with the sagitta.
+
+| | analytic | faceted | delta |
+| --- | --- | --- | --- |
+| lid10 **(fails)** | 226.7486 | 223.4823 | **+1.462%** |
+| bayonet **(fails)** | 236.9718 | 234.8642 | **+0.897%** |
+| coupler (passes) | 227.3047 | 227.1335 | +0.075% |
+
+The part that imports cleanly deviates twelve to twenty times less than the two
+that do not. That is the same quantity as the fit-band fraction measured
+earlier - lid10 at 68% of its band, the coupler at 39% on `_resolution: 240` -
+now correlating with the import outcome as well.
+
+Three points is a correlation, not a mechanism, and the earlier test of the
+kernel's absolute slack found the opposite (fn020 sews at 0.283 where lid10
+fails at 0.264). What the two have in common is that a relative measure
+separates the parts and an absolute one does not, which is worth taking
+seriously rather than reconciling by hand.
+
+The experiment that decides it already exists and has not been run: the
+parameterised band family sweeps `$fn` from 24 to 96 over one shape, so its
+deviation varies by an order of magnitude with everything else held fixed. It
+postdates the SOLIDWORKS session. If the family crosses from solid to SURFACE
+somewhere in that sweep, the deviation is the mechanism and the threshold is
+measurable; if every member imports, it is not, and the two parts share
+something still unnamed.
