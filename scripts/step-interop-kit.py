@@ -114,8 +114,8 @@ COUPONS = [
 # claimed by distance to its axis. Both real parts are here because both now
 # declare their thread - exported with the analytic flag alone, lid10 comes
 # out at 1985 faces and shows a CAD system none of this work.
-APPROX = {"c12-approximated", "c15-bored-cylinder", "c16-bored-cone",
-          "r01-lid10", "r02-bayonet"}
+APPROX = {"c11-swept-grid", "c12-approximated", "c15-bored-cylinder",
+          "c16-bored-cone", "r01-lid10", "r02-bayonet"}
 
 CENSUS_KINDS = [
     "PLANE", "CYLINDRICAL_SURFACE", "CONICAL_SURFACE", "SPHERICAL_SURFACE",

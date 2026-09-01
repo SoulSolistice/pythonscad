@@ -234,3 +234,60 @@ noting too that SOLIDWORKS reports c15 as **four** faces where OpenCASCADE
 reports ten: it sewed the seam-split halves back into whole periodic surfaces,
 which is the best available outcome for a face that had to be cut so as not to
 wrap.
+
+### Correction: it is not "declared sweeps do not sew"
+
+The section above named the declared sweep as the culprit, which was right about
+lid10 and wrong as a general statement. A second real part settles it: the
+user's own `base_coupler`, the same design family and the same feature, with its
+thread declared, imports into SOLIDWORKS as **a solid** - 2838 faces, volume
+229566.5077. So a declared sweep can sew, at the scale of a real part.
+
+What was tried on lid10 and did not help, each a separate export differing in
+one thing:
+
+| tried | result |
+| --- | --- |
+| cutting the sweep along its length, 8 / 16 / 32 / 64 stations per face | SURFACE at every limit |
+| coarser tessellation - 761 faces instead of 1326 | SURFACE |
+| finer tessellation - band 0.1032 and 0.0459 | would not load, then crashed the session |
+
+So neither the boundary size of a single face nor the size of the model is the
+mechanism, and the two are worth ruling out because both were plausible.
+
+The remaining hypothesis is the **tessellation band**: a fitted face is bounded
+by the mesh's own polyline, and those chords sag off the surface they bound by
+up to the band - 0.2527 on lid10, against a sewing tolerance orders of magnitude
+tighter. It fits the evidence that exists (`c12-approximated` sews at 0.0107,
+`base_coupler` at 0.0459, lid10 fails at 0.2527) and it fits the user's
+observation that a good file opens instantly while a bad one takes minutes:
+SOLIDWORKS is not rejecting these files, it is *healing* them, and failing.
+
+It is not proven. The test that would prove it - lid10 at a band of 0.0459 -
+crashed SOLIDWORKS twice, and the files it choked on are valid closed solids in
+OpenCASCADE. Something about lid10 in particular is pathological, and that is a
+separate question from the band.
+
+If the band is the mechanism, the consequence is architectural rather than a
+bug: **a fitted surface adjacent to faceted neighbours can only be sewn by a
+kernel whose tolerance exceeds the model's own tessellation band**, because the
+shared edge has to be straight for the planar neighbour and cannot then lie on
+the curved face. That would make the approximation pass safe only below a
+resolution-dependent threshold, which is a thing to state and measure rather
+than to fix.
+
+### What the kit should grow
+
+Every small coupon passes and both real parts failed, which is the shape of a
+gap in the kit rather than a coincidence. Small coupons establish that an entity
+is *encodable*; they say nothing about whether a kernel will sew a shell of a
+thousand of them.
+
+The useful form is not one large coupon but a **parameterised family**: the same
+feature exported at a sweep of tessellation bands, so the kit reports the
+threshold at which a kernel stops sewing rather than a pass or a fail. That
+turns "SOLIDWORKS dislikes our sweeps" - which this document now knows to be
+false - into a number the exporter can be designed against.
+
+A second gap the same run exposed: `c11-swept-grid` was not in `APPROX` either,
+so the coupon named for the swept grid had never exported one. It is now.
