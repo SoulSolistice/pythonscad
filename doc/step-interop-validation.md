@@ -368,3 +368,55 @@ a predictor: it is the only cheap, deterministic number here that describes how
 far an approximated face's boundary sits from the surface it bounds, it needs no
 CAD licence, and it does not crash. `TOLERANCE:` and `TOLERANCE-APPROX:` assert
 it. It just does not, on this evidence, decide whether SOLIDWORKS will sew.
+
+## Diffing the parts that fail against the ones that do not
+
+With three mechanisms ruled out, the remaining question was what the two failing
+files have that the passing ones do not. The obvious candidates are the things
+an importer is fussy about and OpenCASCADE quietly tolerates - geometry below
+its own resolution, faces with holes, shells that do not close. None of them
+distinguishes:
+
+| | faces | min area | area<1e-4 | min edge | edge<1e-2 | multi-bound | edges not used twice |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| lid10 **(fails)** | 1327 | 0.00021 | 0 | 0.0011 | 40 | 7 | 0 |
+| bayonet **(fails)** | 595 | 0.0098 | 0 | 0.0315 | 0 | 8 | 0 |
+| coupler (passes) | 2840 | 3.9e-07 | **46** | 0.00026 | **396** | 9 | 0 |
+| c12 (passes) | 6 | 40 | 0 | 0.435 | 0 | 0 | 0 |
+
+The file that imports cleanly is the *worst* of them by every measure of small
+geometry: forty-six faces under 1e-4 where the failing ones have none, and
+three hundred and ninety-six short edges where lid10 has forty. Every shell is
+closed. Nor is it the seam: all three sweeps come out as strips over one
+B_SPLINE_SURFACE_WITH_KNOTS, so none of them is the two-faces-across-a-cut case.
+
+So the diff finds nothing, which is worth recording as plainly as a finding
+would be. Four mechanisms have now been measured and discarded, and the failure
+is confined to two files whose only shared property is that they live in this
+repository.
+
+## A third kernel
+
+`scripts/step-interop-fusion.py` does for Autodesk Fusion what
+`step-interop-solidworks.ps1` does for SOLIDWORKS, with the same columns so the
+two read side by side. Fusion has no out-of-process automation, so it runs
+inside it:
+
+```text
+Utilities -> ADD-INS -> Scripts and Add-Ins -> Scripts -> + -> pick the file -> Run
+```
+
+It asks for a kit folder, imports every `.stp`, and writes `fusion-results.csv`
+beside them.
+
+The point of a third opinion is that two kernels currently disagree and no
+mechanism explains it. OpenCASCADE reads both failing files as one valid closed
+solid; SOLIDWORKS reads their faces and declines to sew them. A third kernel
+says which is the outlier, and that changes what to do next: if Fusion agrees
+with OpenCASCADE the exporter is probably fine and SOLIDWORKS is being strict
+about something specific; if it agrees with SOLIDWORKS then the files really do
+carry a defect that OpenCASCADE is repairing on the way in, and it is worth
+finding.
+
+A focused kit for that question is what `build/interop-fusion` holds: the two
+parts that fail, the one that passes, and a faceted control for each.
