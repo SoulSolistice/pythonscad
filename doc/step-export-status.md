@@ -2127,3 +2127,71 @@ cap is a point the generator emitted, so position alone would claim it, and its
 middle is on the cap rather than on the sweep - which is precisely what the
 centroid test exists to catch. They are excluded, and 16 is the distance from a
 cap to the surface it is not on, not an error in the fit.
+
+## 16. Cones, fitted rather than stacked
+
+The reference lid fitted **no quadric at all** to walls which are mostly quadric,
+and the reason was that the only quadric fitter is `fitCylinder`. A cone's
+normals make a constant angle with its axis rather than lying in a plane, so the
+coplanarity test that finds a cylinder's axis correctly refuses one, and every
+conical wall fell through to `fitRevolved` - which decomposes it into *rings*,
+one cylinder per station, for the band pass to reassemble. It rarely does: those
+rings are also what left three declared cylinders at 78.1, 78.2073 and 78.3073,
+a tenth apart under a tessellation band of 0.1073, which no claim can tell
+apart. They were never three rival cylinders. They were one cone, sampled.
+
+That the wall is conical is measured rather than inferred from the source. The
+radius of its faceted area falls linearly with height - 79.09 at z=10 through
+78.49 at z=40 to 78.09 at z=60, about a millimetre over fifty-five - and
+`hoseSocket` does indeed bore it as `cylinder(r1, r2, h)` over `taperLength`
+with only a short cylindrical seat beyond.
+
+### The apex is linear
+
+`fitCone` finds the apex first and finds it without iterating, which is what
+makes it cheap and robust. A ruling of a cone lies in the tangent plane along
+it, so for every point `P` with normal `n`:
+
+```text
+n . (P - A) = 0
+```
+
+Three unknowns, one linear equation per vertex, no starting guess to converge
+from and nothing to diverge. The axis is then the mean ruling from that apex,
+because the rulings are distributed about it and nothing else survives their
+average, and the half angle is their mean angle to it. A cylinder is the
+degenerate case with its apex at infinity; the normal equations say so by
+becoming ill conditioned, and it is refused there rather than fitted to
+something enormous and nearly parallel.
+
+### What it took to reach a face
+
+Fitting was not enough on its own, and the gap is worth recording because it
+cost a build to find. `recogniseQuadricPatches` pre-filters facets by their
+normal, and for a cylinder that filter is exact - every facet of a prism is
+parallel to the axis, to 1e-6. A faceted cone is not: its facets are chord
+planes, so they lean by a little more than the true cone does, by the cosine of
+half the facet angle. Demanding 1e-6 there admitted nothing, and the fitted
+cones sat in the declaration list reaching no face at all. The filter now only
+has to reject caps; the vertex distances do the real work.
+
+### What the cone fit is worth
+
+| | before | after |
+| --- | --- | --- |
+| `lid10`, approximated | 1443 faces | **1326** |
+| | `BSpline 2, Cone 4, Cylinder 6, Plane 1431` | `BSpline 2, Cone 8, Cylinder 6, Plane 1311` |
+| planar area | 42294 | **39224** |
+| `step-approximate-turned` | 2 regions as rings | 1 as a **cone**, 1 as rings |
+| `step-bored-cone` | 56 faces | **26** |
+
+`step-bored-cone` is the new fixture: a cone bored across, so the bore's own trim
+runs on a tapered wall - the case the band model cannot express on either side.
+Its volume is derived and is not elementary, because the wall the bore crosses is
+tapered: integrating `2*sqrt(R(z)^2 - x^2)` with `R(z) = 12 - 0.2z` over the
+bore's disc gives 984.757269 against a frustum of 6366.961111, so 5382.203842.
+
+This does not finish the lid. Its planar area falls by 7% and the largest thing
+left is still the thread's cut remainder, which is not a quadric at all. What it
+does finish is the excuse: a conical wall now has a surface to be written on,
+where before the fitter that could have found one was never asked.

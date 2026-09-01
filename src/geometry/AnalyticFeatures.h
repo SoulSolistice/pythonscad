@@ -306,6 +306,22 @@ struct SmoothRegion {
  * vertices projected onto that plane. */
 std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& region, double tol);
 
+/*! The cone a region lies on, or nullptr.
+ *
+ * Not something fitCylinder can stand in for: a cone's normals make a constant
+ * angle with its axis instead of lying in a plane, so the coplanarity test that
+ * finds a cylinder's axis correctly refuses one - which is why a part whose
+ * walls are mostly cone can fit no quadric at all.
+ *
+ * The apex is solved linearly, which is what makes this cheap and robust. A
+ * ruling lies in the tangent plane along it, so `n . (P - A) = 0` for every
+ * point and its normal: three unknowns, one equation per vertex, no starting
+ * guess. The axis is then the mean ruling from that apex and the half angle
+ * their mean angle to it. A cylinder is the degenerate case with its apex at
+ * infinity, and is refused rather than fitted to something huge and nearly
+ * parallel. */
+std::shared_ptr<Surface> fitCone(const Mesh& mesh, const SmoothRegion& region, double tol);
+
 /*! The quad grid a smooth region was swept as, or null when it has none.
  *
  * The other half of "fit where the generator's grid survives, declare where the

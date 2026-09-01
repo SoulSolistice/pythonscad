@@ -40,7 +40,12 @@ among the declarations lets the zone pass absorb the whole stack of cones.
 """
 # EXPECT: no analytic surfaces were declared
 # EXPECT-NOT: surface recognised
-# APPROX: approximation took 2 of 2 uncovered regions - 0 as cylinders, 2 as rings of a turned surface, 0 as swept grids
+# A cone is now fitted directly rather than decomposed into rings. The
+# report counts it separately because the two are not the same claim: a
+# ring says only that some circle sits at that height, and it takes the
+# band pass to make a cone out of a stack of them, which the rim rules
+# then often refuse. Fitting the cone says what the surface is.
+# APPROX: approximation took 2 of 2 uncovered regions - 0 as cylinders, 1 as cones, 1 as rings of a turned surface, 0 as swept grids
 # APPROX: 2 surfaces recognised (0 toroidal, 1 spherical, 1 conical, 0 partial), 528 facets replaced
 # APPROX: approximation found nothing left to fit
 #

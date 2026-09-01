@@ -51,7 +51,12 @@
 // against the faceted export's 800.717. Over the walls' 570 square units that
 // is an average normal displacement of 0.0035, well inside the band - the
 // smooth surface cutting the corners the chords left standing.
-// APPROX: approximation took 4 of 4 uncovered regions - 0 as cylinders, 0 as rings of a turned surface, 4 as swept grids
+// A cone is now fitted directly rather than decomposed into rings. The
+// report counts it separately because the two are not the same claim: a
+// ring says only that some circle sits at that height, and it takes the
+// band pass to make a cone out of a stack of them, which the rim rules
+// then often refuse. Fitting the cone says what the surface is.
+// APPROX: approximation took 4 of 4 uncovered regions - 0 as cylinders, 0 as cones, 0 as rings of a turned surface, 4 as swept grids
 // APPROX: 4 regions are not turned surfaces because a vertex is off the ring its height puts it on
 // APPROX: a declared 24x17 cubic sweep claims 736 facets whole
 // APPROX: 4 declared sweeps written as one face each, replacing 2048 facets

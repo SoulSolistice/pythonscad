@@ -489,6 +489,126 @@ std::shared_ptr<Surface> fitCylinder(const Mesh& mesh, const SmoothRegion& regio
   return std::make_shared<CylinderSurface>(centre, axis, r);
 }
 
+/*! The cone a region lies on, or nullptr.
+ *
+ * `fitCylinder` cannot stand in for this and does not try: a cone's normals
+ * make a constant angle with its axis rather than lying in a plane, so the
+ * coplanarity test that finds a cylinder's axis correctly refuses one. That
+ * refusal is why the reference lid fitted no quadric at all to walls which are
+ * mostly cone - its hose socket is bored as `cylinder(r1, r2, h)` over most of
+ * its depth, and the exported geometry shows the radius falling a millimetre
+ * over fifty-five of z.
+ *
+ * The apex is found first and it is found linearly, which is the whole trick.
+ * A ruling of a cone lies in the tangent plane along it, so for every point P
+ * with normal n on a cone of apex A, `n . (P - A) = 0` - three unknowns, one
+ * linear equation per vertex, and no starting guess to converge from. The axis
+ * then falls out as the mean of the rulings from that apex, because they are
+ * distributed about it, and the half angle as their mean angle to it.
+ *
+ * A cylinder is the degenerate case with its apex at infinity, and the system
+ * says so by becoming ill conditioned; that is refused here rather than fitted
+ * to something huge and nearly parallel.
+ */
+std::shared_ptr<Surface> fitCone(const Mesh& mesh, const SmoothRegion& region, double tol)
+{
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  const std::vector<Vector3d>& normals = *mesh.normals;
+  if (region.facets.size() < 4) return nullptr;
+
+  // n . A = n . P, weighted by area so a swarm of slivers cannot outvote the
+  // shape, exactly as the cylinder's axis is weighted.
+  Eigen::Matrix3d ata = Eigen::Matrix3d::Zero();
+  Vector3d atb = Vector3d::Zero();
+  std::set<int> verts;
+  double total_area = 0;
+  for (const std::size_t f : region.facets) {
+    const std::vector<int>& loop = loops[f];
+    if (loop.size() < 3) continue;
+    for (const int v : loop) verts.insert(v);
+    double area = 0;
+    for (std::size_t i = 1; i + 1 < loop.size(); i++) {
+      area +=
+        (vertices[loop[i]] - vertices[loop[0]]).cross(vertices[loop[i + 1]] - vertices[loop[0]]).norm() /
+        2;
+    }
+    if (!(area > 0)) continue;
+    total_area += area;
+    Vector3d centroid = Vector3d::Zero();
+    for (const int v : loop) centroid += vertices[v];
+    centroid /= double(loop.size());
+    const Vector3d n = normals[f].normalized();
+    ata += area * n * n.transpose();
+    atb += area * n * n.dot(centroid);
+  }
+  if (verts.size() < 6 || !(total_area > 0)) return nullptr;
+
+  // Ill conditioned means the apex is nowhere in particular - the normals span
+  // too little, or they are all perpendicular to one direction, which is a
+  // cylinder and fitCylinder's business.
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(ata);
+  if (solver.info() != Eigen::Success) return nullptr;
+  const double lo = solver.eigenvalues()[0], hi = solver.eigenvalues()[2];
+  if (!(hi > 0) || lo < 1e-6 * hi) return nullptr;
+
+  const Vector3d apex = ata.inverse() * atb;
+
+  // The axis is the mean ruling. They are spread about it, so nothing else in
+  // their average survives.
+  Vector3d axis = Vector3d::Zero();
+  for (const int v : verts) {
+    const Vector3d ray = vertices[v] - apex;
+    if (ray.norm() > 1e-12) axis += ray.normalized();
+  }
+  if (axis.norm() < 1e-6) return nullptr;  // rulings cancel: a full double cone
+  axis.normalize();
+
+  // The half angle, and the check that there is one - a spread of angles is a
+  // region that is not a cone however well its apex solved.
+  double sum_angle = 0, worst_angle = 0;
+  std::size_t n_rays = 0;
+  for (const int v : verts) {
+    const Vector3d ray = vertices[v] - apex;
+    if (ray.norm() < 1e-12) continue;
+    const double a = acos(std::clamp(ray.normalized().dot(axis), -1.0, 1.0));
+    sum_angle += a;
+    n_rays++;
+  }
+  if (n_rays < 6) return nullptr;
+  const double alpha = sum_angle / double(n_rays);
+  if (!(alpha > 1e-4) || alpha > M_PI / 2 - 1e-4) return nullptr;
+  for (const int v : verts) {
+    const Vector3d ray = vertices[v] - apex;
+    if (ray.norm() < 1e-12) continue;
+    worst_angle =
+      std::max(worst_angle, fabs(acos(std::clamp(ray.normalized().dot(axis), -1.0, 1.0)) - alpha));
+  }
+
+  // Refuse a taper so slight that a cylinder describes it: that is a better
+  // surface for the same facets and fitCylinder has already had its turn.
+  const double slope = tan(alpha);
+  if (slope < 1e-4) return nullptr;
+
+  // Every vertex on it, measured as a distance rather than as an angle.
+  double along = 0;
+  for (const int v : verts) along += (vertices[v] - apex).dot(axis);
+  along /= double(verts.size());
+  if (!(along > 0)) return nullptr;
+  for (const int v : verts) {
+    const Vector3d rel = vertices[v] - apex;
+    const double t = rel.dot(axis);
+    if (!(t > 0)) return nullptr;  // on the other nappe, or past the apex
+    const double radial = (rel - axis * t).norm();
+    if (fabs(radial - t * slope) * cos(alpha) > tol) return nullptr;
+  }
+  (void)worst_angle;
+
+  const double r = along * slope;
+  if (!(r > tol)) return nullptr;
+  return std::make_shared<ConeSurface>(apex + axis * along, axis, r, slope);
+}
+
 std::shared_ptr<Surface> gridFromRegion(const Mesh& mesh, const SmoothRegion& region, double tol,
                                         const char **why)
 {
@@ -1874,10 +1994,30 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     return band;
   };
 
+  // How far a point is off a quadric, as a distance rather than as a radius
+  // difference - on a cone those differ by the cosine of the half angle, and it
+  // is the perpendicular distance the tessellation band is a bound on.
+  auto offsetAt = [](const Surface *surface, const Vector3d& p) {
+    if (const auto *cyl = dynamic_cast<const CylinderSurface *>(surface)) {
+      const Vector3d axis = cyl->normdir.normalized();
+      return fabs(distanceToAxis(p, cyl->refpt, axis) - cyl->r);
+    }
+    const auto *cone = dynamic_cast<const ConeSurface *>(surface);
+    const Vector3d axis = cone->normdir.normalized();
+    const double want = cone->radiusAt(p);
+    if (want < 0) return std::numeric_limits<double>::max();  // past the apex
+    return fabs(distanceToAxis(p, cone->refpt, axis) - want) / sqrt(1 + cone->slope * cone->slope);
+  };
+
   for (const auto& surface : surfaces) {
     const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
-    if (cyl == nullptr || !(cyl->r > 0)) continue;
-    const Vector3d axis = cyl->normdir.normalized();
+    const auto *cone = dynamic_cast<const ConeSurface *>(surface.get());
+    if (cyl == nullptr && cone == nullptr) continue;
+    if (cyl != nullptr && !(cyl->r > 0)) continue;
+    const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
+    // A cone's normal is not perpendicular to its axis - it leans by the half
+    // angle - so what a facet has to agree with is that lean, not zero.
+    const double lean = cyl != nullptr ? 0.0 : cone->slope / sqrt(1 + cone->slope * cone->slope);
 
     // How far a facet may sit off the surface and still be on it is the
     // facet's *own* tessellation band, not a fraction of the radius. A
@@ -1896,12 +2036,22 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     for (std::size_t f = 0; f < loops.size(); f++) {
       if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
       if (loops[f].size() < 3) continue;
-      // A facet lying *along* the axis is not on the cylinder however close its
-      // corners fall - a cap across the bore has every vertex on the rim.
-      if (fabs(normals[f].normalized().dot(axis)) > 1e-6) continue;
+      // A facet across the axis is not on the surface however close its corners
+      // fall - a cap over a bore has every vertex on the rim.
+      //
+      // On a cylinder that is exact: every facet of a prism is parallel to the
+      // axis. On a cone it is not, and demanding it be was what kept the fitted
+      // cones from ever reaching a face. A facet of a polygonal frustum is a
+      // chord plane, so it leans by a little more than the true cone does -
+      // by a factor of cos(pi/n) - and the further test is left to the vertex
+      // distances below, which measure the thing that actually matters.
+      const double lean_of_f = fabs(normals[f].normalized().dot(axis));
+      if (cyl != nullptr ? lean_of_f > 1e-6 : lean_of_f > std::min(0.99, lean * 1.05 + 1e-6)) {
+        continue;
+      }
       double off = 0;
       for (const int v : loops[f]) {
-        off = std::max(off, fabs(distanceToAxis(vertices[v], cyl->refpt, axis) - cyl->r));
+        off = std::max(off, offsetAt(surface.get(), vertices[v]));
       }
       if (off > bandOf({f})) continue;
       claimed.push_back(f);
@@ -1911,16 +2061,18 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
 
     const double band = bandOf(claimed);
     if (worst > band) {
-      report.push_back(format(
-        "a region of %d facets on the declared r=%g is not written: its boundary strays %.4f from "
-        "the surface where the tessellation allows %.4f",
-        int(claimed.size()), cyl->r, worst, band));
+      report.push_back(
+        format("a region of %d facets on the declared %s r=%g is not written: its boundary strays %.4f "
+               "from the surface where the tessellation allows %.4f",
+               int(claimed.size()), cyl != nullptr ? "cylinder" : "cone",
+               cyl != nullptr ? cyl->r : cone->r, worst, band));
       continue;
     }
 
     // Does the claim close around the axis? A face that wraps needs a seam, and
     // the simpler answer - the one a declared sweep already takes when it
     // closes around its profile - is to cut it so that no face wraps at all.
+    const Vector3d base = cyl != nullptr ? cyl->refpt : cone->refpt;
     const Vector3d ref = perpendicular(axis);
     const Vector3d ref2 = axis.cross(ref);
     std::vector<char> quadrant(4, 0);
@@ -1929,7 +2081,7 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
       Vector3d c(0, 0, 0);
       for (const int v : loops[claimed[i]]) c += vertices[v];
       c /= double(loops[claimed[i]].size());
-      const Vector3d rel = c - cyl->refpt;
+      const Vector3d rel = c - base;
       double t = atan2(rel.dot(ref2), rel.dot(ref));
       if (t < 0) t += 2 * M_PI;
       theta[i] = t;

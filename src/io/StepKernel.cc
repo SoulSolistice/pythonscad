@@ -652,7 +652,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     if (approximate) {
       const std::vector<AnalyticFeatures::SmoothRegion> candidates =
         AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
-      std::size_t fitted = 0, recovered = 0, turned = 0, tried = 0;
+      std::size_t fitted = 0, recovered = 0, turned = 0, tried = 0, coned = 0;
       std::map<std::string, int> turned_refusals;
       double coarsest = 0;
       for (const auto& region : candidates) {
@@ -661,6 +661,18 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         std::shared_ptr<Surface> guess = AnalyticFeatures::fitCylinder(mesh, region, model_tol);
         if (guess != nullptr) {
           fitted++;
+          coarsest = std::max(coarsest, region.band);
+          addSurfaceUnique(effective, guess);
+          continue;
+        }
+        // A cone, which is a quadric fitCylinder cannot describe and correctly
+        // refuses - its normals make a constant angle with the axis rather than
+        // lying in a plane. The reference lid's hose socket is bored as a cone
+        // over most of its depth, so without this most of its wall area has no
+        // quadric to be written on at all.
+        guess = AnalyticFeatures::fitCone(mesh, region, model_tol);
+        if (guess != nullptr) {
+          coned++;
           coarsest = std::max(coarsest, region.band);
           addSurfaceUnique(effective, guess);
           continue;
@@ -706,10 +718,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       if (tried > 0) {
         LOG(
           "STEP export: approximation took %1$d of %2$d uncovered regions - %3$d as cylinders, "
-          "%4$d as rings of a turned surface, %5$d as swept grids - the coarsest tessellated "
-          "to %6$.4f",
-          int(fitted + turned + recovered), int(tried), int(fitted), int(turned), int(recovered),
-          coarsest);
+          "%4$d as cones, %5$d as rings of a turned surface, %6$d as swept grids - the coarsest "
+          "tessellated to %7$.4f",
+          int(fitted + coned + turned + recovered), int(tried), int(fitted), int(coned), int(turned),
+          int(recovered), coarsest);
       }
       if (fitted + turned + recovered > 0) {
         // Re-run with the fits in hand. Cheaper than threading them through the
@@ -1633,8 +1645,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // the shell. The surface is exact; only its boundary is the mesh's.
   for (const auto& patch : quadric_faces) {
     const auto *cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get());
-    if (cyl == nullptr) continue;
-    const Vector3d axis = cyl->normdir.normalized();
+    const auto *cone = dynamic_cast<const ConeSurface *>(patch.surface.get());
+    if (cyl == nullptr && cone == nullptr) continue;
+    const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
+    const Vector3d base = cyl != nullptr ? cyl->refpt : cone->refpt;
 
     std::map<std::size_t, std::vector<int>> cycles;
     for (const auto& run : patch.runs) {
@@ -1646,13 +1660,23 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // The reference direction is a radius through the first boundary vertex, so
     // the face starts where its own boundary does rather than at some seam of
     // the surface's own.
-    const Vector3d rel0 = vertices[cycles.begin()->second.front()] - cyl->refpt;
+    const Vector3d rel0 = vertices[cycles.begin()->second.front()] - base;
     const Vector3d ref = (rel0 - axis * axis.dot(rel0)).normalized();
-    auto point = new Point(entities, cyl->refpt);
-    auto dir_axis = new Direction(entities, axis);
+    auto point = new Point(entities, base);
     auto dir_ref = new Direction(entities, ref);
-    auto surface = new CylindricalSurface(
-      entities, "", new Axis2Placement(entities, dir_axis, dir_ref, point), cyl->r);
+    SurfaceType *surface = nullptr;
+    if (cyl != nullptr) {
+      auto dir_axis = new Direction(entities, axis);
+      surface = new CylindricalSurface(entities, "",
+                                       new Axis2Placement(entities, dir_axis, dir_ref, point), cyl->r);
+    } else {
+      // ISO 10303 wants a half angle in (0, pi/2) and a radius growing along the
+      // placement's axis, so a cone narrowing that way is written from its other
+      // end - the same convention the band pass follows.
+      auto dir_axis = new Direction(entities, cone->slope > 0 ? axis : Vector3d(-axis));
+      surface = new ConicalSurface(entities, "", new Axis2Placement(entities, dir_axis, dir_ref, point),
+                                   cone->r, atan(fabs(cone->slope)));
+    }
 
     // Which cycle is the outer bound is a question about the surface's own
     // parameters: a hole in a face is a hole in its (theta, z) rectangle.
@@ -1662,10 +1686,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     for (const auto& entry : cycles) {
       std::vector<std::pair<double, double>> uv;
       for (const int v : entry.second) {
-        const Vector3d rel = vertices[v] - cyl->refpt;
+        const Vector3d rel = vertices[v] - base;
         double t = atan2(rel.dot(ref2), rel.dot(ref));
         if (t < 0) t += 2 * M_PI;
-        uv.emplace_back(t * cyl->r, axis.dot(rel));
+        uv.emplace_back(t * (cyl != nullptr ? cyl->r : cone->r), axis.dot(rel));
       }
       double twice = 0.0;
       for (std::size_t i = 0; i < uv.size(); i++) {
@@ -1706,7 +1730,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       Vector3d centroid = Vector3d::Zero();
       for (const int v : facet) centroid += vertices[v];
       centroid /= double(facet.size());
-      const Vector3d rel = centroid - cyl->refpt;
+      const Vector3d rel = centroid - base;
       const Vector3d radial = (rel - axis * axis.dot(rel)).normalized();
       outward = radial.dot(loop_normals[patch.facets.front()]) > 0;
     }
