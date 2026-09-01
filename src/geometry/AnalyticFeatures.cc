@@ -1532,6 +1532,7 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
   std::size_t corners_only = 0;               // every corner on the sweep, the middle not
   double worst_claimed = 0.0;                 // the furthest a *claimed* facet's middle strays
   double claim_band = 0.0;                    // the allowance it was measured against
+  double worst_at_u = 0.0;                    // and where along the sweep it happened
   std::size_t cut_into = 0;                   // faces a wrapping claim had to be cut into
   double worst_miss = 0, missed_against = 0;  // how far off, and what was allowed
 
@@ -1612,6 +1613,7 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         continue;
       }
       claimed.push_back(f);
+      if (miss > worst_claimed) worst_at_u = pu;
       worst_claimed = std::max(worst_claimed, miss);
       claim_band = std::max(claim_band, grid->membershipTolerance());
       span_of.push_back(segs > 0 ? std::max(0, std::min(segs - 1, int(pv * segs))) : 0);
@@ -1772,8 +1774,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     // point, so this is that deviation over every facet the sweep claimed.
     report.push_back(
       format("the fitted sweep passes within %.4f of the middle of every facet it claims, against a "
-             "tessellation band of %.4f",
-             worst_claimed, claim_band));
+             "tessellation band of %.4f - worst at %.0f%% along the sweep",
+             worst_claimed, claim_band, worst_at_u * 100.0));
   }
   if (corners_only > 0) {
     // Worth a line of its own: it is the difference between the facets a

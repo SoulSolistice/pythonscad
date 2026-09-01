@@ -1213,7 +1213,7 @@ it draws them, and a recognition pass finds the facets on each and resolves
 every boundary. All of it is measured on a real filleted cube at `fn = 12`
 rather than on a transcription of the tessellation:
 
-```
+```text
 20 analytic surfaces available (0 cylindrical, 0 spherical, 0 toroidal, 20 Bezier)
 20 Bezier patches cover 1100 facets
 48 of 48 shared seams agree between the two patches meeting there
@@ -1298,7 +1298,7 @@ nothing.
 
 Measured on the headless build, `cube(10, center=True).fillet(1, fn=12)`:
 
-```
+```text
 20 Bezier patches cover 1100 facets
 20 of 20 patches are exactly quadrics - 12 cylindrical, 8 spherical
 written as 26 faces instead of 1106
@@ -1547,8 +1547,8 @@ at a cap - see the torus section for what still stands in the way there.
 One thing genuinely is new, and it is the seam. A periodic face is closed by a
 seam that has to lie *on* the surface: up a cylinder or a cone that is a
 straight ruling, but over a sphere it is a **meridian**, and the straight line
-between the same two vertices sags 0.05 mm off a radius 10 sphere at `$fn = 32`
-- five thousand times the modelling tolerance. A spherical zone therefore seams
+between the same two vertices sags 0.05 mm off a radius 10 sphere at
+`$fn = 32` - five thousand times the modelling tolerance. A spherical zone therefore seams
 with an arc of a great circle. Nothing else refers to a seam, since it is used
 twice by its own face and appears nowhere in the mesh, so swapping the line for
 an arc costs no neighbouring loop a rewrite.
@@ -2011,3 +2011,53 @@ Two diagnoses in this session were confidently wrong and were corrected by data
 rather than by argument — the orphaned-hole theory of the membrane, and a
 missing UCRT DLL that was never missing. Both times the correction came from the
 user running the thing and pasting the output.
+
+## Sampling a declared sweep
+
+A `declare_grid` fit interpolates a cubic through the stations the generator
+emitted, so it is exact *at* them and the only place it can stray is between.
+Where it strays most is not random: it is wherever the model's sampling is
+thinnest against geometry that is changing fastest, and for a swept feature that
+is almost always the run-in and run-out.
+
+The exporter says so. Every sweep it writes reports how far the surface passes
+from the middle of the furthest facet it claimed, and where along the sweep that
+was:
+
+```text
+the fitted sweep passes within 0.1724 of the middle of every facet it claims,
+against a tessellation band of 0.2527 - worst at 2% along the sweep
+```
+
+On the four sweeps in the tree the worst point is at 1%, 1%, 2% and 98%. Every
+one of them is at an end.
+
+**This is a property of the model, not of the fit.** The reference lid's
+`hoseRidge` takes `steps = max(24, round($fn*turns))` stations spaced uniformly
+in `t`, while its ridge depth ramps over the first and last few percent of the
+sweep - so the ramps get the same station density as the long uniform middle and
+need far more. Quadrupling the station count on the same part measures it:
+
+| | claims whole | band | worst | at |
+| --- | --- | --- | --- | --- |
+| as shipped | 490 | 0.2527 | 0.1724 | 2% |
+| 4x stations | 1928 | 0.0459 | 0.0199 | 99% |
+
+The deviation falls 8.7x, and it falls *relative to the band* as well - 68% of it
+down to 43% - so this is not simply both numbers shrinking with the mesh. Four
+times the stations also claims four times the facets whole.
+
+So the guidance for a generator declaring its own sweep: **sample where the shape
+moves, not uniformly in the sweep parameter**. A run-out that ramps over 5% of
+the sweep deserves something like the station density of the other 95%, not 5%
+of it. Nothing needs to change in the exporter for that - the stations are the
+model's to choose, and the report above is how to tell whether the choice was
+good.
+
+Worth knowing what this is *not*. Interpolating the grid as a **surface** rather
+than as rails overshoots at the ends far harder: a mock-up of this fit measured
+0.378 against a facet sagitta of 0.109, which is worse than the facets it
+replaced at the one point that mattered, while being thousands of times better
+everywhere else. `GridSurface::splineForm` writes `degree_v = 1` and solves the
+poles one rail at a time precisely to avoid that, and the numbers above are what
+remains once it has been.
