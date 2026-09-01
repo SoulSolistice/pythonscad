@@ -25,6 +25,12 @@
 # EXPECT: skipped 1 degenerated face - 0 collapsed to fewer than three distinct points, 1 had no area
 # EXPECT: welded 1 T-junction vertex back into 2 edges
 # EXPECT-NOT: had no neighbouring edge to weld into
+#
+# A unit cube. The extra vertex at (0.5, 0, 1) is a T-junction on one edge and
+# adds no volume, so anything other than exactly 1 means the sliver weld moved
+# the solid rather than only its topology.
+# ROUNDTRIP: Plane=6
+# VOLUME: 1
 
 from openscad import *
 

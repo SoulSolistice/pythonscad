@@ -46,6 +46,11 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 18 analytic surfaces available (17 cylindrical, 0 spherical, 1 toroidal, 0 Bezier)
 // EXPECT: 1 surface recognised (1 toroidal, 0 spherical, 0 conical, 0 partial), 1024 facets replaced
+//
+// Pappus: 2*pi^2*R*r^2 = 2*pi^2*10*9 = 180*pi^2. Exact because both the
+// revolution and the profile circle come back as one TOROIDAL_SURFACE.
+// ROUNDTRIP: Torus=1
+// VOLUME: 1776.5287922
 $fn = 32;
 rotate_extrude()
   translate([10, 0]) circle(3);

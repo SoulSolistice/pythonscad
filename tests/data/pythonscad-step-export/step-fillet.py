@@ -54,6 +54,12 @@ this model it should never have cause to say it.
 # RADII: Cylinder=1 Sphere=1
 # EDGES: Circle=24 Line=24 degenerate=8
 # EXPECT-NOT: left faceted
+#
+# A filleted cube is the Minkowski sum of cube(10-2r) with a ball of r, so it
+# comes apart into the pieces the fillet is made of: 8^3 for the core, 6*1*8^2
+# for the six slabs, 3*pi*1^2*8 for the twelve quarter-cylinders, and
+# (4/3)*pi*1^3 for the eight corner octants. 512 + 384 + 24*pi + (4/3)*pi.
+# VOLUME: 975.5870137
 from pythonscad import *
 
 cube(10, center=True).fillet(1, fn=12).show()

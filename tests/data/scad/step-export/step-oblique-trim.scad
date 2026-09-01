@@ -40,6 +40,23 @@
 // quietly rebuilding the trim it was handed.
 // EDGES: Circle=1 Ellipse=1 Line=1
 //
+// The volume, worked out from the model rather than read off the kernel: the
+// exact solid is a cylinder of radius 10 whose mean height is 26 - 10/cos 20,
+// because the tilt term integrates to nothing over a disc. That is
+// pi*100*15.3582222752 = 4824.92783.
+//
+// The tolerance is the one place in this suite that needs more than the
+// kernel's own 1e-6, and it is a stated property rather than slack. This trim
+// goes out as a plain 3D ELLIPSE with no pcurve, so the reader re-derives the
+// parameterisation on the cylinder instead of reading one, and lands about
+// 2e-6 of the size away - it measures 4824.915473. The same displacement is
+// measurable on OpenCASCADE's own export of the same solid: 5026.548244 with
+// its pcurves, 5026.558839 with the edges repointed at the plain curve. So the
+// bound is set at 0.02, which is far tighter than the tessellation band and
+// far too tight to hide a wrong ellipse - halving a semi-axis moves this by
+// hundreds.
+// VOLUME: 4824.92783 +/- 0.02
+//
 // And the volume says the surface is the *right* one. The exact solid is a
 // cylinder of radius 10 whose mean height is 26 - 10/cos 20 = 15.3582223, so
 // pi*100*that = 4824.9153; OpenCASCADE reads 4824.915473 back. The mesh's own

@@ -18,6 +18,12 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 64 facets replaced
+//
+// The hull's profile is (r=8, z=0) to (r=10, z=2) to (r=10, z=20) - the small
+// cylinder's top rim at (8, 0.01) is inside that line, so it contributes no
+// vertex. Frustum (pi*2/3)(64 + 80 + 100) plus cylinder pi*100*18.
+// ROUNDTRIP: Cone=1 Cylinder=1 Plane=2
+// VOLUME: 6165.8991814
 $fn = 32;
 hull() {
   translate([0, 0, 2]) cylinder(h = 18, r = 10);

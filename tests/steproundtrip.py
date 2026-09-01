@@ -277,7 +277,7 @@ def _invalid_detail(shape, analyzer, limit=5):
 
 
 def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canonical=None,
-                  expect_edges=None, expect_radii=None):
+                  expect_edges=None, expect_radii=None, expect_volume=None):
     """Read `filename` back with OpenCASCADE and report whether it is a solid.
 
     Returns (ok, lines). `ok` is None when OCCT is not installed, which the
@@ -339,9 +339,39 @@ def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canoni
         if volume <= 0:
             lines.append("the volume is not positive, so the solid is inside out")
             ok = False
+        if expect_volume is not None:
+            want, tol = expect_volume
+            if tol is None:
+                tol = 1e-6 * max(abs(want), 1.0)
+            # The one figure here a fixture can work out for itself. Every other
+            # expectation is a census of what this exporter wrote, captured by
+            # running it, so it locks in behaviour but cannot say the behaviour
+            # was right. A volume derived from the model's own dimensions is
+            # independent evidence: the kernel measures the exported solid and
+            # arithmetic says what that solid should measure, and the two having
+            # never met is the point.
+            #
+            # Relative, because these span 1e0 to 1e6, and loose enough only for
+            # the kernel's own reporting - it agrees to about 1e-9 relative when
+            # the solid really is the intended one.
+            if abs(volume - want) > tol:
+                lines.append(
+                    "expected a volume of %.6f +/- %.3g, the kernel measures %.6f - a "
+                    "relative difference of %.3g"
+                    % (want, tol, volume, abs(volume - want) / max(abs(want), 1.0))
+                )
+                ok = False
 
     if expect_surfaces:
-        for kind, want in sorted(expect_surfaces.items()):
+        # Exhaustive, not a subset. Checking only the kinds a fixture happens to
+        # name lets an unlisted one through in silence - a stray TOROIDAL_SURFACE
+        # from a recogniser that overreached would be read back by the kernel and
+        # noticed by nothing, because no fixture would think to say Torus=0. So a
+        # ROUNDTRIP: line has to account for every surface in the file, and the
+        # cost of that is having to state the planes, which is no bad thing: the
+        # plane count is the part that moves when a substitution goes wrong.
+        for kind in sorted(set(census) | set(expect_surfaces)):
+            want = expect_surfaces.get(kind, 0)
             got = census.get(kind, 0)
             if got != want:
                 lines.append(

@@ -12,6 +12,12 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 32 facets replaced
+//
+// Both walls are exact, so the bore takes exactly its own area away:
+// pi*(10^2 - 4^2)*10 = 840*pi. A bore written at the wrong radius, or as the
+// 16-gon it is in the mesh, lands somewhere else.
+// ROUNDTRIP: Cylinder=2 Plane=2
+// VOLUME: 2638.9378290
 $fn = 16;
 difference() {
   cylinder(h = 10, r = 10);

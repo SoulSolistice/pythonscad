@@ -28,6 +28,16 @@
 // being written and is the property that actually broke.
 //
 // EXPECT: no analytic surfaces were declared
+//
+// The census is exhaustive, and for a refusal fixture that is the whole point:
+// the assertion is not the number 2152, which is the mesher's business and was
+// read off a run - it is that no Cylinder, Cone, Sphere, Torus or BSplineSurface
+// appears beside it. A recogniser that started accepting any of these four would
+// have to put the surface somewhere, and there is nowhere here for it to go
+// unnoticed. No VOLUME: line: these are faceted exports of twisted and sheared
+// extrusions, so the figure would be the mesh's own and has no closed form to
+// check it against.
+// ROUNDTRIP: Plane=2152
 $fn = 32;
 linear_extrude(height = 20, twist = 90) circle(r = 4);
 translate([20, 0, 0]) linear_extrude(height = 20, scale = [0.5, 1]) circle(r = 4);

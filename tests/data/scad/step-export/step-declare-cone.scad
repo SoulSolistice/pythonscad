@@ -30,6 +30,7 @@
 // What a kernel makes of it: four faces, where the faceted export has 66.
 // ROUNDTRIP: Cone=1 Cylinder=1 Plane=2
 // RADII: Cylinder=10
+// VOLUME: 3962.5955337
 //
 // And the volume says it is the *right* cone, not merely a cone. The exact
 // solid is a cylinder of r=10 and h=10 under a frustum of h=4 running r=10 to

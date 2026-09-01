@@ -20,6 +20,7 @@ from a declared r=10 to an r=6 that no primitive named.
 # EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 64 facets replaced
 # EXPECT-NOT: left faceted
 # ROUNDTRIP: Cone=1 Cylinder=1 Plane=2
+# VOLUME: 3962.5955337
 from pythonscad import *
 
 body = (cylinder(r=10, h=10, fn=32) | cylinder(r1=10, r2=2, h=8, fn=32).translate([0, 0, 10])) \

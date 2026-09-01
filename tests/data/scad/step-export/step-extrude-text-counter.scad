@@ -17,5 +17,10 @@
 // EXPECT: 0 unresolved
 // EXPECT: written as 23 faces instead of 42
 // CANONICAL: spline=19
+//
+// Captured, for the same reason as its sibling. Two planes rather than four is
+// the counter: the O's hole makes the top and bottom one face each with an
+// inner bound, not two faces.
+// ROUNDTRIP: BSplineSurface=19 Plane=2
 $fn = 8;
 linear_extrude(height = 2) text("O", size = 20, font = "Liberation Sans");

@@ -18,5 +18,11 @@
 //
 // EXPECT: 4 toroidal
 // EXPECT: 6 surfaces recognised (4 toroidal, 0 spherical, 0 conical, 0 partial), 1088 facets replaced
+//
+// Pappus again, V = 2*pi times the first moment of the profile about the
+// axis. Slicing the rounded rectangle by height gives 1300 for the straight
+// middle and 312 + 52*pi for the two rounded ends, so 2*pi*(1612 + 52*pi).
+// ROUNDTRIP: Cylinder=2 Plane=2 Torus=4
+// VOLUME: 11154.9335655
 $fn = 32;
 rotate_extrude() offset(r = 2) translate([10, 0]) square([6, 10]);

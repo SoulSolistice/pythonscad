@@ -34,6 +34,12 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 1 analytic surface available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 32 facets replaced
+//
+// pi*10^2*20, the true cylinder the declaration asked for. The mesh is a
+// 32-gon prism of 6238.7, so this number is also what says the declaration
+// was acted on.
+// ROUNDTRIP: Cylinder=1 Plane=2
+// VOLUME: 6283.1853072
 $fn = 32;
 declare_cylinder(r = 10)
   linear_extrude(height = 20)

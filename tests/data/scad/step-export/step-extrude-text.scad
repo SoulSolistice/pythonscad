@@ -27,5 +27,11 @@
 // EXPECT: 0 unresolved
 // EXPECT: written as 36 faces instead of 68
 // CANONICAL: spline=32
+//
+// Captured rather than derived - a glyph outline has no closed form and the
+// count follows the font. What the line is worth is exhaustiveness: the 32
+// splines are the letter's curved flanks, and a quadric appearing among them
+// would be a recogniser fitting a cylinder to a piece of typography.
+// ROUNDTRIP: BSplineSurface=32 Plane=4
 $fn = 8;
 linear_extrude(height = 2) text("S", size = 20, font = "Liberation Sans");

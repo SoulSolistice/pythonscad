@@ -31,6 +31,15 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 1 analytic surface available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 4 surfaces recognised (0 toroidal, 0 spherical, 0 conical, 4 partial), 16 facets replaced
+//
+// Four arcs and the twenty-two flats: the two discs, the ribs' three faces
+// each, and the eight trapezoids the fixture explains above. No VOLUME: line,
+// and deliberately. This export is a hybrid - four arcs of the wall are the
+// true cylinder and the rest is still chords - so the figure is neither the
+// polygon's nor the circle's but a mixture of the two, and a number that can
+// only be got by running the exporter is exactly what these lines are meant
+// not to be.
+// ROUNDTRIP: Cylinder=4 Plane=22
 $fn = 32;
 union() {
   cylinder(h = 20, r = 10);

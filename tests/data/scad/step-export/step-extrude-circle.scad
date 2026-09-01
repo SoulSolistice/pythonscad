@@ -14,5 +14,11 @@
 //
 // EXPECT: 1 analytic surface available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 32 facets replaced
+//
+// pi*10^2*20. The analytic export is the true cylinder rather than the 32-gon
+// prism the mesh is, so this is the exact figure and not the polygon's
+// 6238.7 - which is the whole claim the fixture makes.
+// ROUNDTRIP: Cylinder=1 Plane=2
+// VOLUME: 6283.1853072
 $fn = 32;
 linear_extrude(height = 20) circle(r = 10);

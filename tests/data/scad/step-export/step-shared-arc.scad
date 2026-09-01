@@ -32,6 +32,11 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 2 partial), 48 facets replaced
+//
+// The chamfered cylinder above with one quadrant cut away, so exactly three
+// quarters of 6165.8991814.
+// ROUNDTRIP: Cone=1 Cylinder=1 Plane=4
+// VOLUME: 4624.4243861
 $fn = 32;
 difference() {
   hull() {

@@ -26,5 +26,10 @@
 //
 // EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 32 facets replaced
+//
+// scale=0.5 on r=10 over h=20 is the frustum r1=10, r2=5:
+// (pi*20/3)(100 + 50 + 25).
+// ROUNDTRIP: Cone=1 Plane=2
+// VOLUME: 3665.1914292
 $fn = 32;
 linear_extrude(height = 20, scale = 0.5) circle(r = 10);

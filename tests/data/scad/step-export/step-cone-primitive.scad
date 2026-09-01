@@ -20,5 +20,9 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 32 facets replaced
+//
+// A frustum, (pi*h/3)(r1^2 + r1*r2 + r2^2) = (pi*10/3)(64 + 96 + 144).
+// ROUNDTRIP: Cone=1 Plane=2
+// VOLUME: 3183.4805556
 $fn = 32;
 cylinder(h = 10, r1 = 8, r2 = 12);

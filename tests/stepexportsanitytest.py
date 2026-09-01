@@ -141,6 +141,57 @@ def roundtrip_expectations(path):
     return wanted
 
 
+def volume_expectation(path):
+    """The VOLUME: line a fixture states, worked out from the model's own dimensions.
+
+    Every other expectation in this harness is a census of what this exporter
+    wrote, obtained by running it. That locks the behaviour in, which is worth
+    having, but it cannot say the behaviour was ever right - regenerate it after
+    a regression and the test agrees with the regression.
+
+    A volume is the one figure a fixture can derive independently. pi*r^2*h is
+    not an opinion about the exporter, and a kernel measuring the exported solid
+    has no access to the arithmetic that predicted it, so the two agreeing says
+    the exported solid is the intended solid rather than merely a self
+    consistent one. Where the analytic pass recognises nothing the figure is the
+    *mesh's* volume, which is equally derivable - an n-gon prism is
+    (n/2)r^2 sin(2pi/n) h, not pi r^2 h, and stating the polygon formula is what
+    says the export was not quietly rounded off.
+
+        # VOLUME: 3962.59553
+        # VOLUME: 4824.92783 +/- 0.02
+
+    States the analytic export, the same run ROUNDTRIP: describes.
+
+    The tolerance is optional and absolute, defaulting to 1e-6 relative, which
+    is what a kernel agrees to when it can read the geometry straight. One case
+    needs more and has to say so: an edge written as a plain 3D curve with no
+    pcurve makes the reader re-derive the parameterisation on the surface, and
+    it lands about 2e-6 of the size away. That is a stated property of this
+    exporter, measured on OpenCASCADE's own file for the same solid, not slack
+    to be widened when a number stops matching - a fixture that needs a looser
+    bound has to say in prose which of the two it is.
+
+    Returns (value, tolerance) or None."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.search(r"(?<![-\w])VOLUME:\s*([-+0-9.eE]+)"
+                          r"(?:\s*\+/-\s*([-+0-9.eE]+))?\s*$", line)
+            if m:
+                try:
+                    value = float(m.group(1))
+                except ValueError:
+                    return None
+                tol = None
+                if m.group(2) is not None:
+                    try:
+                        tol = abs(float(m.group(2)))
+                    except ValueError:
+                        return None
+                return (value, tol)
+    return None
+
+
 def keyed_expectations(path, marker, cast=int):
     """A fixture line of `Key=value` tokens under `marker`."""
     wanted = {}
@@ -186,7 +237,7 @@ def canonical_expectations(path):
 
 
 def check_roundtrip(path, stepfile, what, expect_surfaces=None, expect_canonical=None,
-                    expect_edges=None, expect_radii=None):
+                    expect_edges=None, expect_radii=None, expect_volume=None):
     """Read the export back with a real CAD kernel. Skipped when OCCT is absent.
 
     Returns True when the round trip passed or could not be run, so a machine
@@ -197,6 +248,7 @@ def check_roundtrip(path, stepfile, what, expect_surfaces=None, expect_canonical
         expect_canonical=expect_canonical,
         expect_edges=expect_edges,
         expect_radii=expect_radii,
+        expect_volume=expect_volume,
     )
     if result is None:
         print("note: " + report[0], file=sys.stderr)
@@ -384,6 +436,7 @@ if ok:
         canonical_expectations(inputfile) or None,
         keyed_expectations(inputfile, "EDGES") or None,
         keyed_expectations(inputfile, "RADII", float) or None,
+        volume_expectation(inputfile),
     ):
         ok = False
     else:

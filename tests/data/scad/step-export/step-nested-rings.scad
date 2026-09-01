@@ -12,6 +12,12 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 5 analytic surfaces available (5 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 5 surfaces recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 160 facets replaced
+//
+// The plate plus the two rings above it, the rings counted only where they
+// are not already plate: pi*(1600*2 + (30^2-27^2)*18 + (38^2-35^2)*18)
+// = 10220*pi.
+// ROUNDTRIP: Cylinder=5 Plane=6
+// VOLUME: 32107.0769197
 $fn = 32;
 union() {
   cylinder(h = 2, r = 40);

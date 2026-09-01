@@ -45,5 +45,13 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 9 analytic surfaces available (8 cylindrical, 1 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 1 surface recognised (0 toroidal, 1 spherical, 0 conical, 0 partial), 480 facets replaced
+//
+// Not (4/3)*pi*r^3. An OpenSCAD sphere's tessellation has no pole vertex: its
+// outermost ring sits at 180/$fn = 5.625 degrees off the axis, so the export
+// is the sphere with two flat caps, and the caps are real geometry rather
+// than an artefact. (4/3)*pi*1000 less two caps of pi*h^2*(3r-h)/3 at
+// h = 10*(1 - cos 5.625) = 0.04815273, so 4188.7902048 - 0.1454535.
+// ROUNDTRIP: Plane=2 Sphere=1
+// VOLUME: 4188.6447513
 $fn = 32;
 sphere(r = 10);

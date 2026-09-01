@@ -34,6 +34,12 @@
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 3 analytic surfaces available (3 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 4 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 128 facets replaced
+//
+// pi times the integral of (r_out^2 - 64) dz over the profile: 216 for the
+// straight r=10 run, 229 1/3 for the taper from 10 to 12, 480 for the r=12
+// run, so pi*925 1/3.
+// ROUNDTRIP: Cone=1 Cylinder=3 Plane=2
+// VOLUME: 2907.0203975
 $fn = 32;
 rotate_extrude()
   polygon(points = [[8, 0], [10, 0], [10, 6], [12, 10], [12, 16], [8, 16]]);
