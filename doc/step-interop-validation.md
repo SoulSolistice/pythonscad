@@ -481,3 +481,34 @@ postdates the SOLIDWORKS session. If the family crosses from solid to SURFACE
 somewhere in that sweep, the deviation is the mechanism and the threshold is
 measurable; if every member imports, it is not, and the two parts share
 something still unnamed.
+
+### The sweep, and what it predicts
+
+`scripts/step-interop-kit.py --only '^f0'` builds the family on its own -
+`--only` exists so one question can be put in front of an importer without
+asking a tester to open forty files. Its deviations, measured with
+OpenCASCADE:
+
+| coupon | faces | analytic | faceted | delta |
+| --- | --- | --- | --- | --- |
+| f01-band-fn024 | 134 | 19886.67 | 19282.26 | **+3.135%** |
+| f02-band-fn032 | 181 | 19730.67 | 19379.77 | +1.811% |
+| f03-band-fn048 | 269 | 19600.61 | 19451.12 | +0.769% |
+| f04-band-fn064 | 360 | 19563.16 | 19476.17 | +0.447% |
+| f05-band-fn096 | 532 | 19534.63 | 19494.13 | +0.208% |
+
+The sweep spans a factor of fifteen and brackets both failing parts - lid10 at
+1.462% falls between f02 and f03, the bayonet at 0.897% between f03 and f02 -
+while the coupler that imports cleanly sits below the whole range. Every member
+is the same shape with the same topology, differing only in how finely it was
+sampled, and all ten export with the validator clean.
+
+That makes the prediction falsifiable in the useful direction. If the deviation
+is the mechanism, SOLIDWORKS should refuse f01 and f02, accept f04 and f05, and
+change its mind somewhere near 1%. If it accepts all five, the deviation is a
+coincidence of three data points and the two parts share something still
+unnamed - which is worth knowing just as much, because it would rule out the
+last measurable candidate and point at the topology rather than the geometry.
+
+The kit is at `build/interop-band`, ten files, and `results.csv` beside them has
+the columns to fill in.

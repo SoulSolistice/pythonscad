@@ -209,7 +209,12 @@ def main():
     ap.add_argument("--binary", required=True,
                     help="pythonscad executable, from a staging dir that can run")
     ap.add_argument("--outdir", default="build/interop-kit")
+    ap.add_argument("--only", metavar="REGEX",
+                    help="restrict the kit to coupons whose name matches, for "
+                         "putting one question in front of an importer without "
+                         "asking a tester to open forty files")
     args = ap.parse_args()
+    only = re.compile(args.only) if args.only else None
 
     outdir = args.outdir if os.path.isabs(args.outdir) else os.path.join(ROOT, args.outdir)
     os.makedirs(outdir, exist_ok=True)
@@ -217,6 +222,8 @@ def main():
     rows = []
     for entry in COUPONS:
         name, src, exercises, risk = entry[:4]
+        if only and not only.search(name):
+            continue
         extra = entry[4] if len(entry) > 4 else []
         srcpath = os.path.join(ROOT, src)
         if not os.path.exists(srcpath):
