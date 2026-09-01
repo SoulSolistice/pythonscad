@@ -276,6 +276,28 @@ the curved face. That would make the approximation pass safe only below a
 resolution-dependent threshold, which is a thing to state and measure rather
 than to fix.
 
+### Every configuration of the second part sews
+
+The user's own model was then tried in three configurations, and all three
+import as solids:
+
+| | body | faces | volume |
+| --- | --- | --- | --- |
+| lid, thread declared | solid | 2838 | 229566.5077 |
+| base, thread declared | solid | 1980 | 237372.0586 |
+| base, undeclared | solid | 4101 | 235108.6801 |
+
+Worth stating plainly because the natural reading of "it works when I drop the
+declaration" is that the declaration is at fault, and on this part it is not:
+declared and undeclared both sew, at half the face count declared. What changed
+between the two observations was the part and its settings, not the feature.
+
+So the failure is confined to `examples/step_test/lid10.scad`, which is this
+project's own specimen rather than anything a user has. That is a much narrower
+statement than the one this document started with, and it is the reason the
+band hypothesis above is still only a hypothesis: the one part that exhibits the
+failure is also the one that crashes the tool that would measure it.
+
 ### What the kit should grow
 
 Every small coupon passes and both real parts failed, which is the shape of a
