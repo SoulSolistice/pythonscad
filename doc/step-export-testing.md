@@ -137,6 +137,27 @@ Keep both front ends in step. Anything reachable from SCAD and from Python
 wants a fixture each, because the two bindings can drift — `declare_cone` takes
 four doubles and so could not use the macro that generates its three siblings.
 
+## Committed artifacts go stale
+
+`examples/step_test/*.stp` are generated files kept in the tree so a reader can
+open one without building anything. Nothing regenerates them, and no test reads
+them, so **every improvement to the exporter silently invalidates them** - twice
+now they have been a whole feature behind, and each time the part looked in a
+CAD system exactly as though the feature did not work.
+
+Regenerate after any change that alters what the exporter writes. The lid needs
+its parameter set and both flags, and its own report is the check:
+
+```bash
+cd examples/step_test
+../../build/staging/pythonscad.com lid10.scad -p lid10.json -P "New set 1" \
+  -o lid10.stp --enable=step-analytic-surfaces --enable=step-approximate-surfaces
+```
+
+A quick way to tell whether one is current is to count its faces against a
+fresh export with `grep -c ADVANCED_FACE`. If the two differ, the committed
+file is behind.
+
 ## Scope
 
 The suite covers what the exporter can reach, and the reference part
