@@ -421,6 +421,57 @@ static PyObject *python_declare_torus_core(PyObject *obj, double r_major, double
   return python_declare_core(obj, std::make_shared<TorusSurface>(c, a, major, minor));
 }
 
+/*! `declare_cone(r1, r2, h)`, named the way `cylinder()` names the same shape.
+ *
+ * Too many arguments for DECLARE_ENTRY, which carries exactly two radii, so
+ * this one and its two wrappers are written out. See the OpenSCAD builtin in
+ * DeclareSurfaceNode.cc for why a cone needs a channel of its own at all. */
+static PyObject *python_declare_cone_core(PyObject *obj, double r1, double r2, double h, double d1,
+                                          double d2, PyObject *center, PyObject *axis)
+{
+  Vector3d c(0, 0, 0), a(0, 0, 1);
+  double bottom = 0, top = 0;
+  if (!python_declare_radius(r1, d1, "declare_cone r1", bottom)) return nullptr;
+  if (!python_declare_radius(r2, d2, "declare_cone r2", top)) return nullptr;
+  if (!std::isfinite(h) || h <= 0) {
+    PyErr_SetString(PyExc_ValueError, "declare_cone needs a positive h");
+    return nullptr;
+  }
+  if (fabs(top - bottom) < 1e-12) {
+    PyErr_SetString(PyExc_ValueError,
+                    "declare_cone: r1 and r2 are equal, which is a cylinder - use declare_cylinder");
+    return nullptr;
+  }
+  if (!python_declare_vec3(center, "declare_cone center", c)) return nullptr;
+  if (!python_declare_vec3(axis, "declare_cone axis", a)) return nullptr;
+  if (!python_declare_axis(a, "declare_cone")) return nullptr;
+  return python_declare_core(obj, std::make_shared<ConeSurface>(c, a, bottom, (top - bottom) / h));
+}
+
+PyObject *python_declare_cone(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"obj", "r1", "r2", "h", "d1", "d2", "center", "axis", nullptr};
+  PyObject *obj = nullptr, *center = nullptr, *axis = nullptr;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  double r1 = nan, r2 = nan, h = nan, d1 = nan, d2 = nan;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|dddddOO", kwlist, &obj, &r1, &r2, &h, &d1, &d2,
+                                   &center, &axis))
+    return nullptr;
+  return python_declare_cone_core(obj, r1, r2, h, d1, d2, center, axis);
+}
+
+PyObject *python_oo_declare_cone(PyObject *obj, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"r1", "r2", "h", "d1", "d2", "center", "axis", nullptr};
+  PyObject *center = nullptr, *axis = nullptr;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  double r1 = nan, r2 = nan, h = nan, d1 = nan, d2 = nan;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|dddddOO", kwlist, &r1, &r2, &h, &d1, &d2, &center,
+                                   &axis))
+    return nullptr;
+  return python_declare_cone_core(obj, r1, r2, h, d1, d2, center, axis);
+}
+
 /*! Declare the ordered grid of points a generator swept.
  *
  * The other declare_* functions name a surface - a cylinder of this radius

@@ -208,6 +208,48 @@ private:
   virtual int operator==(const Surface& other) { return 0; }
 };
 
+/*! A cone, declared by the model that meant one.
+ *
+ * The recogniser has always been able to *fit* a frustum; what it lacked was
+ * anything to check the fit against. Its rule was that both rims had to match a
+ * declared cylinder, on the argument that a `hull()` of two coaxial cylinders
+ * declares both and never the cone between them - true, and what
+ * step-chamfered-cylinder asserts. The rule fails wherever a cone's far rim is
+ * only where the cone was *cut*: on the reference lid three chamfers run from a
+ * declared radius to one a boolean computed, and asking that trim to declare
+ * itself is asking the wrong thing of it. This is the other way to state the
+ * intent - name the cone.
+ *
+ * Stored as a radius and a slope rather than as an apex and a half angle. A
+ * cone is infinite and its apex may be far outside the part or, for a nearly
+ * cylindrical taper, absurdly far; radius-at-a-point is well conditioned
+ * everywhere and is also the form the recogniser asks its question in. The
+ * radius at a point `p` on the axis is `r + slope * (p - refpt).dot(normdir)`.
+ *
+ * `slope` is dimensionless, so a uniform scale leaves it alone and only `r`
+ * moves - and reversing the axis negates it, because the radius now grows the
+ * other way. A slope of zero is a cylinder and is refused: CylinderSurface
+ * already says that, and a cone of no taper has no apex to place. */
+class ConeSurface : public Surface
+{
+public:
+  ConeSurface(Vector3d refpt, Vector3d normdir, double r, double slope);
+  void reverse(void) override;
+  int operator==(const ConeSurface& other);
+  int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
+  [[nodiscard]] std::shared_ptr<Surface> clone() const override;
+  bool transform(const Transform3d& mat) override;
+  [[nodiscard]] bool sameAs(const Surface& other) const override;
+
+  /*! The radius this cone has where the axis passes `pt`'s own height. */
+  [[nodiscard]] double radiusAt(const Vector3d& pt) const;
+
+  double r, slope;
+
+private:
+  virtual int operator==(const Surface& other) { return 0; }
+};
+
 /*! An ordered grid of points a generator swept, declared by that generator.
  *
  * This is the channel for the geometry OpenSCAD has no primitive for: a helical

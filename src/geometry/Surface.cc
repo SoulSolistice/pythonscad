@@ -546,6 +546,72 @@ int CylinderSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
   return 1;
 }
 
+ConeSurface::ConeSurface(Vector3d refpt, Vector3d normdir, double r, double slope)
+{
+  this->refpt = refpt;
+  this->normdir = normdir;
+  this->r = r;
+  this->slope = slope;
+}
+
+void ConeSurface::reverse(void)
+{
+  // The apex is where it was; what changes is which way the radius grows.
+  this->normdir = -this->normdir;
+  this->slope = -this->slope;
+}
+
+std::shared_ptr<Surface> ConeSurface::clone() const
+{
+  return std::make_shared<ConeSurface>(*this);
+}
+
+bool ConeSurface::transform(const Transform3d& mat)
+{
+  if (!Surface::transform(mat)) return false;
+  // Only the radius carries a length. The slope is a ratio of two of them, so
+  // a similarity leaves the half angle alone - which is the whole reason for
+  // storing the cone this way.
+  this->r *= (mat.linear() * Vector3d(1, 0, 0)).norm();
+  return true;
+}
+
+double ConeSurface::radiusAt(const Vector3d& pt) const
+{
+  return r + slope * (pt - refpt).dot(normdir);
+}
+
+int ConeSurface::operator==(const ConeSurface& other)
+{
+  if ((normdir - other.normdir).norm() > 1e-6) return 0;
+  if ((refpt - other.refpt).norm() > 1e-6) return 0;
+  if (fabs(r - other.r) > 1e-6) return 0;
+  if (fabs(slope - other.slope) > 1e-6) return 0;
+  return 1;
+}
+
+bool ConeSurface::sameAs(const Surface& other) const
+{
+  if (!Surface::sameAs(other)) return false;
+  const auto& o = static_cast<const ConeSurface&>(other);
+  if (fabs(r - o.r) > 1e-9) return false;
+  // The base class counts antiparallel axes as the same surface, and for a
+  // cone they are - traversed the other way, so the radius grows the other way
+  // too. Comparing the slopes without that would keep both records, which is
+  // only wasteful, but saying they differ when they do not is still wrong.
+  const double sense = normdir.dot(o.normdir) > 0 ? 1.0 : -1.0;
+  return fabs(slope - sense * o.slope) < 1e-9;
+}
+
+int ConeSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
+{
+  const double dist = (pt - refpt).dot(normdir);
+  const double want = r + slope * dist;
+  if (want < 0) return 0;  // past the apex, where this cone has no surface
+  if (fabs((pt - dist * normdir - refpt).norm() - want) > 1e-5) return 0;
+  return 1;
+}
+
 namespace {
 /*! The 1e-9 grid a GridSurface indexes its points on. */
 std::tuple<int64_t, int64_t, int64_t> gridKey(const Vector3d& pt)

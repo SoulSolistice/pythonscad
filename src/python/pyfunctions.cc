@@ -997,6 +997,10 @@ PyMethodDef PyOpenSCADFunctions[] = {
    "Declare that part of an object was meant to be a sphere.\n"
    "declare_sphere(obj, r=5, center=[0, 0, 0])\n"
    "declare_sphere(obj, d=10)"},
+  {"declare_cone", (PyCFunction)python_declare_cone, METH_VARARGS | METH_KEYWORDS,
+   "Declare that part of an object was meant to be a cone.\n"
+   "declare_cone(obj, r1=10, r2=6, h=4, center=[0, 0, 0], axis=[0, 0, 1])\n"
+   "declare_cone(obj, d1=20, d2=12, h=4)"},
   {"declare_torus", (PyCFunction)python_declare_torus, METH_VARARGS | METH_KEYWORDS,
    "Declare that part of an object was meant to be a torus.\n"
    "declare_torus(obj, r_major=10, r_minor=3, center=[0, 0, 0], axis=[0, 0, 1])"},
@@ -1072,8 +1076,10 @@ PyMethodDef PyOpenSCADMethods[] = {
                                                         OO_METHOD_ENTRY(declare_sphere,
                                                                         "Declare a spherical surface")
                                                           OO_METHOD_ENTRY(declare_torus,
-                                                                          "Declare a toroidal surface"){
-                                                            NULL, NULL, 0, NULL}};
+                                                                          "Declare a toroidal surface")
+                                                            OO_METHOD_ENTRY(declare_cone,
+                                                                            "Declare a conical surface"){
+                                                              NULL, NULL, 0, NULL}};
 
 PyNumberMethods PyOpenSCADNumbers = {
   python_nb_add,        // binaryfunc nb_add

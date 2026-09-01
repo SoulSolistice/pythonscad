@@ -275,13 +275,14 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // out - which is a feature nobody has asked for yet.
   (void)curves;
   if (!surfaces.empty()) {
-    int cylinders = 0, spheres = 0, tori = 0, patches = 0, grids = 0;
+    int cylinders = 0, spheres = 0, tori = 0, patches = 0, grids = 0, cones = 0;
     for (const auto& surface : surfaces) {
       if (dynamic_cast<const CylinderSurface *>(surface.get()) != nullptr) cylinders++;
       else if (dynamic_cast<const SphereSurface *>(surface.get()) != nullptr) spheres++;
       else if (dynamic_cast<const TorusSurface *>(surface.get()) != nullptr) tori++;
       else if (dynamic_cast<const BezierPatchSurface *>(surface.get()) != nullptr) patches++;
       else if (dynamic_cast<const GridSurface *>(surface.get()) != nullptr) grids++;
+      else if (dynamic_cast<const ConeSurface *>(surface.get()) != nullptr) cones++;
     }
     // Swept grids are named only when there are some. Every other kind is listed
     // unconditionally because a zero there is informative - a model that meant
@@ -290,6 +291,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // mentioning it always would churn every fixture quoting this line.
     std::string extra;
     if (grids > 0) extra = ", " + std::to_string(grids) + " swept grid";
+    // A cone is named by hand for the same reason a grid is, so it is listed on
+    // the same terms: only when there is one. Listing it always would say
+    // nothing and would rewrite the EXPECT line of every fixture here.
+    if (cones > 0) extra += ", " + std::to_string(cones) + " conical";
     LOG(
       "STEP export: %1$d analytic surface%2$s available (%3$d cylindrical, %4$d spherical, "
       "%5$d toroidal, %6$d Bezier%7$s)",

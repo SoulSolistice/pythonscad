@@ -1804,6 +1804,28 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     return false;
   };
 
+  // Did the model declare a cone which passes through both of these rims?
+  //
+  // Asked of the two rims rather than of an apex and an angle, because that is
+  // what the band has measured and it is well conditioned however shallow the
+  // taper. A cone that agrees with both rims of an exactly fitted frustum is
+  // the frustum, so nothing further is checked.
+  auto declared_cone = [&](double r_bottom, double r_top, const Vector3d& axis, const Vector3d& base,
+                           double height) {
+    const double scale = std::max(std::max(r_bottom, r_top), 1e-9);
+    for (const auto& surface : surfaces) {
+      const auto *cone = dynamic_cast<const ConeSurface *>(surface.get());
+      if (cone == nullptr) continue;
+      const Vector3d cone_axis = cone->normdir.normalized();
+      if (fabs(fabs(cone_axis.dot(axis)) - 1.0) > 1e-7) continue;
+      if (distanceToAxis(cone->refpt, base, axis) > 1e-7 * scale) continue;
+      if (fabs(cone->radiusAt(base) - r_bottom) > 1e-7 * scale) continue;
+      if (fabs(cone->radiusAt(base + axis * height) - r_top) > 1e-7 * scale) continue;
+      return true;
+    }
+    return false;
+  };
+
   // Walk the strip of quads reached by crossing ruling edges.
   //
   // The previous version grew across edges parallel to the axis, which finds
@@ -2157,8 +2179,15 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       // imprecise one. Only a cylinder may be tilted.
       if (tilted && is_cone) continue;
       if (is_cone) {
-        if (!declared_cylinder(r_bottom, axis, base)) continue;
-        if (!declared_cylinder(r_top, axis, base)) continue;
+        // Either both rims match a declared cylinder - a hull() of two coaxial
+        // cylinders declares those and never the cone between them, which is
+        // what step-chamfered-cylinder asserts - or the model named the cone
+        // itself. The second way exists because the first cannot state a cone
+        // whose far rim is only where a boolean cut it, and asking that trim to
+        // declare itself is asking the wrong thing of it.
+        const bool by_rims =
+          declared_cylinder(r_bottom, axis, base) && declared_cylinder(r_top, axis, base);
+        if (!by_rims && !declared_cone(r_bottom, r_top, axis, base, hi - lo)) continue;
       } else if (!declared_cylinder(r_bottom, axis, base)) {
         continue;
       }

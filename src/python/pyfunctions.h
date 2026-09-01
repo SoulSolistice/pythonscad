@@ -144,6 +144,8 @@ PyObject *python_oo_declare_cylinder(PyObject *obj, PyObject *args, PyObject *kw
 PyObject *python_oo_declare_grid(PyObject *obj, PyObject *args, PyObject *kwargs);
 PyObject *python_declare_sphere(PyObject *self, PyObject *args, PyObject *kwargs);
 PyObject *python_oo_declare_sphere(PyObject *obj, PyObject *args, PyObject *kwargs);
+PyObject *python_declare_cone(PyObject *self, PyObject *args, PyObject *kwargs);
+PyObject *python_oo_declare_cone(PyObject *obj, PyObject *args, PyObject *kwargs);
 PyObject *python_declare_torus(PyObject *self, PyObject *args, PyObject *kwargs);
 PyObject *python_oo_declare_torus(PyObject *obj, PyObject *args, PyObject *kwargs);
 PyObject *python_pull(PyObject *self, PyObject *args, PyObject *kwargs);

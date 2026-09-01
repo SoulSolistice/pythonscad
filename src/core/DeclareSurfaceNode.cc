@@ -132,6 +132,40 @@ std::shared_ptr<AbstractNode> builtin_declare_sphere(
   return withSurface(inst, children, std::move(surface));
 }
 
+/*! `declare_cone(r1, r2, h)`, named the way `cylinder()` names the same shape.
+ *
+ * Two radii and a height rather than an apex and a half angle, because that is
+ * how the model already thinks of it, and because a chamfer's apex is often
+ * nowhere near the part. `center` is the centre of the `r1` rim and `axis`
+ * points from there towards `r2`. */
+std::shared_ptr<AbstractNode> builtin_declare_cone(
+  const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
+{
+  Parameters parameters = Parameters::parse(std::move(arguments), inst->location(),
+                                            {"r1", "r2", "h", "d1", "d2", "center", "axis"});
+  Vector3d centre(0, 0, 0), axis(0, 0, 1);
+  double r1 = 0, r2 = 0;
+  std::shared_ptr<Surface> surface;
+  if (declaredRadius(parameters, "r1", "d1", inst, r1) &&
+      declaredRadius(parameters, "r2", "d2", inst, r2) &&
+      declaredVector(parameters, "center", inst, false, centre) &&
+      declaredVector(parameters, "axis", inst, true, axis)) {
+    const double h = parameters["h"].type() == Value::Type::NUMBER ? parameters["h"].toDouble() : 0.0;
+    if (!std::isfinite(h) || h <= 0) {
+      LOG(message_group::Warning, inst->location(), parameters.documentRoot(), "%1$s needs a positive h",
+          inst->name());
+    } else if (fabs(r2 - r1) < 1e-12) {
+      // Not a cone at all. Saying so is better than recording a surface whose
+      // apex is at infinity; declare_cylinder is the one that was wanted.
+      LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
+          "%1$s: r1 and r2 are equal, which is a cylinder - use declare_cylinder", inst->name());
+    } else {
+      surface = std::make_shared<ConeSurface>(centre, axis, r1, (r2 - r1) / h);
+    }
+  }
+  return withSurface(inst, children, std::move(surface));
+}
+
 std::shared_ptr<AbstractNode> builtin_declare_torus(
   const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
 {
@@ -178,8 +212,8 @@ std::shared_ptr<AbstractNode> builtin_declare_grid(
       std::size_t j = 0;
       for (const Value& pointValue : rowValue.toVector()) {
         Vector3d p(0, 0, 0);
-        if (!pointValue.getVec3(p[0], p[1], p[2], 0.0) || !std::isfinite(p[0]) ||
-            !std::isfinite(p[1]) || !std::isfinite(p[2])) {
+        if (!pointValue.getVec3(p[0], p[1], p[2], 0.0) || !std::isfinite(p[0]) || !std::isfinite(p[1]) ||
+            !std::isfinite(p[2])) {
           LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
               "declare_grid: point [%1$d][%2$d] must be three finite numbers", int(i), int(j));
           ok = false;
@@ -193,8 +227,8 @@ std::shared_ptr<AbstractNode> builtin_declare_grid(
       i++;
     }
     if (ok) {
-      const bool closed = parameters["closed"].type() == Value::Type::BOOL &&
-                          parameters["closed"].toBool();
+      const bool closed =
+        parameters["closed"].type() == Value::Type::BOOL && parameters["closed"].toBool();
       std::string why;
       surface = GridSurface::fromRows(grid, closed, why);
       if (surface == nullptr) {
@@ -218,6 +252,11 @@ void register_builtin_declare_surface()
                  {
                    "declare_sphere(r = 5) { ... }",
                    "declare_sphere(d = 10, center = [x, y, z]) { ... }",
+                 });
+  Builtins::init("declare_cone", new BuiltinModule(builtin_declare_cone),
+                 {
+                   "declare_cone(r1 = 10, r2 = 6, h = 4) { ... }",
+                   "declare_cone(d1 = 20, d2 = 12, h = 4, center = [x, y, z], axis = [x, y, z]) { ... }",
                  });
   Builtins::init("declare_torus", new BuiltinModule(builtin_declare_torus),
                  {

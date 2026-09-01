@@ -1733,10 +1733,20 @@ wall = linear_extrude(circle(r=10, fn=32), height=20)
 wall.declare_cylinder(r=10).show()
 ```
 
-`declare_cylinder`, `declare_sphere` and `declare_torus`, in both languages -
-a module wrapping its children in SCAD, a method on the object in Python, both
-building the same `DeclareSurfaceNode`. Radii take `r` or `d`, and `center` and
-`axis` default to the origin and Z.
+`declare_cylinder`, `declare_sphere`, `declare_torus` and `declare_cone`, in
+both languages - a module wrapping its children in SCAD, a method on the object
+in Python, both building the same `DeclareSurfaceNode`. Radii take `r` or `d`,
+and `center` and `axis` default to the origin and Z.
+
+`declare_cone` is named the way `cylinder()` names the same shape, `r1`, `r2`
+and `h`, with `center` at the `r1` rim and `axis` pointing towards `r2`. It
+exists because the rule it supplements - a frustum is accepted when *both* its
+rims match a declared cylinder, which a `hull()` of two coaxial cylinders
+satisfies - cannot state a cone whose far rim is only where a boolean cut it.
+Asking that trim to declare itself is asking the wrong thing of it. See
+`step-declare-cone`, where declaring one cone recovers two surfaces: the
+cylinder standing on the chamfer was being refused only because the rim it
+shared with the chamfer bordered one face per facet.
 
 **It is a node, not a call that annotates a geometry.** There is no geometry yet
 when the model is written, and being a node is what makes the coordinates come
