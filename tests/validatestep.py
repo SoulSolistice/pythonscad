@@ -792,6 +792,60 @@ def check_cylindrical_faces(entities, problems):
                 continue
 
         bounds = [b for b in refs[:-1] if entities.get(b) is not None]
+        if not bounds:
+            problems.append("#%d: cylindrical face has no bounds" % face.id)
+            continue
+
+        # Two shapes of cylindrical face reach here and only one of them is a
+        # band. A band is a run of facets between two rims, so it is bounded by
+        # circles and arcs and the rules below are about those. A *trimmed*
+        # quadric is whatever the booleans left of a surface - a bored cylinder,
+        # a wall with a declared ridge cut out of it - and it is bounded by the
+        # mesh's own polyline, because the faceted faces around it have to close
+        # against it edge for edge. It has no circular edge at all, which is how
+        # the two are told apart, and it may have holes, which is why the single
+        # bound rule cannot be asked of it.
+        face_edge_ids = []
+        for b in bounds:
+            bl, _ = _bound_loop(entities, b)
+            if bl is not None:
+                face_edge_ids.extend(bl.refs())
+        edge_kinds = set()
+        for oid in face_edge_ids:
+            g = _edge_geometry(entities, oid)
+            if g is not None:
+                edge_kinds.add(g.name)
+        if face_edge_ids and not (edge_kinds & {"CIRCLE", "ELLIPSE"}):
+            # Every corner of it still has to be on the surface it claims, or
+            # the face is describing a different cylinder from the one the mesh
+            # was. The tolerance is loose on purpose: this is an approximation
+            # gated on the model's own tessellation, and a kernel checks the
+            # topology in the round trip. What it catches is a face bounded by
+            # geometry from somewhere else entirely.
+            origin, axis, _ref = _placement(entities, surface.refs()[0])
+            if origin is None:
+                problems.append("#%d: %s has no readable placement" % (surface.id, surface.name))
+                continue
+            worst = 0.0
+            for oid in face_edge_ids:
+                ends = _edge_endpoints(entities, oid)
+                if ends is None:
+                    continue
+                for vid in ends:
+                    pt = _vertex_point(entities, vid)
+                    if pt is None:
+                        continue
+                    rel = [pt[i] - origin[i] for i in range(3)]
+                    along = sum(rel[i] * axis[i] for i in range(3))
+                    perp = [rel[i] - along * axis[i] for i in range(3)]
+                    worst = max(worst, abs(math.sqrt(sum(c * c for c in perp)) - radius))
+            if worst > 0.05 * radius:
+                problems.append(
+                    "#%d: trimmed %s is bounded by points up to %g off it, on a radius of %g"
+                    % (face.id, surface.name, worst, radius)
+                )
+            continue
+
         if len(bounds) != 1:
             problems.append("#%d: cylindrical face has %d bounds, expected 1" % (face.id, len(bounds)))
             continue

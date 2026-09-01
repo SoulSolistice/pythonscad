@@ -141,7 +141,7 @@ def roundtrip_expectations(path):
     return wanted
 
 
-def volume_expectation(path):
+def volume_expectation(path, marker="VOLUME"):
     """The VOLUME: line a fixture states, worked out from the model's own dimensions.
 
     Every other expectation in this harness is a census of what this exporter
@@ -175,7 +175,7 @@ def volume_expectation(path):
     Returns (value, tolerance) or None."""
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
-            m = re.search(r"(?<![-\w])VOLUME:\s*([-+0-9.eE]+)"
+            m = re.search(r"(?<![-\w])" + marker + r":\s*([-+0-9.eE]+)"
                           r"(?:\s*\+/-\s*([-+0-9.eE]+))?\s*$", line)
             if m:
                 try:
@@ -390,7 +390,8 @@ def check_approximation(openscad, inputfile, stepfile, args):
     # declared sweep written as a B-spline and then read back as 160 planes
     # would pass every other check in this file.
     if not check_roundtrip(inputfile, approxfile, "approximation",
-                           keyed_expectations(inputfile, "ROUNDTRIP-APPROX") or None):
+                           keyed_expectations(inputfile, "ROUNDTRIP-APPROX") or None,
+                           expect_volume=volume_expectation(inputfile, "VOLUME-APPROX")):
         return False
     ok = True
     flat = " ".join(output.split())

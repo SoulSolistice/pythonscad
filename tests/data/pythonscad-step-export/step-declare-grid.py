@@ -91,6 +91,7 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # EXPECT: 2 declared sweeps cover 300 facets over 1 boundary cycle, split into 401 runs of up to 8 mesh edges, 0 unresolved
 # EXPECT-NOT: written as one face each
 # APPROX: 2 declared sweeps written as one face each, replacing 300 facets
+# APPROX: 2 trimmed quadrics written as one face each, replacing 230 facets
 # EXPECT: its facets lie over 2 of the profile's 4 spans - the region is a strip, whose boundary stays inside the surface's rectangle
 #
 # What a kernel makes of each export: the declared sweep survives as a surface, not as the facets it claimed.
@@ -98,7 +99,16 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # survived as one. A fit read back as the planes it replaced would
 # pass every other check in this fixture.
 # ROUNDTRIP: Plane=534
-# ROUNDTRIP-APPROX: BSplineSurface=2 Plane=234
+#
+# The walls go out too, and not as facets. They are declared cylinders the
+# band pass could not write: the ridge cut out of one leaves a hole in it, and
+# a band is two rims at a constant height with no notion of a hole. The
+# trimmed-quadric path claims them by distance to the axis instead and bounds
+# them with the mesh's own polyline, which is what the faceted faces around
+# them close against. So the census below is the whole part rather than the
+# sweep alone - the several cylinder faces are one wall each side of the seam
+# it is cut at, since a face written on an open rectangle cannot wrap.
+# ROUNDTRIP-APPROX: BSplineSurface=2 Cylinder=5 Plane=4
 from pythonscad import *
 import math
 

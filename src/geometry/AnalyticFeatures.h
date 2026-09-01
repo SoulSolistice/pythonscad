@@ -400,6 +400,27 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
                                         const std::vector<char>& consumed,
                                         std::vector<std::string>& report);
 
+/*! Regions lying on a declared or fitted quadric, as patches.
+ *
+ * The band recogniser writes quadrics already, and writes them better: between
+ * two circular rims a cylinder goes out bounded by CIRCLEs, which a kernel can
+ * offset and pattern along. What a band cannot be is trimmed by anything that
+ * is not a plane section - it *is* two rims at a constant height - so a bored
+ * cylinder loses its whole face for want of a curve to bound it with.
+ *
+ * This claims such a region by distance to the axis instead of by walking
+ * rings, and lets its boundary be whatever the booleans left. It runs after the
+ * band pass and over what that pass did not consume, so it can never cost a
+ * circle that would otherwise have been written.
+ *
+ * An approximation, and gated as one: a trim's vertices are not all on the
+ * surface, and a claim which strays further than its own tessellation band is
+ * dropped with a line in `report` rather than written. */
+std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
+                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                           const std::vector<char>& consumed, double smooth_angle,
+                                           std::vector<std::string>& report);
+
 /*! Find the bands of facets which were modelled as a surface of revolution.
  *
  * `surfaces` are the analytic surfaces the model declared; with none of them

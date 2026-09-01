@@ -46,13 +46,23 @@ standing off the chords by about that band, in the direction it should.
 # EXPECT: the region is a strip, whose boundary stays inside the surface's rectangle
 # EXPECT-NOT: written as one face each
 # APPROX: 1 declared sweep written as one face each, replacing 241 facets
+# APPROX: 4 trimmed quadrics written as one face each, replacing 289 facets
 #
 # What a kernel makes of each export: the declared strip survives as a surface.
 # Validity says the file is well formed; only this says the surface
 # survived as one. A fit read back as the planes it replaced would
 # pass every other check in this fixture.
 # ROUNDTRIP: Plane=534
-# ROUNDTRIP-APPROX: BSplineSurface=2 Plane=293
+#
+# The walls go out too, and not as facets. They are declared cylinders the
+# band pass could not write: the ridge cut out of one leaves a hole in it, and
+# a band is two rims at a constant height with no notion of a hole. The
+# trimmed-quadric path claims them by distance to the axis instead and bounds
+# them with the mesh's own polyline, which is what the faceted faces around
+# them close against. So the census below is the whole part rather than the
+# sweep alone - the several cylinder faces are one wall each side of the seam
+# it is cut at, since a face written on an open rectangle cannot wrap.
+# ROUNDTRIP-APPROX: BSplineSurface=2 Cylinder=9 Plane=4
 from pythonscad import *
 import math
 

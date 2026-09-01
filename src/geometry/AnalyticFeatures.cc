@@ -1778,6 +1778,168 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
   return patches;
 }
 
+/*! Regions lying on a declared or fitted quadric, as patches.
+ *
+ * The band recogniser already writes quadrics, and writes them better - a
+ * cylinder between two circular rims goes out with CIRCLEs a kernel can offset
+ * and pattern along. What it cannot do is write one whose rim is not a circle,
+ * because a band *is* two rims at a constant height and every rule in it says
+ * so. A cylinder bored across, or trimmed by anything that is not a plane
+ * section, has no such rim: the trim is a quartic, and the whole face is lost
+ * for want of a curve to bound it with.
+ *
+ * This is the other route to the same face. It claims facets by distance to the
+ * axis rather than by walking rings, hands them to patchFromFacets, and lets
+ * the boundary be whatever the booleans left - each stretch of it becoming one
+ * curve against one neighbour, exactly as a trimmed sweep's does. It runs after
+ * the band pass and over what that pass did not consume, so nothing it does can
+ * cost a circle that would otherwise have been written.
+ *
+ * It is an approximation and is gated as one. The trim's vertices are not all
+ * on the surface: where a ruling of the bore met a facet of the wall the vertex
+ * is exactly on it, but where a facet met an *edge* it is not, and on the
+ * reference bore 16 of 80 rim vertices are off by up to 0.0188 against that
+ * region's tessellation band of 0.0193. Inside the band is the same licence the
+ * rest of the approximation pass runs on, and a claim which cannot show that is
+ * dropped rather than written.
+ */
+std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
+                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                           const std::vector<char>& consumed, double smooth_angle,
+                                           std::vector<std::string>& report)
+{
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  const std::vector<char>& loop_valid = *mesh.valid;
+  const std::vector<char>& is_hole = *mesh.is_hole;
+  const std::vector<Vector3d>& normals = *mesh.normals;
+
+  std::vector<Patch> patches;
+  std::vector<char> taken(loops.size(), 0);
+
+  std::map<EdgeKey, std::vector<std::size_t>> edge_loops;
+  for (std::size_t f = 0; f < loops.size(); f++) {
+    if (!loop_valid[f]) continue;
+    const std::vector<int>& loop = loops[f];
+    for (std::size_t i = 0; i < loop.size(); i++) {
+      edge_loops[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
+    }
+  }
+
+  // The band a set of facets leaves open, by the same sagitta the approximation
+  // pass measures: over every interior edge, (reach/2)*tan(dihedral/4).
+  auto bandOf = [&](const std::vector<std::size_t>& facets) {
+    // A single facet has no interior edge of its own, so for that case the
+    // band is measured against whatever lies across each of its edges - which
+    // is the same sagitta, asked of the one facet rather than of a region.
+    const bool single = facets.size() == 1;
+    const std::set<std::size_t> in(facets.begin(), facets.end());
+    double band = 0;
+    for (const std::size_t f : facets) {
+      const std::vector<int>& loop = loops[f];
+      for (std::size_t i = 0; i < loop.size(); i++) {
+        const int a = loop[i], b = loop[(i + 1) % loop.size()];
+        const auto it = edge_loops.find(edgeKey(a, b));
+        if (it == edge_loops.end()) continue;
+        for (const std::size_t g : it->second) {
+          if (g == f || (!single && !in.count(g))) continue;
+          const double dot = std::clamp(normals[f].normalized().dot(normals[g].normalized()), -1.0, 1.0);
+          const double dihedral = acos(dot);
+          if (dihedral > smooth_angle) continue;
+          const double reach =
+            std::max(reachAcross(vertices, loops[f], a, b), reachAcross(vertices, loops[g], a, b));
+          band = std::max(band, (reach / 2.0) * tan(dihedral / 4.0));
+        }
+      }
+    }
+    return band;
+  };
+
+  for (const auto& surface : surfaces) {
+    const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
+    if (cyl == nullptr || !(cyl->r > 0)) continue;
+    const Vector3d axis = cyl->normdir.normalized();
+
+    // How far a facet may sit off the surface and still be on it is the
+    // facet's *own* tessellation band, not a fraction of the radius. A
+    // fraction cannot be right for both: on a bore of r=4 it has to admit the
+    // 0.0188 a trim vertex strays, and on a wall of r=82 the same fraction is
+    // four millimetres, which reaches clean across to the next declared
+    // cylinder - the reference lid has four of them inside 1.7 of each other,
+    // and claiming across them is how this first went wrong.
+    //
+    // The band is local and self calibrating: it is what the mesh already
+    // concedes about where its own surface lies, so a facet inside it is one
+    // this cylinder could be the surface of, and a facet outside it belongs to
+    // something else.
+    std::vector<std::size_t> claimed;
+    double worst = 0;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
+      if (loops[f].size() < 3) continue;
+      // A facet lying *along* the axis is not on the cylinder however close its
+      // corners fall - a cap across the bore has every vertex on the rim.
+      if (fabs(normals[f].normalized().dot(axis)) > 1e-6) continue;
+      double off = 0;
+      for (const int v : loops[f]) {
+        off = std::max(off, fabs(distanceToAxis(vertices[v], cyl->refpt, axis) - cyl->r));
+      }
+      if (off > bandOf({f})) continue;
+      claimed.push_back(f);
+      worst = std::max(worst, off);
+    }
+    if (claimed.size() < 3) continue;
+
+    const double band = bandOf(claimed);
+    if (worst > band) {
+      report.push_back(format(
+        "a region of %d facets on the declared r=%g is not written: its boundary strays %.4f from "
+        "the surface where the tessellation allows %.4f",
+        int(claimed.size()), cyl->r, worst, band));
+      continue;
+    }
+
+    // Does the claim close around the axis? A face that wraps needs a seam, and
+    // the simpler answer - the one a declared sweep already takes when it
+    // closes around its profile - is to cut it so that no face wraps at all.
+    const Vector3d ref = perpendicular(axis);
+    const Vector3d ref2 = axis.cross(ref);
+    std::vector<char> quadrant(4, 0);
+    std::vector<double> theta(claimed.size());
+    for (std::size_t i = 0; i < claimed.size(); i++) {
+      Vector3d c(0, 0, 0);
+      for (const int v : loops[claimed[i]]) c += vertices[v];
+      c /= double(loops[claimed[i]].size());
+      const Vector3d rel = c - cyl->refpt;
+      double t = atan2(rel.dot(ref2), rel.dot(ref));
+      if (t < 0) t += 2 * M_PI;
+      theta[i] = t;
+      quadrant[std::min(3, int(t / (M_PI / 2)))] = 1;
+    }
+    const bool wraps = quadrant[0] && quadrant[1] && quadrant[2] && quadrant[3];
+
+    std::vector<std::vector<std::size_t>> groups;
+    if (!wraps) {
+      groups.push_back(claimed);
+    } else {
+      groups.resize(2);
+      for (std::size_t i = 0; i < claimed.size(); i++) {
+        groups[theta[i] < M_PI ? 0 : 1].push_back(claimed[i]);
+      }
+    }
+
+    for (const auto& group : groups) {
+      if (group.size() < 3) continue;
+      Patch patch = patchFromFacets(loops, edge_loops, surface, group);
+      if (patch.alive) {
+        for (const std::size_t f : patch.facets) taken[f] = 1;
+      }
+      patches.push_back(std::move(patch));
+    }
+  }
+  return patches;
+}
+
 Result recogniseSurfacesOfRevolution(const Mesh& mesh,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol)
 {

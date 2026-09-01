@@ -1992,3 +1992,93 @@ the specimen the adversarial cases were found on, not a deliverable; the number
 that matters here is not that one part improved by 24% but that a generator
 declaring its own sweep works unchanged on a part two orders of magnitude larger
 than the fixture that specifies it.
+
+## 14. Item 4, the general case
+
+Rung one of item 4 was a quadric trimmed by a plane at any angle, in §12, and it
+turned out to be exact: the trim is an ellipse and the mesh's cut vertices lie
+on the true cylinder. The general case is not exact, and establishing that
+before writing anything is what shaped the rest.
+
+**There is no exact representation, even for two exact cylinders.** Asked to
+build a bored cylinder from its own primitives and export it, OpenCASCADE writes
+the trim as a `SURFACE_CURVE` over a degree-7 `B_SPLINE_CURVE_WITH_KNOTS` of
+some thirty control points. STEP has no cylinder-meets-cylinder entity. So item
+4's general case belongs behind `step-approximate-surfaces`, which is where the
+rest of the inexact work already lives.
+
+**Pcurves are not needed here either.** Repointing every `EDGE_CURVE` at its
+plain 3D curve and dropping the pcurves leaves OCCT reading the same file
+identically - `Cylinder 2, Plane 2`, valid, 5298.394857 against 5298.405182,
+1.9e-6 - which is the same result §12 measured for the ellipse.
+
+### The gate was not where it looked
+
+Three attempts, and the measurements corrected the first two.
+
+The exact walk rejects a vertex more than `1e-7` off the surface, and a bored
+cylinder has sixteen of eighty rim vertices off by up to 0.0188, so that looked
+like the gate. It is not: the walk never gets that far, because `fitCircleCentre`
+needs a *flat rim* to place the axis and a bored cylinder has neither rim flat.
+
+Nor was the fitting missing. `fitCylinder` takes the axis from the normals'
+scatter matrix and least-squares fits a circle through the projected vertices -
+no rim required - and the report proves it runs: `approximation took 1 of 3
+uncovered regions`, and then `3 smooth regions left faceted`. **The fit was
+being computed and thrown away.** A fitted surface is added to the declaration
+list, and the only thing that reads a `CylinderSurface` from that list is the
+band recogniser, whose rim rules are written for circles. The same discard
+accounts for the lid's seventeen taken and fifteen refused, and for the cascade
+route A ran into.
+
+### The route, not the surface
+
+So what was missing was a way out, and most of one already existed. The patch
+path takes a region, computes its boundary cycles, and writes each stretch of
+boundary as one curve against one neighbour; `Run::bound` already documents
+annuli, and a declared sweep that closes on itself is already cut so no face
+crosses the seam. `buildPatch`, the part that turns facets into a bounded
+face, referred to nothing but the loops and the surface, so it is now
+`patchFromFacets` and both callers share it.
+
+`recogniseQuadricPatches` claims a region for a declared or fitted quadric by
+distance to the axis, cuts it at the seam if it wraps, and hands it over. The
+face is bounded by the mesh's own polyline rather than by a fitted curve, for
+the same reason a declared sweep's is: the faceted faces around it have to close
+against it edge for edge. The surface is exact; only its boundary is the mesh's.
+
+**How much a facet may stray is the facet's own tessellation band.** A fraction
+of the radius cannot be right for both cases and getting this wrong is
+instructive: at 5% it admits the 0.0188 a bore needs, and on the lid the same
+5% is four millimetres, which reaches across to the next declared cylinder -
+there are four inside 1.7 of each other - and claims facets from all of them.
+The band is what the mesh already concedes about where its surface lies, so a
+facet inside it is one this cylinder could be the surface of.
+
+### What it is worth
+
+| | before | after |
+| --- | --- | --- |
+| `step-bored-cylinder` | 56 faces, `Cylinder 2, Plane 54` | **10**, `Cylinder 8, Plane 2` |
+| `step-declare-grid` | 236, `BSplineSurface 2, Plane 234` | **11**, `BSplineSurface 2, Cylinder 5, Plane 4` |
+| `step-declare-grid-strip` | 296 | **15** |
+| `step-declare-grid-scad` | 86 | **12** |
+| `lid10`, approximated | 1501 | **1443** |
+
+Eight cylinder faces where a kernel would write two, because splitting at the
+seam is what avoids writing a periodic face. That is a smaller and duller piece
+of work than the one this replaced.
+
+The lid gains least, and the refusals say why in its own report: two of its
+declared cylinders are 0.1 apart where the tessellation band is 0.1073, so the
+mesh cannot tell them apart and the claim is dropped rather than guessed. Its
+remaining 1336 facets are dominated by the thread's cut remainder, which is not
+a quadric at all - a helical flank's normal is not perpendicular to the axis, so
+this path correctly declines it.
+
+`step-bored-cylinder` is the fixture, and its volume is derived rather than
+read back: two perpendicular cylinders of *different* radii meet in an elliptic
+integral, `8*int_0^4 sqrt((16-x^2)(100-x^2)) dx = 984.779688`, so the solid is
+`pi*100*20` less that, 5298.405619. OpenCASCADE building the same solid from its
+own primitives measures 5298.405182 - agreement to 8e-8 between two methods that
+share nothing.

@@ -608,6 +608,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // whose boundary stays inside the surface's parameter rectangle. One closing
   // around its profile crosses the surface's seam and is left faceted.
   std::vector<AnalyticFeatures::Patch> grid_faces;
+  std::vector<AnalyticFeatures::Patch> quadric_faces;
   // Parallel to `bezier_patches`: the exact quadric that patch lies on, or null
   // where it is written as the spline it is in general. See quadricOfPatch.
   std::vector<std::shared_ptr<Surface>> patch_quadric;
@@ -995,6 +996,35 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
           int(wrapping + strips - grid_faces.size()),
           wrapping + strips - grid_faces.size() == 1 ? "" : "s", int(wrapping),
           int(strips - grid_faces.size()));
+    }
+
+    // A quadric the band pass could not write, because its trim is not a plane
+    // section: a bored cylinder, whose rim is a quartic and whose face is
+    // therefore lost for want of a bound. Runs last and over what nothing else
+    // claimed, so it can only ever add faces.
+    if (approximate) {
+      std::vector<std::string> quadric_report;
+      const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::recogniseQuadricPatches(
+        mesh, effective, features.consumed, smooth_angle, quadric_report);
+      for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
+      std::size_t claimed_facets = 0, refused = 0;
+      for (const auto& patch : found) {
+        if (!patch.alive) {
+          refused++;
+          continue;
+        }
+        quadric_faces.push_back(patch);
+        claimed_facets += patch.facets.size();
+        for (const std::size_t f : patch.facets) features.consumed[f] = 1;
+      }
+      if (!quadric_faces.empty()) {
+        LOG("STEP export: %1$d trimmed quadric%2$s written as one face each, replacing %3$d facets",
+            int(quadric_faces.size()), quadric_faces.size() == 1 ? "" : "s", int(claimed_facets));
+      }
+      if (refused > 0) {
+        LOG("STEP export: %1$d trimmed quadric region%2$s could not be bounded", int(refused),
+            refused == 1 ? "" : "s");
+      }
     }
 
     if (approximate) {
@@ -1585,6 +1615,100 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       const Vector3d d_v =
         grid->evaluate(pu, std::min(1.0, pv + h)) - grid->evaluate(pu, std::max(0.0, pv - h));
       outward = d_u.cross(d_v).dot(loop_normals[patch.facets.front()]) > 0;
+    }
+
+    sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
+    face_edges_extra.push_back(face_edges_here);
+  }
+
+  // A trimmed quadric, bounded by the mesh's own boundary rather than by
+  // circles. The band pass writes a cylinder between two circular rims and
+  // writes it better - a CIRCLE is a curve a kernel can offset and pattern
+  // along - so this only ever sees what that pass could not take: a face whose
+  // trim is not a plane section and has no conic to bound it with.
+  //
+  // The bound is the polyline the neighbouring faceted faces already use, for
+  // the same reason a declared sweep's is: those faces have to close against
+  // this one edge for edge, and a curve of our own devising there would open
+  // the shell. The surface is exact; only its boundary is the mesh's.
+  for (const auto& patch : quadric_faces) {
+    const auto *cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get());
+    if (cyl == nullptr) continue;
+    const Vector3d axis = cyl->normdir.normalized();
+
+    std::map<std::size_t, std::vector<int>> cycles;
+    for (const auto& run : patch.runs) {
+      std::vector<int>& cycle = cycles[run.bound];
+      for (std::size_t i = 0; i + 1 < run.verts.size(); i++) cycle.push_back(run.verts[i]);
+    }
+    if (cycles.empty()) continue;
+
+    // The reference direction is a radius through the first boundary vertex, so
+    // the face starts where its own boundary does rather than at some seam of
+    // the surface's own.
+    const Vector3d rel0 = vertices[cycles.begin()->second.front()] - cyl->refpt;
+    const Vector3d ref = (rel0 - axis * axis.dot(rel0)).normalized();
+    auto point = new Point(entities, cyl->refpt);
+    auto dir_axis = new Direction(entities, axis);
+    auto dir_ref = new Direction(entities, ref);
+    auto surface = new CylindricalSurface(
+      entities, "", new Axis2Placement(entities, dir_axis, dir_ref, point), cyl->r);
+
+    // Which cycle is the outer bound is a question about the surface's own
+    // parameters: a hole in a face is a hole in its (theta, z) rectangle.
+    std::size_t outer = 0;
+    double widest = -1.0;
+    const Vector3d ref2 = axis.cross(ref);
+    for (const auto& entry : cycles) {
+      std::vector<std::pair<double, double>> uv;
+      for (const int v : entry.second) {
+        const Vector3d rel = vertices[v] - cyl->refpt;
+        double t = atan2(rel.dot(ref2), rel.dot(ref));
+        if (t < 0) t += 2 * M_PI;
+        uv.emplace_back(t * cyl->r, axis.dot(rel));
+      }
+      double twice = 0.0;
+      for (std::size_t i = 0; i < uv.size(); i++) {
+        const auto& a = uv[i];
+        const auto& b = uv[(i + 1) % uv.size()];
+        twice += a.first * b.second - b.first * a.second;
+      }
+      if (fabs(twice) / 2 > widest) {
+        widest = fabs(twice) / 2;
+        outer = entry.first;
+      }
+    }
+
+    std::vector<FaceBound *> bounds;
+    std::vector<EdgeCurve *> face_edges_here;
+    for (const auto& entry : cycles) {
+      const std::vector<int>& cycle = entry.second;
+      if (cycle.size() < 3) continue;
+      std::vector<OrientedEdge *> loop;
+      for (std::size_t i = 0; i < cycle.size(); i++) {
+        const int a = cycle[i], b = cycle[(i + 1) % cycle.size()];
+        bool dir = true;
+        EdgeCurve *edge =
+          get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+        loop.push_back(new OrientedEdge(entities, edge, dir));
+        face_edges_here.push_back(edge);
+      }
+      auto edge_loop = new EdgeLoop(entities, loop);
+      bounds.push_back(new FaceBound(entities, edge_loop, true, entry.first == outer));
+    }
+    if (bounds.empty()) continue;
+
+    // Which way the face points. A cylinder's own normal is radially outward,
+    // so the mesh decides by whether one of its facets agrees.
+    bool outward = true;
+    if (!patch.facets.empty()) {
+      const std::vector<int>& facet = loops[patch.facets.front()];
+      Vector3d centroid = Vector3d::Zero();
+      for (const int v : facet) centroid += vertices[v];
+      centroid /= double(facet.size());
+      const Vector3d rel = centroid - cyl->refpt;
+      const Vector3d radial = (rel - axis * axis.dot(rel)).normalized();
+      outward = radial.dot(loop_normals[patch.facets.front()]) > 0;
     }
 
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));

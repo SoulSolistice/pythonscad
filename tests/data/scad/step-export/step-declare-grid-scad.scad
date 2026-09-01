@@ -34,7 +34,17 @@
 // planes it would otherwise be, which is the whole claim and is worth asserting
 // rather than inferring from a face count.
 // ROUNDTRIP: Cylinder=1 Plane=244
-// ROUNDTRIP-APPROX: BSplineSurface=1 Cylinder=1 Plane=84
+//
+// The two walls go out as well, and not as facets. They are declared
+// cylinders the band pass could not write - the ridge cut into one leaves a
+// hole in it, and a band is two rims at a constant height with no notion of
+// a hole. The trimmed-quadric path claims them by distance to the axis and
+// bounds them with the mesh's own polyline, which is what the faceted faces
+// around them close against. Nine cylinder faces rather than two because a
+// face written on an open rectangle cannot wrap, so each wall is cut at the
+// seam.
+// APPROX: 2 trimmed quadrics written as one face each, replacing 76 facets
+// ROUNDTRIP-APPROX: BSplineSurface=1 Cylinder=9 Plane=8
 
 $fn = 32;
 
