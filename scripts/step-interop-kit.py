@@ -79,6 +79,28 @@ COUPONS = [
     ("c12-approximated", "tests/data/scad/step-export/step-approximate-report.scad",
      "4 swept-grid faces from the approximation pass",
      "The approximation pass, which needs step-approximate-surfaces as well."),
+    ("c13-oblique-trim", "tests/data/scad/step-export/step-oblique-trim.scad",
+     "ELLIPSE bounding a CYLINDRICAL_SURFACE",
+     "HIGHEST RISK of the new entities, because it is the only entity kind this "
+     "exporter has never shown a commercial reader. A cylinder cut by a tilted "
+     "plane is bounded by an ellipse, and it is written as a plain 3D ELLIPSE "
+     "with no pcurve - which OpenCASCADE reads back to 2e-6 of the radius, but "
+     "which a stricter importer may insist on having a parameterisation for."),
+    ("c14-declared-cone", "tests/data/scad/step-export/step-declare-cone.scad",
+     "CONICAL_SURFACE from declare_cone, sharing a rim with a cylinder",
+     "A cone and a cylinder meeting at one CIRCLE used by both, where the cone "
+     "came from a declaration rather than from two matching rims. c03 covers a "
+     "cone standing alone; this covers the joint."),
+    ("c15-bored-cylinder", "tests/data/scad/step-export/step-bored-cylinder.scad",
+     "CYLINDRICAL_SURFACE bounded entirely by LINE, with holes",
+     "Structurally new: every other quadric face here is bounded by circles and "
+     "arcs, and this one is bounded by the mesh's own polyline because its trim "
+     "is a quartic no STEP curve can state. It may also carry more than one "
+     "FACE_BOUND - a quadric with a hole in it - which some importers only "
+     "expect on a PLANE."),
+    ("c16-bored-cone", "tests/data/scad/step-export/step-bored-cone.scad",
+     "CONICAL_SURFACE and CYLINDRICAL_SURFACE, both polyline-bounded",
+     "As c15 on a taper, so the bore's own trim runs on a cone."),
     ("r01-lid10", "examples/step_test/lid10.scad",
      "real part: cylinders, cones, circles",
      "A real model, and the one whose committed export was finding F1."),
@@ -87,8 +109,13 @@ COUPONS = [
      "Scale, and a helical thread that stays faceted by design."),
 ]
 
-# Coupons that additionally need the approximation feature.
-APPROX = {"c12-approximated"}
+# Coupons whose interesting geometry only exists with the approximation pass:
+# a declared sweep is a fit rather than an exact surface, and so is a quadric
+# claimed by distance to its axis. Both real parts are here because both now
+# declare their thread - exported with the analytic flag alone, lid10 comes
+# out at 1985 faces and shows a CAD system none of this work.
+APPROX = {"c12-approximated", "c15-bored-cylinder", "c16-bored-cone",
+          "r01-lid10", "r02-bayonet"}
 
 CENSUS_KINDS = [
     "PLANE", "CYLINDRICAL_SURFACE", "CONICAL_SURFACE", "SPHERICAL_SURFACE",

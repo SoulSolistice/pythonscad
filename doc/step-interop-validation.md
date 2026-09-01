@@ -170,3 +170,67 @@ mechanical engineer would want them, whether the parameterisation survives a
 fillet or a draft applied downstream, or whether a thread that stays faceted is
 acceptable in a part someone intends to machine. Those are judgements, not
 measurements, and they want a user rather than a script.
+
+## The declared sweep is not sewn by SOLIDWORKS
+
+Run 2026-09-01, SOLIDWORKS 2026 SP0.0, against the kit built from the current
+exporter. Sixteen of eighteen coupons pass; the two findings are both real
+parts, and they are the failure this whole document exists for - the analytic
+export comes in as a **surface body** while its own faceted control comes in as
+a solid.
+
+```text
+r01-lid10-analytic    SURFACE  1306 faces  vol 0.0000
+r01-lid10-faceted     solid    2441 faces  vol 223482.2984
+r02-bayonet-analytic  SURFACE   576 faces  vol 0.0000
+r02-bayonet-faceted   solid    1685 faces  vol 234864.2425
+```
+
+OpenCASCADE reads both as one valid closed solid, so this is SOLIDWORKS
+specific and no amount of `validatestep.py` or round-trip checking would have
+found it.
+
+### Which feature, isolated
+
+Four exports of the same part, each differing by one thing:
+
+| export | body |
+| --- | --- |
+| analytic only | **solid**, 1969 faces, vol 227209.5503 |
+| approximation, trimmed quadrics only (no declared sweep) | **solid**, 1828 faces, vol 226215.5900 |
+| approximation, declared sweep only (quadrics suppressed) | **SURFACE**, vol 0 |
+| approximation, both | **SURFACE**, vol 0 |
+
+So it is the **declared sweep**, and the trimmed quadrics are cleared. That
+matters for attribution: the quadric and cone work is the newest thing here and
+the obvious suspect, and it is not the cause. `declare_grid` on this part dates
+from item 5.
+
+It is also not swept grids as such. `c12-approximated` writes four of them and
+imports as a solid. The difference is scale: the lid's sweep is a single face
+whose boundary is 312 runs of up to 4 mesh edges, better than a thousand edges
+on one face, and that is what does not sew.
+
+### Why it was not seen until now
+
+The kit exported both real parts with `step-analytic-surfaces` alone. In that
+mode neither part's thread is declared at all - lid10 comes out at 1985 faces -
+so the coupon that was meant to be the most realistic test was exercising a path
+no user of the feature would take. Both are now in `APPROX`, which is what
+surfaced this.
+
+Four coupons were added for the newer entities, and all four pass:
+
+| coupon | body | faces | volume | against |
+| --- | --- | --- | --- | --- |
+| c13-oblique-trim (`ELLIPSE`) | solid | 3 | 4824.8003 | 4824.92783 derived |
+| c14-declared-cone | solid | 4 | 3962.5955 | 3962.5955337 exact |
+| c15-bored-cylinder | solid | 4 | 5298.5717 | 5298.405619 derived |
+| c16-bored-cone | solid | 25 | 5370.1929 | 5382.203842 derived |
+
+`ELLIPSE` was the one to watch, being the only entity kind this exporter had
+never shown a commercial reader, and it reads cleanly with no pcurve. Worth
+noting too that SOLIDWORKS reports c15 as **four** faces where OpenCASCADE
+reports ten: it sewed the seam-split halves back into whole periodic surfaces,
+which is the best available outcome for a face that had to be cut so as not to
+wrap.
