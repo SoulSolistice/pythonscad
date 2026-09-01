@@ -92,7 +92,7 @@ One run of `scripts/step-analytic-probe.py` over
 `examples/step_test/bayonet_container_v1-2.stp` (a faceted export — 1693 `PLANE`,
 no analytic entity, so it is the question and not the answer):
 
-```
+```text
 2168 vertices, 1693 loops (8 holes)
 664 facets (39.4% of outer loops) lie on 14 distinct surfaces of revolution
 26 bands fit exactly (664 facets)
@@ -125,7 +125,7 @@ correctness; the rest are hygiene and drift.
 `tests/validatestep.py` over `examples/step_test/lid10.stp`
 (`FILE_NAME` says pythonscad, 2026-08-13):
 
-```
+```text
 94 edge(s) used by only one face, e.g. #1438 (shell is not closed)
 #49832 / #49835 / #49999 / #50381: hole lies outside the outer bound of its face
 #50451: hole 20954 is not directly inside this face (its face is left sealed)
@@ -213,8 +213,9 @@ machine. The same commit adds `examples/step_test/lid10.{scad,json,stp}` —
 2.9 MB. `grep` finds no reference, which was misleading: `tests/CMakeLists.txt`
 globs `examples/**/*.scad` recursively, so both models were being rendered by
 dump-examples, render-*, preview-* and throwntogether-* — 16 tests failing for a
-baseline they should never have needed. They are excluded from that glob now. It is a useful artifact, which is an argument for wiring it in or
-saying what it is for, not for leaving it untitled.
+baseline they should never have needed. They are excluded from that glob now.
+It is a useful artifact, which is an argument for wiring it in or saying what it
+is for, not for leaving it untitled.
 
 `examples/step_test/README.md` now says what both artifacts are, which one the
 probe reads and why it has to stay faceted, and that neither is a known-good
@@ -383,7 +384,7 @@ Found by the twelfth validator check on its first run, and by nothing before it.
 All three of the suite's hand-written polyhedra were built with their faces the
 wrong way round:
 
-```
+```text
 step-t-junction              -1.0000  ->  +1.0000
 step-approximate-cylinder    -3763.86 ->  +3763.86
 step-approximate-turned      -6076.75 ->  +6076.75
@@ -426,9 +427,9 @@ being installed, on a regression `validatestep.py` had passed. The lesson is
 worth keeping - the validator checks that a file is well formed, and only a
 kernel checks that it is the solid the mesh was.
 
-
-A headless build was made in this environment - Manifold and CGAL, no Qt, Release
-- so most of what this section used to disclaim is now measured. What runs:
+A headless build was made in this environment - Manifold and CGAL, no Qt,
+Release - so most of what this section used to disclaim is now measured. What
+runs:
 
 - **all 23 fixtures**, each asserting the exporter's own report through
   `EXPECT:` lines, measured on that build rather than transcribed;
@@ -496,7 +497,7 @@ matters more than it looks.
 99.8% of everything this exporter leaves faceted on that part, is a hand-written
 `polyhedron` over a computed point list (`bayonet_container_v1-2.scad:765`):
 
-```
+```text
 steps = max(24, round($fn*turns));
 points = [ for (i = [0 : steps]) let (t = i/steps, a = 360*turns*t, ...
 ```
@@ -1082,8 +1083,9 @@ union with the socket wall retriangulated it, and 36% regularity means there is
 no grid left to walk.
 
 **So: fit where the generator's grid survives, declare where the boolean took
-it.** `declare_grid()` is that second half - see below. The thread is 99.8% of the uncovered area on this part and falls on the
-declaring side, which puts it back with roadmap item 5 and with §8's standing
+it.** `declare_grid()` is that second half - see below. The thread is 99.8% of
+the uncovered area on this part and falls on the declaring side, which puts it
+back with roadmap item 5 and with §8's standing
 lesson - every item that looked like a recogniser problem turned out to be a
 channel problem one layer down. `hoseRidge` knows it swept a profile along a
 helix; nothing downstream can be told to guess it.
@@ -1180,7 +1182,7 @@ was standing in for it all along.
 
 On the reference ridge:
 
-```
+```text
 1 declared sweep covers 348 facets over 2 boundary cycles,
 split into 185 runs of up to 7 mesh edges, 0 unresolved
 ```
@@ -1199,8 +1201,8 @@ The 185 runs are the 185 cut facets, one run each, none unresolved - so every
 boundary of this face has a single neighbour that could replace it in step.
 
 **The surface now covers the whole sweep.** A profile declared closed has one
-more span than it has columns - the strip from the last column back to the first
-- and no column of the net names it. Without it a four sided ridge had a surface
+more span than it has columns - the strip from the last column back to the
+first - and no column of the net names it. Without it a four sided ridge had a surface
 over three of its sides, and facets on the fourth could be claimed by position,
 because the generator emitted their corners, and never by projection. That is
 precisely the half a boolean destroys, so the gap was in the worst possible
@@ -1221,7 +1223,7 @@ The blocker is one layer up. A sweep whose profile is declared closed is a tube,
 its surface is closed across `v`, and the exporter measures whether the claimed
 region closes around it:
 
-```
+```text
 its facets lie over 4 of the profile's 4 spans - the region closes around the
 profile, so its face crosses the surface's seam
 ```
@@ -1284,7 +1286,7 @@ of which is a sheet in its own right and its own face. The reference ridge
 declared closed - the case that was left faceted - is written as two faces
 replacing 299 facets, and the export says so:
 
-```
+```text
 a sweep closing around its profile was cut into 2 faces, so that no face
 crosses the surface's seam
 ```
@@ -1453,7 +1455,7 @@ which is not hypothetical, since OCCT named six exact cylinders among
 gate now names itself, and the counts settle what was left open when those six
 were recovered:
 
-```
+```text
 12 patches are not quadrics because the rails are parallel but not coaxial
 12 patches are not quadrics because its two meridians have different radii
 6 of 30 patches are exactly quadrics - 6 cylindrical, 0 spherical
@@ -1557,8 +1559,8 @@ The second is the question an importing user actually has, which no validity
 check answers: having read a `CYLINDRICAL_SURFACE`, does the receiving system
 still believe in it? **No quadric was downgraded to a spline anywhere in the
 kit.** `c09`'s twenty-four `RATIONAL_B_SPLINE_SURFACE` complex instances - the
-highest risk in `doc/step-interop-validation.md`, and the class of defect F7 was
-- come back as twenty-four. SOLIDWORKS accepts the form and re-emits it.
+highest risk in `doc/step-interop-validation.md`, and the class of defect F7
+was - come back as twenty-four. SOLIDWORKS accepts the form and re-emits it.
 
 Where it differs, it is splitting periodic surfaces at their seams rather than
 losing anything: our one-face cylinder returns as two, our one-face torus as
@@ -1636,7 +1638,6 @@ than a measurement.
 Fusion is installed on the same machine and has not been tried. The same kit
 runs against it; only the driver is SOLIDWORKS-specific.
 
-
 ## 10. Open work
 
 §7's list is closed - every item on it is struck through - and §8's "what to do
@@ -1678,7 +1679,7 @@ Measured rather than assumed. The remainder is still fourteen faces - 0.8% of
 the bayonet, 803.6 of its area - lying on four surfaces the recogniser already
 knows:
 
-```
+```text
 8 facets  cylinder r=78          3 facets  cone r=80.6-1*z
 2 facets  cylinder r=78.1        1 facet   cylinder r=74.2356
 ```
@@ -1778,7 +1779,6 @@ question. §8's *what not to do* list stands unchanged: `SURFACE_OF_REVOLUTION`
 and per-face provenance both collapse zero faces, and the bayonet's last
 36-facet rejection is geometrically necessary.
 
-
 ## 11. Item 5, closed
 
 The blocker was "a `polyhedron()` sweep has no generator to speak for it". That
@@ -1820,7 +1820,7 @@ is written only under `step-approximate-surfaces` as well as
 `step-analytic-surfaces`. `step-declare-grid-scad.scad` asserts both states, and
 asserts what a kernel makes of each rather than inferring it from a face count:
 
-```
+```text
 ROUNDTRIP:        Cylinder=1 Plane=244            # analytic alone: sweep left faceted
 ROUNDTRIP-APPROX: BSplineSurface=1 Cylinder=1 Plane=84
 ```
@@ -1925,3 +1925,58 @@ claims nothing beyond it.
   planar, so no conic describes it, and this is the part of item 4 that is
   genuinely open. Note that C already loses nothing today: the partial-band path
   writes the arc-bounded parts of both cylinders and leaves the mouth faceted.
+
+## 13. The lid's thread, declared
+
+The largest thing the lid still exported as facets was one region of 1016 -
+`z 1.2..75`, `r 74.236..79.376`, a full turn, and the approximation pass's own
+verdict on it was that *"the ordering is gone, only a declaration could describe
+this"*. Locating it settled what it was: the hose thread, whose root radius
+74.24 this document already had on record from the other direction.
+
+So it is the same shape as the bayonet's in §11, and it took the same one line.
+`hoseRidge` built its sweep as a flat point list; built as one row per station
+instead, with `points` flattened back out of the rows, the generator can hand
+over the order it swept in and `declare_grid` does the rest.
+
+| | before | after |
+| --- | --- | --- |
+| OpenCASCADE | 1985 faces | **1501** |
+| | `Cone 4, Cylinder 4, Plane 1977` | `BSplineSurface 2, Cone 4, Cylinder 4, Plane 1491` |
+| valid, one solid, one shell | yes | yes |
+
+486 planes become two B-spline faces - two rather than one because a sweep
+closing around its profile is cut so that no face crosses the surface's seam,
+which `step-declare-grid` already asserts.
+
+**The faceted export is unchanged**, which is the property that makes this safe
+to do to a real part: the two files differ only in the filename recorded in
+`FILE_NAME`, `PRODUCT` and `SHAPE_REPRESENTATION`, over identical 66866 line
+data sections. A declaration states intent and moves no geometry.
+
+### What it does not do, and that is the interesting half
+
+The report is explicit: *a declared 154x4 cubic sweep claims 490 facets whole,
+452 cut across it*. Rather less than half the thread is left, because the
+boolean that fused the ridge to the socket wall introduced vertices which are
+not in the generator's grid, and `GridSurface` membership is by position - a
+facet belongs to the sweep exactly when all of its corners are grid points.
+Those 452 are correctly excluded rather than approximated.
+
+That is the documented behaviour rather than a defect, and it is already pinned
+in both languages - `step-declare-grid.py` at 349 whole against 184 cut,
+`step-declare-grid-scad.scad` at 178 against 67. **So this needed no new
+fixture and no new capability**: it is the existing channel confirmed at the
+scale of a real part, which is the only thing about it the small fixtures could
+not say.
+
+The volume moves 227209.55 to 227635.86, +0.19%. Over the roughly 19000 square
+units the claimed facets cover that is a mean normal displacement of 0.022,
+against a reported band of 0.2527 - the smooth surface cutting the corners the
+chords left standing, and well inside what the mesh already allows.
+
+Note what this is and is not evidence for. `examples/step_test/lid10.scad` is
+the specimen the adversarial cases were found on, not a deliverable; the number
+that matters here is not that one part improved by 24% but that a generator
+declaring its own sweep works unchanged on a part two orders of magnitude larger
+than the fixture that specifies it.

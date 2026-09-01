@@ -771,17 +771,23 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 	assert(span > 0,
 	       "hose socket is shallower than one thread root: raise _hoseThreadTurns");
 
-	points = [
+	// Built one row per station rather than as one flat list, so the sweep can
+	// hand the exporter the order it generated in. That ordering is the one
+	// thing a mesh loses and no measurement recovers, and it is what lets the
+	// thread go out as a surface instead of as a thousand facets. `points` is
+	// the same list it always was, flattened back out of the rows.
+	rows = [
 		for (i = [0 : steps])
 		let (t = i/steps,
 		     a = 360*turns*t,
 		     z = zStart + span*t,
 		     r = radius0 + slope*min(z, taperLength),
 		     f = max(0, min(1, t/leadIn, (1 - t)/leadOut)))
-		for (p = [[back, -rootWidth/2], [-ridgeDepth*f, -crestWidth/2],
-		          [-ridgeDepth*f, crestWidth/2], [back, rootWidth/2]])
-			[(r + p[0])*cos(a), (r + p[0])*sin(a), z + p[1]]
+		[ for (p = [[back, -rootWidth/2], [-ridgeDepth*f, -crestWidth/2],
+		            [-ridgeDepth*f, crestWidth/2], [back, rootWidth/2]])
+			[(r + p[0])*cos(a), (r + p[0])*sin(a), z + p[1]] ]
 	];
+	points = [ for (row = rows) for (p = row) p ];
 
 	faces = concat(
 		[ for (i = [0 : steps - 1]) for (j = [0 : np - 1]) for (k = [0, 1])
@@ -794,6 +800,8 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 		[ [steps*np + 3, steps*np + 2, steps*np + 1, steps*np] ]
 	);
 
+	// The profile closes on itself - four points round the ridge - so `closed`.
+	declare_grid(points = rows, closed = true)
 	polyhedron(points = points, faces = faces, convexity = 8);
 }
 
