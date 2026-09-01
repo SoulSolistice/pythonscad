@@ -114,8 +114,32 @@ COUPONS = [
 # claimed by distance to its axis. Both real parts are here because both now
 # declare their thread - exported with the analytic flag alone, lid10 comes
 # out at 1985 faces and shows a CAD system none of this work.
+# The band family: one model, one feature, at a sweep of tessellations.
+#
+# Every other coupon here answers "does this import"; this one answers "up to
+# what tessellation band does this importer sew". That is the question the
+# SOLIDWORKS run of 2026-09-01 could not answer, because every candidate cause
+# was tried on one part at one tessellation. A fitted face is bounded by the
+# mesh's own polyline - the faceted faces around it have to close against it
+# edge for edge - so its boundary sags off the surface by up to a station's
+# sagitta, and a kernel either grants that slack or does not.
+#
+# `-D FN=` is the whole difference between the members. Everything else about
+# the model is fixed, so the band is the only thing that moves.
+BAND_FAMILY = [24, 32, 48, 64, 96]
+for _i, _fn in enumerate(BAND_FAMILY):
+    COUPONS.append((
+        "f%02d-band-fn%03d" % (_i + 1, _fn),
+        "tests/data/scad/step-export/step-band-family.scad",
+        "a declared sweep at $fn=%d" % _fn,
+        "One member of the band family; read the members together, not alone. "
+        "What matters is the fn at which the importer stops making a solid.",
+        ["-D", "FN=%d" % _fn],
+    ))
+
 APPROX = {"c11-swept-grid", "c12-approximated", "c15-bored-cylinder",
           "c16-bored-cone", "r01-lid10", "r02-bayonet"}
+APPROX |= {"f%02d-band-fn%03d" % (i + 1, fn) for i, fn in enumerate(BAND_FAMILY)}
 
 CENSUS_KINDS = [
     "PLANE", "CYLINDRICAL_SURFACE", "CONICAL_SURFACE", "SPHERICAL_SURFACE",
@@ -149,9 +173,10 @@ def parameter_set(source):
     return ["-p", cfg, "-P", sorted(sets)[0]]
 
 
-def export(binary, source, target, analytic, approx):
+def export(binary, source, target, analytic, approx, extra=()):
     args = [binary, source, "-o", target, "--trust-python"]
     args += parameter_set(source)
+    args += list(extra)
     if analytic:
         args.append("--enable=step-analytic-surfaces")
         if approx:
@@ -190,7 +215,9 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     rows = []
-    for name, src, exercises, risk in COUPONS:
+    for entry in COUPONS:
+        name, src, exercises, risk = entry[:4]
+        extra = entry[4] if len(entry) > 4 else []
         srcpath = os.path.join(ROOT, src)
         if not os.path.exists(srcpath):
             print("SKIP %-22s source missing: %s" % (name, src))
@@ -199,7 +226,7 @@ def main():
             target = os.path.join(outdir, "%s-%s.stp" % (name, mode))
             rc, err = export(args.binary, srcpath, target,
                              analytic=(mode == "analytic"),
-                             approx=(name in APPROX))
+                             approx=(name in APPROX), extra=extra)
             if rc != 0 or not os.path.exists(target):
                 print("FAIL %-22s %-8s export rc=%s" % (name, mode, rc))
                 for line in err.strip().splitlines()[-3:]:

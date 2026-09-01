@@ -313,3 +313,58 @@ false - into a number the exporter can be designed against.
 
 A second gap the same run exposed: `c11-swept-grid` was not in `APPROX` either,
 so the coupon named for the swept grid had never exported one. It is now.
+
+## The band family, and what it refuted
+
+`tests/data/scad/step-export/step-band-family.scad` is one declared sweep on a
+bored wall, with `FN` as its only knob, exported by the kit as coupons `f01`
+through `f05` via `-D`. Every other coupon asks "does this import"; this one
+asks "up to what tessellation does this importer sew", which is the question no
+single-part test could answer.
+
+It also gave the investigation its first free instrument. **OpenCASCADE had been
+telling us something all along and was not being asked.** `BRepCheck_Analyzer`
+says "valid" and stops, because OCCT sews by *widening the tolerance* of an edge
+until it covers the gap between that edge and the faces it bounds. A shape whose
+edges do not lie on their surfaces still comes back as one closed solid; it has
+simply been granted the slack. `worst_tolerance()` reports that slack, and it
+tracks the tessellation band as the theory predicted:
+
+| FN | band | slack OCCT accepted |
+| --- | --- | --- |
+| 20 | 0.4214 | 0.283185 |
+| 24 | 0.3207 | 0.196314 |
+| 32 | 0.2077 | 0.117000 |
+| 48 | 0.1181 | 0.056772 |
+| 64 | 0.0807 | 0.034967 |
+| 96 | 0.0485 | 0.018006 |
+
+And on the first look the slack correlated perfectly with the SOLIDWORKS result:
+everything it read as a solid needed 0.048 or less, and lid10, which it read as
+loose surfaces, needed 0.264.
+
+**The family refutes it.** Every member imports as a solid, including `fn020` at
+a slack of 0.283 - *more* than the 0.264 that lid10 fails at, on a model of 102
+faces. A tolerance threshold between the two would have to be narrower than the
+gap between those two numbers, which is not a threshold.
+
+So slack is not the mechanism either, and that is now three candidate
+explanations measured and discarded: the boundary size of a single face, the
+size of the model, and the tolerance the kernel has to accept. The correlation
+was real and the causation was not, which is the sort of mistake a family of
+coupons exists to catch and a single coupon cannot.
+
+### What is left
+
+Both failing parts - `lid10` and `bayonet_container_v1-2` - are real models
+carrying a declared sweep, and both live in this repository. A third real model
+carrying the same feature, the user's own, imports as a solid in every
+configuration tried. So the question is no longer "what does this feature do to
+an importer" but "what do these two files have that the other three do not", and
+the answer is not tessellation, not scale, not slack, and not the sweep itself.
+
+Worth noting what the tolerance measurement is still good for, having failed as
+a predictor: it is the only cheap, deterministic number here that describes how
+far an approximated face's boundary sits from the surface it bounds, it needs no
+CAD licence, and it does not crash. `TOLERANCE:` and `TOLERANCE-APPROX:` assert
+it. It just does not, on this evidence, decide whether SOLIDWORKS will sew.

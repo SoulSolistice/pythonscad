@@ -192,6 +192,25 @@ def volume_expectation(path, marker="VOLUME"):
     return None
 
 
+def float_expectation(path, marker):
+    """A single number a fixture states under `marker`, or None.
+
+        # TOLERANCE: 0.05
+
+    Used for the slack a kernel has to accept to sew the export, which is the
+    one measurement here that predicts whether a *foreign* importer will manage
+    it - see worst_tolerance() in steproundtrip.py."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.search(r"(?<![-\w])" + marker + r":\s*([-+0-9.eE]+)\s*$", line)
+            if m:
+                try:
+                    return float(m.group(1))
+                except ValueError:
+                    return None
+    return None
+
+
 def keyed_expectations(path, marker, cast=int):
     """A fixture line of `Key=value` tokens under `marker`."""
     wanted = {}
@@ -237,7 +256,8 @@ def canonical_expectations(path):
 
 
 def check_roundtrip(path, stepfile, what, expect_surfaces=None, expect_canonical=None,
-                    expect_edges=None, expect_radii=None, expect_volume=None):
+                    expect_edges=None, expect_radii=None, expect_volume=None,
+                    expect_tolerance=None):
     """Read the export back with a real CAD kernel. Skipped when OCCT is absent.
 
     Returns True when the round trip passed or could not be run, so a machine
@@ -249,6 +269,7 @@ def check_roundtrip(path, stepfile, what, expect_surfaces=None, expect_canonical
         expect_edges=expect_edges,
         expect_radii=expect_radii,
         expect_volume=expect_volume,
+        expect_tolerance=expect_tolerance,
     )
     if result is None:
         print("note: " + report[0], file=sys.stderr)
@@ -391,7 +412,8 @@ def check_approximation(openscad, inputfile, stepfile, args):
     # would pass every other check in this file.
     if not check_roundtrip(inputfile, approxfile, "approximation",
                            keyed_expectations(inputfile, "ROUNDTRIP-APPROX") or None,
-                           expect_volume=volume_expectation(inputfile, "VOLUME-APPROX")):
+                           expect_volume=volume_expectation(inputfile, "VOLUME-APPROX"),
+                           expect_tolerance=float_expectation(inputfile, "TOLERANCE-APPROX")):
         return False
     ok = True
     flat = " ".join(output.split())
@@ -438,6 +460,7 @@ if ok:
         keyed_expectations(inputfile, "EDGES") or None,
         keyed_expectations(inputfile, "RADII", float) or None,
         volume_expectation(inputfile),
+        expect_tolerance=float_expectation(inputfile, "TOLERANCE"),
     ):
         ok = False
     else:

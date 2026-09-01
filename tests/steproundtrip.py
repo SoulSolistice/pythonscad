@@ -141,6 +141,35 @@ def canonical_census(shape, tol=1e-7):
     return census
 
 
+def worst_tolerance(shape):
+    """The largest tolerance the kernel had to accept to sew this shape.
+
+    The one measurement here that predicts a *foreign* importer, and it was
+    missing for a long time because BRepCheck_Analyzer says "valid" and stops.
+    OpenCASCADE sews by widening an edge's tolerance until it covers the gap
+    between that edge and the faces it bounds, so a shape whose edges do not lie
+    on their surfaces still comes back as one closed solid - it has simply been
+    granted the slack it needed.
+
+    That slack is what a stricter importer will not grant. Measured against the
+    SOLIDWORKS run in doc/step-interop-validation.md the correlation is exact:
+    everything it read as a solid needed 0.048 or less, and the one file it read
+    as loose surfaces needed 0.264.
+
+    Which is also the tessellation band, and that is not a coincidence. Every
+    exactly-fitted face this exporter writes is bounded by curves lying on it;
+    an *approximated* face is bounded by the mesh's own polyline, because the
+    faceted faces around it have to close against it edge for edge, and those
+    chords sag off the surface by up to a station's sagitta."""
+    worst = 0.0
+    for kind, cast in ((TopAbs_FACE, TopoDS.Face_s), (TopAbs_EDGE, TopoDS.Edge_s)):
+        exp = TopExp_Explorer(shape, kind)
+        while exp.More():
+            worst = max(worst, BRep_Tool.Tolerance_s(cast(exp.Current())))
+            exp.Next()
+    return worst
+
+
 def surface_radii(shape, tol=1e-6):
     """The distinct radius of every cylindrical, spherical and conical face.
 
@@ -277,7 +306,8 @@ def _invalid_detail(shape, analyzer, limit=5):
 
 
 def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canonical=None,
-                  expect_edges=None, expect_radii=None, expect_volume=None):
+                  expect_edges=None, expect_radii=None, expect_volume=None,
+                  expect_tolerance=None):
     """Read `filename` back with OpenCASCADE and report whether it is a solid.
 
     Returns (ok, lines). `ok` is None when OCCT is not installed, which the
@@ -378,6 +408,15 @@ def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canoni
                     "expected the kernel to read %d %s face(s), it read %d" % (want, kind, got)
                 )
                 ok = False
+
+    slack = worst_tolerance(shape)
+    lines.append("OCCT worst tolerance %.6f" % slack)
+    if expect_tolerance is not None and slack > expect_tolerance:
+        lines.append(
+            "the kernel had to accept %.6f of slack to sew this, against an allowance of %.6f"
+            % (slack, expect_tolerance)
+        )
+        ok = False
 
     radii = surface_radii(shape)
     if radii:
