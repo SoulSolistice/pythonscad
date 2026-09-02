@@ -2296,3 +2296,51 @@ whose written B-spline interpolates the declared net, rather than approximating
 it, would put every one of those 490 whole facets' corners on the surface and
 leave the sagitta as the only residual. That is a change to how the surface is
 constructed, and it is the next thing worth doing here.
+
+## 19. Corners on the surface: it works, and what it costs
+
+Holding every claimed corner to the surface being written - in the declared
+sweep and in the trimmed quadric alike - makes both reference parts import into
+SOLIDWORKS **clean**. That is the end of the thread the interop investigation
+opened, and it is worth stating as the rule it turned out to be:
+
+> A corner is the one thing the mesh states exactly, so a surface that misses it
+> contradicts the mesh. A chord sagging between two corners the mesh does state
+> is only the tessellation, which the band already allows for. Corners are held
+> to the surface; edges are not.
+
+It is not landed, because the price is not what it first appears.
+
+| fixture | sweep facets, before | after | trimmed quadric faces, before | after |
+| --- | --- | --- | --- | --- |
+| step-declare-grid-strip | 241 | **6** | 9 | **78** |
+| step-declare-grid | 300 | 65 | 5 | 74 |
+| step-declare-grid-scad | 160 | 32 | 8 | 26 |
+| lid10 | 486 | 154 | 2 | 11 |
+
+The sweep nearly vanishes and the quadric path shatters into dozens of faces of
+two facets each. That looks like an over-strict gate, and measuring says it is
+not. On the strip coupon, of the 636 corners bounding the two sweep faces **as
+they were written before any of this**, 240 lie on the surface to 1e-6 and 392
+are more than 1e-3 off it, up to 0.1117. Two corners fall between. Bimodal, so
+it is not a tolerance artefact: over half the boundary of that face was never on
+the surface the face was drawn on.
+
+So the old coverage was partly fictitious. The face was written across facets
+its own surface does not touch, which is exactly what an importer then has to
+guess its way through.
+
+**The cause is what the fit interpolates.** A GridSurface is built through the
+*declared net* - 60 stations by 4 profile points on the strip - and it passes
+through those exactly. The mesh in the claimed region has far more vertices than
+that: everything the tessellation and the booleans added. None of them is on the
+surface, and `pointMember` admits them because it asks whether the generator
+emitted a point *near* the vertex, with the tessellation band as its tolerance.
+
+That makes the fix neither rejecting them, which is the table above, nor
+accepting them, which is the defect. It is to fit along the declared ordering to
+**the mesh vertices in the claimed region**, rather than to the declared net
+alone. The declaration's job is to hand over the ordering the booleans
+destroyed; interpolating the points that are actually there is the exporter's.
+Done that way the corners are on the surface by construction, the coverage comes
+back, and the rule above costs nothing to enforce.
