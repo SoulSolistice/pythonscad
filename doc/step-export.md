@@ -1577,6 +1577,14 @@ the shell against its planar neighbour by far more than the modelling tolerance,
 so those walls stay faceted, and no amount of care over the surface changes that
 — the curve has to come from the generator, as with the splines in item 2.
 
+**One more rung of this has since been climbed, and it narrows the claim.** Where
+the *other* surface is known — a plane at any angle — the trim curve is exactly
+representable and `doc/step-export-status.md` §12 now writes it. The prediction
+here and in §10 was that this would need `SURFACE_CURVE` with a pcurve on each
+face; measuring it said otherwise. What survives unchanged is the sentence above
+about the bayonet's fourteen: those border a *mesh*, and no entity choice
+rescues a curve that does not exist.
+
 Two lessons are worth more than the item:
 
 - **The earlier estimate counted rings, not faces.** "6 of the 15 detected
@@ -1588,7 +1596,14 @@ Two lessons are worth more than the item:
   an axis derived from the wrong set of facets. Measure which gate a face
   actually fails before costing the surface behind it.
 
-### 5. Swept surfaces — blocked, and worth knowing why
+### 5. Swept surfaces — unblocked; the analysis below is why it was hard
+
+**Closed.** `declare_grid` is the user-facing declaration this section argues
+for, it exists in both languages, and `doc/step-export-status.md` §11 records
+it. What follows is the measurement that established there was no other way in,
+and it is kept because the reasoning still binds anything that tries one: a
+`polyhedron()` has no intent to declare, so the declaration had to come from the
+user or from nowhere.
 
 Not previously on this list, and on the bayonet it is larger than items 1 to 4
 put together: **999 faces, 59.3% of that model**, lie on no surface of
@@ -1927,10 +1942,11 @@ prism elsewhere in the part. Bounded, but not zero.
    the two neighbouring leaks above.
 3. ~~**A user-facing `declare_*` in the Python API.**~~ Done, and in SCAD too:
    see *Declaring a surface from the model* below.
-4. **`FilletNode` declaring a B-spline.** No channel work at all: a surface
-   type, the matching, the emission, and the rim generalisation that item 2 has
-   been carrying all along. Sized under *What the patches actually are* above:
-   one indivisible piece, and worth 4514 faces down to 26 on a filleted cube.
+4. ~~**`FilletNode` declaring a B-spline.**~~ Done. `FilletNode` builds its
+   patches from explicit Bezier control points and declares them through
+   `PolySetBuilder::addSurface`, and `step-fillet` asserts the figure this entry
+   predicted: *written as 26 faces instead of 1106*, with all 20 patches exactly
+   quadrics - 12 cylindrical, 8 spherical - and 48 of 48 shared seams agreeing.
 5. **A wall split by a Nef boolean.** Measured under *Known quality gaps*
    above: on `--backend=CGAL` a boolean leaves the wall of a ring it never
    touched cut into arcs at the seams where the operands met, and the recogniser

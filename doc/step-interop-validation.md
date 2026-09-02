@@ -819,6 +819,27 @@ anything, one face per component, and to decide outer against inner only within
 a component. The pcurves stay: they are correct, and they will matter once the
 faces they bound are valid.
 
+### It was, and the fix holds
+
+Landed, and it is the result of the whole investigation:
+**SOLIDWORKS goes from 82 faulty faces to one, with no gaps.** The remaining one
+is at the thread's run-out and is the overshoot this project has measured
+before - a B-spline fitted through the thread oversteps 0.378 where the band is
+0.109 - so it is the second of the two defects named above rather than a
+remainder of the first.
+
+Two things to carry, both about attribution rather than about the fix:
+
+- **The pcurve work was landed on a diagnosis that turned out to be
+  over-attributed.** It is correct and it was not the defect; the section above
+  says so and is worth re-reading before anything else is attributed to a missing
+  pcurve.
+- **Everything else in this document predates the split.** Every body type, face
+  count and volume recorded above was measured against an exporter that packed
+  disjoint regions into one face. They are still evidence about the *questions*
+  they were asked, and none of them is a measurement of the exporter as it now
+  stands.
+
 ## The round trip, as a step of the kit
 
 *Reading back what SOLIDWORKS made of it* did this by hand once and it was the

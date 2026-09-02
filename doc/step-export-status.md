@@ -1668,14 +1668,30 @@ the faceted control fails the same way, but a distinction a user meeting it
 would not care about. The decision is a maintainer's, and it is the only thing
 blocking it.
 
-### 3. Fusion
+### 3. ~~Fusion~~ - done
 
-Installed on the same machine, never tried. The kit is already written; only
-`scripts/step-interop-solidworks.ps1` is SOLIDWORKS-specific. Cheapest
-outstanding item by some distance, and a third kernel is worth more than a
-second was.
+`scripts/step-interop-fusion.py` exists and has been run; see
+`doc/step-interop-validation.md`, *What Fusion said*. It imports all six files of
+the focused kit as one valid solid body each - **including the two parts
+SOLIDWORKS refuses** - which is what established that SOLIDWORKS is the outlier
+rather than the exporter. That did not make the disagreement go away, and an
+importer stricter than two others is still an interoperability defect if the
+strictness is about something real; it turned out to be, and the face split of
+§23 is what it was about.
 
-### 4. Roadmap item 4, trimmed faces - blocked on item 5, not on effort
+Its answers predate the face split and the ladder, so a re-run is now worth
+about what the first one was.
+
+### 4. Roadmap item 4, trimmed faces - no longer blocked on item 5, and still not on effort
+
+**The blocker named below is gone and the item is not.** Item 5 closed in §11 -
+`declare_grid` is the user-facing declaration it was waiting for - so the
+sentence further down that item 4 "cannot be finished before item 5" no longer
+holds as written. What replaced it is narrower and firmer: §12 writes the trim
+where the other surface is a *plane*, and the bayonet's fourteen faces border a
+*mesh*, which is a curve that does not exist rather than one nobody has
+declared. The rest of this entry stands as the measurement that establishes
+that.
 
 Measured rather than assumed. The remainder is still fourteen faces - 0.8% of
 the bayonet, 803.6 of its area - lying on four surfaces the recogniser already
