@@ -93,7 +93,9 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   // data section
   output << "DATA;\n";
 
-  for (auto e : sk.entities) e->serialize(output);
+  for (auto e : sk.entities) {
+    if (e->live) e->serialize(output);
+  }
   // create the base csys
   output << "ENDSEC;\n";
   output << "END-ISO-10303-21;\n";

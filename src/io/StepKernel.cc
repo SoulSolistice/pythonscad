@@ -1844,6 +1844,133 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     face_edges.push_back(face_edges_extra[i]);
   }
 
+  // Every edge bounding a recovered curved face was still a straight line: the
+  // exporter drops a cylinder behind the mesh's polyline boundary, so the edge
+  // is the chord where the surface is the arc, and the gap between them is the
+  // sagitta. Measured on the band family, 366 of 388 line-on-cylinder edges lay
+  // off the cylinder they bounded, by up to 0.17mm - doc/step-interop-validation.md
+  // has the tables. Every kernel that reads such a file has to widen its
+  // tolerance to swallow that; two do it silently and one declines, and none of
+  // them is wrong to object.
+  //
+  // The 22 edges that were already exact say what the fix is. A ruling lies on a
+  // cylinder by construction, so the segments running up and down the axis need
+  // nothing, and it is the ones running around it - at constant height, chords
+  // of a circle - that should be written as arcs of that circle instead.
+  //
+  // An edge belongs to two faces, so promoting it is only sound when both can
+  // contain the arc. A plane can when its normal is the axis, which is what a
+  // flat top or an annulus is; anything else declines, and the edge stays the
+  // line it was. That is what keeps this from ever moving an edge off a face
+  // that was exact already, which would trade one kernel's complaint for
+  // everyone's.
+  std::map<EdgeCurve *, std::vector<Face *>> edge_faces;
+  for (std::size_t i = 0; i < face_edges.size(); i++) {
+    for (auto *edge : face_edges[i]) edge_faces[edge].push_back(sfaces[i]);
+  }
+
+  // The axis and radius a quadric face implies for an edge, if it implies one:
+  // the section at the edge's own height, which exists only when both ends are
+  // at the same height and the same distance from the axis.
+  auto section_of = [&](const SurfaceType *surface, const Vector3d& p1, const Vector3d& p2,
+                        Vector3d& axis, Vector3d& centre, double& radius) {
+    Vector3d ax, org;
+    double apex_r = 0.0, slope = 0.0;
+    if (const auto *cyl = dynamic_cast<const CylindricalSurface *>(surface)) {
+      ax = cyl->axis->dir1->pt.normalized();
+      org = cyl->axis->point->pt;
+      apex_r = cyl->r;
+    } else if (const auto *con = dynamic_cast<const ConicalSurface *>(surface)) {
+      ax = con->axis->dir1->pt.normalized();
+      org = con->axis->point->pt;
+      apex_r = con->r;
+      slope = tan(con->half_angle);
+    } else {
+      return false;
+    }
+    const double h1 = (p1 - org).dot(ax), h2 = (p2 - org).dot(ax);
+    if (fabs(h1 - h2) > tol) return false;
+    const Vector3d c = org + ax * h1;
+    const double r1 = (p1 - c).norm(), r2 = (p2 - c).norm();
+    const double want = apex_r + slope * h1;
+    if (fabs(r1 - r2) > tol || fabs(r1 - want) > tol) return false;
+    axis = ax;
+    centre = c;
+    radius = want;
+    return true;
+  };
+
+  int arcs_promoted = 0, arcs_declined = 0;
+  for (auto& entry : edge_faces) {
+    EdgeCurve *edge = entry.first;
+    auto *was_line = dynamic_cast<Line *>(edge->round);
+    if (was_line == nullptr) continue;
+    const Vector3d p1 = edge->vert1->point->pt;
+    const Vector3d p2 = edge->vert2->point->pt;
+    if ((p1 - p2).norm() < 1e-12) continue;
+
+    // A quadric among the faces proposes the arc; every face then gets a veto.
+    Vector3d axis, centre;
+    double radius = 0.0;
+    bool proposed = false;
+    for (auto *face : entry.second) {
+      if (section_of(face->surface, p1, p2, axis, centre, radius)) {
+        proposed = true;
+        break;
+      }
+    }
+    if (!proposed) continue;
+
+    bool agreed = true;
+    for (auto *face : entry.second) {
+      if (const auto *pl = dynamic_cast<const Plane *>(face->surface)) {
+        // A circle about `axis` lies in a plane only if the plane is
+        // perpendicular to it, and its endpoints are in the plane already.
+        const Vector3d n = pl->axis->dir1->pt.normalized();
+        agreed = fabs(fabs(n.dot(axis)) - 1) < 1e-9;
+      } else {
+        Vector3d other_axis, other_centre;
+        double other_radius = 0.0;
+        agreed = section_of(face->surface, p1, p2, other_axis, other_centre, other_radius) &&
+                 (other_centre - centre).norm() < tol && fabs(other_radius - radius) < tol;
+      }
+      if (!agreed) break;
+    }
+    if (!agreed) {
+      arcs_declined++;
+      continue;
+    }
+
+    const Vector3d from = (p1 - centre).normalized();
+    const Vector3d to = (p2 - centre).normalized();
+    // The normal that makes the sweep from `from` to `to` counter clockwise and
+    // shorter than half a turn, which one segment of a tessellated boundary
+    // always is.
+    const Vector3d normal = from.cross(to);
+    if (normal.norm() < 1e-12) {
+      arcs_declined++;
+      continue;
+    }
+    auto arc_point = new Point(entities, centre);
+    auto arc_axis = new Direction(entities, normal.normalized());
+    auto arc_ref = new Direction(entities, from);
+    edge->round =
+      new Circle(entities, "", new Axis2Placement(entities, arc_axis, arc_ref, arc_point), radius);
+    edge->dir = true;
+    // The line and the three entities it alone referred to would otherwise sit
+    // in the file unreferenced. `get_line_from_map` gives every edge its own,
+    // so nothing else can be pointing at them.
+    was_line->live = false;
+    was_line->vector->live = false;
+    was_line->vector->dir->live = false;
+    was_line->point->live = false;
+    arcs_promoted++;
+  }
+  if (arcs_promoted > 0 || arcs_declined > 0) {
+    LOG("STEP export: %1$d edge%2$s written as an arc on the surface it bounds, %3$d left straight",
+        arcs_promoted, arcs_promoted == 1 ? "" : "s", arcs_declined);
+  }
+
   // A CLOSED_SHELL has to be a single connected shell, so split disconnected
   // bodies into one MANIFOLD_SOLID_BREP each instead of stuffing all of them
   // into one shell that can never close.

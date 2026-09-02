@@ -802,26 +802,28 @@ def check_cylindrical_faces(entities, problems):
         # quadric is whatever the booleans left of a surface - a bored cylinder,
         # a wall with a declared ridge cut out of it - and it is bounded by the
         # mesh's own polyline, because the faceted faces around it have to close
-        # against it edge for edge. It has no circular edge at all, which is how
-        # the two are told apart, and it may have holes, which is why the single
-        # bound rule cannot be asked of it.
+        # against it edge for edge, and it may have holes, which is why the
+        # single bound rule cannot be asked of it.
+        #
+        # It used to be told apart by having no circular edge at all. That
+        # stopped being true when the boundary segments running around the
+        # surface at constant height began to be written as the arcs they are,
+        # so the two are separated by shape instead: a band is a ring closed by
+        # a seam or a pair of ends, three or four edges over one bound, and a
+        # trimmed patch carries the mesh's whole polyline.
         face_edge_ids = []
         for b in bounds:
             bl, _ = _bound_loop(entities, b)
             if bl is not None:
                 face_edge_ids.extend(bl.refs())
-        edge_kinds = set()
-        for oid in face_edge_ids:
-            g = _edge_geometry(entities, oid)
-            if g is not None:
-                edge_kinds.add(g.name)
-        if face_edge_ids and not (edge_kinds & {"CIRCLE", "ELLIPSE"}):
-            # Every corner of it still has to be on the surface it claims, or
-            # the face is describing a different cylinder from the one the mesh
-            # was. The tolerance is loose on purpose: this is an approximation
-            # gated on the model's own tessellation, and a kernel checks the
-            # topology in the round trip. What it catches is a face bounded by
-            # geometry from somewhere else entirely.
+
+        # Every corner of a face has to be on the surface it claims whichever
+        # shape it is, or the face is describing a different cylinder from the
+        # one the mesh was. The tolerance is loose on purpose: this is an
+        # approximation gated on the model's own tessellation, and a kernel
+        # checks the topology in the round trip. What it catches is a face
+        # bounded by geometry from somewhere else entirely.
+        if face_edge_ids:
             origin, axis, _ref = _placement(entities, surface.refs()[0])
             if origin is None:
                 problems.append("#%d: %s has no readable placement" % (surface.id, surface.name))
@@ -838,16 +840,25 @@ def check_cylindrical_faces(entities, problems):
                     rel = [pt[i] - origin[i] for i in range(3)]
                     along = sum(rel[i] * axis[i] for i in range(3))
                     perp = [rel[i] - along * axis[i] for i in range(3)]
-                    worst = max(worst, abs(math.sqrt(sum(c * c for c in perp)) - radius))
+                    # A cone's radius is a function of height, and the one the
+                    # entity carries is only the radius at its placement.
+                    want = radius
+                    if surface.name == "CONICAL_SURFACE":
+                        want = radius + along * math.tan(numbers[1])
+                    elif surface.name == "SPHERICAL_SURFACE":
+                        continue
+                    elif surface.name == "TOROIDAL_SURFACE":
+                        continue
+                    worst = max(worst, abs(math.sqrt(sum(c * c for c in perp)) - want))
             if worst > 0.05 * radius:
                 problems.append(
                     "#%d: trimmed %s is bounded by points up to %g off it, on a radius of %g"
                     % (face.id, surface.name, worst, radius)
                 )
-            continue
 
-        if len(bounds) != 1:
-            problems.append("#%d: cylindrical face has %d bounds, expected 1" % (face.id, len(bounds)))
+        # Anything but a ring is a trimmed patch, and the ring rules below say
+        # nothing about one.
+        if len(bounds) != 1 or len(face_edge_ids) > 6:
             continue
         loop, _ = _bound_loop(entities, bounds[0])
         if loop is None:

@@ -45,12 +45,23 @@
 // which is what says the figure is right rather than merely repeatable.
 //
 // The tolerance is for the boundary, not the surface. Every face here is the
-// exact cylinder, but each is bounded by chords rather than by the quartic, so
-// the solid is those cylinders trimmed by a polyline and reads 5296.533. That
-// deficit of 1.87 over the roughly 500 square units the trimmed faces cover is
-// a mean normal displacement of 0.004, well inside the 0.0193 band. It is far
+// exact cylinder, and since the boundary segments that run around one at a
+// constant height are written as arcs of it, the outer wall is now bounded
+// exactly: its rim is the true circle rather than a 32-gon inscribed in it.
+// What is left is the bore, whose opening is still trimmed by chords because
+// the quartic has no entity to be written as, so the solid reads 5301.57 - the
+// full pi*100*20 less a bore that removes 3.16 too little.
+//
+// The bound on that is the bore's own tessellation. A chord of a 32-gon on
+// r=4 lies at most 4*(1-cos(pi/32)) = 0.0193 inside the true circle, and the
+// bore's faces cover about 460 square units, so no more than 460*0.0193/2 =
+// 4.4 can be lost this way. Five is the bound rounded up, and it is still far
 // too tight to hide a wrong radius: boring at r=4.1 instead moves this by 25.
-// VOLUME-APPROX: 5298.405619 +/- 2.0
+//
+// The deficit used to read 1.87 rather than 3.16, which was the smaller number
+// for the worse reason - the outer rim was inscribed too, and its error had the
+// opposite sign and very nearly cancelled the bore's.
+// VOLUME-APPROX: 5298.405619 +/- 5.0
 $fn = 32;
 difference() {
 	cylinder(r = 10, h = 20);

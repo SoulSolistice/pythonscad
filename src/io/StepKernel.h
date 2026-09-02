@@ -138,6 +138,12 @@ public:
       ent_list.push_back(this);
       id = int(ent_list.size());
     }
+
+    // An entity's id is its position in the list, so an entity that turns out
+    // not to be wanted cannot be taken out of it - every id issued afterwards
+    // would collide with one already written. It is dropped at serialisation
+    // instead, which costs a flag and keeps ids meaning what they say.
+    bool live = true;
     virtual ~Entity() {}
 
     std::vector<std::string> tokenize(const std::string& str, const std::string& delimiters = ",")
