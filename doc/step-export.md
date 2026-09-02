@@ -515,7 +515,7 @@ uninterrupted.
 Each of the other three fails differently, and each failure names a different
 piece of future work:
 
-- **The body wall is not declared, because `hull()` drops provenance.**
+- **The body wall is not declared, because `hull()` collapses provenance.**
   `applyOperator3DManifold(..., HULL)` (`manifold-applyops.cc`) collects the
   children's vertices into a point cloud and returns a fresh `ManifoldGeometry`,
   so the `CylinderSurface` that `cylinder(r=82.75)` recorded never reaches the

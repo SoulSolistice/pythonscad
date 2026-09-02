@@ -2437,8 +2437,15 @@ had to be written because agreement with a kernel proves nothing
 
 Three limits, all of which stand from the original analysis:
 
-- **`hull()` drops it.** Fitting keeps those surfaces. Two channels, not a
-  replacement - which is what §5 concluded and why the retirement was right.
+- **`hull()` collapses it, and does not drop it.** Both places above say
+  dropped, and a sweep of every fixture says otherwise: `step-chamfered-cylinder`
+  is a bare `hull()` of two cylinders and reports **one** original over all 188
+  facets, while `step-shared-arc` - that hull differenced with a cube - reports
+  two, 144 facets and 6. So the output of a hull carries an id; what is lost is
+  which *operand* a facet came from. The original objection stands as stated -
+  no face of either operand lies on the collar's chamfer, so provenance cannot
+  name the surface there and fitting must - but a gate keyed on provenance still
+  functions over hull output rather than going blind at it.
 - **It names surfaces, not boundaries.** No trim curves, so it does not touch
   the sagitta of §20 - only *which* surface a cut vertex should be slid onto.
 - **Manifold only.** The CGAL backend has no equivalent, so every gate it feeds
@@ -2447,3 +2454,45 @@ Three limits, all of which stand from the original analysis:
 So the item is not revived as written. It is re-scoped: **provenance as the
 intent channel, feeding the gates that are currently guessing**, with fitting
 unchanged as the recognition channel beside it.
+
+## 22. What provenance says about the fixtures
+
+Reporting it and gating nothing has a use on the first day: run every fixture
+through it and see whether what the channel says matches what the model is. It
+does, on all 39, and two things fall out that were not known before.
+
+**Where it speaks, it is exact.** Every count is the number of primitives the
+source actually combines, with nothing to interpret:
+
+| fixture | source | originals |
+| --- | --- | --- |
+| step-partial-cylinder | a cylinder unioned with four cubes | 5 |
+| step-exact-trim | a cylinder differenced with eight cubes | 9 |
+| step-declare-cone | an intersection of a union of two, with one | 3 |
+| step-bored-cylinder, step-bore, step-oblique-trim | two | 2 |
+| step-shared-arc | a hull, differenced with a cube | 2 |
+| step-chamfered-cylinder | a hull, alone | 1 |
+
+No fixture reports a count the source does not justify, and **no fixture has a
+fragment** - not one original anywhere contributes fewer than three facets. The
+boolean chains are not shattering provenance, which was the thing most worth
+checking before building on it.
+
+**Where it is silent, the reason is uniform.** Nineteen fixtures report nothing,
+and every one of them is boolean-free: a bare primitive (`step-cube`,
+`step-sphere`, `step-torus`), an extrusion (`step-concave`, `step-rounded-box`,
+`step-pie-slice`), a hand-written `polyhedron` (`step-t-junction`,
+`step-approximate-cylinder`), or a fillet, which builds its geometry directly.
+None of them reaches a Manifold boolean, so there is no id to keep. There is no
+counterexample - nothing with a boolean in it is silent - which is what makes
+the absence a property of the model rather than a hole in the channel.
+
+**And `hull()` does not drop provenance.** §5 and §21 both say it does, and the
+sweep says otherwise: `step-chamfered-cylinder`, a bare hull of two cylinders,
+reports one original over all 188 facets. `step-shared-arc` - the same hull
+differenced with a cube - reports two, at 144 facets and 6. A hull's output
+carries an id; what is lost is which *operand* a facet came from. The original
+objection is unchanged, since no face of either operand lies on the collar's
+chamfer and provenance cannot name the surface there, but the consequence is
+smaller than recorded: a gate keyed on provenance degrades over a hull rather
+than going blind at it.

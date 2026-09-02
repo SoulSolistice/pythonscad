@@ -41,9 +41,13 @@ public:
    * decides what a facet belongs to currently decides it by distance, and each
    * one is a guess that fails plausibly rather than loudly.
    *
-   * Empty unless the Manifold backend produced this PolySet, and `hull()`
-   * drops the ids even there, so a consumer checks `size() == indices.size()`
-   * and keeps whatever it did before as the fallback. */
+   * Empty unless a Manifold boolean produced this PolySet: a bare primitive,
+   * extrusion, polyhedron or fillet never reaches that path and carries no ids
+   * at all. A `hull()` does carry them, but collapses its operands into one, so
+   * over a hull the ids say which hull and not which face of what went into it.
+   *
+   * A consumer therefore checks `size() == indices.size()` and keeps whatever
+   * it did before as the fallback. */
   std::vector<int32_t> original_ids;
   std::vector<Color4f> colors;
   std::vector<std::shared_ptr<Curve>>
