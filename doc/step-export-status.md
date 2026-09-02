@@ -2546,7 +2546,8 @@ rather than 241. Two things stop it:
 2. **The trimmed quadric path fragments under it** - 110 faces over 295 facets,
    many of three edges, which the validator rejects, correctly. Whether this
    survives a correct ownership rule is unknown and should be re-measured rather
-   than assumed.
+   than assumed. **Re-measured - see §25.** It survives, and ownership is not
+   its cause: it appears under the single-owner move too.
 
 ### Loose ends
 
@@ -2661,3 +2662,86 @@ the PoC's existing plane-constrained slide and 207 lid vertices change hands;
 and the two-owner case, where the vertex goes to the crossing instead. §23's
 blocker 2 - the trimmed quadric path fragmenting - is still unmeasured under
 either, and should be re-measured rather than assumed.
+
+## 25. The two halves of the snap, measured apart
+
+§24 ended by saying the next rung was not one change but two, and that they
+should be measured apart. They are, on `claude/step-snap-owned`, behind
+`STEP_SNAP=1` and `STEP_SNAP=2` - proof of concept scaffolding, off by default,
+suite unchanged at 39/39. The two behave nothing alike, and the reason they
+differ is the useful part.
+
+### One owner: the half worth pursuing
+
+Provenance replaces the nearest-surface guess in the slide the earlier PoC
+already did - within the plane its other facets need, onto the surface its own
+original owns.
+
+| reference lid | before | after |
+| --- | --- | --- |
+| vertices moved | - | 146, by at most 0.1860 |
+| declared sweep written | 486 facets | **631 facets** |
+| trimmed quadrics | 10 faces / 68 facets | 10 faces / 68 facets |
+| validator, OpenCASCADE | pass | pass |
+
+A third more of the sweep, and nothing else moves. Across the suite only three
+fixtures see any vertex move at all, which is itself worth knowing: the
+single-owner case is a property of parts with a sweep, and the fixtures mostly
+do not have one.
+
+**And it is not free.** On `step-partial-cylinder` the same move opens the
+trimmed quadric path onto a region it could not previously claim - 0 faces to 6 -
+and those faces have no circular edge, which `validatestep.py` rejects. That is
+the same failure as §23's blocker 2, at a scale small enough to study.
+
+### Two owners: a large gain that breaks the file
+
+The vertex goes to where its two surfaces cross, which is where the trim curve
+between them belonged.
+
+| strip coupon | before | after |
+| --- | --- | --- |
+| vertices moved | - | 508, by at most 0.0947 |
+| declared sweep written | 241 facets | **640 facets** |
+| trimmed quadrics | 9 faces / 289 facets | **70 faces / 145 facets** |
+| regions left faceted | 0 | 66 |
+| validator | pass | **fail** |
+| OpenCASCADE | pass | pass |
+
+Five fixtures go the same way, and on `step-band-family` the sweep is lost
+outright - 358 facets to none. **The round trip passes on every one of them**,
+which is the trap `step-export-testing.md` opens with: a kernel reading the file
+is not the file being right.
+
+On the lid it does nothing whatsoever. All 707 candidates refuse, because the
+lid's two-owner pairs are coaxial cylinders that never cross - exactly what §24
+measured and said would not transfer.
+
+### What that attributes
+
+§23 listed the fragmenting quadric path as blocker 2 and said it was unknown
+whether a correct ownership rule would survive it. It does not go away, and it
+is not caused by ownership: it appears under the single-owner move too. The
+cause is putting a cut vertex exactly on a quadric while its neighbours stay
+where the tessellation put them. The vertex is then off the prism they are on,
+by the sagitta, and the recogniser splits around it - a face of three edges, no
+circular edge, and a validator refusal.
+
+So the snap and the trimmed quadric tier are in tension by construction, and the
+next question is theirs rather than ownership's: either the quadric path has to
+accept a region whose boundary has been moved onto the surface, or the snap has
+to leave quadric-owned vertices alone and take the sweep only. The second is a
+measurable experiment and should be the next rung.
+
+### And a bound that was never a bound
+
+Independent of all of the above, and worth keeping: the earlier PoC bounded the
+move by the longest edge at the vertex. That is not a bound. On
+`step-partial-cylinder` the mesh has 20-unit vertical edges, so it licensed a
+move of **1.9976 on a radius of 10**, and the export broke.
+
+What bounds it is the local tessellation error, measured from the mesh: how far
+the surface stands off the middles of the chords near the vertex that *do* lie
+on it. A declared sweep states the same quantity outright as its band. That
+change alone took `step-partial-cylinder` from 25 vertices moved to 8, and
+`step-exact-trim` from 16 to 4.
