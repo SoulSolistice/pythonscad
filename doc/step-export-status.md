@@ -2540,8 +2540,9 @@ rather than 241. Two things stop it:
    *the surface it was cut from* - the first version pulled a ridge's vertices
    onto the wall and lost the sweep entirely. Provenance answers this and is now
    in the tree; the mapping it needs is original id to declared surface, by
-   counting which id's facets lie on which surface. That is the next piece of
-   work.
+   counting which id's facets lie on which surface. **Done and measured - see
+   §24.** The nearest rule is wrong for 207 of the lid's 674 single-owner
+   junction vertices.
 2. **The trimmed quadric path fragments under it** - 110 faces over 295 facets,
    many of three edges, which the validator rejects, correctly. Whether this
    survives a correct ownership rule is unknown and should be re-measured rather
@@ -2571,3 +2572,92 @@ build/interop-pcurve/      with pcurves, without the face split - superseded
 
 These are build outputs and are not in the repository; `scripts/step-interop-kit.py`
 regenerates the kit, and `--only` restricts it to one question.
+
+## 24. Ownership, measured
+
+§23 named the mapping as the next piece of work: original id to declared
+surface, by counting which id's facets lie on which surface. It is on
+`claude/step-ownership-poc`, it reports and gates nothing, and it says two
+things - one about the rule it replaces and one about what the snap can then do.
+
+### What the rule being replaced is worth
+
+On the reference lid, of 1308 junction vertices - vertices where facets of two
+different originals meet, which is exactly where the snap acts - provenance
+names one owner for 674. **For 207 of those, 31%, the nearest declared surface
+is a different surface.** That is blocker 1 of §23 quantified: not a suspicion
+from one failed run, a third of the vertices the PoC moves.
+
+Where the geometry is simple the two agree completely - all 56 of
+`step-exact-trim`, all 43 of `step-partial-cylinder`, all 32 of
+`step-oblique-trim`. The only fixture where they part is `step-shared-arc`, 2 of
+8, and it is a hull. The disagreement is a property of parts with a sweep and
+several coaxial walls, which is what the reference parts are and what the
+fixtures deliberately are not.
+
+### Three ways to get the mapping wrong
+
+Each was measured rather than reasoned about, and each looked right until it was:
+
+| test | what it claimed | why it is wrong |
+| --- | --- | --- |
+| `pointMember` | the wall's id owns 182 facets of the ridge's sweep | it accepts anything within the tessellation band - 0.1290 - which is the loose gate this exists to replace |
+| corners only | the cutter owns all 30 facets of its own cap | an oblique cut's rim *is* the intersection, so every corner of the cap is exactly on the cylinder |
+| corners plus cut facets | every solid owns every surface it touches | a facet cut across a seam has two corners on the surface the other side of it |
+
+So the test is: every corner on the surface, tightly - 1e-7 for a quadric, and
+for a declared grid the cell of the generator's own net, positionally - **and**
+the facet facing the way the surface does there, within 60 degrees. Cut facets
+are counted and reported, because they say how much of a surface the boolean
+took, and they decide nothing. A boundary artefact cannot produce a whole facet,
+which is what makes whole facets the right unit.
+
+A grid is asked positionally and not by projection, and that is not a
+preference: taking the grid's normal from `project()` counted 122 facets on the
+closed sweep and **4** on the open one, from the same mesh.
+
+### What all 39 fixtures say
+
+Every mapping is one the source justifies, and nothing is owned by more than two
+solids at any vertex. The cases worth naming:
+
+| fixture | mapping | why that is right |
+| --- | --- | --- |
+| step-nested-rings | five originals, one cylinder each | the plate and the four ring walls |
+| step-exact-trim | 1 of 9 originals mapped | the eight cutting cubes declare nothing |
+| step-oblique-trim | 1 of 2 | the cutter's cap belongs to the cutter |
+| step-chamfered-cylinder | 1 original, 1 of 2 surfaces | §21's objection, measured: no facet lies on the hull's chamfer |
+| step-declare-grid-strip | ridge owns the sweep, wall owns the cylinder | 4 facets whole and 119 cut - the boolean took nearly all of it |
+
+That last one is the margin worth watching. The open profile's sweep is owned on
+four whole facets, because the boolean cut every other cell of it; the closed
+declaration of the same mesh has 122, all but four of them on the strip an open
+profile excludes. The threshold of three is not comfortable there.
+
+### And what the snap can do with it
+
+Two owners at a vertex is not a contest to be broken. It is the trim curve: the
+vertex belongs to both surfaces and its place is where they cross, which is
+where the trim between them belonged. That is a stronger move than the PoC's -
+it satisfies both declarations at once instead of sliding along a plane onto
+one - and on the strip coupon it is available almost everywhere:
+
+> Of 517 junction vertices owned by two surfaces, 514 reach the curve where the
+> two cross, and **511 do so without moving further than the sweep's own
+> tessellation band of 0.1290**, by at most 0.0947.
+
+Against the PoC's 271 vertices moved, that is most of the boundary rather than
+part of it.
+
+**It does not transfer to the lid.** There, 574 junction vertices have two
+owners and 5 reach a crossing. The lid's two-owner pairs are mostly coaxial
+cylinders that never cross, so alternating projection has nothing to converge
+on - correctly, and it says so rather than inventing a point. The strip's 99% is
+a property of a ridge cut by a wall, not of the method.
+
+So the next rung is not one change but two, and they should be measured apart:
+the single-owner case, where provenance replaces the nearest-surface guess in
+the PoC's existing plane-constrained slide and 207 lid vertices change hands;
+and the two-owner case, where the vertex goes to the crossing instead. §23's
+blocker 2 - the trimmed quadric path fragmenting - is still unmeasured under
+either, and should be re-measured rather than assumed.
