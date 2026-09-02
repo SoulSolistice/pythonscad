@@ -684,3 +684,37 @@ arc, and 48 of f01's edges and 192 of f05's do. Where the surface is a fit, the
 endpoints are off it by up to the tessellation band and no curve through them
 lies on it; those edges are the residual, and closing them means moving
 vertices, which moves every planar facet that shares them.
+
+## The exact tier, in SOLIDWORKS
+
+Both reference parts, exported with `step-analytic-surfaces` alone:
+
+| | faulty faces | check entity |
+| --- | --- | --- |
+| lid10-exact | **0** | no invalid edges/faces |
+| bayonet-exact | **0** | no invalid edges/faces |
+
+Solid bodies, nothing flagged, on the two parts that came in as SURFACE bodies
+with the approximation on. That closes the thread the SOLIDWORKS investigation
+opened: the exporter's exact pass is accepted by all three kernels, and the
+disagreement was always about the approximate one.
+
+The round trip says the same thing from the other direction, and more sharply.
+Asked to re-export the healed body, SOLIDWORKS wrote back:
+
+| | our lines | its B-splines | edges off a face |
+| --- | --- | --- | --- |
+| approximate file | 571 | **319** | 0.152 worst |
+| exact file | 4700 | **0** | **0.000000** |
+
+Given a file whose edges lie on their faces, it changes nothing: no curve is
+re-described, no tolerance is opened, and every edge comes back on its face.
+Given one whose edges do not, it replaces most of them with splines and stores
+the mismatch as tolerance. The healing was never a preference of the importer's;
+it was a repair, and there is nothing to repair here.
+
+One caveat on the pair. In the exact tier the two reference parts come out with
+the same face census over the same 4360-facet mesh, 85 bytes apart - the
+filename in the header. They are near duplicates, and the interop kit has been
+treating them as two independent samples. Worth resolving before either is
+quoted as corroborating the other.
