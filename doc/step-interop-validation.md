@@ -718,3 +718,53 @@ the same face census over the same 4360-facet mesh, 85 bytes apart - the
 filename in the header. They are near duplicates, and the interop kit has been
 treating them as two independent samples. Worth resolving before either is
 quoted as corroborating the other.
+
+## The approximate tier: it is the trim, not the tolerance
+
+Knitting is not the explanation. Both reference parts import as surface bodies
+with **Try forming solid(s)** and with **Do not knit** alike, 82 faulty faces
+either way, one open surface, and *Create analytic faces* changes nothing.
+SOLIDWORKS' separate heal command fails on them too. An earlier reading of this
+file that guessed the knit setting was the cause was wrong, and the automated
+run's SURFACE verdict stands.
+
+What the re-export shows is worse than a refusal to sew:
+
+| | shell | worst tolerance | B-spline faces |
+| --- | --- | --- | --- |
+| our r02 | closed solid | 0.264 | 2 |
+| SOLIDWORKS' re-export of it | **does not close** | **4.882928** | 1 |
+
+Nearly five millimetres, and a B-spline face lost outright. On screen the thread
+is not slightly off, it is shredded into a field of broken quads. Nothing about
+tolerance produces that. It is the face being trimmed along the wrong path.
+
+**The cause is that we write no PCURVE.** Without parameter-space curves an
+importer has to reconstruct each face's trim by projecting its 3D edges back
+onto the surface. On a plane or a cylinder that is trivial - which is exactly
+why the exact tier, which contains no B-spline face at all, imports perfectly
+into all three kernels. On a long thin fitted B-spline, 154 by 4 stations with
+three hundred boundary segments, it is ill conditioned: the trim wanders, the
+face deforms, and the shell stops closing. It also explains why *Create analytic
+faces* is irrelevant, since that is about how surfaces are classified and not
+how faces are trimmed, and why healing fails - there is no small gap to close,
+the boundary is in the wrong place.
+
+The test needed no exporter change. OpenCASCADE read our file and wrote it
+straight back out: same surfaces, same 0.264 of edge sag, verified as the same
+closed solid at the same volume, differing only in carrying 3400 PCURVEs and
+1692 SURFACE_CURVEs. SOLIDWORKS reads that one with the thread intact and **one**
+faulty face, against 82.
+
+So there are two separate defects here and they had been running together:
+
+1. **No parameter-space trim.** The one that mangles the thread, and the one to
+   fix first.
+2. **The fit degenerates at the run-out.** What is left after the pcurves go in -
+   a single bad face at the end of the thread, which is the overshoot this
+   project has measured before: a B-spline fitted through this thread oversteps
+   0.378 at the run-out where the band is 0.109.
+
+It is also the case, finally, where pcurves earn their place. Three earlier
+occasions concluded they were unnecessary, and all three were faces whose bounds
+were exact and trivially projectable. A trimmed fitted sweep is neither.
