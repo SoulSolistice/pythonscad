@@ -639,3 +639,48 @@ cylinder by construction. The same 22 survive the round trip untouched. That is
 the shape of the fix stated precisely: the rulings are already right, and it is
 the circumferential and oblique boundary segments that have to become arcs, or
 curves on the surface, instead of chords.
+
+## Is the mesh already wrong before the exporter sees it?
+
+Worth asking, because if the vertices handed to the exporter were not on the
+surfaces the model declares, no amount of care about edges would help. They are,
+and the way to see it is to turn the approximation off. With
+`step-analytic-surfaces` alone, every edge of every file measured is exactly on
+the face it bounds:
+
+| exact pass only | edges | off >1e-4 | worst |
+| --- | --- | --- | --- |
+| c01-cylinder | 3 | 0 | 0.000000 |
+| step-bored-cylinder | 164 | 0 | 0.000000 |
+| **lid10** | **2410** | **0** | **0.000000** |
+
+lid10, all 2410 edges, nothing off by more than 1e-4. The mesh is not the
+problem: a tessellated cylinder's vertices lie on the true cylinder, and the
+exact pass writes surfaces that pass through them.
+
+The same model with `step-approximate-surfaces` added:
+
+| lid10, approximate | edges | off >1e-4 | worst |
+| --- | --- | --- | --- |
+| line on B-spline | 479 | 477 | **0.264218** |
+| line on cylinder | 210 | 150 | 0.100000 |
+| line on plane | 2593 | 0 | 0.000000 |
+
+0.264218 is the number OpenCASCADE reported as its worst tolerance on this file
+when the kernel's slack was first measured, and it was read then as the slack
+OCCT had to accept. It is the same quantity seen from the other side: the
+furthest any edge lies from a face it bounds. The two measurements agreeing to
+six figures is what closes the argument.
+
+So the defect belongs to the approximate pass, not to the mesh and not to the
+exact pass. That is consistent with the one thing SOLIDWORKS was reliable
+about, that only analytic exports were ever flagged, and with the observation
+that the failure went away when the model was exported without the declaration, since
+`declare_grid` is a fit and needs the approximation flag to be written at all.
+
+It also sets the boundary of what the arc promotion can do. A boundary segment
+at constant height on a surface that *contains* its endpoints becomes an exact
+arc, and 48 of f01's edges and 192 of f05's do. Where the surface is a fit, the
+endpoints are off it by up to the tessellation band and no curve through them
+lies on it; those edges are the residual, and closing them means moving
+vertices, which moves every planar facet that shares them.
