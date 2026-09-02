@@ -768,3 +768,53 @@ So there are two separate defects here and they had been running together:
 It is also the case, finally, where pcurves earn their place. Three earlier
 occasions concluded they were unnecessary, and all three were faces whose bounds
 were exact and trivially projectable. A trimmed fitted sweep is neither.
+
+## What it actually is: two regions in one face
+
+The pcurves did not fix it. Written correctly - `.CURVE_3D.` after
+`.PCURVE_S.` turned out not to be a value ISO 10303 has - SOLIDWORKS still
+reports 82 faulty faces and still imports a surface body, and the thread is
+still shredded.
+
+The earlier conclusion was over-attributed, and the confound is worth naming:
+OpenCASCADE's rewrite is not our file plus pcurves. It is OpenCASCADE's
+*repaired* shape written out, and the repair includes splitting our faces.
+
+Bisecting to the smallest thing that carries a declared sweep -
+`step-declare-grid-strip.py`, nine faces - makes the repair visible. What we
+write, and what OpenCASCADE makes of it:
+
+| our ADVANCED_FACE | bounds | edges per bound | OpenCASCADE reads |
+| --- | --- | --- | --- |
+| B-spline | 2 | 314, 322 | **2 faces**, one wire each, areas 289.65 and 286.03 |
+| cylinder | 2 | 138, 225 | 2 faces |
+| cylinder | 3 | 158, 138, 40 | 3 faces |
+| cylinder | 2 | 42, 22 | 2 faces |
+| cylinder | 2 | 22, 40 | 2 faces |
+
+Nine faces in, fifteen out, every one of them with a single wire. The second
+bound of the sweep is not a hole in the first: it is a second region of the same
+surface, of the same size, somewhere else on it.
+
+**So the exporter packs disjoint regions into one ADVANCED_FACE and calls all
+but the largest an inner bound.** A face's inner bounds have to lie inside its
+outer one; two separate patches of surface are not a face with a hole. The
+heuristic that chose the outer bound - largest area in parameter space - assumed
+every cycle belonged to one region, and where the booleans leave two, it labels
+the second a hole.
+
+OpenCASCADE splits them and says nothing, which is why its census has been
+reporting more faces than the file contains all along, and why nothing in a
+round trip ever flagged it. SOLIDWORKS does not split. It is handed one face
+with two disjoint outer loops and builds what it can, which is the shredded
+thread on screen.
+
+That also explains the shape of every earlier result. The exact tier has no such
+face - a band is a ring and a trimmed quadric that survives the proof test is
+one region - so it imports everywhere. The approximate tier's sweep and its
+trimmed quadrics are exactly the faces the booleans cut into pieces.
+
+The fix is to split a claimed region into connected components before writing
+anything, one face per component, and to decide outer against inner only within
+a component. The pcurves stay: they are correct, and they will matter once the
+faces they bound are valid.
