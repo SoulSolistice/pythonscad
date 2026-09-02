@@ -583,3 +583,59 @@ already right - a ruling is on the surface - and it is the circumferential and
 oblique ones that need to become arcs or curves on the surface. This is where
 pcurves stop being unnecessary; the two earlier occasions when they were shown
 not to be needed were both faces whose boundaries were exact already.
+
+## Reading back what SOLIDWORKS made of it
+
+Two corrections to the sweep table first. f01's faceted control, re-measured,
+is clean and all planar as expected. And f02-analytic, reopened, came back with
+**12** faulty faces where the first import reported 32 - the same file, the same
+importer, a different answer. The faulty-face count is therefore not a
+measurement of the file at all; it records where a heuristic healer happened to
+give up on that run. It should not be used as a metric again, and the
+non-monotonic 0/32/1/5/1 row needs no further explaining.
+
+Exporting the healed bodies back out to STEP was expected to supply an answer
+key - a kernel that gets edges right, showing what ours should have been. It
+does not, and what it does instead is more useful.
+
+| | our f01 | SOLIDWORKS' f01 |
+| --- | --- | --- |
+| ADVANCED_FACE | 134 | 144 |
+| CYLINDRICAL_SURFACE | 3 | 10 |
+| B_SPLINE_SURFACE_WITH_KNOTS | 1 | 4 |
+| LINE | 571 | 138 |
+| B_SPLINE_CURVE_WITH_KNOTS | 0 | 319 |
+| PCURVE / SURFACE_CURVE | 0 | 0 |
+
+It replaced most of the straight edges with B-spline curves - and they still do
+not lie on the faces they bound:
+
+| f01 round trip | edges | off >1e-4 | worst |
+| --- | --- | --- | --- |
+| bspl on plane | 242 | 192 | 0.151957 |
+| bspl on cylinder | 250 | 243 | 0.143222 |
+| bspl on B-spline | 146 | 58 | 0.113821 |
+| **line on cylinder** | **22** | **0** | **0.000000** |
+| line on plane | 254 | 0 | 0.000000 |
+
+Against our 0.196 and 0.171, so the error survives the round trip nearly intact.
+SOLIDWORKS kept the vertices where they were, re-described the edges through
+them as splines, and stored the mismatch as tolerance - tolerant topology,
+which is the same thing OpenCASCADE does by widening its own, just less
+willingly and, as the 32-then-12 result shows, not reproducibly. Its own
+re-export even contains planar faces whose boundary misses the plane by 0.022.
+
+Two things fall out of that. It is not that SOLIDWORKS demands exact edges: it
+writes inexact ones itself, and it writes no pcurves either, which retires that
+question for the third time. And no external kernel is going to hand us the
+correct file, because every one of them copes by tolerancing rather than by
+fixing. That makes the defect ours to fix on its own merits rather than to
+negotiate with an importer.
+
+The one exact row is the confirmation worth keeping: **22 line-on-cylinder
+edges, zero deviation, in both files.** Our export has 388 line-on-cylinder
+incidences of which exactly 22 are clean - the vertical rulings, which lie on a
+cylinder by construction. The same 22 survive the round trip untouched. That is
+the shape of the fix stated precisely: the rulings are already right, and it is
+the circumferential and oblique boundary segments that have to become arcs, or
+curves on the surface, instead of chords.
