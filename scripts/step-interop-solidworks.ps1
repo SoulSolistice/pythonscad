@@ -111,12 +111,20 @@ param(
     [string]$Only,
     # Localising a fault to its face or edge costs one COM call per entity. On a
     # body of a few hundred faces that is free; on the kit's 2000-face faceted
-    # controls it is tens of minutes to be told what the body-level check
-    # already said. So bodies larger than this are walked only when
-    # IBody2::Check3 or IBody2::Diagnose reports something to localise, and
-    # smaller ones are always walked so that a body-level count of zero is
-    # positively confirmed rather than assumed.
-    [int]$MaxWalkFaces = 300
+    # controls it is tens of minutes - c12-approximated-faceted took over
+    # eighteen - to be told what the body-level check already said. So bodies
+    # larger than this are walked only when IBody2::Check3 or IBody2::Diagnose
+    # reports something to localise.
+    #
+    # The default is set above every *analytic* file in this kit and below its
+    # largest faceted controls, and that is the whole reasoning: a body-level
+    # count of zero does not imply the entities are clean - c06-partial-torus
+    # reports zero faults while SOLIDWORKS holds a solid 14% away from the one
+    # in the file - so the skip is only safe where there is independent reason
+    # to expect nothing, which is what a faceted control is. A first attempt at
+    # 300 skipped f05-band-fn096-analytic at 534 faces and would have skipped
+    # both reference parts, which are the rows the run exists for.
+    [int]$MaxWalkFaces = 1500
 )
 
 $ErrorActionPreference = 'Stop'

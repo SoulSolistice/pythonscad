@@ -1064,3 +1064,88 @@ faceted lid10 perfectly - a solid of 2441 faces whose volume matches
 OpenCASCADE's to ten digits - so if Fusion's rewrite of that one also opens
 cleanly, the difference is the analytic surfaces at this scale with the writer
 eliminated on both sides.
+
+## The first run with fault diagnostics
+
+Run 2026-09-02, all 48 files, `-ImportSettings do-not-knit`, with
+`IBody2::Check3`, `IFace2::Check`, `IEdge::Check` and `IBody2::Diagnose` read
+per body. **Every file imports as a solid.** Seven bodies carry any fault:
+
+| body | faults | faulty faces | faulty edges | code |
+| --- | --- | --- | --- | --- |
+| c11-swept-grid-analytic | 1 | 3 | 2 | 13 `swEdgeVerticesTouch`, 30 `swTopolNotG1Continuous` |
+| c17-snapped-sweep-analytic | 1 | 1 | 0 | 17 `swFaceBadEdge` |
+| f02-band-fn032-analytic | 3 | 3 | 0 | 17 |
+| f04-band-fn064-analytic | 2 | 2 | 0 | 17 |
+| **r01-lid10-analytic** | 3 | **81** | **86** | **7 `swEdgeVertexNotLie`** |
+| **r02-bayonet-analytic** | 3 | **82** | **86** | **7** |
+| r01-lid10-**faceted** | 6 | 0 | 0 | 24 `swFaceFaceInconsistency` |
+
+Eighteen of the twenty-four analytic files are entirely clean, including every
+quadric coupon, both fillets, the rational B-spline, the text splines and three
+of the five band members. Gaps are zero everywhere.
+
+**The two reference parts land on one signature.** About eighty-two faulty faces
+and *exactly* eighty-six faulty edges each, every one `swEdgeVertexNotLie` - a
+vertex that does not lie on the edge it bounds. That is the defect this document
+identified with OpenCASCADE and described as every edge bounding a recovered
+curved face still being a straight line, now named by SOLIDWORKS on specific
+entities. The two parts agreeing on the edge count to the unit points at the
+feature they share, which is the declared thread.
+
+### Three things this run corrected
+
+**The faceted control is not automatically clean.** lid10's carries six
+`swFaceFaceInconsistency` faults at body level while importing as a solid whose
+volume matches OpenCASCADE to ten digits. So the control still discriminates,
+but on the *kind* of fault rather than on its presence: the control's is
+body-level with no entity implicated, the analytic file's is eighty-six named
+edges.
+
+**Faults and correctness are close to orthogonal.** `c06-partial-torus-analytic`
+reports zero faults, zero gaps, zero faulty faces and zero faulty edges - fully
+walked, nothing skipped - while SOLIDWORKS holds a solid 14% away from the one
+in the file. A body can be faultless and wrong, and lid10's control shows a body
+can be faulty and measured exactly right. Neither the body type nor the fault
+count would have caught c06; only the volume derived from the model's own
+dimensions did.
+
+**The reported volume is not the volume of the body it keeps.** For the two real
+parts and for c11, what SOLIDWORKS reports on import disagrees with what
+OpenCASCADE reads back from the body SOLIDWORKS itself saved:
+
+| | ours | SOLIDWORKS reported | its own saved body |
+| --- | --- | --- | --- |
+| c06-partial-torus | 11154.93 | 9575.80 (-14.2%) | 9575.80 (-14.2%) - agrees |
+| c11-swept-grid | 16626.90 | 14381.70 (-13.5%) | 16651.36 (+0.15%) |
+| r01-lid10 | 226617.51 | 351652.94 (+55.2%) | 241006.86 (+6.3%) |
+| r02-bayonet | 238544.66 | 363852.89 (+52.5%) | 234909.83 (-1.5%) |
+
+Only c06 is self-consistent, which is what makes c06 a geometry defect and the
+other three a mass-properties one. A +55% reading is not evidence that the solid
+is half again too big.
+
+### An open discrepancy with the recorded result
+
+`doc/step-export-status.md` §23 records the face split as taking SOLIDWORKS
+**"from 82 faulty faces to 1, and no gaps"**. Half of that reproduces and half
+does not:
+
+| | recorded | measured now |
+| --- | --- | --- |
+| body type | SURFACE | **solid** |
+| gaps | - | **0** |
+| faulty faces | 82 -> 1 | **81 / 82** |
+
+Both parts landing on 81 and 82 rather than one of them landing there makes an
+instrument artefact unlikely, and the direction is wrong for one: on the band
+family the dialog counts *higher* than the API, 32 against 3 and 5 against 2, so
+a dialog reading of 1 against an API reading of 81 would be the opposite of the
+established relationship.
+
+**Not yet corrected in §23, because the check that settles it has not been run:**
+open `r01-lid10-analytic.stp` with Import Diagnostics enabled and read the
+dialog's own faulty-face count, which is the instrument the original claim was
+made with. Until then what is safe to say is the part that reproduces - both
+reference parts now import as solids with no gaps, where they were surface
+bodies - and that is the stronger claim anyway.
