@@ -674,7 +674,7 @@ void reportOwnership(const PolySet& ps, const Ownership& own)
  * sagitta of its stations, and elsewhere the mesh's own edges stand in.
  */
 struct SnapReport {
-  std::size_t moved_one = 0, moved_two = 0;
+  std::size_t moved = 0;
   std::size_t refused_unpinned = 0, refused_far = 0, refused_stuck = 0, refused_unbounded = 0;
   std::size_t held_placed = 0, held_proven = 0, held_quadric = 0;
   double worst = 0.0;
@@ -695,11 +695,10 @@ bool pinnedPlane(const std::vector<Vector4d>& planes, Vector3d& normal, double& 
   return true;
 }
 
-SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, const Ownership& own,
-                           int mode, int veto)
+SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, const Ownership& own)
 {
   SnapReport report;
-  if (!own.valid || mode <= 0) return report;
+  if (!own.valid) return report;
   const auto& triangles = ps.indices;
 
   // The plane of every triangle, and which triangles meet at each vertex.
@@ -732,10 +731,6 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
     // distance and ownership by nearest each were. Every rung here either fires
     // or does not, and the report says which one did.
     //
-    // The two holding rungs are separately switchable because which of them is
-    // right is a measurement, not an argument. STEP_SNAP_VETO=0 holds nothing,
-    // 1 holds a vertex already proven to be on one of its surfaces, 2 also
-    // holds any vertex a quadric owns.
     bool on_all = true, on_any = false, has_quadric = false;
     for (const std::size_t j : candidates) {
       const bool on = own.onSurface(j, int(v));
@@ -758,7 +753,7 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
     // take a point that is *on* a declared surface off that surface - trading a
     // proof for an approximation bounded by a band, which is the one trade this
     // exporter never makes (see the two tiers of section 17).
-    if (veto >= 1 && on_any) {
+    if (on_any) {
       report.held_proven++;
       continue;
     }
@@ -766,9 +761,11 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
     // the vertex lands on the true cylinder while its neighbours stay on the
     // prism that approximates it, and the trimmed quadric recogniser splits
     // around the step - 9 faces over 289 facets becoming 70 over 145, and an
-    // export the validator refuses. Whether holding them keeps the sweep's gain
-    // as well is the thing being measured.
-    if (veto >= 2 && has_quadric) {
+    // export the validator refuses. Holding them keeps the whole of the
+    // reference part's gain, because its sweep is cut by planes rather than by
+    // walls; what it gives up is the strip coupon, every one of whose junction
+    // vertices a quadric owns.
+    if (has_quadric) {
       report.held_quadric++;
       continue;
     }
@@ -870,27 +867,6 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
         continue;
       }
       moved = p;
-    } else if (candidates.size() == 2 && mode >= 2) {
-      const Surface *a = ps.surfaces[candidates[0]].get();
-      const Surface *b = ps.surfaces[candidates[1]].get();
-      Vector3d p = vertices[v], qa, qb;
-      bool ok = true;
-      for (int iter = 0; iter < 64; iter++) {
-        if (!closestOnSurface(a, p, qa) || !closestOnSurface(b, qa, qb)) {
-          ok = false;
-          break;
-        }
-        if ((qb - p).norm() < 1e-12) {
-          p = qb;
-          break;
-        }
-        p = qb;
-      }
-      if (!ok || !closestOnSurface(a, p, qa) || (qa - p).norm() > 1e-6) {
-        report.refused_stuck++;
-        continue;
-      }
-      moved = p;
     } else {
       continue;
     }
@@ -902,8 +878,7 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
     }
     vertices[v] = moved;
     report.worst = std::max(report.worst, travel);
-    if (candidates.size() == 1) report.moved_one++;
-    else report.moved_two++;
+    report.moved++;
   }
   return report;
 }
@@ -920,43 +895,6 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   //	printf("export surfaces: %zu\n",ps->surfaces.size());
   std::vector<int> faceParents;
   std::vector<Vector4d> normals, newNormals;
-
-  Ownership ownership;
-  if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
-    reportProvenance(*ps);
-    ownership = computeOwnership(*ps);
-    reportOwnership(*ps, ownership);
-  }
-
-  // Proof of concept scaffolding, not a supported switch: STEP_SNAP=1 moves the
-  // vertices provenance names one owner for, STEP_SNAP=2 also moves the ones it
-  // names two for onto the curve where they cross. Two changes with separate
-  // failure modes, so they are measured apart before either is proposed.
-  std::vector<Vector3d> vertices = ps->vertices;
-  const char *snap_env = getenv("STEP_SNAP");
-  const int snap_mode = snap_env != nullptr ? atoi(snap_env) : 0;
-  const char *veto_env = getenv("STEP_SNAP_VETO");
-  const int snap_veto = veto_env != nullptr ? atoi(veto_env) : 2;
-  if (snap_mode > 0 && Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
-    const SnapReport snapped = snapCutVertices(vertices, *ps, ownership, snap_mode, snap_veto);
-    LOG(
-      "STEP export: snapped %1$d vertices onto the surface they were cut from and %2$d onto the "
-      "curve two surfaces cross on, by up to %3$.4f; refused %4$d with no single plane to move "
-      "in, %5$d that would have moved too far, %6$d that did not converge, %7$d with nothing "
-      "to say how far the tessellation is entitled to stray",
-      int(snapped.moved_one), int(snapped.moved_two), snapped.worst, int(snapped.refused_unpinned),
-      int(snapped.refused_far), int(snapped.refused_stuck), int(snapped.refused_unbounded));
-    LOG(
-      "STEP export: the ladder held %1$d vertices already on every surface that owns them, %2$d "
-      "provably on one of them, and %3$d a quadric owns",
-      int(snapped.held_placed), int(snapped.held_proven), int(snapped.held_quadric));
-  }
-
-  std::vector<IndexedFace> indicesNew;
-  normals = calcTriangleNormals(vertices, ps->indices);
-  indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, vertices);
-
-  StepKernel sk;
 
   // newNormals holds the outward normal of each merged face; without it the
   // exporter has to guess the plane orientation from the first three points of
@@ -975,6 +913,43 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   // tessellation's own tolerance and reports what it did. It has no meaning
   // without the exact pass, which decides what is left over in the first place.
   const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
+
+  Ownership ownership;
+  if (analytic) {
+    reportProvenance(*ps);
+    ownership = computeOwnership(*ps);
+    reportOwnership(*ps, ownership);
+  }
+
+  // Put the boolean's own vertices back on the surfaces they were cut out of,
+  // before anything is measured against those surfaces. See snapCutVertices.
+  //
+  // Under the approximation flag rather than the analytic one, because after
+  // the ladder's third rung the only vertices this moves belong to a declared
+  // sweep, and a declared sweep is only ever *written* under approximation. The
+  // exact tier's input is left exactly as it was.
+  std::vector<Vector3d> vertices = ps->vertices;
+  if (approximate) {
+    const SnapReport snapped = snapCutVertices(vertices, *ps, ownership);
+    if (snapped.moved > 0) {
+      LOG("STEP export: %1$d cut vertex%2$s slid onto the surface it was cut from, by up to %3$.4f",
+          int(snapped.moved), snapped.moved == 1 ? "" : "es", snapped.worst);
+    }
+    LOG(
+      "STEP export: the ladder held %1$d vertices already on every surface that owns them, %2$d "
+      "provably on one of them, and %3$d a quadric owns; it refused %4$d with no single plane to "
+      "move in, %5$d that would have moved too far, %6$d that did not converge, %7$d with nothing "
+      "to say how far the tessellation is entitled to stray",
+      int(snapped.held_placed), int(snapped.held_proven), int(snapped.held_quadric),
+      int(snapped.refused_unpinned), int(snapped.refused_far), int(snapped.refused_stuck),
+      int(snapped.refused_unbounded));
+  }
+
+  std::vector<IndexedFace> indicesNew;
+  normals = calcTriangleNormals(vertices, ps->indices);
+  indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, vertices);
+
+  StepKernel sk;
 
   sk.build_tri_body(exportInfo.title.c_str(), vertices, indicesNew, ps->curves, ps->surfaces,
                     faceParents, newNormals, 1e-5, analytic, approximate);
