@@ -29,6 +29,22 @@ public:
   std::vector<Vector3d> vertices;
   // Per polygon color, indexing the colors vector below. Can be empty, and -1 means no specific color.
   std::vector<int32_t> color_indices;
+  /*! Which original solid each polygon came from, where the backend knows.
+   *
+   * Manifold carries an id per run of triangles through arbitrary boolean
+   * chains - it is what makes colour survive a difference() - and
+   * ManifoldGeometry::toPolySet already reads it, collapses it into a colour
+   * and drops it. This keeps it.
+   *
+   * It answers a question no measurement can: *where did this facet come
+   * from*, as against *what is it near*. Every gate in the STEP exporter that
+   * decides what a facet belongs to currently decides it by distance, and each
+   * one is a guess that fails plausibly rather than loudly.
+   *
+   * Empty unless the Manifold backend produced this PolySet, and `hull()`
+   * drops the ids even there, so a consumer checks `size() == indices.size()`
+   * and keeps whatever it did before as the fallback. */
+  std::vector<int32_t> original_ids;
   std::vector<Color4f> colors;
   std::vector<std::shared_ptr<Curve>>
     curves;  // defines vertex connections(edges) which are not straight lines

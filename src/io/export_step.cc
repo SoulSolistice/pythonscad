@@ -35,6 +35,47 @@
 #include <src/geometry/PolySetUtils.h>
 #include <src/geometry/GeometryEvaluator.h>
 
+namespace {
+
+/*! What the mesh knows about where it came from, said out loud and used for
+ * nothing else yet.
+ *
+ * Every gate in this exporter that decides what a facet belongs to decides it
+ * by distance - is this vertex near a declared point, is this facet inside the
+ * tessellation band. Provenance answers a different question, *which solid was
+ * this cut out of*, and it is the question those gates are really asking.
+ *
+ * This reports it and gates nothing, on purpose. Landing a channel and gating
+ * on it in one step means a change in behaviour and a change in what is known
+ * arriving together, with no way to tell which moved the result - and the
+ * record in doc/step-export-status.md §§17-20 is a long argument for not doing
+ * that again. What it is good for immediately is telling two failures apart:
+ * a region left faceted can now say which solid it belonged to, rather than
+ * quoting its own dihedral back.
+ */
+void reportProvenance(const PolySet& ps)
+{
+  if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) {
+    // The CGAL backend keeps no ids, and hull() drops them on Manifold. Nothing
+    // to say, and nothing downstream may assume otherwise.
+    return;
+  }
+  std::map<int32_t, std::size_t> facets;
+  for (const int32_t id : ps.original_ids) facets[id]++;
+  std::size_t fragments = 0, largest = 0;
+  for (const auto& entry : facets) {
+    if (entry.second < 3) fragments++;
+    largest = std::max(largest, entry.second);
+  }
+  LOG(
+    "STEP export: the mesh comes from %1$d original solid%2$s over %3$d facets - largest "
+    "contributes %4$d, %5$d contribute fewer than three",
+    int(facets.size()), facets.size() == 1 ? "" : "s", int(ps.indices.size()), int(largest),
+    int(fragments));
+}
+
+}  // namespace
+
 void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& output,
                  const ExportInfo& exportInfo)
 {
@@ -45,6 +86,8 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   //	printf("export surfaces: %zu\n",ps->surfaces.size());
   std::vector<int> faceParents;
   std::vector<Vector4d> normals, newNormals;
+
+  if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) reportProvenance(*ps);
 
   std::vector<IndexedFace> indicesNew;
   normals = calcTriangleNormals(ps->vertices, ps->indices);

@@ -145,6 +145,7 @@ std::shared_ptr<PolySet> ManifoldGeometry::toPolySet() const
 
   ps->colors.reserve(originalIDToColor_.size());
   ps->color_indices.reserve(ps->indices.size());
+  ps->original_ids.reserve(ps->indices.size());
 
   auto colorScheme = ColorMap::instance().findColorScheme(RenderSettings::inst()->colorscheme);
   int32_t faceFrontColorIndex = -1;
@@ -205,6 +206,9 @@ std::shared_ptr<PolySet> ManifoldGeometry::toPolySet() const
       ps->indices.push_back({static_cast<int>(mesh.triVerts[i]), static_cast<int>(mesh.triVerts[i + 1]),
                              static_cast<int>(mesh.triVerts[i + 2])});
       ps->color_indices.push_back(colorIndex);
+      // The same id the colour is derived from, kept as itself. See
+      // PolySet::original_ids for why a downstream gate wants it.
+      ps->original_ids.push_back(static_cast<int32_t>(id));
     }
     start = end;
   }

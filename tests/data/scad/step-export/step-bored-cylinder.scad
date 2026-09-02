@@ -14,6 +14,13 @@
 // takes only the arc-bounded parts of the wall - two partial cylinders, twenty
 // facets - and leaves the other fifty-two as planes.
 //
+// Provenance, reported and gating nothing. Manifold keeps an id per run of
+// triangles through a boolean chain - it is what makes colour survive a
+// difference() - and this says what survived. Two originals here, the wall and
+// the bore, which is the whole model. It is asserted because a channel nothing
+// checks is a channel that quietly stops working, and because the number is
+// derivable by looking at the model rather than at the exporter.
+// EXPECT: the mesh comes from 2 original solids over 288 facets
 // EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 0 conical, 2 partial), 20 facets replaced
 // ROUNDTRIP: Cylinder=2 Plane=54
