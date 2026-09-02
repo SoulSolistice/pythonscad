@@ -1122,19 +1122,188 @@ public:
 
   class Line;
 
+  /*! Geometry in a surface's own parameter space, for a PCURVE.
+   *
+   * An edge bounding a face is a curve in space, and a reader has to know where
+   * that curve runs across the surface. It can find out by projecting, and for
+   * a plane or a cylinder that is trivial - which is why this exporter went a
+   * long way with no pcurves at all. On a swept surface it is not: a helix
+   * passes near itself once a pitch, so the nearest point of the surface to a
+   * point on the edge can be a whole turn from the right one.
+   * GridSurface::project samples every station before it starts Newton for
+   * exactly that reason. An importer that does not is left trimming the face
+   * along a path that jumps between turns, which is how SOLIDWORKS came to
+   * shred this project's threads while OpenCASCADE read the same file as a
+   * closed solid.
+   *
+   * Writing the parameters down removes the guess. These four entities are the
+   * two dimensional half of what a LINE needs, and they exist only to be
+   * referred to from a DEFINITIONAL_REPRESENTATION.
+   */
+  class Point2d : public Entity
+  {
+  public:
+    Point2d(std::vector<Entity *>& ent_list, double u_in, double v_in) : Entity(ent_list)
+    {
+      u = u_in;
+      v = v_in;
+    }
+    virtual ~Point2d() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = CARTESIAN_POINT('" << label << "',(" << step_real(u) << ","
+                << step_real(v) << "));\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    double u = 0, v = 0;
+  };
+
+  class Direction2d : public Entity
+  {
+  public:
+    Direction2d(std::vector<Entity *>& ent_list, double u_in, double v_in) : Entity(ent_list)
+    {
+      u = u_in;
+      v = v_in;
+    }
+    virtual ~Direction2d() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = DIRECTION('" << label << "',(" << step_real(u) << "," << step_real(v)
+                << "));\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    double u = 0, v = 0;
+  };
+
+  class Vector2d : public Entity
+  {
+  public:
+    Vector2d(std::vector<Entity *>& ent_list, Direction2d *dir_in, double len_in) : Entity(ent_list)
+    {
+      dir = dir_in;
+      length = len_in;
+    }
+    virtual ~Vector2d() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = VECTOR('" << label << "',#" << dir->id << "," << step_real(length)
+                << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Direction2d *dir = nullptr;
+    double length = 0;
+  };
+
+  class Line2d : public Entity
+  {
+  public:
+    Line2d(std::vector<Entity *>& ent_list, Point2d *point_in, Vector2d *vector_in) : Entity(ent_list)
+    {
+      point = point_in;
+      vector = vector_in;
+    }
+    virtual ~Line2d() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = LINE('" << label << "',#" << point->id << ",#" << vector->id
+                << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Point2d *point = nullptr;
+    Vector2d *vector = nullptr;
+  };
+
+  /*! The context those two dimensional curves live in.
+   *
+   * A complex instance, because ISO 10303 gives it no entity of its own, and
+   * one per file is enough since nothing about it varies.
+   */
+  class ParametricContext : public Entity
+  {
+  public:
+    ParametricContext(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
+    virtual ~ParametricContext() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id
+                << " = ( GEOMETRIC_REPRESENTATION_CONTEXT(2) PARAMETRIC_REPRESENTATION_CONTEXT()"
+                << " REPRESENTATION_CONTEXT('2D SPACE','') );\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+  };
+
+  class DefinitionalRepresentation : public Entity
+  {
+  public:
+    DefinitionalRepresentation(std::vector<Entity *>& ent_list, Line2d *curve_in,
+                               ParametricContext *context_in)
+      : Entity(ent_list)
+    {
+      curve = curve_in;
+      context = context_in;
+    }
+    virtual ~DefinitionalRepresentation() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = DEFINITIONAL_REPRESENTATION('" << label << "',(#" << curve->id
+                << "),#" << context->id << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Line2d *curve = nullptr;
+    ParametricContext *context = nullptr;
+  };
+
+  class PCurve : public Entity
+  {
+  public:
+    PCurve(std::vector<Entity *>& ent_list, SurfaceType *surface_in, DefinitionalRepresentation *rep_in)
+      : Entity(ent_list)
+    {
+      surface = surface_in;
+      rep = rep_in;
+    }
+    virtual ~PCurve() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PCURVE('" << label << "',#" << surface->id << ",#" << rep->id
+                << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    SurfaceType *surface = nullptr;
+    DefinitionalRepresentation *rep = nullptr;
+  };
+
+  /*! An edge's curve, given in space and on a face it bounds.
+   *
+   * The three dimensional curve is unchanged and stays the master
+   * representation, so a reader that ignores the pcurves sees exactly the file
+   * it saw before. What they add is the answer to a projection this exporter
+   * used to leave every importer to work out for itself.
+   */
   class SurfaceCurve : public RoundType
   {
   public:
-    SurfaceCurve(std::vector<Entity *>& ent_list) : RoundType(ent_list) { line = 0; }
-    SurfaceCurve(std::vector<Entity *>& ent_list, Line *surface_curve_in) : RoundType(ent_list)
+    SurfaceCurve(std::vector<Entity *>& ent_list) : RoundType(ent_list) { curve = nullptr; }
+    SurfaceCurve(std::vector<Entity *>& ent_list, RoundType *curve_in, std::vector<PCurve *> on_in)
+      : RoundType(ent_list)
     {
-      line = surface_curve_in;
+      curve = curve_in;
+      on = std::move(on_in);
     }
     virtual ~SurfaceCurve() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = SURFACE_CURVE('" << label << "', #" << line->id << ");\n";
+      stream_in << "#" << id << " = SURFACE_CURVE('" << label << "',#" << curve->id << ",(";
+      for (std::size_t i = 0; i < on.size(); i++) stream_in << (i ? ",#" : "#") << on[i]->id;
+      stream_in << "),.PCURVE_S.);\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
@@ -1146,10 +1315,11 @@ public:
       int p1_id;
       ss >> p1_id;
 
-      line = dynamic_cast<Line *>(ent_map[p1_id]);
+      curve = dynamic_cast<RoundType *>(ent_map[p1_id]);
     }
 
-    Line *line;
+    RoundType *curve;
+    std::vector<PCurve *> on;
   };
 
   class EdgeCurve : public Entity

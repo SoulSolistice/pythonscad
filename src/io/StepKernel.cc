@@ -1615,6 +1615,8 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
   // the edges from the same map every other face uses is therefore both the
   // simplest thing and the only one that keeps the shell closed: the neighbour
   // is not asked to give anything up.
+  // One per file - nothing about a 2D parametric context varies.
+  ParametricContext *param_context = nullptr;
   for (const auto& patch : grid_faces) {
     const auto *grid = dynamic_cast<const GridSurface *>(patch.surface.get());
     if (grid == nullptr) continue;
@@ -1685,6 +1687,40 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
           get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
         loop.push_back(new OrientedEdge(entities, edge, dir));
         face_edges_here.push_back(edge);
+        // Where this edge runs across the surface, written down rather than
+        // left to be guessed. A swept surface cannot be projected onto
+        // reliably - see the PCURVE classes in StepKernel.h - and this is the
+        // one face shape in this exporter that is trimmed by a polyline on
+        // such a surface.
+        //
+        // Taken from the edge's own two vertices, not from a and b: an edge
+        // already in the map may run the other way, and a pcurve that
+        // disagrees with the direction of the curve it belongs to is worse
+        // than none.
+        [&]() {
+          double ua = 0, va = 0, ub = 0, vb = 0;
+          if (!grid->project(edge->vert1->point->pt, ua, va)) return;
+          if (!grid->project(edge->vert2->point->pt, ub, vb)) return;
+          const double su = ub - ua, sv = vb - va;
+          const double plen = sqrt(su * su + sv * sv);
+          // A DIRECTION has to have a magnitude, and an edge whose ends land on
+          // the same parameters says nothing about where it runs anyway.
+          if (plen < 1e-12) return;
+          if (param_context == nullptr) param_context = new ParametricContext(entities);
+          auto rep = new DefinitionalRepresentation(
+            entities,
+            new Line2d(entities, new Point2d(entities, ua, va),
+                       new Vector2d(entities, new Direction2d(entities, su / plen, sv / plen), plen)),
+            param_context);
+          auto pcurve = new PCurve(entities, surface, rep);
+          // An edge between two sweep faces is on both of them, and STEP allows
+          // a SURFACE_CURVE to say so.
+          if (auto *already = dynamic_cast<SurfaceCurve *>(edge->round)) {
+            if (already->on.size() < 2) already->on.push_back(pcurve);
+          } else {
+            edge->round = new SurfaceCurve(entities, edge->round, {pcurve});
+          }
+        }();
       }
       auto edge_loop = new EdgeLoop(entities, loop);
       bounds.push_back(new FaceBound(entities, edge_loop, true, entry.first == outer));

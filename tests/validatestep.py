@@ -284,12 +284,34 @@ def check_directions(entities, problems):
     always splits, because a value without a fractional part never contains one
     in the first place."""
     expected = {"CARTESIAN_POINT": 3, "DIRECTION": 3, "VECTOR": 1}
+
+    # A pcurve's geometry lives in a surface's parameter space, where a point
+    # and a direction have two components rather than three. That is not a
+    # comma radix, so the entities a DEFINITIONAL_REPRESENTATION can reach are
+    # counted against 2 instead. Reachability rather than a name test, because
+    # nothing about a CARTESIAN_POINT says which space it is in.
+    parametric = set()
+    frontier = [e.id for e in entities.values() if e.name == "DEFINITIONAL_REPRESENTATION"]
+    while frontier:
+        eid = frontier.pop()
+        for ref in (entities[eid].refs() if eid in entities else []):
+            if ref in parametric or ref not in entities:
+                continue
+            # The context is shared with nothing and refers to nothing; stopping
+            # at the curve keeps this from wandering into the 3D model.
+            if entities[ref].name.endswith("REPRESENTATION_CONTEXT"):
+                continue
+            parametric.add(ref)
+            frontier.append(ref)
+
     malformed = []
     zero = []
     for e in entities.values():
         want = expected.get(e.name)
         if want is None:
             continue
+        if e.id in parametric and e.name in ("CARTESIAN_POINT", "DIRECTION"):
+            want = 2
         v = e.floats()
         if len(v) != want:
             malformed.append((e, want, len(v)))
