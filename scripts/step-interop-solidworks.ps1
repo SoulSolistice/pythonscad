@@ -43,14 +43,29 @@
      needed because the generated assembly references the interop by name and the
      default probing path does not include SOLIDWORKS' redist folder.
 
+.PARAMETER ImportSettings
+  A label for the state of Tools > Options > Import when the run was made, for
+  instance "do-not-knit" or "try-forming-solids". It is recorded in every row.
+  Nothing checks it and nothing can; the point is that a run whose settings were
+  not written down cannot be compared with another one.
+
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File scripts\step-interop-solidworks.ps1
+  powershell -ExecutionPolicy Bypass -File scripts\step-interop-solidworks.ps1 -ImportSettings do-not-knit
 #>
 [CmdletBinding()]
 param(
     [string]$KitDir = "build\interop-kit",
     [string]$OutCsv,
-    [string]$Redist = "C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist"
+    [string]$Redist = "C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist",
+    # LoadFile4 imports with whatever is set in Tools > Options > Import, and
+    # the API gives this script no way to say otherwise. Two runs of the same
+    # file can therefore disagree with nothing in the CSV to show why - which is
+    # what happened here between an automated run that recorded SURFACE bodies
+    # and a hand import of the same file that gave solids. Label the run with
+    # the settings it was made under, so a result still means something a week
+    # later.
+    [Parameter(Mandatory = $true)]
+    [string]$ImportSettings
 )
 
 $ErrorActionPreference = 'Stop'
@@ -206,6 +221,7 @@ foreach ($f in $files) {
         file = $p[0]; opened = $p[1]; open_errors = $p[2]; open_warnings = $p[3]
         body_type = $p[4]; solid_bodies = $p[5]; surface_bodies = $p[6]
         faces = $p[7]; volume_mm3 = $p[8]; area_mm2 = $p[9]; note = $p[10]
+        import_settings = $ImportSettings
     }
     $rows += $row
     if ($row.opened -eq 'yes') {
