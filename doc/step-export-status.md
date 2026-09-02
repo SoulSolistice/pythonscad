@@ -1497,7 +1497,9 @@ these files.** See *The SOLIDWORKS round trip* below. Fusion is still untried.
   the oblique cylinder, which needs its own surface family *and* recogniser.
 - Per-face provenance through `runOriginalID` (§6 item 3) is architecturally
   cleaner but adds no coverage, and would *lose* the hull-generated surfaces that
-  fitting currently catches.
+  fitting currently catches. **As a recognition channel. See §21: the same
+  machinery answers the intent question, where every gate is currently guessing,
+  and that use is not retired.**
 - The bayonet's last rejection is geometrically necessary, not unimplemented: 36
   pentagons each take one edge of the r=78.1 rim, and an arc through two vertices
   of a planar facet lifts 0.30 mm out of its plane. It is correctly refused.
@@ -2385,3 +2387,63 @@ between three that do:
    the sweep. That is the intersection of the two exact surfaces, which is what
    the trim curve between them should have been all along, and it is the piece
    of work the rest of this now points at.
+
+## 21. Provenance, reconsidered - as instrumentation, not as coverage
+
+§6 item 3 proposed per-face provenance through Manifold's `runOriginalID`, and
+the ledger above retired it: *architecturally cleaner but adds no coverage, and
+would lose the hull-generated surfaces that fitting currently catches.* That
+verdict is correct and should stand, because the question it answers is
+**should provenance replace fitting as the recognition channel** - and it should
+not. `hull()` drops provenance, no face of either operand lies on the collar's
+hull chamfer, and fitting catches exactly that.
+
+It is being re-read as *provenance was tried and rejected*, which is a different
+and wrong claim. What was rejected is one use of it. §5 already wrote down the
+other, in the same breath as the objection: it *removes the geometry gate
+outright and makes the intent gate exact instead of probabilistic.*
+
+Every failure recorded in §§17-20 is that probabilistic gate.
+
+| what went wrong | the gate that let it |
+| --- | --- |
+| Over half a sweep face's boundary never on its surface (§19) | `pointMember`: the generator emitted a point *near* this vertex |
+| Claims arriving in disjoint pieces, split and split again (§18) | facet membership by distance, not by origin |
+| The snap PoC pulling a ridge's vertices onto the wall | ownership by *nearest* declared surface |
+| Two thirds of the snap's candidates refused | ownership unresolvable, so left alone |
+
+The last two are the open blocker on the snap, and provenance answers them
+outright: a vertex belongs to the face it came from, not to the surface it
+happens to sit closest to. That is not a coverage argument, and it is not in
+competition with fitting.
+
+It is also better instrumentation than anything available now. A refusal
+currently reads
+
+```text
+region of 5 facets, area 1155.2, band 0.0518 (typical 0.0024), worst dihedral 0.7 degrees
+```
+
+which is geometry, inferred after the fact. With provenance it can name the
+declared solid and the face of it that the region came from, and whether a
+boolean cut it - the difference between a diagnostic a developer can act on and
+one a user can.
+
+And it gives the validator the one thing distance can never provide: an
+assertion **independent of geometry**. A face claimed for a surface whose facets
+came from a different original is wrong however well it fits. `check_bound_enclosure`
+had to be written because agreement with a kernel proves nothing
+(`doc/step-export-testing.md`); provenance is the same argument one level up.
+
+Three limits, all of which stand from the original analysis:
+
+- **`hull()` drops it.** Fitting keeps those surfaces. Two channels, not a
+  replacement - which is what §5 concluded and why the retirement was right.
+- **It names surfaces, not boundaries.** No trim curves, so it does not touch
+  the sagitta of §20 - only *which* surface a cut vertex should be slid onto.
+- **Manifold only.** The CGAL backend has no equivalent, so every gate it feeds
+  needs the present geometric test as a fallback rather than a replacement.
+
+So the item is not revived as written. It is re-scoped: **provenance as the
+intent channel, feeding the gates that are currently guessing**, with fitting
+unchanged as the recognition channel beside it.
