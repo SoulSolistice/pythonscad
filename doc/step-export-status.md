@@ -2245,3 +2245,54 @@ OpenCASCADE sews it accepting 1e-7 of slack, its own floor.
 has nothing to work with, while sixteen facets away from any notch are still
 exactly on the cylinder. Its `TOLERANCE: 1e-07` is the first in the suite, and
 it is the assertion the rest of the fixture is scaffolding for.
+
+## 18. The declared sweep, and why the same split does not transfer
+
+The trimmed quadric split worked because a region cut from a declared cylinder
+is mostly exact and the fringe is not. A declared sweep looks like the same
+shape of problem - the exporter already reports it, `claims 490 facets whole,
+452 cut across it` - and it is not.
+
+Two findings, one of which was a wrong turn worth keeping.
+
+**The corners are already asked for, and against the wrong surface.**
+`recogniseGridPatches` requires every corner of a claimed facet to be a
+`pointMember` of the grid. Membership says the generator emitted that point; it
+does not say the surface still runs through it. Adding
+`grid->onSurface(v, 1e-7)` on top of it drops the lid's claim from 486 facets to
+154, and halves the worst edge deviation from 0.264 to 0.112 - which sounds like
+the right trade until you ask which surface each test is about. `onSurface`
+evaluates the *declared* GridSurface. What goes into the file is a B-spline
+**fitted** to it, and the log has been saying so all along:
+
+```text
+a declared 154x4 cubic sweep claims 490 facets whole, ...
+the fitted sweep passes within 0.1122 of the middle of every facet it claims
+```
+
+Two surfaces, and the claim was being proven against the one that is not
+written. That is why 336 facets whose corners the declaration runs through were
+dropped: the test was answering a different question. The change is reverted.
+
+**And the boundary cannot be fixed the way the cylinder's was.** A cylinder has
+rulings, so a straight boundary segment along the axis lies on it exactly, and a
+segment around it at constant height becomes an arc. A cubic sweep has neither:
+every boundary chord sags by the sagitta, and the exact-tier rule - corners on
+the surface *and* boundary on the surface - rejects all of it. Writing the
+boundary as the isocurve it really is does not rescue it either, because the
+face on the other side of that boundary is a planar facet through the chord, and
+curving the edge takes the neighbour off its own plane.
+
+So a declared sweep cannot reach the exact tier, and saying that plainly is the
+result. What it can reach is an honest approximate tier, and the rule for that
+is the one the wrong turn found: **a corner off the surface is the one thing the
+mesh positively contradicts**, since it states that point exactly, whereas a
+chord sagging between two corners it states is only the tessellation, which the
+band already allows for. Corners should be held to the written surface and edges
+should not.
+
+The work that follows from it is not a tighter claim but a better fit: a sweep
+whose written B-spline interpolates the declared net, rather than approximating
+it, would put every one of those 490 whole facets' corners on the surface and
+leave the sagitta as the only residual. That is a change to how the surface is
+constructed, and it is the next thing worth doing here.
