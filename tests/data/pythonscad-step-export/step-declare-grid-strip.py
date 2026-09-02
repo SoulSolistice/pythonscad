@@ -42,10 +42,19 @@ standing off the chords by about that band, in the direction it should.
 """
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
 # EXPECT: 108 facets have every corner on the sweep and their middle off it
-# EXPECT: 1 declared sweep covers 241 facets over 2 boundary cycles
+# A claim is not always in one piece. The boolean that cuts the ridge leaves
+# two separate regions of the same sweep, and each is its own face: written as
+# one they would be one ADVANCED_FACE with two outer loops, the second labelled
+# a hole in the first, which is not a face. The counts below say two sweeps and
+# one boundary cycle each, where they used to say one sweep over two cycles.
+#
+# The ROUNDTRIP-APPROX line is unchanged, and that is the point of it. OpenCASCADE
+# was already splitting these faces on read and reporting the split numbers, so
+# what the exporter writes now is what a kernel was making of it all along.
+# EXPECT: 2 declared sweeps cover 241 facets over 1 boundary cycle
 # EXPECT: the region is a strip, whose boundary stays inside the surface's rectangle
 # EXPECT-NOT: written as one face each
-# APPROX: 1 declared sweep written as one face each, replacing 241 facets
+# APPROX: 2 declared sweeps written as one face each, replacing 241 facets
 # How far the fitted surface strays *between* the stations it was
 # interpolated through, which is the only place it can. A cubic passes
 # through its data exactly, so measuring at the data says nothing; what
@@ -55,7 +64,7 @@ standing off the chords by about that band, in the direction it should.
 # pinned because it is what a change to the fit would move. The figure
 # that matters is that it is below the band beside it.
 # EXPECT: the fitted sweep passes within 0.0609 of the middle of every facet it claims, against a tessellation band of 0.1290
-# APPROX: 4 trimmed quadrics written as one face each, replacing 289 facets
+# APPROX: 9 trimmed quadrics written as one face each, replacing 289 facets
 #
 # What a kernel makes of each export: the declared strip survives as a surface.
 # Validity says the file is well formed; only this says the surface

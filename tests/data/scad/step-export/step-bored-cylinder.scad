@@ -24,7 +24,13 @@
 // faces around it already use, so the shell closes edge for edge. Eight
 // cylinder faces rather than two because a face written on an open rectangle
 // cannot wrap, so each surface is cut at its seam.
-// APPROX: 4 trimmed quadrics written as one face each, replacing 52 facets
+// Six faces, not four. The bore cuts the wall into separate regions and a
+// face cannot be in two places, so each region is its own face; the two the
+// count gained were being carried as inner bounds of the others, which is
+// what an inner bound is not for. ROUNDTRIP-APPROX does not move, because
+// OpenCASCADE was splitting them on read and counting eight all along - what
+// changed is that the file now says what the kernel was already making of it.
+// APPROX: 6 trimmed quadrics written as one face each, replacing 52 facets
 // APPROX: approximation found nothing left to fit
 // ROUNDTRIP-APPROX: Cylinder=8 Plane=2
 //

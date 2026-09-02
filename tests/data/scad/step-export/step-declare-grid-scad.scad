@@ -43,7 +43,11 @@
 // around them close against. Nine cylinder faces rather than two because a
 // face written on an open rectangle cannot wrap, so each wall is cut at the
 // seam.
-// APPROX: 2 trimmed quadrics written as one face each, replacing 76 facets
+// Eight faces over the same 76 facets: the wall the ridge is fused to is cut
+// into that many separate regions, and each is its own face now rather than
+// an inner bound of the largest. ROUNDTRIP-APPROX is unchanged, since it was
+// already counting what OpenCASCADE split ours into.
+// APPROX: 8 trimmed quadrics written as one face each, replacing 76 facets
 // How far the fitted surface strays *between* the stations it was
 // interpolated through, which is the only place it can. A cubic passes
 // through its data exactly, so measuring at the data says nothing; what

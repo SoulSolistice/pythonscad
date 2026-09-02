@@ -20,8 +20,15 @@
 // cut corners are at radius 9.85, not 10, and they stay planar. The sixteen
 // facets nowhere near a notch are written as the cylinder.
 //
+// Eight faces of two facets, not one face of sixteen, and that is the second
+// thing this fixture holds. The eight surviving stretches of wall are eight
+// separate regions of one cylinder, and a face cannot be in two places: written
+// as one ADVANCED_FACE they would be one face with eight outer loops, seven of
+// them labelled holes in the largest, which is not a face. This fixture was
+// written before that was understood and asserted the wrong number.
+//
 // EXPECT: 1 analytic surface available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
-// EXPECT: 2 trimmed quadrics written as one face each, replacing 16 facets (exactly on their surface)
+// EXPECT: 8 trimmed quadrics written as one face each, replacing 16 facets (exactly on their surface)
 // EXPECT-NOT: within their tessellation band
 // ROUNDTRIP: Cylinder=8 Plane=50
 // RADII: Cylinder=10

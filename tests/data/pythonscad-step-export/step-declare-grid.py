@@ -100,7 +100,11 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # pinned because it is what a change to the fit would move. The figure
 # that matters is that it is below the band beside it.
 # EXPECT: the fitted sweep passes within 0.0660 of the middle of every facet it claims, against a tessellation band of 0.1290
-# APPROX: 2 trimmed quadrics written as one face each, replacing 230 facets
+# The trimmed quadrics are five faces rather than two for the same reason the
+# sweep is two rather than one: the booleans leave a claim in pieces, and a
+# face cannot be in two places. ROUNDTRIP-APPROX is unchanged, because it was
+# already counting the faces OpenCASCADE split ours into.
+# APPROX: 5 trimmed quadrics written as one face each, replacing 230 facets
 # EXPECT: its facets lie over 2 of the profile's 4 spans - the region is a strip, whose boundary stays inside the surface's rectangle
 #
 # What a kernel makes of each export: the declared sweep survives as a surface, not as the facets it claimed.

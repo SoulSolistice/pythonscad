@@ -1564,6 +1564,62 @@ std::vector<std::shared_ptr<Surface>> fitRevolved(const Mesh& mesh, const Smooth
  * needs to be - a maximal stretch of consecutive boundary segments with the
  * same face on the far side, because every segment of it has to be replaced
  * in that one neighbour by one curve or the shell opens. */
+/*! The facets of a claim, split into the pieces that actually touch.
+ *
+ * A claim is a set of facets agreeing with one surface, and the booleans have
+ * no reason to leave it in one piece: a helical ridge cut by a wall comes back
+ * as two strips of the same sweep, the same size, somewhere else on it.
+ *
+ * Written as one face those become one ADVANCED_FACE with two outer loops,
+ * which is not a face - and since the outer bound is then chosen by area in
+ * parameter space, the second region is labelled a hole in the first. A face's
+ * inner bounds have to lie inside its outer one, and two separate patches of a
+ * surface are not a face with a hole.
+ *
+ * OpenCASCADE splits such a face on read and says nothing, which is why its
+ * census reported more faces than the file ever contained and why no round trip
+ * flagged it. SOLIDWORKS does not split, and builds what it can of one face
+ * with two disjoint outer loops; a thread came back shredded that way.
+ */
+std::vector<std::vector<std::size_t>> connectedComponents(
+  const std::vector<std::vector<int>>& loops,
+  const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops, const std::vector<std::size_t>& facets)
+{
+  std::map<std::size_t, std::size_t> slot;
+  for (std::size_t i = 0; i < facets.size(); i++) slot[facets[i]] = i;
+
+  std::vector<std::size_t> parent(facets.size());
+  for (std::size_t i = 0; i < parent.size(); i++) parent[i] = i;
+  std::function<std::size_t(std::size_t)> find = [&](std::size_t x) {
+    while (parent[x] != x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+
+  for (std::size_t i = 0; i < facets.size(); i++) {
+    const std::vector<int>& loop = loops[facets[i]];
+    for (std::size_t k = 0; k < loop.size(); k++) {
+      const auto it = edge_loops.find(edgeKey(loop[k], loop[(k + 1) % loop.size()]));
+      if (it == edge_loops.end()) continue;
+      for (const std::size_t other : it->second) {
+        const auto jt = slot.find(other);
+        if (jt == slot.end()) continue;
+        const std::size_t a = find(i), b = find(jt->second);
+        if (a != b) parent[a] = b;
+      }
+    }
+  }
+
+  std::map<std::size_t, std::vector<std::size_t>> grouped;
+  for (std::size_t i = 0; i < facets.size(); i++) grouped[find(i)].push_back(facets[i]);
+  std::vector<std::vector<std::size_t>> out;
+  out.reserve(grouped.size());
+  for (auto& entry : grouped) out.push_back(std::move(entry.second));
+  return out;
+}
+
 Patch patchFromFacets(const std::vector<std::vector<int>>& loops,
                       const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops,
                       const std::shared_ptr<const Surface>& surface,
@@ -1743,8 +1799,15 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     // Build one Patch out of a set of facets: its boundary cycles, and the runs
     // those split into. Called once for the whole claim, or once per group when
     // the claim has to be cut - see below.
-    auto buildPatch = [&](const std::vector<std::size_t>& fs) {
-      return patchFromFacets(loops, edge_loops, surface, fs);
+    //
+    // One per connected component, because a claim is not necessarily in one
+    // piece and a face cannot be in two - see connectedComponents above.
+    auto buildPatches = [&](const std::vector<std::size_t>& fs) {
+      std::vector<Patch> out;
+      for (const auto& piece : connectedComponents(loops, edge_loops, fs)) {
+        out.push_back(patchFromFacets(loops, edge_loops, surface, piece));
+      }
+      return out;
     };
 
     // Does the claim close around the profile? Only a closed profile can, and
@@ -1757,11 +1820,12 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     }
 
     if (!wraps) {
-      Patch patch = buildPatch(claimed);
-      if (patch.alive) {
-        for (const std::size_t f : patch.facets) taken[f] = 1;
+      for (Patch& patch : buildPatches(claimed)) {
+        if (patch.alive) {
+          for (const std::size_t f : patch.facets) taken[f] = 1;
+        }
+        patches.push_back(std::move(patch));
       }
-      patches.push_back(std::move(patch));
       continue;
     }
 
@@ -1797,9 +1861,10 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
           if (span_of[i] >= from && span_of[i] < to) group.push_back(claimed[i]);
         }
         if (group.empty()) continue;
-        Patch patch = buildPatch(group);
-        all_alive = patch.alive;
-        built.push_back(std::move(patch));
+        for (Patch& patch : buildPatches(group)) {
+          all_alive = all_alive && patch.alive;
+          built.push_back(std::move(patch));
+        }
       }
       // The last attempt stands whatever it produced, so a sweep that cannot be
       // cut into sheets still reports why rather than vanishing.
@@ -2105,11 +2170,22 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
 
     for (const auto& group : groups) {
       if (group.size() < 3) continue;
-      Patch patch = patchFromFacets(loops, edge_loops, surface, group);
-      if (patch.alive) {
-        for (const std::size_t f : patch.facets) taken[f] = 1;
+      // The seam split above cuts a wrapping claim in two; this one cuts a
+      // claim the booleans left in pieces. Both have to happen, and neither
+      // implies the other.
+      // No size test on a piece. The three facet floor above is about whether a
+      // claim is worth making at all; once it has been made, a region of two
+      // facets on that surface is as real as a region of two hundred, and
+      // leaving it planar while its neighbours across the same surface are
+      // written is the crease that "all of a surface or none" exists to avoid.
+      for (const auto& piece : connectedComponents(loops, edge_loops, group)) {
+        if (piece.empty()) continue;
+        Patch patch = patchFromFacets(loops, edge_loops, surface, piece);
+        if (patch.alive) {
+          for (const std::size_t f : patch.facets) taken[f] = 1;
+        }
+        patches.push_back(std::move(patch));
       }
-      patches.push_back(std::move(patch));
     }
   }
   return patches;
