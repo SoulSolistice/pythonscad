@@ -60,6 +60,17 @@ void export_off(const std::shared_ptr<const Geometry>& geom, std::ostream& outpu
 
   auto has_color = !ps->color_indices.empty();
 
+  // A colour which cannot be read is not a reason to abandon the file. This
+  // used to return here, which left an OFF truncated in the middle of a face -
+  // header promising 2172 of them, one and a half written, and an exit status
+  // of 0. Every reader then either rejects the file or, worse, believes the
+  // header. linear_extrude(twist = ...) reproduces it.
+  //
+  // Per-face colour is optional in OFF, so the face is written without one and
+  // the geometry survives. Reported once rather than per face: a mesh with one
+  // bad colour usually has thousands.
+  bool warned_color = false;
+
   for (size_t i = 0; i < ps->indices.size(); ++i) {
     const size_t nverts = ps->indices[i].size();
     output << nverts;
@@ -69,13 +80,15 @@ void export_off(const std::shared_ptr<const Geometry>& geom, std::ostream& outpu
       if (color_index >= 0) {
         auto color = ps->colors[color_index];
         int r, g, b, a;
-        if (!color.getRgba(r, g, b, a)) {
-          LOG(message_group::Error, "Invalid color in OFF export");
-          return;
+        if (color.getRgba(r, g, b, a)) {
+          output << " " << r << " " << g << " " << b;
+          // Alpha channel is read by apps like MeshLab.
+          if (a != 255) output << " " << a;
+        } else if (!warned_color) {
+          LOG(message_group::Export_Warning,
+              "Invalid color in OFF export; those faces are written without one");
+          warned_color = true;
         }
-        output << " " << r << " " << g << " " << b;
-        // Alpha channel is read by apps like MeshLab.
-        if (a != 255) output << " " << a;
       }
     }
     output << "\n";

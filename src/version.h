@@ -28,6 +28,16 @@
 
 #include <string_view>
 
+// These arrive as compile definitions, scoped in CMakeLists.txt to the few
+// translation units which include this header - the version comes from
+// `git describe`, so making it global would invalidate every object in the
+// build on every commit. Without them the stringify below would quietly
+// produce the literal text "OPENSCAD_VERSION" instead of a version, so fail
+// loudly and name the fix rather than shipping a wrong version string.
+#if !defined(OPENSCAD_VERSION) || !defined(OPENSCAD_SHORTVERSION)
+#error "version.h requires the OPENSCAD_VERSION definitions. Add this file to OPENSCAD_VERSION_SOURCES in CMakeLists.txt."
+#endif
+
 #define QUOTE_(x_) #x_
 #define QUOTED_(x__) QUOTE_(x__)
 

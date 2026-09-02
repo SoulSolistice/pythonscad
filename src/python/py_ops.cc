@@ -27,6 +27,8 @@
 #include "genlang/genlang.h"
 #include <Python.h>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <string>
 #include "pyopenscad.h"
 #include <io/fileutils.h>
@@ -34,6 +36,7 @@
 #include <PullNode.h>
 #include <WrapNode.h>
 #include <ColorNode.h>
+#include <DeclareSurfaceNode.h>
 #include <RoofNode.h>
 #include <OversampleNode.h>
 #include <DebugNode.h>
@@ -304,6 +307,274 @@ PyObject *python_oo_color(PyObject *obj, PyObject *args, PyObject *kwargs)
   }
   return python_color_core(obj, color, alpha);
 }
+
+/*! Attach one analytic surface declaration to an object.
+ *
+ * The declaration says what the model meant, which nothing else can say for a
+ * mesh the user built by hand: a swept thread or a ramp exists only as a
+ * polyhedron, and a ring of quads is exactly the mesh of a prism, so no
+ * measurement of the result tells one from the other. See DeclareSurfaceNode.
+ *
+ * Same shape as python_color_core: wrap the child in a node and carry the
+ * object's dictionary across. */
+static PyObject *python_declare_core(PyObject *obj, const std::shared_ptr<Surface>& surface)
+{
+  PyObject *child_dict_raw = nullptr;
+  PyTypeObject *type = PyOpenSCADObjectType(obj);
+  auto child = PyOpenSCADObjectToNodeMulti(obj, &child_dict_raw);
+  auto child_dict = py_owned(child_dict_raw);
+  if (child == nullptr) return propagate_or_typeerror("Invalid type for Object in declare");
+  DECLARE_INSTANCE();
+  auto node = std::make_shared<DeclareSurfaceNode>(instance);
+  node->surfaces.push_back(surface);
+  node->children.push_back(child);
+
+  PyObject *pyresult = PyOpenSCADObjectFromNode(type, node);
+  if (pyresult == nullptr) return nullptr;
+  if (child_dict.get() != nullptr) {
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(child_dict.get(), &pos, &key, &value)) {
+      if (PyDict_SetItem(((PyOpenSCADObject *)pyresult)->dict, key, value) < 0) {
+        Py_DECREF(pyresult);
+        return nullptr;
+      }
+    }
+  }
+  return pyresult;
+}
+
+/*! A three vector argument which may be left out. */
+static bool python_declare_vec3(PyObject *value, const char *what, Vector3d& out)
+{
+  if (value == nullptr) return true;
+  double x = 0, y = 0, z = 0;
+  if (python_vectorval(value, 3, 3, &x, &y, &z)) {
+    PyErr_Format(PyExc_TypeError, "%s must be three numbers", what);
+    return false;
+  }
+  out = Vector3d(x, y, z);
+  return true;
+}
+
+/*! A radius given either way round, which every primitive here accepts. */
+static bool python_declare_radius(double r, double d, const char *what, double& out)
+{
+  if (!std::isnan(r) && !std::isnan(d)) {
+    PyErr_Format(PyExc_TypeError, "%s: give r or d, not both", what);
+    return false;
+  }
+  out = !std::isnan(d) ? d / 2 : r;
+  if (std::isnan(out) || !(out > 0)) {
+    PyErr_Format(PyExc_TypeError, "%s needs a positive radius", what);
+    return false;
+  }
+  return true;
+}
+
+/*! An axis, which must have a direction to be one. */
+static bool python_declare_axis(Vector3d& axis, const char *what)
+{
+  if (!(axis.norm() > 0)) {
+    PyErr_Format(PyExc_TypeError, "%s: axis has no direction", what);
+    return false;
+  }
+  axis.normalize();
+  return true;
+}
+
+static PyObject *python_declare_cylinder_core(PyObject *obj, double r, double d, PyObject *center,
+                                              PyObject *axis)
+{
+  Vector3d c(0, 0, 0), a(0, 0, 1);
+  double radius = 0;
+  if (!python_declare_radius(r, d, "declare_cylinder", radius)) return nullptr;
+  if (!python_declare_vec3(center, "declare_cylinder center", c)) return nullptr;
+  if (!python_declare_vec3(axis, "declare_cylinder axis", a)) return nullptr;
+  if (!python_declare_axis(a, "declare_cylinder")) return nullptr;
+  return python_declare_core(obj, std::make_shared<CylinderSurface>(c, a, radius));
+}
+
+static PyObject *python_declare_sphere_core(PyObject *obj, double r, double d, PyObject *center,
+                                            PyObject *axis)
+{
+  Vector3d c(0, 0, 0), a(0, 0, 1);
+  double radius = 0;
+  if (!python_declare_radius(r, d, "declare_sphere", radius)) return nullptr;
+  if (!python_declare_vec3(center, "declare_sphere center", c)) return nullptr;
+  if (!python_declare_vec3(axis, "declare_sphere axis", a)) return nullptr;
+  if (!python_declare_axis(a, "declare_sphere")) return nullptr;
+  return python_declare_core(obj, std::make_shared<SphereSurface>(c, a, radius));
+}
+
+static PyObject *python_declare_torus_core(PyObject *obj, double r_major, double r_minor,
+                                           PyObject *center, PyObject *axis)
+{
+  Vector3d c(0, 0, 0), a(0, 0, 1);
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  double major = 0, minor = 0;
+  if (!python_declare_radius(r_major, nan, "declare_torus r_major", major)) return nullptr;
+  if (!python_declare_radius(r_minor, nan, "declare_torus r_minor", minor)) return nullptr;
+  if (!python_declare_vec3(center, "declare_torus center", c)) return nullptr;
+  if (!python_declare_vec3(axis, "declare_torus axis", a)) return nullptr;
+  if (!python_declare_axis(a, "declare_torus")) return nullptr;
+  return python_declare_core(obj, std::make_shared<TorusSurface>(c, a, major, minor));
+}
+
+/*! `declare_cone(r1, r2, h)`, named the way `cylinder()` names the same shape.
+ *
+ * Too many arguments for DECLARE_ENTRY, which carries exactly two radii, so
+ * this one and its two wrappers are written out. See the OpenSCAD builtin in
+ * DeclareSurfaceNode.cc for why a cone needs a channel of its own at all. */
+static PyObject *python_declare_cone_core(PyObject *obj, double r1, double r2, double h, double d1,
+                                          double d2, PyObject *center, PyObject *axis)
+{
+  Vector3d c(0, 0, 0), a(0, 0, 1);
+  double bottom = 0, top = 0;
+  if (!python_declare_radius(r1, d1, "declare_cone r1", bottom)) return nullptr;
+  if (!python_declare_radius(r2, d2, "declare_cone r2", top)) return nullptr;
+  if (!std::isfinite(h) || h <= 0) {
+    PyErr_SetString(PyExc_ValueError, "declare_cone needs a positive h");
+    return nullptr;
+  }
+  if (fabs(top - bottom) < 1e-12) {
+    PyErr_SetString(PyExc_ValueError,
+                    "declare_cone: r1 and r2 are equal, which is a cylinder - use declare_cylinder");
+    return nullptr;
+  }
+  if (!python_declare_vec3(center, "declare_cone center", c)) return nullptr;
+  if (!python_declare_vec3(axis, "declare_cone axis", a)) return nullptr;
+  if (!python_declare_axis(a, "declare_cone")) return nullptr;
+  return python_declare_core(obj, std::make_shared<ConeSurface>(c, a, bottom, (top - bottom) / h));
+}
+
+PyObject *python_declare_cone(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"obj", "r1", "r2", "h", "d1", "d2", "center", "axis", nullptr};
+  PyObject *obj = nullptr, *center = nullptr, *axis = nullptr;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  double r1 = nan, r2 = nan, h = nan, d1 = nan, d2 = nan;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|dddddOO", kwlist, &obj, &r1, &r2, &h, &d1, &d2,
+                                   &center, &axis))
+    return nullptr;
+  return python_declare_cone_core(obj, r1, r2, h, d1, d2, center, axis);
+}
+
+PyObject *python_oo_declare_cone(PyObject *obj, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"r1", "r2", "h", "d1", "d2", "center", "axis", nullptr};
+  PyObject *center = nullptr, *axis = nullptr;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  double r1 = nan, r2 = nan, h = nan, d1 = nan, d2 = nan;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|dddddOO", kwlist, &r1, &r2, &h, &d1, &d2, &center,
+                                   &axis))
+    return nullptr;
+  return python_declare_cone_core(obj, r1, r2, h, d1, d2, center, axis);
+}
+
+/*! Declare the ordered grid of points a generator swept.
+ *
+ * The other declare_* functions name a surface - a cylinder of this radius
+ * about that axis - and the exporter checks the mesh against it. For a helical
+ * thread or a cam ramp there is no name to give: the model built it with
+ * polyhedron() over a computed point list and the surface has no closed form.
+ *
+ * What the generator can still hand over is the *ordering*, and that is the
+ * part the mesh loses. A swept quad grid straight from a generator puts every
+ * interior vertex at valence 6; the same grid after a boolean has trimmed it
+ * measures 36% regular on the reference part, and at that point nothing can
+ * recover which facet follows which along the sweep. The grid says so directly.
+ *
+ * Membership is by position, so a facet belongs to the sweep exactly when every
+ * corner is a point given here. Facets a boolean created are not, and stay
+ * faceted - which is the correct answer, not a limitation. */
+static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int closed)
+{
+  // Extract the shape Python happens to be holding; the rules about what makes
+  // it a grid live in GridSurface::fromRows, which the OpenSCAD builtin uses
+  // too. Only the extraction is language specific.
+  if (points == nullptr || !PySequence_Check(points) || PyUnicode_Check(points)) {
+    PyErr_SetString(PyExc_TypeError, "declare_grid: points must be a sequence of rows");
+    return nullptr;
+  }
+  const Py_ssize_t rows = PySequence_Size(points);
+  std::vector<std::vector<Vector3d>> grid;
+  grid.reserve(rows < 0 ? 0 : std::size_t(rows));
+  for (Py_ssize_t i = 0; i < rows; i++) {
+    auto row = py_owned(PySequence_GetItem(points, i));
+    if (row.get() == nullptr || !PySequence_Check(row.get())) {
+      PyErr_Format(PyExc_TypeError, "declare_grid: row %zd is not a sequence of points", i);
+      return nullptr;
+    }
+    const Py_ssize_t n = PySequence_Size(row.get());
+    std::vector<Vector3d> out;
+    out.reserve(n < 0 ? 0 : std::size_t(n));
+    for (Py_ssize_t j = 0; j < n; j++) {
+      auto item = py_owned(PySequence_GetItem(row.get(), j));
+      double x = 0, y = 0, z = 0;
+      if (item.get() == nullptr || python_vectorval(item.get(), 3, 3, &x, &y, &z)) {
+        PyErr_Format(PyExc_TypeError, "declare_grid: point [%zd][%zd] must be three numbers", i, j);
+        return nullptr;
+      }
+      out.emplace_back(x, y, z);
+    }
+    grid.push_back(std::move(out));
+  }
+
+  std::string why;
+  auto surface = GridSurface::fromRows(grid, closed != 0, why);
+  if (surface == nullptr) {
+    PyErr_SetString(PyExc_TypeError, why.c_str());
+    return nullptr;
+  }
+  return python_declare_core(obj, std::move(surface));
+}
+
+PyObject *python_declare_grid(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"obj", "points", "closed", nullptr};
+  PyObject *obj = nullptr, *points = nullptr;
+  int closed = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|p", kwlist, &obj, &points, &closed)) return nullptr;
+  return python_declare_grid_core(obj, points, closed);
+}
+
+PyObject *python_oo_declare_grid(PyObject *obj, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"points", "closed", nullptr};
+  PyObject *points = nullptr;
+  int closed = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|p", kwlist, &points, &closed)) return nullptr;
+  return python_declare_grid_core(obj, points, closed);
+}
+
+#define DECLARE_ENTRY(name, first, second)                                                          \
+  PyObject *python_declare_##name(PyObject *self, PyObject *args, PyObject *kwargs)                 \
+  {                                                                                                 \
+    char *kwlist[] = {"obj", first, second, "center", "axis", nullptr};                             \
+    PyObject *obj = nullptr, *center = nullptr, *axis = nullptr;                                    \
+    double a = std::numeric_limits<double>::quiet_NaN();                                            \
+    double b = std::numeric_limits<double>::quiet_NaN();                                            \
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|ddOO", kwlist, &obj, &a, &b, &center, &axis)) \
+      return nullptr;                                                                               \
+    return python_declare_##name##_core(obj, a, b, center, axis);                                   \
+  }                                                                                                 \
+  PyObject *python_oo_declare_##name(PyObject *obj, PyObject *args, PyObject *kwargs)               \
+  {                                                                                                 \
+    char *kwlist[] = {first, second, "center", "axis", nullptr};                                    \
+    PyObject *center = nullptr, *axis = nullptr;                                                    \
+    double a = std::numeric_limits<double>::quiet_NaN();                                            \
+    double b = std::numeric_limits<double>::quiet_NaN();                                            \
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ddOO", kwlist, &a, &b, &center, &axis))        \
+      return nullptr;                                                                               \
+    return python_declare_##name##_core(obj, a, b, center, axis);                                   \
+  }
+
+DECLARE_ENTRY(cylinder, "r", "d")
+DECLARE_ENTRY(sphere, "r", "d")
+DECLARE_ENTRY(torus, "r_major", "r_minor")
+
+#undef DECLARE_ENTRY
 
 PyObject *python_solid_root_color_rgba(PyObject *obj)
 {

@@ -5,6 +5,7 @@
 #include "core/progress.h"
 #include "geometry/Geometry.h"
 #include "geometry/PolySet.h"
+#include "geometry/Surface.h"
 #include "geometry/cgal/cgal.h"
 #include "geometry/cgal/cgalutils.h"
 #include "utils/printutils.h"
@@ -74,7 +75,9 @@ std::unique_ptr<const Geometry> applyUnion3D(const CsgOpNode& node,
     }
 
     if (q.size() == 1) {
-      return std::make_unique<CGALNefGeometry>(q.top().first->p3);
+      // p3 alone would leave the surface records behind, and this is where a
+      // union of primitives ends up
+      return std::make_unique<CGALNefGeometry>(q.top().first->p3, q.top().first->surfaces);
     } else {
       return nullptr;
     }
@@ -169,11 +172,17 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
 
   auto addPoint = [&](const auto& v) { reindexer.lookup(v); };
 
+  // The analytic surfaces the children declared, kept for the same reason as in
+  // the Manifold backend's hull: they are a statement of intent which an
+  // exporter only acts on after finding an exact fit in the resulting mesh.
+  std::vector<std::shared_ptr<Surface>> surfaces;
+
   for (const auto& item : children) {
     auto& chgeom = item.second;
 #ifdef ENABLE_CGAL
     if (const auto *N = dynamic_cast<const CGALNefGeometry *>(chgeom.get())) {
       if (!N->isEmpty()) {
+        mergeSurfaces(surfaces, N->surfaces);
         addCapacity(N->p3->number_of_vertices());
         for (auto it = N->p3->vertices_begin(); it != N->p3->vertices_end(); ++it) {
           addPoint(CGALUtils::vector_convert<Hull_kernel::Point_3>(it->point()));
@@ -182,6 +191,7 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
 #endif  // ENABLE_CGAL
 #ifdef ENABLE_MANIFOLD
     } else if (const auto *mani = dynamic_cast<const ManifoldGeometry *>(chgeom.get())) {
+      mergeSurfaces(surfaces, mani->getSurfaces());
       addCapacity(mani->numVertices());
       mani->foreachVertexUntilTrue([&](auto& p) {
         addPoint(CGALUtils::vector_convert<Hull_kernel::Point_3>(p));
@@ -189,6 +199,7 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
       });
 #endif  // ENABLE_MANIFOLD
     } else if (const auto *ps = dynamic_cast<const PolySet *>(chgeom.get())) {
+      mergeSurfaces(surfaces, ps->surfaces);
       addCapacity(ps->indices.size() * 3);
       for (const auto& p : ps->indices) {
         for (const auto& ind : p) {
@@ -212,7 +223,9 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
       PRINTDB("After hull valid: %d", r.is_valid());
       // FIXME: Make sure PolySet is set to convex.
       // FIXME: Can we guarantee a manifold PolySet here?
-      return CGALUtils::createPolySetFromPolyhedron(r);
+      auto result = CGALUtils::createPolySetFromPolyhedron(r);
+      if (result) result->surfaces = surfaces;
+      return result;
     } catch (const CGAL::Failure_exception& e) {
       LOG(message_group::Error, "CGAL error in applyHull3D(): %1$s", e.what());
     }

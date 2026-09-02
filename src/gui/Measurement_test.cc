@@ -1,3 +1,17 @@
+// EXCLUDED FROM THE BUILD - see the stale_test list in CMakeLists.txt.
+//
+// This was written against a Measurement that does not exist. It wants a
+// Measurement::Template<GLView> seam so a FakeGLView can be substituted for the
+// real one, and a Measurement::Result carrying a status and a list of messages
+// with display_text. What src/gui/Measurement.h actually declares is a plain
+// Measurement holding a QGLView* whose statemachine() returns a reverse-ordered
+// std::vector<QString>.
+//
+// So this file is a specification of a testability refactor rather than a test
+// that has drifted: bringing it back means giving Measurement that seam and that
+// return type, not editing the cases below. It has never been compiled by any
+// build - the target was commented out and the glob only looked in src/utils -
+// so it has never passed either.
 #include "Measurement.h"
 
 #include <catch2/catch_all.hpp>

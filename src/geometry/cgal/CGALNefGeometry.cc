@@ -3,10 +3,13 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "geometry/Geometry.h"
 #include "geometry/cgal/cgal.h"
 #include "geometry/cgal/cgalutils.h"
+#include "geometry/Surface.h"
 #include "geometry/linalg.h"
 #include "utils/printutils.h"
 #include "utils/svg.h"
@@ -17,6 +20,7 @@
 CGALNefGeometry::CGALNefGeometry(const CGALNefGeometry& src) : Geometry(src)
 {
   if (src.p3) this->p3 = src.p3;
+  this->surfaces = src.surfaces;
 }
 
 std::unique_ptr<Geometry> CGALNefGeometry::copy() const
@@ -24,26 +28,33 @@ std::unique_ptr<Geometry> CGALNefGeometry::copy() const
   return std::make_unique<CGALNefGeometry>(*this);
 }
 
+// Every boolean keeps both operands' surface records - see mergeSurfaces() for
+// why a subtraction keeps the tool's as well.
 CGALNefGeometry CGALNefGeometry::operator+(const CGALNefGeometry& other) const
 {
-  return {std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) + (*other.p3))};
+  auto merged = this->surfaces;
+  mergeSurfaces(merged, other.surfaces);
+  return {std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) + (*other.p3)), std::move(merged)};
 }
 
 CGALNefGeometry& CGALNefGeometry::operator+=(const CGALNefGeometry& other)
 {
   this->p3 = std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) + (*other.p3));
+  mergeSurfaces(this->surfaces, other.surfaces);
   return *this;
 }
 
 CGALNefGeometry& CGALNefGeometry::operator*=(const CGALNefGeometry& other)
 {
   this->p3 = std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) * (*other.p3));
+  mergeSurfaces(this->surfaces, other.surfaces);
   return *this;
 }
 
 CGALNefGeometry& CGALNefGeometry::operator-=(const CGALNefGeometry& other)
 {
   this->p3 = std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) - (*other.p3));
+  mergeSurfaces(this->surfaces, other.surfaces);
   return *this;
 }
 
@@ -59,6 +70,11 @@ CGALNefGeometry& CGALNefGeometry::minkowski(const CGALNefGeometry& other)
   CGAL_Nef_polyhedron3 op1(*this->p3);
   CGAL_Nef_polyhedron3 op2(*other.p3);
   this->p3 = std::make_shared<CGAL_Nef_polyhedron3>(CGAL::minkowski_sum_3(op1, op2));
+  // A minkowski sum changes every radius it touches, so no declaration survives
+  // it. Dropping them is deliberate: the same decision the Manifold backend
+  // makes, and the one case where a record could still fit some other feature
+  // of the result and be acted on wrongly.
+  this->surfaces.clear();
   return *this;
 }
 
@@ -113,6 +129,15 @@ void CGALNefGeometry::transform(const Transform3d& matrix)
       auto N = std::make_shared<CGAL_Nef_polyhedron3>(*this->p3);
       CGALUtils::transform(*N, matrix);
       this->p3 = N;
+      // Records are held in world coordinates, so they move with the geometry.
+      // A surface which cannot be represented after the transform - a cylinder
+      // under a non uniform scale - is dropped rather than left wrong.
+      std::vector<std::shared_ptr<Surface>> moved;
+      for (const auto& surface : this->surfaces) {
+        auto copy = surface->clone();
+        if (copy->transform(matrix)) moved.push_back(copy);
+      }
+      this->surfaces = std::move(moved);
     }
   }
 }

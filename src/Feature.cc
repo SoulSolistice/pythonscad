@@ -49,6 +49,16 @@ const Feature Feature::ExperimentalVectorSwizzle(
 const Feature Feature::ExperimentalDiscretizationByError(
   "discretization-by-error",
   "Specify the maximum error in $fe and shapes will be segmented appropriately.");
+const Feature Feature::ExperimentalStepAnalyticSurfaces(
+  "step-analytic-surfaces",
+  "Write cylinders and cones in STEP exports as real curved surfaces instead of facets. Only surfaces "
+  "the model declared and which fit the mesh exactly are collapsed; everything else stays faceted.");
+const Feature Feature::ExperimentalStepApproximateSurfaces(
+  "step-approximate-surfaces",
+  "Also fit curved surfaces to regions the exact pass left faceted, such as a helical thread that "
+  "no OpenSCAD primitive could declare. Needs step-analytic-surfaces. A fit is accepted only while "
+  "it stays inside the band the model's own tessellation leaves open, and the worst error is "
+  "reported on every export; anything outside that band stays faceted.");
 const Feature Feature::ExperimentalAiFeatures("ai-features",
                                               "Enable AI features (Note: AI integration is under "
                                               "development and does not connect to external APIs yet).");

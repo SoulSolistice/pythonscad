@@ -100,7 +100,10 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
     }
   }
 
-  return std::make_shared<ManifoldGeometry>(mani, originalIDs, originalIDToColor);
+  // ps.surfaces carries the analytic surfaces the primitives declared; keep
+  // them attached so they survive the boolean operations.
+  return std::make_shared<ManifoldGeometry>(mani, originalIDs, originalIDToColor, std::set<uint32_t>{},
+                                            ps.surfaces);
 }
 
 }  // namespace

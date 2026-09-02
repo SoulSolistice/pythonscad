@@ -34,9 +34,13 @@
 #include "Builtins.h"
 #include "handle_dep.h"
 #include "src/geometry/PolySetBuilder.h"
+#include "src/geometry/Surface.h"
 
+#include <algorithm>  // std::clamp
 #include <cmath>
+#include <map>
 #include <sstream>
+#include <tuple>
 
 #include <src/geometry/PolySetUtils.h>
 #include <src/core/Tree.h>
@@ -69,14 +73,118 @@ std::shared_ptr<const PolySet> childToPolySet(std::shared_ptr<AbstractNode> chil
   return PolySetUtils::getGeometryAsPolySet(geom);
 }
 
-// Credit: inphase Ryan Colyer
-Vector3d Bezier(double t, Vector3d a, Vector3d b, Vector3d c)
+namespace {
+
+/*! One vertex of a fillet gets computed twice, and the two answers differ.
+ *
+ * The rail where an edge strip meets a corner patch is generated once by the
+ * strip, as `p + e_fa - 2f*e_fa + f^2*(e_fa + e_fb)`, and once by the corner, as
+ * `center + mat * Bezier(...)`. Same point, different arithmetic, so they land
+ * one unit in the last place apart - and PolySetBuilder's vertex lookup is
+ * exact, so the mesh ended up with two vertices where it needed one and a crack
+ * between them. A filleted cube exported with 48 quadrilateral holes, one
+ * wherever a strip end meets a corner, and SolidWorks imported it as loose
+ * surfaces rather than a solid.
+ *
+ * Snapping to a grid fixes it, but the grid has to be fine. GRID_FINE is about
+ * 1e-6, coarser than the 1e-7 the exporter uses to decide whether a vertex lies
+ * on a declared surface, so aligning to that would push vertices off the very
+ * patches this file declares. 1e-9 is far above one ulp at any plausible model
+ * size and far below anything that is measured. */
+class VertexSnapper
 {
-  return (a * (1 - t) + b * t) * (1 - t) + (b * (1 - t) + c * t) * t;  // TODO improve
+public:
+  int index(PolySetBuilder& builder, const Vector3d& pt)
+  {
+    const Key key = keyOf(pt);
+    for (int64_t dx = -1; dx <= 1; dx++) {
+      for (int64_t dy = -1; dy <= 1; dy++) {
+        for (int64_t dz = -1; dz <= 1; dz++) {
+          const auto it =
+            known.find(Key{std::get<0>(key) + dx, std::get<1>(key) + dy, std::get<2>(key) + dz});
+          if (it != known.end()) return it->second;
+        }
+      }
+    }
+    return add(builder, pt);
+  }
+
+  /*! Allocate unconditionally, and record the position so later points snap
+   * onto it. The original mesh's vertices go through here rather than through
+   * index(): the fillet relies on vertex i of the input keeping index i, and
+   * merging two of them - however close together - would renumber the rest. */
+  int add(PolySetBuilder& builder, const Vector3d& pt)
+  {
+    const int id = builder.vertexIndex(pt);
+    known.emplace(keyOf(pt), id);
+    return id;
+  }
+
+private:
+  using Key = std::tuple<int64_t, int64_t, int64_t>;
+  static Key keyOf(const Vector3d& pt)
+  {
+    const double res = 1e-9;
+    return Key{(int64_t)llround(pt[0] / res), (int64_t)llround(pt[1] / res),
+               (int64_t)llround(pt[2] / res)};
+  }
+  std::map<Key, int> known;
+};
+
+}  // namespace
+
+// Credit: inphase Ryan Colyer
+/*! The weight that makes a quadratic Bezier through these three points a
+ * circular arc.
+ *
+ * A *polynomial* quadratic through (a, b, c) is a parabola, which is why
+ * fillet(1) did not draw a 1 mm fillet: measured against the axis a true fillet
+ * turns about, it was out by 6% of the radius where the two faces meet at a
+ * right angle, 25% at a 60 degree dihedral, and the corner patch was 9.5% off
+ * the sphere.
+ *
+ * The same three control points with the middle weight at cos(theta/2), theta
+ * being the turn between the two end tangents, is exactly a circular arc - and
+ * the weight comes out of the control points themselves, so nothing upstream has
+ * to compute an axis or solve for tangency. That is what keeps this construction
+ * usable where a circular fillet has no clean definition: faces that are not
+ * perpendicular, edges that are not straight, a radius that changes sharply. In
+ * those cases the legs are no longer equal and the result is an exact conic
+ * rather than a circle, which is the same graceful degradation the polynomial
+ * form had, only now correct wherever a circle was meant.
+ *
+ * cos(theta/2) is sqrt((1 + cos theta) / 2), so this needs no trig call. */
+double BezierWeight(const Vector3d& a, const Vector3d& b, const Vector3d& c)
+{
+  const Vector3d t0 = b - a, t1 = c - b;
+  const double n0 = t0.norm(), n1 = t1.norm();
+  if (n0 < 1e-12 || n1 < 1e-12) return 1.0;  // no tangent to turn between
+  const double cos_theta = std::clamp(t0.dot(t1) / (n0 * n1), -1.0, 1.0);
+  return sqrt((1.0 + cos_theta) / 2.0);
 }
 
-void bezier_patch(PolySetBuilder& builder, Vector3d center, Vector3d dir[3], int concave_1,
-                  int concave_2, int concave_3, int N)
+/*! The rational quadratic through (a, b, c) with an explicitly given weight.
+ *
+ * `Bezier()` reads the weight off the control points it is handed, which is
+ * right wherever those points are the ones the curve is actually drawn between.
+ * It is wrong in one place: bezier_patch() does its arithmetic in a frame it
+ * builds by *pretending* the corner's three directions are perpendicular, and
+ * cos(theta/2) is not affine invariant - the weight measured in that frame
+ * describes a different curve once the frame is sheared back into the world.
+ * That caller measures its weights in world coordinates and passes them here. */
+Vector3d BezierW(double t, const Vector3d& a, const Vector3d& b, const Vector3d& c, double w)
+{
+  const double b0 = (1 - t) * (1 - t), b1 = 2 * t * (1 - t) * w, b2 = t * t;
+  return (a * b0 + b * b1 + c * b2) / (b0 + b1 + b2);
+}
+
+Vector3d Bezier(double t, Vector3d a, Vector3d b, Vector3d c)
+{
+  return BezierW(t, a, b, c, BezierWeight(a, b, c));
+}
+
+void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center, Vector3d dir[3],
+                  int concave_1, int concave_2, int concave_3, int N)
 {
   if ((dir[1].cross(dir[0])).dot(dir[2]) < 0) {
     Vector3d tmp = dir[0];
@@ -96,37 +204,85 @@ void bezier_patch(PolySetBuilder& builder, Vector3d center, Vector3d dir[3], int
   ydir = Vector3d(0, 1, 0) * dir[1].norm();
   zdir = Vector3d(0, 0, 1) * dir[2].norm();
 
-  // now use matrices to transform the vectors into std orientation
+  // The frame above is orthogonal *by construction* - the three directions were
+  // replaced by axis aligned vectors of the same length - and `mat` shears it
+  // back onto the real ones. That is exact for the control points, because an
+  // affine combination commutes with a linear map, and wrong for the weight,
+  // because cos(theta/2) does not: it is measured between tangents, and a shear
+  // changes the angle between them. On a cube `mat` is a signed permutation and
+  // nothing moves, which is why this only ever showed on a corner whose three
+  // edges are not mutually perpendicular - there the corner drew the *image of
+  // a circle*, an ellipse, where the edge strips meeting it drew true circles,
+  // and the two came apart between their shared endpoints. A hexagonal prism
+  // lost 168 edges to it, in twelve lens shaped holes, one per corner.
+  //
+  // So every weight below is measured in world coordinates and handed to
+  // BezierW, while the points stay in the frame that makes the coordinate mix
+  // meaningful. The rails then agree with the strips' rails to the last bit,
+  // being the same expression on the same inputs.
   //
   //  N = floor(N/2)*2 + 1;
   Vector3d pt;
+  const Vector3d apex_l = zdir + 2 * (concave_1 + concave_2) * (xdir + ydir);
+  const Vector3d xdir_w = mat * xdir, ydir_w = mat * ydir, zdir_w = mat * zdir;
+  const Vector3d apex_w = mat * apex_l;
+  const double w_xz = BezierWeight(xdir_w, xdir_w + zdir_w, apex_w);
+  const double w_yz = BezierWeight(ydir_w, ydir_w + zdir_w, apex_w);
   std::vector<Vector3d> points_xz;
   std::vector<Vector3d> points_yz;
   for (int i = 0; i < N; i++) {
     double t = (double)i / (double)(N - 1);
-    points_xz.push_back(
-      Bezier(t, xdir, xdir + zdir, zdir + 2 * (concave_1 + concave_2) * (xdir + ydir)));
-    points_yz.push_back(
-      Bezier(t, ydir, ydir + zdir, zdir + 2 * (concave_1 + concave_2) * (xdir + ydir)));
+    points_xz.push_back(BezierW(t, xdir, xdir + zdir, apex_l, w_xz));
+    points_yz.push_back(BezierW(t, ydir, ydir + zdir, apex_l, w_yz));
+  }
+
+  // The same statement for the corner. Every row of this patch is a quadratic
+  // Bezier between the two rails through a control point mixing their
+  // coordinates, and each of those three is itself quadratic in the row
+  // parameter, which makes the whole thing a tensor product of degree (2,2)
+  // rather than the triangular patch it looks like. Its last row is the apex
+  // three times - a singular point, and the usual way a rounded corner is
+  // written.
+  {
+    std::vector<Vector3d> net{xdir,        xdir + ydir, ydir,   xdir + zdir, xdir + ydir + zdir,
+                              ydir + zdir, apex_l,      apex_l, apex_l};
+    // Rational in both directions, with the weight of each read off that
+    // direction's own boundary - the column for u, the row for v - and the net
+    // weight their product. The rows Bezier() draws between the two rails turn
+    // through the same angle as the row of the net does, which is why one scalar
+    // per direction describes the whole patch. On a cube corner both come out at
+    // cos 45 degrees and the patch is then exactly an octant of a sphere: this
+    // net, degenerate apex row and all, is the classical exact one.
+    // Placed into the world *before* the weights are read off it, for the reason
+    // above: cos(theta/2) has to be the angle the curve really turns through,
+    // not the one it turns through in the frame the arithmetic uses. Adding
+    // `center` is harmless either way, the weight being built from differences.
+    for (auto& p : net) p = center + mat * p;
+    const double wu = BezierWeight(net[0], net[3], net[6]);
+    const double wv = BezierWeight(net[0], net[1], net[2]);
+    std::vector<double> wnet{1.0, wv, 1.0, wu, wu * wv, wu, 1.0, wv, 1.0};
+    builder.addSurface(std::make_shared<BezierPatchSurface>(2, 2, std::move(net), std::move(wnet)));
   }
 
   std::vector<int> points;
   for (int i = 0; i < N; i++) {
     if (i == N - 1) {
-      pt = zdir + 2 * (concave_1 + concave_2) * (xdir + ydir);
-      pt = mat * pt;
-      points.push_back(builder.vertexIndex(pt + center));
+      points.push_back(snap.index(builder, apex_w + center));
     } else {
       int M = N - i;
+      // The control point between the two rails mixes their coordinates, which
+      // only means anything in the axis aligned frame - so it is formed there
+      // and all three are carried into the world before the curve is drawn,
+      // where the angle it turns through is the real one.
+      const Vector3d mid_l(points_xz[i][0], points_yz[i][1], points_xz[i][2]);
+      const Vector3d a_w = mat * points_xz[i], b_w = mat * mid_l, c_w = mat * points_yz[i];
       for (int j = 0; j < M; j++) {
         int k;
         if (concave_1 == 1 || concave_3 == 1) k = j;
         else k = M - 1 - j;
         double t2 = (double)k / (double)(M - 1);
-        pt = Bezier(t2, points_xz[i], Vector3d(points_xz[i][0], points_yz[i][1], points_xz[i][2]),
-                    points_yz[i]);
-        pt = mat * pt;
-        points.push_back(builder.vertexIndex(center + pt));
+        pt = Bezier(t2, a_w, b_w, c_w);
+        points.push_back(snap.index(builder, center + pt));
       }
     }
   }
@@ -230,7 +386,6 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
   std::vector<std::vector<int>> corner_rounds;
   do {
     improved = false;  // fix short edges until happy
-    std::vector<int> lockouts;
 
     polinds.clear();
     polposs.clear();
@@ -273,131 +428,279 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
         if (polinds[e.first.ind2].size() != 3) continue;  // start must be 3edge corner
 
         e.second.sel = 1;
-        corner_rounds[e.first.ind1].push_back(e.first.ind2);
-        corner_rounds[e.first.ind2].push_back(e.first.ind1);
       }
     }
-    /* TODO activate
+    // A face too small to carry the fillet is dropped and its neighbours
+    // extended to meet where it was. This runs before the edge pass below and
+    // is the operation that pass could not perform: collapsing an *edge* of
+    // such a face is over-determined - four planes through one point - and is
+    // available only where the edge is already degenerate, while collapsing the
+    // face itself is three planes through one point, which is exactly
+    // determined and needs no tolerance to be met by luck. On a cube with a cut
+    // corner the intersection is exact, the result manifold, every face still
+    // planar and the sharp corner restored, where every edge collapse of the
+    // same shape is refused.
+    //
+    // What makes a face collapsible is not its size on its own. A finely
+    // tessellated sphere is nothing but faces smaller than the radius, and
+    // dropping those would eat the model. The gate is that all three of its
+    // edges were *selected for rounding* just above - so each is a genuine
+    // sharp edge between two 3-edge corners, steeper than minang - and that all
+    // three are shorter than 2r, so no arc of radius r fits along any of them.
+    // A face like that is a chamfer or a sliver the fillet cannot round, and
+    // the three fillets that would be drawn around it would collide. A smooth
+    // tessellation never reaches here: its edges are too shallow to be selected
+    // and its vertices carry more than three faces.
+    //
+    // Only triangles. A quadrilateral's four neighbours are over-determined
+    // again, which is the case the edge pass already documents; the general
+    // n-sided version wants the same least squares treatment and is not needed
+    // by anything yet.
+    for (int f = 0; f < int(merged.size()); f++) {
+      if (merged[f].size() != 3) continue;
+      const int v[3] = {merged[f][0], merged[f][1], merged[f][2]};
+      if (v[0] == v[1] || v[1] == v[2] || v[2] == v[0]) continue;
 
-        // eliminate  too short edges by extrapolating the neighboring edges
-        for(auto &e: edge_db) {
-          if(!e.second.sel) continue;
-          Vector3d line = vertices_copy[e.first.ind1] - vertices_copy[e.first.ind2];
-          if(line.norm() < 2*r_) {
-
-            int a_prev=-1, a_next=-1;
-            int b_prev=-1, b_next=-1;
-
-            if(std::find(lockouts.begin(), lockouts.end(), e.first.ind1) != lockouts.end()) continue;
-            if(std::find(lockouts.begin(), lockouts.end(), e.first.ind2) != lockouts.end()) continue;
-            auto &facea = merged[e.second.facea];
-            int na=facea.size();
-            for(int i=0;i<na;i++) {
-              if(facea[i] == e.first.ind1){
-                a_prev = facea[(i+na-1)%na];
-                a_next = facea[(i+na+2)%na];
-              }
-            }
-
-            auto &faceb = merged[e.second.faceb];
-            int nb=faceb.size();
-            for(int i=0;i<nb;i++) {
-              if(faceb[i] == e.first.ind2){
-                b_prev = faceb[(i+nb-1)%nb];
-                b_next = faceb[(i+nb+2)%nb];
-              }
-            }
-
-            if(std::find(lockouts.begin(), lockouts.end(), a_prev) != lockouts.end()) continue;
-            if(std::find(lockouts.begin(), lockouts.end(), a_next) != lockouts.end()) continue;
-            if(std::find(lockouts.begin(), lockouts.end(), b_prev) != lockouts.end()) continue;
-            if(std::find(lockouts.begin(), lockouts.end(), b_next) != lockouts.end()) continue;
-
-            // is it safe to take the bigger face ?
-            int commonfaceind=-1, faceind1=-1, faceind2=-1;
-            EdgeKey ek1, ek2;
-            if(nb > na) {
-              commonfaceind=e.second.faceb; // TODO b hat die richtigen punkte
-              ek1 = EdgeKey(b_prev, e.first.ind2);
-              ek2 = EdgeKey(e.first.ind1, b_next);
-            } else { // na  > nb)
-              commonfaceind=e.second.facea; // TODO b hat die richtigen punkte
-              ek1 = EdgeKey(a_prev, e.first.ind1);
-              ek2 = EdgeKey(e.first.ind2, a_next);
-            }
-
-            if(edge_db.count(ek1)) {
-              auto &ev1 = edge_db.at(ek1);
-              if(ev1.facea == commonfaceind) faceind1= ev1.faceb;
-              if(ev1.faceb == commonfaceind) faceind1= ev1.facea;
-            }
-
-            // find opposite of e.first.ind1, b_next)
-            if(edge_db.count(ek2)) {
-              auto &ev2 = edge_db.at(ek2);
-              if(ev2.facea == commonfaceind) faceind2= ev2.faceb;
-              if(ev2.faceb == commonfaceind) faceind2= ev2.facea;
-            }
-
-            Vector3d fn1 =calcTriangleNormal(vertices_copy, merged[commonfaceind]).head<3>();
-            Vector3d fn2 =calcTriangleNormal(vertices_copy, merged[faceind1]).head<3>();
-            Vector3d fn3 =calcTriangleNormal(vertices_copy, merged[faceind2]).head<3>();
-
-            Vector3d fp1 = vertices_copy[merged[commonfaceind][0]];
-            Vector3d fp2 = vertices_copy[merged[faceind1][0]];
-            Vector3d fp3 = vertices_copy[merged[faceind2][0]];
-            Vector3d ptcut;
-            if(cut_face_face_face(fp1, fn1, fp2, fn2, fp3, fn3, ptcut,nullptr)) {
-              printf("Error during cutting\n");
-              e.second.sel=0;
-              continue;
-            }
-            //
-            // change is going to happen
-            vertices_copy[e.first.ind1]=ptcut;
-            lockouts.push_back(ek1.ind1);
-            lockouts.push_back(ek1.ind2);
-            lockouts.push_back(ek2.ind1);
-            lockouts.push_back(ek2.ind2);
-
-            for(int j=0;j<merged.size();j++) {
-              auto &tri = merged[j];
-              int n = tri.size();
-              int dupind=-1;
-              for(int i=0;i<n;i++)
-              {
-                if(tri[i] == e.first.ind2){
-                  tri[i] =e.first.ind1;
-                  if(tri[(i+1)%n] == e.first.ind1 || tri[(i+n-1)%n] == e.first.ind1) {
-                    dupind=i;
-                  }
-                }
-              }
-              if(dupind != -1) {
-                IndexedFace tri_new;
-                for(int i=0;i<dupind;i++) tri_new.push_back(tri[i]);
-                for(int i=dupind+1;i<n;i++) tri_new.push_back(tri[i]);
-                tri = tri_new;
-                n--;
-              }
-              if(n < 3) {
-                    merged.erase(merged.begin()+j);
-                    j--;
-              }
-            }
-            improved=true;
-          // TODO lockout
-          }
-
+      bool candidate = true;
+      int neigh[3] = {-1, -1, -1};
+      for (int i = 0; i < 3 && candidate; i++) {
+        const int a = v[i], b = v[(i + 1) % 3];
+        const auto it = edge_db.find(EdgeKey(a, b));
+        if (it == edge_db.end() || !it->second.sel) candidate = false;
+        else if ((vertices_copy[a] - vertices_copy[b]).norm() >= 2 * r_) candidate = false;
+        else {
+          if (it->second.facea == f) neigh[i] = it->second.faceb;
+          else if (it->second.faceb == f) neigh[i] = it->second.facea;
+          if (neigh[i] < 0 || neigh[i] >= int(merged.size()) || merged[neigh[i]].size() < 3)
+            candidate = false;
         }
-    */
+      }
+      if (!candidate) continue;
+      // Three distinct neighbours, or the "intersection" is two planes and a
+      // repeat of one of them: a line, not a point.
+      if (neigh[0] == neigh[1] || neigh[1] == neigh[2] || neigh[0] == neigh[2]) continue;
+
+      Eigen::Matrix3d planes;
+      Vector3d offsets;
+      for (int i = 0; i < 3; i++) {
+        const Vector4d plane = calcTriangleNormal(vertices_copy, merged[neigh[i]]);
+        planes.row(i) = plane.head<3>().transpose();
+        offsets[i] = plane[3];  // the plane is norm . x == offset
+      }
+      const Vector3d ptcut = planes.colPivHouseholderQr().solve(offsets);
+      double residual = 0;
+      for (int i = 0; i < 3; i++) {
+        residual = std::max(residual, fabs(planes.row(i).dot(ptcut) - offsets[i]));
+      }
+
+      // Exactly determined does not mean well conditioned: three planes meeting
+      // at a very shallow angle put the point far away while the residual stays
+      // small, so where it *landed* is checked too. The restored corner of a cut
+      // one sits within the face's own circumradius of its centre - 0.577 of the
+      // cut against a circumradius of 0.816 - so a few times that is generous
+      // and still bounded, where the ill-conditioned case is unbounded.
+      const Vector3d centre = (vertices_copy[v[0]] + vertices_copy[v[1]] + vertices_copy[v[2]]) / 3.0;
+      double rad = 0;
+      for (int i = 0; i < 3; i++) rad = std::max(rad, (vertices_copy[v[i]] - centre).norm());
+      if (!ptcut.allFinite() || residual > 1e-3 * r_ || (ptcut - centre).norm() > 4 * rad) {
+        LOG(message_group::Warning,
+            "fillet() left the small face %1$d-%2$d-%3$d unrounded: its three edges are all "
+            "shorter than the diameter of the fillet, but the faces around it do not meet at a "
+            "usable point. Reduce the radius, or remove the small face from the model.",
+            v[0], v[1], v[2]);
+        continue;
+      }
+
+      // Merge all three corners into the point they become. Every neighbour
+      // keeps its plane - the new point lies on all three by construction - so
+      // nothing else in the mesh has to move, and the face itself shrinks to a
+      // single index and is dropped by the same cleanup.
+      vertices_copy[v[0]] = ptcut;
+      for (int j = 0; j < int(merged.size()); j++) {
+        IndexedFace& face = merged[j];
+        for (auto& ind : face) {
+          if (ind == v[1] || ind == v[2]) ind = v[0];
+        }
+        IndexedFace cleaned;
+        for (const int ind : face) {
+          if (!cleaned.empty() && cleaned.back() == ind) continue;
+          cleaned.push_back(ind);
+        }
+        while (cleaned.size() > 1 && cleaned.front() == cleaned.back()) cleaned.pop_back();
+        if (cleaned.size() < 3) {
+          merged.erase(merged.begin() + j);
+          j--;
+          continue;
+        }
+        face = cleaned;
+      }
+
+      // One collapse per pass, for the same reason the edge pass takes one: the
+      // face indices in edge_db, polinds and polposs all shift when a face is
+      // erased. The enclosing do-while rebuilds them.
+      improved = true;
+      break;
+    }
+
+    // Where an edge is shorter than 2r the arc cannot close along it, so the two
+    // corners are merged into one and the faces around them extended to meet at
+    // that point. An arc of radius r genuinely cannot be drawn along a shorter
+    // edge - a parabola through the same control points quietly produced
+    // something, which is one reason this pass was never needed before.
+    //
+    // The collapse is over-determined, and that is the whole difficulty. Both
+    // endpoints are 3-edge corners (the selection above requires it), so *four*
+    // planes surround the pair: the two sharing the edge, plus the third face at
+    // either end. The merged vertex has to lie on all four, and four planes
+    // through one point is one equation too many unless they are concurrent.
+    //
+    // Cutting three of them and ignoring the fourth - which is what this did
+    // while it was disabled - puts the vertex off that face by an amount linear
+    // in the edge length, with a factor the angles set and nothing bounds: 2.13
+    // times the length on one ordinary configuration, so a 0.5 mm edge moved the
+    // vertex 1 mm off a face it should have been on, and with two of the planes
+    // nearly parallel a 0.1 mm edge landed 12 units away with no error reported,
+    // because the determinant was not zero. An edge length is therefore the wrong
+    // gate. All four planes go in, in least squares, and the residual - which is
+    // exactly their non-concurrency - decides.
+    //
+    // Which bounds what this pass can do, and the bound is algebraic rather than
+    // a matter of tuning the tolerance. Corner one is facea & faceb & third1 and
+    // corner two is facea & faceb & third2, so if all four planes share a point
+    // then *both* corners are that point and the edge has zero length. A short
+    // edge of non-zero length therefore always has a non-zero residual - measured
+    // at 0.2887 times the length on a cube with a cut corner, at every size from
+    // 0.4 down to 1e-9 - and a collapse to one point is only available where the
+    // edge is already degenerate. That is worth having: a boolean leaves slivers
+    // and they are cleaned up here, verified to leave the mesh manifold. But it
+    // is not what removes a real short edge.
+    //
+    // What does, for a real one, is collapsing the small *face* rather than one
+    // of its edges, which is the pass above: three planes rather than four, so
+    // exactly determined. Between them the two cover the cases - a sliver left
+    // by a boolean here, a chamfer too small to round there - and what is left
+    // over is refused below: the edge is left unrounded and says why, rather
+    // than being filleted with two arcs that cannot both fit along it.
+    for (auto& e : edge_db) {
+      if (improved) break;  // a face was already collapsed this pass
+      if (!e.second.sel) continue;
+      const int ind1 = e.first.ind1, ind2 = e.first.ind2;
+      if ((vertices_copy[ind1] - vertices_copy[ind2]).norm() >= 2 * r_) continue;
+
+      const int facea_ind = e.second.facea, faceb_ind = e.second.faceb;
+      const int posa = e.second.posa;
+      if (facea_ind < 0 || faceb_ind < 0 || posa < 0) continue;
+      const IndexedFace& facea = merged[facea_ind];
+      const int na = int(facea.size());
+      // facea traverses the edge ind1 -> ind2 and faceb the other way round, so
+      // the two faces to extend are the ones across facea's neighbouring edges:
+      // the one before ind1 and the one after ind2. posa says where the edge sits
+      // without searching for it again.
+      if (posa >= na || na < 4) continue;
+      if (facea[posa] != ind1 || facea[(posa + 1) % na] != ind2) continue;
+      const int a_prev = facea[(posa + na - 1) % na];
+      const int a_next = facea[(posa + 2) % na];
+      if (a_prev == ind2 || a_next == ind1 || a_prev == a_next) continue;
+
+      // The third face at either end is the one on the other side of that
+      // neighbouring edge. At a 3-edge corner it can only be the third face, but
+      // check rather than assume: everything below dereferences it.
+      auto other_face = [&](const EdgeKey& key) {
+        const auto it = edge_db.find(key);
+        if (it == edge_db.end()) return -1;
+        if (it->second.facea == facea_ind) return it->second.faceb;
+        if (it->second.faceb == facea_ind) return it->second.facea;
+        return -1;
+      };
+      const int third1 = other_face(EdgeKey(a_prev, ind1));
+      const int third2 = other_face(EdgeKey(ind2, a_next));
+      const int around[4] = {facea_ind, faceb_ind, third1, third2};
+      bool usable = true;
+      Eigen::Matrix<double, 4, 3> planes;
+      Eigen::Matrix<double, 4, 1> offsets;
+      for (int i = 0; i < 4; i++) {
+        if (around[i] < 0 || around[i] >= int(merged.size()) || merged[around[i]].size() < 3) {
+          usable = false;
+          break;
+        }
+        const Vector4d plane = calcTriangleNormal(vertices_copy, merged[around[i]]);
+        planes.row(i) = plane.head<3>().transpose();
+        offsets[i] = plane[3];  // the plane is norm . x == offset
+      }
+      if (!usable || third1 == faceb_ind || third2 == faceb_ind || third1 == third2) continue;
+
+      const Vector3d ptcut = planes.colPivHouseholderQr().solve(offsets);
+      double residual = 0;
+      for (int i = 0; i < 4; i++) {
+        residual = std::max(residual, fabs(planes.row(i).dot(ptcut) - offsets[i]));
+      }
+      // One thousandth of the radius: the merged vertex is then off each face by
+      // less than a micron on a 1 mm fillet, and the arcs drawn tangent to those
+      // faces inherit that error and no more. Beyond it the faces genuinely do
+      // not meet at a point and there is nothing to collapse to, so the edge is
+      // left unrounded rather than moved somewhere invented - and said out loud,
+      // because a silently dropped feature looks exactly like one that was never
+      // asked for.
+      if (!ptcut.allFinite() || residual > 1e-3 * r_) {
+        LOG(message_group::Warning,
+            "fillet() left edge %1$d-%2$d unrounded: it is shorter than the diameter of the fillet, "
+            "and the four faces around it miss a common point by %3$s, so there is no vertex to "
+            "collapse it to. Reduce the radius, or remove the short edge from the model.",
+            ind1, ind2, residual);
+        e.second.sel = 0;
+        continue;
+      }
+
+      // Merge ind2 into ind1 at the point they both become.
+      vertices_copy[ind1] = ptcut;
+      for (int j = 0; j < int(merged.size()); j++) {
+        IndexedFace& tri = merged[j];
+        int n = int(tri.size());
+        int dupind = -1;
+        for (int i = 0; i < n; i++) {
+          if (tri[i] != ind2) continue;
+          tri[i] = ind1;
+          if (tri[(i + 1) % n] == ind1 || tri[(i + n - 1) % n] == ind1) dupind = i;
+        }
+        if (dupind != -1) {
+          tri.erase(tri.begin() + dupind);
+          n--;
+        }
+        if (n < 3) {
+          merged.erase(merged.begin() + j);
+          j--;
+        }
+      }
+
+      // One collapse per pass, then start over. edge_db holds facea and faceb as
+      // *indices* into merged, and polinds, polposs and corner_rounds index it
+      // too; erasing a face here shifts every later index, so carrying on round
+      // this loop would read the wrong faces. The enclosing do-while rebuilds all
+      // of them, which is also why no lockout list is needed to keep two
+      // collapses in one pass from interfering.
+      improved = true;
+      break;
+    }
+
+    // Which rounded edges meet at each corner, built from the selection that
+    // *survived* the pass above rather than the one that entered it. An edge
+    // refused there is not rounded, and a corner which still lists it draws a
+    // patch whose rails were never drawn: cube(10) with fillet(5.1) left every
+    // edge sharp and every corner rounded, and the result was a mesh whose own
+    // volume, 1532, exceeded the 1000 of the box it sits in.
+    for (auto& e : edge_db) {
+      if (!e.second.sel) continue;
+      corner_rounds[e.first.ind1].push_back(e.first.ind2);
+      corner_rounds[e.first.ind2].push_back(e.first.ind1);
+    }
   } while (improved == true);
 
   // start builder with existing vertices to have VertexIndex available
   //
   PolySetBuilder builder;
+  VertexSnapper snap;
   for (size_t i = 0; i < vertices_copy.size(); i++) {
-    builder.vertexIndex(vertices_copy[i]);  // allocate all vertices in the right order
+    snap.add(builder, vertices_copy[i]);  // allocate all vertices in the right order
   }
 
   SearchReplace s;
@@ -545,13 +848,34 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
       e_fb2 *= r_;
 
       // Calculate bezier patches
+      //
+      // Through the shared Bezier() rather than the expanded polynomial this
+      // used to spell out. Two reasons: the rail is now rational, and the
+      // expansion was the second of two ways to compute the same point - the
+      // corner patch computes the shared rail the other way, the two landed one
+      // unit in the last place apart, and every filleted body was non-manifold
+      // because of it. One arithmetic, one answer.
       for (int i = 0; i < bn; i++) {
         double f = (double)i / (double)(bn - 1);  // from 0 to 1
-        e.second.bez1.push_back(
-          builder.vertexIndex(p1 + e_fa1 - 2 * f * e_fa1 + f * f * (e_fa1 + e_fb1)));
-        e.second.bez2.push_back(
-          builder.vertexIndex(p2 + e_fa2 - 2 * f * e_fa2 + f * f * (e_fa2 + e_fb2)));
+        e.second.bez1.push_back(snap.index(builder, Bezier(f, p1 + e_fa1, p1, p1 + e_fb1)));
+        e.second.bez2.push_back(snap.index(builder, Bezier(f, p2 + e_fa2, p2, p2 + e_fb2)));
       }
+
+      // Say what was just drawn. Expanding the rail above,
+      // p + e_fa - 2f*e_fa + f^2*(e_fa + e_fb) is the quadratic Bezier through
+      // the control points (p + e_fa, p, p + e_fb): it leaves one of the two
+      // faces meeting at this edge, is controlled by the original edge vertex,
+      // and arrives on the other. The strip is the ruled surface between the
+      // two rails, so it is a tensor product of degree (2,1) and the net is
+      // those six points - the same numbers the loop was already evaluating,
+      // which is why this needs no fitting and cannot drift from the mesh.
+      // The weights are the ones Bezier() just drew with, one per rail: where
+      // the edge is straight and the radius constant the two are equal and the
+      // strip is exactly a piece of a cylinder.
+      builder.addSurface(std::make_shared<BezierPatchSurface>(
+        2, 1, std::vector<Vector3d>{p1 + e_fa1, p2 + e_fa2, p1, p2, p1 + e_fb1, p2 + e_fb2},
+        std::vector<double>{1.0, 1.0, BezierWeight(p1 + e_fa1, p1, p1 + e_fb1),
+                            BezierWeight(p2 + e_fa2, p2, p2 + e_fb2), 1.0, 1.0}));
       s.pol = e.second.facea;  // laengsseite1
       s.search = e.first.ind1;
       s.replace = {e.second.bez1[0]};
@@ -778,8 +1102,8 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
         for (int i = 0; i < 3; i++) {
           pdir[i] = -dir[(i + dirshift) % 3];
         }
-        bezier_patch(builder, ps->vertices[i] - pdir[0] - pdir[1] - pdir[2], pdir, conc1, conc2, conc3,
-                     bn);
+        bezier_patch(builder, snap, ps->vertices[i] - pdir[0] - pdir[1] - pdir[2], pdir, conc1, conc2,
+                     conc3, bn);
       }
     }
   }

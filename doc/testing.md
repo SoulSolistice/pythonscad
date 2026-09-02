@@ -29,6 +29,55 @@ From your build directory:
   * **Bugs:** Test known bugs (tests will fail).
   * **All:** Test everything.
 
+## Unit Tests
+
+The Catch2 unit tests build into one executable, `OpenSCADUnitTests`, and each
+`TEST_CASE` is registered with ctest under its own name with its Catch2 tags as
+ctest labels:
+
+```bash
+ctest -R "calculate"            # by test case name
+ctest -L geometry               # by Catch2 tag
+./OpenSCADUnitTests             # or run the executable directly
+./OpenSCADUnitTests "[bezier]"  # Catch2's own filtering, tags included
+./OpenSCADUnitTests --list-tests
+```
+
+A test lives beside the code it covers, in a file named `*_test.cc` anywhere
+under `src/`; nothing else is needed to register it. Files under `src/gui/` are
+compiled only when the build has a GUI, since they need Qt.
+
+Two files are excluded by name in the `stale_test` list in `CMakeLists.txt`:
+`src/gui/Measurement_test.cc` and `src/geometry/linear_extrude_test.cc`. Neither
+has ever been compiled by any build, and neither builds against the code as it
+now stands - one needs a testability seam on `Measurement` that does not exist,
+the other declares internals of `linear_extrude.cc` that have since moved. Each
+says so at the top of the file. Deleting its line from that list is the last
+step of porting one.
+
+Catch2 3.3 or newer is required. MSYS2 packages it and the msys2 dependency
+profile asks for it (`catch:p`), so a Windows build uses the package. Where the
+distribution has no suitable Catch2 the build downloads one at configure time
+instead, so the tests are available on every platform. Two options control this:
+
+* `-DENABLE_UNIT_TESTS=OFF`: do not build or register them at all. They are also
+  skipped automatically for a cross build or an Emscripten build, where ctest
+  could not run the result.
+* `-DFETCH_CATCH2=OFF`: require a system Catch2 and warn instead of downloading.
+  `-DCATCH2_FETCH_TAG=` picks the tag that gets fetched otherwise.
+
+Test discovery runs at test time rather than at build time (`DISCOVERY_MODE
+PRE_TEST`). This matters on Windows: the default is to run the freshly linked
+executable as part of the build, and the build tree has no DLLs beside it - only
+`cmake --install` gathers them - so build-time discovery fails and takes the
+build with it. See *Windows + MSYS2* below for the same problem in its other
+form.
+
+A test case may report `SKIP()` for an input whose expected value the code does
+not currently produce; ctest shows those as `Skipped` rather than failed. A real
+failure elsewhere in the same test case still fails the run, so a skip cannot
+mask a regression.
+
 ## Running GUI Tests
 
 GUI tests verify the user interface behavior. They require a window system to run (even if headless).
@@ -185,6 +234,50 @@ option may break in the future and require tweaking to get working again.
 There are sporadic reports of problems running on remote machines with proprietary GL
 drivers. Try doing a web search for your exact error message to see solutions and
 workarounds that others have found.
+
+### Windows + MSYS2
+
+The tests run the binary straight out of the build tree, but a build tree binary
+has no DLLs next to it. `cmake --install` is what gathers them: the
+`install(RUNTIME_DEPENDENCY_SET ...)` rule walks the executable's imports and
+copies the MSYS2 DLLs into the install prefix. Without that, launching
+`build/pythonscad.com` fails before it reaches `main`, and every test fails with
+exit status 3221225781 (`0xC0000135`, "required DLL not found").
+
+Note that the DLL named in the error is often misleading: MSYS2 resolves imports
+by searching the filesystem and does not understand Windows API sets, so it
+tends to report an `api-ms-win-crt-*.dll` that is virtual and never existed as a
+file.
+
+Install into a staging tree and point the tests at it:
+
+```bash
+cmake --build build -j4
+cmake --install build --prefix build/staging
+OPENSCAD_BINARY="E:/path/to/pythonscad/build/staging/pythonscad.com" cmake -B build <options>
+ctest --test-dir build -R <pattern> --output-on-failure
+```
+
+Use a native `E:/...` path rather than an MSYS `/e/...` one; CMake is a native
+Windows program and will not resolve the latter.
+
+Two things that mislead while debugging a Windows build:
+
+* The `pythonscad.com` wrapper only writes to a real Windows console. Run it
+  from `cmd.exe` and it prints normally; run it from an MSYS2 shell and it
+  produces no output at all, however the command succeeded. Redirecting to a
+  file, or letting a program capture it (which is what the test drivers do),
+  works from either shell.
+* The version reported by `--info` is baked in by `configure_file()` when cmake
+  runs, not when the code is compiled, so after a plain rebuild it still names
+  the commit cmake last saw. To tell whether a binary contains a given change,
+  check the timestamp of the executable or look for the change's behaviour -
+  not the version string.
+
+Re-run `cmake --install` after every rebuild, otherwise the tests keep exercising
+the previously staged binary. `OPENSCAD_BINARY` is read at configure time and
+baked into `CTestTestfile.cmake`, so a later `cmake -B build` without it in the
+environment sends the tests back to the build tree binary.
 
 ### Windows + MSVC
 

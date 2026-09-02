@@ -2,3 +2,7 @@
 MD013:
   line_length: 120
   code_block_line_length: 120
+  # A table row cannot be wrapped without destroying the table, and the STEP
+  # docs lean on tables to line measurements up against each other. Exempting
+  # them keeps the rule meaningful for prose, which is where it earns its keep.
+  tables: false

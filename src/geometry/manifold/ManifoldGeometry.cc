@@ -45,11 +45,13 @@ ManifoldGeometry::ManifoldGeometry() : manifold_(manifold::Manifold())
 
 ManifoldGeometry::ManifoldGeometry(manifold::Manifold mani, const std::set<uint32_t>& originalIDs,
                                    const std::map<uint32_t, Color4f>& originalIDToColor,
-                                   const std::set<uint32_t>& subtractedIDs)
+                                   const std::set<uint32_t>& subtractedIDs,
+                                   const std::vector<std::shared_ptr<Surface>>& surfaces)
   : manifold_(std::move(mani)),
     originalIDs_(originalIDs),
     originalIDToColor_(originalIDToColor),
-    subtractedIDs_(subtractedIDs)
+    subtractedIDs_(subtractedIDs),
+    surfaces_(surfaces)
 {
 }
 
@@ -143,6 +145,7 @@ std::shared_ptr<PolySet> ManifoldGeometry::toPolySet() const
 
   ps->colors.reserve(originalIDToColor_.size());
   ps->color_indices.reserve(ps->indices.size());
+  ps->original_ids.reserve(ps->indices.size());
 
   auto colorScheme = ColorMap::instance().findColorScheme(RenderSettings::inst()->colorscheme);
   int32_t faceFrontColorIndex = -1;
@@ -203,9 +206,17 @@ std::shared_ptr<PolySet> ManifoldGeometry::toPolySet() const
       ps->indices.push_back({static_cast<int>(mesh.triVerts[i]), static_cast<int>(mesh.triVerts[i + 1]),
                              static_cast<int>(mesh.triVerts[i + 2])});
       ps->color_indices.push_back(colorIndex);
+      // The same id the colour is derived from, kept as itself. See
+      // PolySet::original_ids for why a downstream gate wants it.
+      ps->original_ids.push_back(static_cast<int32_t>(id));
     }
     start = end;
   }
+
+  // Hand the analytic surfaces on to whoever consumes the PolySet; the STEP
+  // exporter uses them to tell a faceted cylinder from a prism.
+  ps->surfaces = surfaces_;
+
   return ps;
 }
 
@@ -285,7 +296,14 @@ ManifoldGeometry ManifoldGeometry::binOp(const ManifoldGeometry& lhs, const Mani
     originalIDToColor.insert(rhs.originalIDToColor_.begin(), rhs.originalIDToColor_.end());
     subtractedIDs.insert(rhs.subtractedIDs_.begin(), rhs.subtractedIDs_.end());
   }
-  return {mani, originalIDs, originalIDToColor, subtractedIDs};
+
+  // Keep the analytic surfaces of both operands. A cylinder used as a tool
+  // leaves a bore of the same axis and radius behind, so the surfaces of the
+  // right hand side stay meaningful for a subtraction too.
+  auto surfaces = lhs.surfaces_;
+  mergeSurfaces(surfaces, rhs.surfaces_);
+
+  return {mani, originalIDs, originalIDToColor, subtractedIDs, surfaces};
 }
 
 std::shared_ptr<ManifoldGeometry> minkowskiOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs)
@@ -366,6 +384,18 @@ void ManifoldGeometry::transform(const Transform3d& mat)
     {mat(0, 0), mat(1, 0), mat(2, 0)}, {mat(0, 1), mat(1, 1), mat(2, 1)},
     {mat(0, 2), mat(1, 2), mat(2, 2)}, {mat(0, 3), mat(1, 3), mat(2, 3)});
   manifold_ = getManifold().Transform(glMat);
+
+  // The surfaces are recorded in world coordinates, so they move with the
+  // geometry. Copy before transforming: the same surface may still be
+  // referenced by another geometry. Anything a similarity cannot carry (a non
+  // uniform scale turns a cylinder into an ellipse) is dropped rather than
+  // kept wrong.
+  std::vector<std::shared_ptr<Surface>> moved;
+  for (const auto& surface : surfaces_) {
+    auto copy = surface->clone();
+    if (copy->transform(mat)) moved.push_back(copy);
+  }
+  surfaces_ = std::move(moved);
 }
 
 void ManifoldGeometry::setColor(const Color4f& c)

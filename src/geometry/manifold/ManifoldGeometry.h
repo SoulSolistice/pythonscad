@@ -11,7 +11,10 @@
 #include <set>
 #include <string>
 
+#include <vector>
+
 #include "geometry/Geometry.h"
+#include "geometry/Surface.h"
 #include "geometry/linalg.h"
 
 namespace manifold {
@@ -28,7 +31,8 @@ public:
   ManifoldGeometry();
   ManifoldGeometry(manifold::Manifold object, const std::set<uint32_t>& originalIDs = {},
                    const std::map<uint32_t, Color4f>& originalIDToColor = {},
-                   const std::set<uint32_t>& subtractedIDs = {});
+                   const std::set<uint32_t>& subtractedIDs = {},
+                   const std::vector<std::shared_ptr<Surface>>& surfaces = {});
   ManifoldGeometry(const ManifoldGeometry& other) = default;
 
   [[nodiscard]] bool isEmpty() const override;
@@ -72,6 +76,13 @@ public:
 
   const manifold::Manifold& getManifold() const;
 
+  /*! The analytic surfaces this geometry carries. See surfaces_ below. */
+  [[nodiscard]] const std::vector<std::shared_ptr<Surface>>& getSurfaces() const { return surfaces_; }
+  void addSurface(const std::shared_ptr<Surface>& surface) override
+  {
+    if (!containsSurface(surfaces_, surface)) surfaces_.push_back(surface);
+  }
+
 private:
   ManifoldGeometry binOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs,
                          manifold::OpType opType) const;
@@ -80,4 +91,12 @@ private:
   std::set<uint32_t> originalIDs_;
   std::map<uint32_t, Color4f> originalIDToColor_;
   std::set<uint32_t> subtractedIDs_;
+  /*! Analytic surfaces the model was built from, in world coordinates.
+   *
+   * A boolean turns a cylinder into a strip of triangles and no mesh can say
+   * afterwards whether a ring of facets was meant as a cylinder or as a prism -
+   * the two are the same mesh. These records survive the boolean and let the
+   * STEP exporter tell the difference. They are a statement of intent, not
+   * geometry: nothing reads them for rendering or measurement. */
+  std::vector<std::shared_ptr<Surface>> surfaces_;
 };

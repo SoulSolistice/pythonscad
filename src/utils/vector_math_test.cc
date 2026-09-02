@@ -1,13 +1,52 @@
-#include <catch2/catch_all.hpp>
-#if 0
-#include "vector_math.h"
+#include "utils/vector_math.h"
 
 #include <catch2/catch_all.hpp>
+#include <cmath>
 #include <limits>
+#include <string>
+#include <vector>
 
-#include "src/geometry/Grid.h"
+#include "geometry/Grid.h"
+
+// These cases were written against an earlier vector_math and the file then sat
+// behind `#if 0` for long enough that nothing noticed the API moving under it -
+// both of the distance functions now return the two closest points as a
+// SelectedObject rather than a double. Restoring them found seven failing
+// assertions in one build of this file and nine in another, and every one of them
+// was a defect in the code rather than a stale expectation:
+//
+//  - calculateLineLineVector() never assigned signed_distance on its parallel
+//    branch, and calculateLineLineDistance() returns that uninitialized double.
+//    Two parallel lines measured whatever was on the stack: 0 in one build, the
+//    previous call's distance in the next. The parallel and collinear rows below
+//    are what pin it down.
+//  - calculateSegSegDistance() clamped its two parameters independently, which
+//    does not give the closest points on two segments, and fell back to measuring
+//    from one endpoint when they were parallel. Two of the rows below carry a
+//    comment from the last time that was fixed - "the previous implementation was
+//    returning NaN, so don't delete unless you must" - and NaN is what they had
+//    gone back to returning.
 
 #define NOT_APPLICABLE 0.0
+
+static const auto NaN = std::numeric_limits<double>::quiet_NaN();
+
+/*! The distance a ruler measures.
+ *
+ * calculateLinePointDistance() and calculateSegSegDistance() return the two
+ * closest points rather than the distance between them - the GUI draws a ruler
+ * between them and derives the number for its label, without checking the type
+ * or the length of pt, so anything but two points there is a crash in the
+ * caller. SELECTION_INVALID is mapped to NaN so a test says so rather than
+ * reading out of bounds itself. */
+static double rulerLength(const SelectedObject& ruler)
+{
+  if (ruler.type == SelectionType::SELECTION_INVALID) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  REQUIRE(ruler.pt.size() == 2);
+  return (ruler.pt[1] - ruler.pt[0]).norm();
+}
 
 TEST_CASE("calculateLinePointDistance calculates distance to infinite line", "[Geometry][LinePoint]")
 {
@@ -44,7 +83,8 @@ TEST_CASE("calculateLinePointDistance calculates distance to infinite line", "[G
     SECTION(test.name)
     {
       double actual_lat;
-      double actual_dist = calculateLinePointDistance(test.l1b, test.l1e, test.pt, actual_lat);
+      double actual_dist =
+        rulerLength(calculateLinePointDistance(test.l1b, test.l1e, test.pt, actual_lat));
 
       CHECK(actual_dist == Catch::Approx(test.expected_dist).margin(epsilon));
       CHECK(actual_lat == Catch::Approx(test.expected_lat).margin(epsilon));
@@ -94,23 +134,39 @@ TEST_CASE("calculateSegSegDistance handles standard geometry", "[vector_math][se
      Vector3d(-12.92893123626709, 0, 30), Vector3d(-20, -7.0710678100585938, 30), 14.73719},
     {"Not quite parallel", Vector3d(-33, 0, 30), Vector3d(-40, -7.0710678100585938, 30),
      Vector3d(-12.92893123626709, 0, 30), Vector3d(-20, -7.0710678100585938, 30), 14.79865},
+    // A point against the middle of a segment, which is the branch where the
+    // second segment has no length to solve along.
+    {"Second segment is a point beside the first", Vector3d(0.0, 0.0, 0.0), Vector3d(10.0, 0.0, 0.0),
+     Vector3d(5.0, 3.0, 0.0), Vector3d(5.0, 3.0, 0.0), 3.0},
+    // Skew segments whose closest points on the infinite lines lie beyond both
+    // of them, so both parameters have to be pinned before the answer is the
+    // distance between the two near ends.
+    {"Skew, closest point off the end of both segments", Vector3d(0.0, 0.0, 0.0),
+     Vector3d(1.0, 0.0, 0.0), Vector3d(4.0, 0.0, 3.0), Vector3d(4.0, 4.0, 3.0), 4.242640687119285},
   };
 
   for (const auto& test : test_cases) {
     SECTION(test.name)
     {
-      double actual_distance = calculateSegSegDistance(test.l1b, test.l1e, test.l2b, test.l2e);
+      double actual_distance =
+        rulerLength(calculateSegSegDistance(test.l1b, test.l1e, test.l2b, test.l2e));
 
       INFO("S1: [" << test.l1b << " to " << test.l1e << "], S2: [" << test.l2b << " to " << test.l2e
                    << "]");
       INFO("Expected: " << test.expected_distance << ", Actual: " << actual_distance);
 
       REQUIRE(actual_distance == Catch::Approx(test.expected_distance).margin(1e-6));
+
+      // The distance between two segments does not depend on which one is named
+      // first. The previous implementation was not symmetric: it took its first
+      // point from the start of segment 1 and its second from the *end* of
+      // segment 2.
+      const double swapped =
+        rulerLength(calculateSegSegDistance(test.l2b, test.l2e, test.l1b, test.l1e));
+      CHECK(swapped == Catch::Approx(actual_distance).margin(1e-6));
     }
   }
 }
-
-const auto NaN = std::numeric_limits<double>::quiet_NaN();
 
 TEST_CASE("calculateLineLineDistance handles various line arrangements (Eigen)", "[Geometry][Line]")
 {
@@ -249,4 +305,3 @@ TEST_CASE("calculateLineLineDistance handles various line arrangements (Eigen)",
     }
   }
 }
-#endif

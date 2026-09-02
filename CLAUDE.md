@@ -27,6 +27,79 @@ make -j$(nproc)
 ./pythonscad
 ```
 
+### Headless build in a container or agent sandbox
+
+The recipe above assumes a desktop with Qt and a checked-out tree. In a sandbox
+it fails at four separate points, none of them obvious from the error. This is
+the path that works, in order:
+
+```bash
+# 1. Submodules. A fresh clone has none, and cmake reports them one failure at a
+#    time - "Unknown CMake command add_sanitizers", then "MCAD not found" - so do
+#    them all at once.
+git submodule update --init --recursive
+
+# 2. Dependencies, minus Qt. Ask the project for the list rather than guessing,
+#    then drop the qt/gui entries; HEADLESS needs none of them. gettext is not
+#    optional even headless: without msgfmt the build fails *after* linking
+#    pythonscad, at the locale step, which looks like a build failure but is not.
+python3 ./scripts/get-dependencies.py --distro ubuntu --profile pythonscad-qt5 --list
+apt-get install -y bison flex gettext ninja-build pkg-config python3-dev \
+  libboost-{program-options,regex,system}-dev libcgal-dev libeigen3-dev \
+  libdouble-conversion-dev libcairo2-dev libfontconfig-dev libfreetype-dev \
+  libharfbuzz-dev libglib2.0-dev libgmp-dev libmpfr-dev libtbb-dev \
+  libxml2-dev libzip-dev nettle-dev libmimalloc-dev libopencsg-dev \
+  libglew-dev libgl1-mesa-dev lib3mf-dev catch2
+
+# 3. Configure. OPENSCAD_VERSION is required: the version comes from git tags, a
+#    shallow or tagless clone gives "Version string 'abc1234' doesn't match
+#    expected format", and VERSION.txt does not rescue it.
+cmake -B build -G Ninja -DHEADLESS=ON -DENABLE_PYTHON=ON -DENABLE_TESTS=ON \
+  -DEXPERIMENTAL=ON -DCMAKE_BUILD_TYPE=Release -DOPENSCAD_VERSION=$(date +%Y.%m.%d)
+
+# 4. Build. Keep the job count *below* the core count - see the memory note.
+cmake --build build -j3
+```
+
+**Budget an hour.** A full build is ~272 targets and the CGAL translation units
+dominate: `cgalutils-*.cc`, `CGALNefGeometry.cc` and the minkowski ones take
+minutes *each*. An incremental build after touching a widely-included header
+(`Polygon2d.h`, `PolySet.h`, `Surface.h`) is ~110 targets and still 30+ minutes.
+Plan around that rather than polling it.
+
+**Memory is the binding constraint, not cores.** On 4 cores and 16 GB, `-j3` is
+right and `-j4` is marginal; a CGAL TU peaks around 2 GB. **Never run two builds
+in the same build directory** - it OOM-kills a compile *and* corrupts
+`.ninja_deps`, after which ninja silently skips translation units. That is not a
+theoretical hazard: it produced a stale-object ABI mismatch that presented as a
+`linear_extrude(square())` exporting a non-closed shell on the CGAL backend,
+hours away from anything that could explain it. The tell was the target count -
+111 where a header change should have rebuilt 272. Recovery is
+`rm -f build/.ninja_deps build/.ninja_log` and a full rebuild.
+
+**Optional: the CAD kernel round trip.** `tests/steproundtrip.py` reads each STEP
+export back with OpenCASCADE and checks it comes back as a solid a kernel can
+use, which is the one thing the exporter's own validator cannot answer. It is
+optional and skips silently when absent, so install it only when working on the
+exporter:
+
+```bash
+pip install cadquery-ocp     # ~68 MB wheel, provides the OCP bindings
+```
+
+**Tests.** `ctest --test-dir build -R <regex>` works headless for everything
+except the GL/PNG comparison tests, which need the virtual framebuffer that
+ctest starts through `tests/virtualfb.sh`. Let ctest own its lifecycle: do not
+`pkill ctest`, because the orphaned `Xvfb` leaves a PID file that makes the
+fixture conclude the server is already running, so it never exports `DISPLAY`
+and every GL test fails with "Unable to open a connection to the X server".
+Recovery is `rm -f build/tests/virtualfb.{PID,DISPLAY}`; as a stopgap,
+`DISPLAY=$(cat build/tests/virtualfb.DISPLAY) ctest ...` works.
+
+Note that `python3 ./scripts/get-dependencies.py` needs no `sudo` to *list*, and
+that apt behind an agent proxy may 403 on third-party PPAs while the main
+archives work - which is fine, nothing here comes from a PPA.
+
 ### Build Configuration Options
 
 Key CMake options (pass with `-D` flag):
@@ -351,6 +424,15 @@ the repo root with:
 C:/msys64/msys2_shell.cmd -defterm -here -no-start -ucrt64 -shell bash
 ```
 
+**Use that, not a bare `bash.exe -lc`.** MSYS2 replaces the Windows `PATH`
+rather than extending it, so a bare invocation loses `System32` and the
+binary in `build/` then fails to load with exit `3221225781`
+(`0xC0000135`, DLL not found) - reported by ctest as every test failing at
+once, which looks like a catastrophic regression and is not one. The staged
+copy is immune because `cmake --install` puts the CRT DLLs beside it, so
+"staging works, `build/` does not" is the signature. If a bare shell is
+unavoidable, set `MSYS2_PATH_TYPE=inherit`.
+
 Inside that shell, install/update the package set used by CI:
 
 ```bash
@@ -394,8 +476,173 @@ powershell -ExecutionPolicy Bypass -File scripts\release-smoke\test-windows.ps1 
   --skip-download --artifact-dir build --keep-workdir
 ```
 
+#### Driving the MSYS2 shell non-interactively
+
+`msys2_shell.cmd` opens an interactive terminal, which a script or an agent
+cannot use. For scripted runs, call `bash` directly and set the subsystem:
+
+```powershell
+$env:MSYSTEM='UCRT64'; $env:CHERE_INVOKING='1'
+C:\msys64\usr\bin\bash.exe -lc "cd /e/path/to/pythonscad && cmake --build build -j12"
+```
+
+`-l` matters: the login profile is what puts `/ucrt64/bin` on PATH, so without
+it `cmake`, `ninja` and `g++` are all missing.
+
+**Put anything non-trivial in a script file and run `bash <file>`.** A command
+passed inline crosses PowerShell's quoting rules and then bash's, and the two
+disagree about backslashes, `$`, and quotes; PowerShell here-strings do not
+survive the trip either. Writing the script to disk first sidesteps all of it.
+
+Note also that `ninja -t commands` prints the compiler as a Windows path with
+backslashes, which bash then eats. Rebuild single objects with
+`ninja -C build <object-path>` rather than by replaying that command.
+
+#### Configure costs a full rebuild
+
+`cmake -B build` re-runs configure, which regenerates the build files and leaves
+everything out of date — so it costs a **full rebuild**, about an hour here,
+every time. `cmake --build build` on its own is incremental and is what you want
+almost always:
+
+| change | what to run |
+| --- | --- |
+| edited an existing source file | `cmake --build build -jN` — never configure |
+| **added** a source file | configure first; sources are found by glob, and the full rebuild is unavoidable |
+| **added** a test or fixture | configure first, or ctest will not see the new test at all |
+
+Do not put a configure step into a script "to be safe": that quietly turns every
+run into a full rebuild. `scripts/msys2-build.sh` therefore skips it unless the
+build directory has no cache yet, or `--configure` is passed.
+
+#### Running the built binary
+
+**A freshly linked `build/pythonscad.exe` cannot run.** It fails with exit 127,
+or `0xC0000135` (3221225781) when launched by Windows, and
+`error while loading shared libraries: python314.dll`. This is not a build
+failure. The link pulls the bundled portable Python at
+`python_mingw/ucrt64/lib/libpython3.14.dll.a`, a git-ignored tree that ships
+headers and an import library but **no DLL**, so nothing in the build tree can
+satisfy the import.
+
+The two packaging steps above are what produce a runnable tree:
+
+```bash
+BUNDLE_PY_AUTO_INSTALL_PIP_LICENSES=1 \
+  ./scripts/bundle-runtime-python.sh build/pythonscad-bundled-py --python python
+cmake --install build --prefix build/staging
+```
+
+Run the binary from the staging **root** — `build/staging/pythonscad.exe`, which
+sits beside all ~70 DLLs. `build/staging/bin/pythonscad.exe` also exists, has no
+DLLs next to it, and still fails.
+
+Do not work around this by copying `python314.dll` out of an installed
+PythonSCAD or by putting that install on PATH: that pulls a different build's Qt
+and other DLLs into the process and makes every result untrustworthy.
+
+#### Running the test suite on Windows
+
+ctest drives `build/pythonscad.com`, which has the same missing-DLL problem, so
+a bare `ctest` fails every test with
+`PythonSCAD exited with status 3221225781` — a DLL-not-found code that reads
+like a crash. Stage first, then put the staging directory on PATH:
+
+```bash
+export PATH="$PWD/build/staging:$PATH"
+ctest --test-dir build -j12
+```
+
+The DLLs in `build/staging` come from the same build, so this is consistent
+rather than a fudge. The suite is ~3000 tests. Unlike the container build, the
+GL/PNG comparison tests need no virtual framebuffer here — they use the real
+desktop and GPU.
+
+Two more things are needed for a fully green run, and each fails as something
+that looks unrelated to what it is:
+
+- **The 22 stdlib `.pyd` extension modules** are installed only into staging,
+  and the embedded interpreter resolves them relative to the executable rather
+  than through `PYTHONHOME` (which does not work — it was tried). Copy them
+  beside the build binary, or tests that import `asyncio`, `socket` or `ctypes`
+  fail with `ModuleNotFoundError: No module named '_socket'` / `'_ctypes'`.
+- **`LC_ALL=C.UTF-8`.** The echo tests compare against English diagnostics, so
+  on a non-English system gettext translates them and the comparison fails on
+  the translation rather than on any behaviour. It must be `C.UTF-8`, not plain
+  `C`: the C locale is not UTF-8, and under it five tests carrying non-ASCII
+  paths (`astdump_include-tests`, `echo_include-tests`, `echo_use-tests`,
+  `dump_use-tests`, `preview-cgal_utf8-import`) fail instead. `en_US.UTF-8`
+  works equally well.
+
+`ipython-smoke` and `repl-smoke` cannot pass from the build tree at all: they
+drive the REPL, which spawns `pythonscad.exe` as a child, and ctest replaces the
+test environment wholesale so the PATH above never reaches it. Run those two
+against the staged binary directly:
+
+```bash
+python tests/test_ipython_cli.py build/staging/pythonscad.com
+python tests/test_repl_cli.py    build/staging/pythonscad.com
+```
+
+`scripts/msys2-build.sh` does the whole sequence — configure, build, bundle,
+install, then test with all of the above applied:
+
+```bash
+./scripts/msys2-build.sh --test
+```
+
+#### Install the CAD kernel round trip
+
+`tests/steproundtrip.py` reads each STEP export back with OpenCASCADE and checks
+it comes back as a solid a kernel can use — the one thing the exporter's own
+validator cannot answer. It is optional and **skips silently** when absent, so a
+green suite does not mean it ran.
+
+Install it, and note *which* interpreter: it imports `OCP`, the `cadquery-ocp`
+bindings, not MSYS2's OpenCASCADE libraries — `pacman -S ...opencascade` will not
+make `import OCP` work. It has to go into the interpreter CMake found, which on
+Windows is the system Python ctest drives the tests with, not MSYS2's:
+
+```bash
+"$(grep -ao 'Python3_EXECUTABLE:INTERNAL=[^;]*' build/CMakeCache.txt | cut -d= -f2)" -m pip install cadquery-ocp
+```
+
+Worth doing before touching the exporter. On the day it was installed here it
+rejected `step-nested-rings` within minutes, on a regression `validatestep.py`
+had passed: the validator checks that a file is well formed, and only a kernel
+checks that it is the solid the mesh was.
+
+The `-j3` / `-j4` figures elsewhere in this file describe a memory-constrained
+4-core agent sandbox. On a real workstation, size the job count to the machine;
+memory is still the binding constraint, at roughly 2 GB per CGAL translation
+unit.
+
+#### Tests that do not compile against this fork
+
+`ENABLE_TESTS=ON` globs test sources recursively, and a few files in the tree do
+not build against the code as it stands. They are excluded by name in
+`CMakeLists.txt`, each with a note saying what porting it would take —
+`src/core/surface_node_test.cc` is one, imported from upstream OpenSCAD and
+written against a `SurfaceNode` this fork has diverged from in three ways.
+Removing a line from that `foreach(stale_test ...)` list is the last step of
+porting one, not the first.
+
 See `doc/win-build.md` for the older MSVC/vcpkg build notes. The historical MXE
 cross-build path is `./scripts/mingw-x-build-dependencies.sh 64`.
+
+### STEP export interop
+
+The analytic STEP path is validated against OpenCASCADE only. To get a second
+opinion from a commercial kernel, `scripts/step-interop-kit.py` builds a set of
+coupons — each exported twice, once analytic and once faceted as a control — and
+a CSV to record the target system's answers:
+
+```bash
+python3 scripts/step-interop-kit.py --binary build/staging/pythonscad.exe --outdir build/interop-kit
+```
+
+`doc/step-interop-validation.md` explains what each coupon isolates and gives
+the per-file procedure and pass criteria.
 
 ### WebAssembly Build
 

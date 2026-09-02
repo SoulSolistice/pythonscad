@@ -12,6 +12,7 @@
 #include "core/BaseVisitable.h"
 #include "core/CgalAdvNode.h"
 #include "core/ColorNode.h"
+#include "core/DeclareSurfaceNode.h"
 #include "core/CsgOpNode.h"
 #include "core/CurveDiscretizer.h"
 #include "core/LinearExtrudeNode.h"
@@ -21,6 +22,8 @@
 #include "core/RenderNode.h"
 #include "core/RoofNode.h"
 #include "core/RotateExtrudeNode.h"
+#include "core/primitives.h"
+#include "geometry/Surface.h"
 #include "core/SkinNode.h"
 #include "core/PathExtrudeNode.h"
 #include "core/PullNode.h"
@@ -537,6 +540,47 @@ void reduceColinearPointsGlobal(std::vector<IndexedFace>& indices, const std::ve
     if (face_new.size() >= 3) face = face_new;
   }
 }
+// How far a point may sit off a plane and still be called coplanar.
+//
+// The bucketing used to ask two questions of a candidate triangle - is its
+// normal within 0.99999 of the bucket's, and is its plane offset within 0.001 -
+// and neither carries a length scale. An angular tolerance alone does not bound
+// anything: 0.99999 permits 0.256 degrees between the normals, which at a
+// distance L from the foot of the plane is L*0.00447 of out-of-plane error.
+// That is 0.045 at L=10 and 0.35 at L=78, so on a part of any size triangles
+// which are visibly not coplanar land in one bucket. The merged loop then comes
+// out warped, and a warped loop is written as a PLANE face whose own boundary
+// does not lie in that plane.
+//
+// So measure the thing that matters instead - the distance from each corner to
+// the bucket's plane - and scale the allowance to the model rather than fixing
+// it. Triangles that really are coplanar agree to within rounding, many orders
+// below this.
+static double coplanarTolerance(const std::vector<Vector3d>& vert)
+{
+  if (vert.empty()) return 1e-9;
+  Vector3d lo = vert[0], hi = vert[0];
+  for (const auto& v : vert) {
+    lo = lo.cwiseMin(v);
+    hi = hi.cwiseMax(v);
+  }
+  const double diagonal = (hi - lo).norm();
+  return std::max(1e-9, 1e-8 * diagonal);
+}
+
+// Every corner of the triangle within tol of the bucket's plane, and facing the
+// same way. The direction test stays: it is what keeps the two sides of a thin
+// wall, which are coplanar to any tolerance, in separate buckets.
+static bool triangleOnPlane(const std::vector<Vector3d>& vert, const IndexedFace& triangle,
+                            const Vector4d& plane, double tol)
+{
+  const Vector3d n = plane.head<3>();
+  for (const int vi : triangle) {
+    if (fabs(n.dot(vert[vi]) - plane[3]) > tol) return false;
+  }
+  return true;
+}
+
 std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
                                         const std::vector<Vector4d> normals,
                                         std::vector<Vector4d>& newNormals, std::vector<int>& faceParents,
@@ -545,6 +589,7 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
   indexedFaceList emptyList;
   std::vector<Vector4d> norm_list;
   std::vector<indexedFaceList> polygons_sorted;
+  const double plane_tol = coplanarTolerance(vert);
   // sort polygons into buckets of same orientation
   for (unsigned int i = 0; i < polygons.size(); i++) {
     Vector4d norm = normals[i];
@@ -553,7 +598,8 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
     int norm_ind = -1;
     for (unsigned int j = 0; norm_ind == -1 && j < norm_list.size(); j++) {
       const auto& cur = norm_list[j];
-      if (cur.head<3>().dot(norm.head<3>()) > 0.99999 && fabs(cur[3] - norm[3]) < 0.001) {
+      if (cur.head<3>().dot(norm.head<3>()) > 0.99999 &&
+          triangleOnPlane(vert, triangle, cur, plane_tol)) {
         norm_ind = j;
       }
       if (cur.norm() < 1e-6 && norm.norm() < 1e-6) norm_ind = j;  // zero vector matches zero vector
@@ -593,7 +639,17 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
           polygons_sorted[i_].erase(polygons_sorted[i_].begin() + l);
           k--;
           l--;
-        } else if (pointInPolygon(vert, poly, hole[0])) {
+        } else if (triangleOnPlane(vert, hole, norm_list[i], plane_tol) &&
+                   pointInPolygon(vert, poly, hole[0])) {
+          // The plane test is not redundant with the search for the opposite
+          // bucket above. That search accepts a normal within dot -0.999, which
+          // is 2.56 degrees - ten times looser than the bucketing - and at a
+          // radius of 78 that is 3.5 of out-of-plane error. Moving such a
+          // triangle into this bucket warps the loop it ends up in, and the
+          // loop is then written as a PLANE face whose own boundary does not
+          // lie in that plane. It also arrives wound the other way, which is
+          // what leaves the exporter holding a reversed loop that nothing
+          // encloses.
           polygons_sorted[i].push_back(hole);
           polygons_sorted[i_].erase(polygons_sorted[i_].begin() + l);
           l--;  // could have more holes
@@ -647,6 +703,7 @@ std::vector<IndexedColorFace> mergeTriangles(const std::vector<IndexedColorFace>
   std::vector<Vector4d> norm_list;
   std::vector<int> color_list;
   std::vector<indexedFaceList> polygons_sorted;
+  const double plane_tol = coplanarTolerance(vert);
   // sort polygons into buckets of same orientation and color
   for (unsigned int i = 0; i < polygons.size(); i++) {
     Vector4d norm = normals[i];
@@ -656,7 +713,8 @@ std::vector<IndexedColorFace> mergeTriangles(const std::vector<IndexedColorFace>
     for (unsigned int j = 0; bucket_ind == -1 && j < norm_list.size(); j++) {
       if (polygons[i].color == color_list[j]) {
         const auto& cur_norm = norm_list[j];
-        if (cur_norm.head<3>().dot(norm.head<3>()) > 0.99999 && fabs(cur_norm[3] - norm[3]) < 0.001) {
+        if (cur_norm.head<3>().dot(norm.head<3>()) > 0.99999 &&
+            triangleOnPlane(vert, triangle.face, cur_norm, plane_tol)) {
           bucket_ind = j;
         }
         if (cur_norm.norm() < 1e-6 && norm.norm() < 1e-6)
@@ -699,7 +757,17 @@ std::vector<IndexedColorFace> mergeTriangles(const std::vector<IndexedColorFace>
           polygons_sorted[i_].erase(polygons_sorted[i_].begin() + l);
           k--;
           l--;
-        } else if (pointInPolygon(vert, poly, hole[0])) {
+        } else if (triangleOnPlane(vert, hole, norm_list[i], plane_tol) &&
+                   pointInPolygon(vert, poly, hole[0])) {
+          // The plane test is not redundant with the search for the opposite
+          // bucket above. That search accepts a normal within dot -0.999, which
+          // is 2.56 degrees - ten times looser than the bucketing - and at a
+          // radius of 78 that is 3.5 of out-of-plane error. Moving such a
+          // triangle into this bucket warps the loop it ends up in, and the
+          // loop is then written as a PLANE face whose own boundary does not
+          // lie in that plane. It also arrives wound the other way, which is
+          // what leaves the exporter holding a reversed loop that nothing
+          // encloses.
           polygons_sorted[i].push_back(hole);
           polygons_sorted[i_].erase(polygons_sorted[i_].begin() + l);
           l--;  // could have more holes
@@ -736,201 +804,6 @@ std::vector<IndexedColorFace> mergeTriangles(const std::vector<IndexedColorFace>
   }
 
   return indices;
-}
-
-Map3DTree::Map3DTree(void)
-{
-  for (int i = 0; i < 8; ind[i++] = -1);
-  ptlen = 0;
-}
-
-Map3D::Map3D(Vector3d min, Vector3d max)
-{
-  this->min = min;
-  this->max = max;
-}
-void Map3D::add_sub(int ind, Vector3d min, Vector3d max, Vector3d pt, int ptind, int disable_local_num)
-{
-  int indnew;
-  int corner;
-  Vector3d mid;
-  do {
-    if (items[ind].ptlen >= 0 && disable_local_num != ind) {
-      if (items[ind].ptlen < BUCKET) {
-        for (int i = 0; i < items[ind].ptlen; i++)
-          if (items[ind].pts[i] == pt) return;
-        items[ind].pts[items[ind].ptlen] = pt;
-        items[ind].ptsind[items[ind].ptlen] = ptind;
-        items[ind].ptlen++;
-        return;
-      } else {
-        for (int i = 0; i < items[ind].ptlen; i++) {
-          add_sub(ind, min, max, items[ind].pts[i], items[ind].ptsind[i], ind);
-        }
-        items[ind].ptlen = -1;
-        // run through
-      }
-    }
-    mid[0] = (min[0] + max[0]) / 2.0;
-    mid[1] = (min[1] + max[1]) / 2.0;
-    mid[2] = (min[2] + max[2]) / 2.0;
-    corner = (pt[0] >= mid[0] ? 1 : 0) + (pt[1] >= mid[1] ? 2 : 0) + (pt[2] >= mid[2] ? 4 : 0);
-    indnew = items[ind].ind[corner];
-    if (indnew == -1) {
-      indnew = items.size();
-      items.push_back(Map3DTree());
-      items[ind].ind[corner] = indnew;
-    }
-    if (corner & 1) min[0] = mid[0];
-    else max[0] = mid[0];
-    if (corner & 2) min[1] = mid[1];
-    else max[1] = mid[1];
-    if (corner & 4) min[2] = mid[2];
-    else max[2] = mid[2];
-    ind = indnew;
-  } while (1);
-}
-void Map3D::add(Vector3d pt, int ind)
-{
-  if (items.size() == 0) {
-    items.push_back(Map3DTree());
-    items[0].pts[0] = pt;
-    items[0].ptsind[0] = ind;
-    items[0].ptlen++;
-    return;
-  }
-  add_sub(0, this->min, this->max, pt, ind, -1);
-}
-
-void Map3D::del(Vector3d pt)
-{
-  int ind = 0;
-  int corner;
-  Vector3d min = this->min;
-  Vector3d max = this->max;
-  Vector3d mid;
-  printf("Deleting %g/%g/%g\n", pt[0], pt[1], pt[2]);
-  while (ind != -1) {
-    for (int i = 0; i < items[ind].ptlen; i++) {
-      if (items[ind].pts[i] == pt) {
-        for (int j = i + 1; j < items[ind].ptlen; j++) items[ind].pts[j - 1] = items[ind].pts[j];
-        items[ind].ptlen--;
-        return;
-      }
-      // was wenn leer wird dnn sind ind immer noch -1
-    }
-    mid[0] = (min[0] + max[0]) / 2.0;
-    mid[1] = (min[1] + max[1]) / 2.0;
-    mid[2] = (min[2] + max[2]) / 2.0;
-    corner = (pt[0] > mid[0] ? 1 : 0) + (pt[1] > mid[1] ? 2 : 0) + (pt[2] > mid[2] ? 4 : 0);
-    printf("corner=%d\n", corner);
-    ind = items[ind].ind[corner];
-    if (corner & 1) min[0] = mid[0];
-    else max[0] = mid[0];
-    if (corner & 2) min[1] = mid[1];
-    else max[1] = mid[1];
-    if (corner & 4) min[2] = mid[2];
-    else max[2] = mid[2];
-  }
-}
-
-void Map3D::find_sub(int ind, double minx, double miny, double minz, double maxx, double maxy,
-                     double maxz, Vector3d pt, double r, std::vector<Vector3d>& result,
-                     std::vector<int>& resultind, int maxresult)
-{
-  if (ind == -1) return;
-  if (this->items[ind].ptlen > 0) {
-    for (int i = 0; i < this->items[ind].ptlen; i++) {
-      if ((this->items[ind].pts[i] - pt).norm() < r) {
-        result.push_back(this->items[ind].pts[i]);
-        resultind.push_back(this->items[ind].ptsind[i]);
-      }
-      if (result.size() >= (size_t)maxresult) return;
-    }
-    return;
-  }
-  double midx, midy, midz;
-  //	printf("find_sub ind=%d %g/%g/%g - %g/%g/%g\n",ind, minx, miny,  minz, maxx, maxy, maxz );
-  midx = (minx + maxx) / 2.0;
-  midy = (miny + maxy) / 2.0;
-  midz = (minz + maxz) / 2.0;
-  if (result.size() >= (size_t)maxresult) return;
-  if (pt[2] + r >= minz && pt[2] - r < midz) {
-    if (pt[1] + r >= miny && pt[1] - r < midy) {
-      if (pt[0] + r >= minx && pt[0] - r < midx)
-        find_sub(this->items[ind].ind[0], minx, miny, minz, midx, midy, midz, pt, r, result, resultind,
-                 maxresult);
-      if (pt[0] + r >= midx && pt[0] - r < maxx)
-        find_sub(this->items[ind].ind[1], midx, miny, minz, maxx, midy, midz, pt, r, result, resultind,
-                 maxresult);
-    }
-    if (pt[1] + r >= midy && pt[1] - r < maxy) {
-      if (pt[0] + r >= minx && pt[0] - r < midx)
-        find_sub(this->items[ind].ind[2], minx, midy, minz, midx, maxy, midz, pt, r, result, resultind,
-                 maxresult);
-      if (pt[0] + r >= midx && pt[0] - r < maxx)
-        find_sub(this->items[ind].ind[3], midx, midy, minz, maxx, maxy, midz, pt, r, result, resultind,
-                 maxresult);
-    }
-  }
-  if (pt[2] + r >= midz && pt[2] - r < maxz) {
-    if (pt[1] + r >= miny && pt[1] - r < midy) {
-      if (pt[0] + r >= minx && pt[0] - r < midx)
-        find_sub(this->items[ind].ind[4], minx, miny, midz, midx, midy, maxz, pt, r, result, resultind,
-                 maxresult);
-      if (pt[0] + r >= midx && pt[0] - r < maxx)
-        find_sub(this->items[ind].ind[5], midx, miny, midz, maxx, midy, maxz, pt, r, result, resultind,
-                 maxresult);
-    }
-    if (pt[1] + r >= midy && pt[1] - r < maxy) {
-      if (pt[0] + r >= minx && pt[0] - r < midx)
-        find_sub(this->items[ind].ind[6], minx, midy, midz, midx, maxy, maxz, pt, r, result, resultind,
-                 maxresult);
-      if (pt[0] + r >= midx && pt[0] - r < maxx)
-        find_sub(this->items[ind].ind[7], midx, midy, midz, maxx, maxy, maxz, pt, r, result, resultind,
-                 maxresult);
-    }
-  }
-}
-int Map3D::find(Vector3d pt, double r, std::vector<Vector3d>& result, std::vector<int>& resultind,
-                int maxresult)
-{
-  int results = 0;
-  if (items.size() == 0) return results;
-  result.clear();
-  resultind.clear();
-  find_sub(0, this->min[0], this->min[1], this->min[2], this->max[0], this->max[1], this->max[2], pt, r,
-           result, resultind, maxresult);
-  return result.size();
-}
-
-void Map3D::dump_hier(int i, int hier, float minx, float miny, float minz, float maxx, float maxy,
-                      float maxz)
-{
-  for (int i = 0; i < hier; i++) printf("  ");
-  printf("%d inds ", i);
-  for (int j = 0; j < 8; j++) printf("%d ", items[i].ind[j]);
-  printf("pts ");
-  for (int j = 0; j < items[i].ptlen; j++)
-    printf("%g/%g/%g ", items[i].pts[j][0], items[i].pts[j][1], items[i].pts[j][2]);
-
-  float midx, midy, midz;
-  midx = (minx + maxx) / 2.0;
-  midy = (miny + maxy) / 2.0;
-  midz = (minz + maxz) / 2.0;
-  printf(" (%g/%g/%g - %g/%g/%g)\n", minx, miny, minz, maxx, maxy, maxz);
-  if (items[i].ind[0] != -1) dump_hier(items[i].ind[0], hier + 1, minx, miny, minz, midx, midy, midz);
-  if (items[i].ind[1] != -1) dump_hier(items[i].ind[1], hier + 1, midx, miny, minz, maxx, midy, midz);
-  if (items[i].ind[2] != -1) dump_hier(items[i].ind[2], hier + 1, minx, midy, minz, midx, maxy, midz);
-  if (items[i].ind[3] != -1) dump_hier(items[i].ind[3], hier + 1, midx, midy, minz, maxx, maxy, midz);
-  if (items[i].ind[4] != -1) dump_hier(items[i].ind[4], hier + 1, minx, miny, midz, midx, midy, maxz);
-  if (items[i].ind[5] != -1) dump_hier(items[i].ind[5], hier + 1, midx, miny, midz, maxx, midy, maxz);
-  if (items[i].ind[6] != -1) dump_hier(items[i].ind[6], hier + 1, minx, midy, midz, midx, maxy, maxz);
-  if (items[i].ind[7] != -1) dump_hier(items[i].ind[7], hier + 1, midx, midy, midz, maxx, maxy, maxz);
-}
-void Map3D::dump(void)
-{
-  dump_hier(0, 0, min[0], min[1], min[2], max[0], max[1], max[2]);
 }
 
 GeometryEvaluator::ResultObject GeometryEvaluator::applyToChildren(const AbstractNode& node,
@@ -1004,7 +877,7 @@ std::unique_ptr<Geometry> union_geoms(std::vector<std::shared_ptr<PolySet>> part
       else *result += *op;
       auto p2 = CGALUtils::getNefPolyhedronFromGeometry(parts[0]);
     }
-    return std::make_unique<CGALNefGeometry>(result->p3);
+    return std::make_unique<CGALNefGeometry>(result->p3, result->surfaces);
   }
 }
 
@@ -1032,7 +905,7 @@ std::unique_ptr<Geometry> difference_geoms(
       else *result -= *op;
       auto p2 = CGALUtils::getNefPolyhedronFromGeometry(parts[0]);
     }
-    return std::make_unique<CGALNefGeometry>(result->p3);
+    return std::make_unique<CGALNefGeometry>(result->p3, result->surfaces);
   }
 }
 
@@ -2017,6 +1890,41 @@ Response GeometryEvaluator::visit(State& state, const ColorNode& node)
       if ((geom = res.constptr())) {
         auto mutableGeom = res.asMutableGeometry();
         if (mutableGeom) mutableGeom->setColor(node.color);
+        geom = mutableGeom;
+      }
+    } else {
+      geom = smartCacheGet(node, state.preferNef());
+    }
+    addToParent(state, node, geom);
+    node.progress_report();
+  }
+  return Response::ContinueTraversal;
+}
+
+/*!
+   Attaches the surfaces the model declared to the geometry of its children.
+
+   The same shape as the ColorNode above: union the children, then annotate the
+   result. Being a node is what makes the coordinates right - the records are in
+   world coordinates and a transform above this node moves geometry and records
+   together - and the geometry carries them from here through every later
+   boolean, hull and transform on its own.
+ */
+Response GeometryEvaluator::visit(State& state, const DeclareSurfaceNode& node)
+{
+  if (state.isPrefix() && isSmartCached(node)) return Response::PruneTraversal;
+  if (state.isPostfix()) {
+    std::shared_ptr<const Geometry> geom;
+    if (!isSmartCached(node)) {
+      ResultObject res = applyToChildren(node, OpenSCADOperator::UNION);
+      if ((geom = res.constptr())) {
+        auto mutableGeom = res.asMutableGeometry();
+        if (mutableGeom) {
+          // Clone: the node outlives this geometry and may be evaluated again,
+          // and a record handed out twice would be moved twice by the first
+          // transform to reach either copy.
+          for (const auto& surface : node.surfaces) mutableGeom->addSurface(surface->clone());
+        }
         geom = mutableGeom;
       }
     } else {

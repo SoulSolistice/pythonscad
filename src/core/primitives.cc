@@ -278,6 +278,49 @@ std::unique_ptr<const Geometry> SphereNode::createGeometry() const
     polyset->indices.back().push_back(num_rings * num_fragments - i - 1);
   }
 
+  // Say that this is a sphere, and then say where each of its rings is.
+  //
+  // The two records do different jobs and both are wanted. The SphereSurface is
+  // what a SPHERICAL_SURFACE is written from, and it is matched first because
+  // it describes the whole thing; the ring circles are the fallback, and they
+  // are what collapses a sphere which has been cut about so that no complete
+  // zone of it survives - a hemisphere still has rings even when it no longer
+  // has a sphere an exporter can bound.
+  polyset->surfaces.push_back(std::make_shared<SphereSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), r));
+
+  // Record the circle at each ring, which is what makes a sphere collapse.
+  //
+  // A sphere is not a band and is not going to become one: its facets span many
+  // rings rather than two rims, so the strip walk cannot describe it and a
+  // SPHERICAL_SURFACE would need a grower of its own. But the mesh *between*
+  // two consecutive rings is a band - a frustum whose rims are those two
+  // circles - and an exporter accepts a cone when both of its rims match a
+  // declared cylinder. Declaring the rings therefore collapses the whole sphere
+  // into a stack of exact cones with no new recogniser work at all, which is
+  // the same thing that happens to a torus.
+  //
+  // There are no poles to worry about here. The rings sit at
+  // phi = 180 (i + 0.5) / num_rings, so the first and the last are ordinary
+  // circles closed by a flat cap, not fans of triangles meeting at a point -
+  // every band's outer rim is the complete bound of one face.
+  //
+  // The radii repeat in pairs about the equator, so they are deduplicated: a
+  // record is only ever matched on its radius and axis.
+  std::vector<double> declared;
+  for (auto i = 0; i < num_rings; ++i) {
+    const double phi = (180.0 * (i + 0.5)) / num_rings;
+    const double radius = r * sin_degrees(phi);
+    if (radius <= 0) continue;
+    bool seen = false;
+    for (const double d : declared) {
+      seen = seen || fabs(d - radius) <= 1e-12 * std::max(1.0, d);
+    }
+    if (seen) continue;
+    declared.push_back(radius);
+    polyset->surfaces.push_back(std::make_shared<CylinderSurface>(Vector3d(0, 0, r * cos_degrees(phi)),
+                                                                  Vector3d(0, 0, 1), radius));
+  }
+
   return polyset;
 }
 
@@ -377,6 +420,35 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
     }
   }
 
+  // Record what the wall was meant to be. The facets alone cannot say: a ring
+  // of N quads is exactly the mesh of an N sided prism, and no amount of
+  // measuring the result tells the two apart. Exporters that write analytic
+  // geometry read this to know which is which; nothing else uses it, and
+  // dropping it only costs the analytic form.
+  //
+  // A frustum has no surface record of its own, so it says what it is the way
+  // hull() of two coaxial cylinders does - by declaring the circle at each rim.
+  // An exporter accepts a cone when both of its rims match a declared cylinder,
+  // so the two constructions now leave identical provenance. That is the point:
+  // the idiomatic chamfer and the primitive which draws the same shape should
+  // not export differently, and until now only the hull did.
+  //
+  // A pie slice declares its wall too. Its two flat sides run through the axis
+  // and fit no cylinder, so they are discarded on the fit rather than needing
+  // to be excluded here; the arc between them is a partial cylinder like any
+  // other.
+  //
+  // An apex is not a rim, and it is left undeclared: there is no circle there
+  // to collapse, and a radius of zero would match every other radius of zero.
+  if (!cone && !inverted_cone) {
+    polyset->surfaces.push_back(
+      std::make_shared<CylinderSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1), r1));
+    if (r2 != r1) {
+      polyset->surfaces.push_back(
+        std::make_shared<CylinderSurface>(Vector3d(0, 0, z2), Vector3d(0, 0, 1), r2));
+    }
+  }
+
   return polyset;
 }
 
@@ -438,6 +510,19 @@ static std::shared_ptr<AbstractNode> builtin_cylinder(
           "cylinder(r1=%1$s, r2=%2$s, ...)",
           (r1.type() == Value::Type::NUMBER ? r1.toEchoStringNoThrow() : r.toEchoStringNoThrow()),
           (r2.type() == Value::Type::NUMBER ? r2.toEchoStringNoThrow() : r.toEchoStringNoThrow()));
+    }
+  }
+
+  // `angle` was in the parameter list and nowhere else: it parsed, and was then
+  // dropped on the floor, so cylinder(angle=90) in a .scad file silently
+  // produced a whole cylinder. The Python binding has always set it
+  // (py_primitives.cc), which is why the node, createGeometry() and toString()
+  // all handle it and only this path did not.
+  if (parameters["angle"].type() == Value::Type::NUMBER) {
+    node->angle = parameters["angle"].toDouble();
+    if (OpenSCAD::rangeCheck && (node->angle <= 0 || node->angle > 360)) {
+      LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
+          "cylinder(..., angle=%1$s)", parameters["angle"].toEchoStringNoThrow());
     }
   }
 
@@ -730,7 +815,13 @@ std::unique_ptr<const Geometry> CircleNode::createGeometry() const
     o.vertices[i] = {this->r * cos_degrees(phi), this->r * sin_degrees(phi)};
   }
   o.color = *OpenSCAD::parse_color("#f9d72c");
-  return std::make_unique<Polygon2d>(o);
+  auto poly = std::make_unique<Polygon2d>(o);
+  // Say what the vertices were, before anything downstream has to guess them
+  // back. A partial circle records it too: the arc is still an arc of this
+  // circle, and the two straight radii are simply not on it - a consumer fits
+  // the record to whichever run of vertices does lie on it.
+  poly->arcs.push_back(Arc2d{Vector2d(0., 0.), this->r});
+  return poly;
 }
 
 static std::shared_ptr<AbstractNode> builtin_circle(

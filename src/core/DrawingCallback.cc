@@ -86,6 +86,28 @@ void DrawingCallback::add_vertex(const Vector2d& v)
   this->outline.vertices.push_back(size * (v + offset + advance));
 }
 
+/*! Keep the curve, not only the points it was sampled at.
+ *
+ * The control points are in glyph space and add_vertex() is what puts a point
+ * into outline space, so the record has to make the same journey - the same
+ * size, offset and advance, applied to the control points instead of to the
+ * samples. Then the record and the vertices describe one curve rather than two
+ * that happen to be near each other.
+ *
+ * A hint like every record on this channel: an extruder fits it to the mesh
+ * before believing it, and a glyph that a boolean has since cut through simply
+ * stops matching. */
+void DrawingCallback::add_bezier(const Vector2d *ctrl, int degree)
+{
+  if (!this->polygon) return;
+  Bezier2d bez;
+  bez.degree = degree;
+  for (int i = 0; i <= degree; i++) {
+    bez.ctrl[i] = Vector2d(size * (ctrl[i] + offset + advance));
+  }
+  this->polygon->beziers.push_back(bez);
+}
+
 void DrawingCallback::move_to(const Vector2d& to)
 {
   if (this->outline.vertices.size() > 0) {
@@ -105,6 +127,8 @@ void DrawingCallback::line_to(const Vector2d& to)
 // Quadric Bezier curve
 void DrawingCallback::curve_to(const Vector2d& c1, const Vector2d& to)
 {
+  const Vector2d ctrl[3] = {pen, c1, to};
+  add_bezier(ctrl, 2);
   // NOTE - this could be done better using a chord length iteration (uniform in space) to implement $fa
   // (lot of work, little gain)
   for (unsigned long idx = 1; idx <= fn; ++idx) {
@@ -117,6 +141,8 @@ void DrawingCallback::curve_to(const Vector2d& c1, const Vector2d& to)
 // Cubic Bezier curve
 void DrawingCallback::curve_to(const Vector2d& c1, const Vector2d& c2, const Vector2d& to)
 {
+  const Vector2d ctrl[4] = {pen, c1, c2, to};
+  add_bezier(ctrl, 3);
   // NOTE - this could be done better using a chord length iteration (uniform in space) to implement $fa
   // (lot of work, little gain)
   for (unsigned long idx = 1; idx <= fn; ++idx) {

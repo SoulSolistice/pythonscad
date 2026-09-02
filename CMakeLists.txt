@@ -42,6 +42,9 @@ configure_file(
 option(INFO "Display build configuration info at end of cmake config" ON)
 option(ENABLE_TESTS "Run testsuite after building." ON)
 option(ENABLE_GUI_TESTS "Compile a special version of the PythonSCAD gui with feature for testing." OFF)
+option(ENABLE_UNIT_TESTS "Build the Catch2 unit tests (OpenSCADUnitTests) and register them with ctest." ON)
+option(FETCH_CATCH2 "Download Catch2 at configure time when the machine has no suitable Catch2 3 installed. Turn off to require a system Catch2." ON)
+set(CATCH2_FETCH_TAG "v3.15.3" CACHE STRING "Catch2 git tag used when FETCH_CATCH2 downloads it")
 option(EXPERIMENTAL "Enable Experimental Features" ON)
 option(USE_MANIFOLD_TRIANGULATOR "Use Manifold's triangulator instead of CGAL's" ON)
 option(USE_MANIFOLD_MINKOWSKI "Use Manifold's Minkowski instead of CGAL's" OFF)
@@ -1038,15 +1041,11 @@ if(ENABLE_PYTHON)
   set_property(TARGET OpenSCADPy PROPERTY EXPORT_COMPILE_COMMANDS ON)
   target_compile_definitions(OpenSCADPy PRIVATE "STACKSIZE=${STACKSIZE}")
   target_compile_options(OpenSCADPy PRIVATE "$<$<CONFIG:DEBUG>:-DDEBUG>")
-  target_compile_definitions(OpenSCADPy PRIVATE
-    OPENSCAD_VERSION=${OPENSCAD_VERSION}
-    OPENSCAD_SHORTVERSION=${OPENSCAD_SHORTVERSION}
-    OPENSCAD_MAJOR=${OPENSCAD_MAJOR}
-    OPENSCAD_MINOR=${OPENSCAD_MINOR}
-    OPENSCAD_PATCH=${OPENSCAD_PATCH}
-    OPENSCAD_YEAR=${OPENSCAD_YEAR}
-    OPENSCAD_MONTH=${OPENSCAD_MONTH}
-    OPENSCAD_DAY=${OPENSCAD_DAY})
+  # The version definitions are NOT repeated here. They are attached per source
+  # file, further down, to the handful which include version.h - pyfunctions.cc
+  # among them, and source file properties apply in every target that compiles
+  # the file. Putting them back on the whole target would mean every commit
+  # rebuilt all of OpenSCADPy again. See OPENSCAD_VERSION_SOURCES.
   target_include_directories(OpenSCADPy SYSTEM PRIVATE ${Boost_INCLUDE_DIRS})
   target_include_directories(OpenSCADPy SYSTEM PRIVATE ${GLIB2_INCLUDE_DIRS})
   target_include_directories(OpenSCADPy PRIVATE
@@ -1425,18 +1424,51 @@ if(USE_CCACHE)
   endif()
 endif()
 
-target_compile_definitions(OpenSCADLibInternal PUBLIC
-  OPENSCAD_VERSION=${OPENSCAD_VERSION}
-  OPENSCAD_SHORTVERSION=${OPENSCAD_SHORTVERSION}
-  OPENSCAD_MAJOR=${OPENSCAD_MAJOR}
-  OPENSCAD_MINOR=${OPENSCAD_MINOR}
-  OPENSCAD_PATCH=${OPENSCAD_PATCH}
-  OPENSCAD_YEAR=${OPENSCAD_YEAR}
-  OPENSCAD_MONTH=${OPENSCAD_MONTH}
-  OPENSCAD_DAY=${OPENSCAD_DAY})
+# The version string comes from `git describe`, so it changes on every commit
+# and whenever the working tree flips between clean and dirty. These used to be
+# PUBLIC on OpenSCADLibInternal, which put them on the compile command line of
+# every translation unit linking it - all of them - so one commit invalidated
+# every object, and the next configure cost a full rebuild of the whole tree.
+#
+# Nothing reads these except through version.h, and only the files below include
+# it. Scoping the definitions to exactly those files means a new commit rebuilds
+# thirteen objects instead of the entire build.
+#
+# Adding a new #include "version.h" anywhere means adding that file here too.
+# version.h has an #error which says so, because without the definitions the
+# stringify would quietly yield the literal text "OPENSCAD_VERSION" rather than
+# failing.
+set(OPENSCAD_VERSION_SOURCES
+  src/LibraryInfo.cc
+  src/core/builtin_functions.cc
+  src/gui/AboutDialog.cc
+  src/gui/LaunchingScreen.cc
+  src/gui/MainWindow.cc
+  src/gui/SparkleAutoUpdater.mm
+  src/gui/UIUtils.cc
+  src/io/export_amf.cc
+  src/openscad.cc
+  src/openscad_gui.cc
+  src/platform/PlatformUtils-mac.mm
+  src/platform/PlatformUtils-posix.cc
+  src/platform/PlatformUtils-win.cc
+  src/python/pyfunctions.cc)
+
+set(OPENSCAD_VERSION_DEFINES
+  "OPENSCAD_VERSION=${OPENSCAD_VERSION}"
+  "OPENSCAD_SHORTVERSION=${OPENSCAD_SHORTVERSION}"
+  "OPENSCAD_MAJOR=${OPENSCAD_MAJOR}"
+  "OPENSCAD_MINOR=${OPENSCAD_MINOR}"
+  "OPENSCAD_PATCH=${OPENSCAD_PATCH}"
+  "OPENSCAD_YEAR=${OPENSCAD_YEAR}"
+  "OPENSCAD_MONTH=${OPENSCAD_MONTH}"
+  "OPENSCAD_DAY=${OPENSCAD_DAY}")
 if(DEFINED OPENSCAD_COMMIT)
-  target_compile_definitions(OpenSCADLibInternal PUBLIC OPENSCAD_COMMIT=${OPENSCAD_COMMIT})
+  list(APPEND OPENSCAD_VERSION_DEFINES "OPENSCAD_COMMIT=${OPENSCAD_COMMIT}")
 endif()
+
+set_source_files_properties(${OPENSCAD_VERSION_SOURCES}
+  PROPERTIES COMPILE_DEFINITIONS "${OPENSCAD_VERSION_DEFINES}")
 
 #
 # Platform specific settings
@@ -1523,6 +1555,7 @@ set(CORE_SOURCES
   src/core/CgalAdvNode.cc
   src/core/Children.cc
   src/core/ColorNode.cc
+  src/core/DeclareSurfaceNode.cc
   src/core/ColorUtil.cc
   src/core/Context.cc
   src/core/ContextFrame.cc
@@ -1587,6 +1620,7 @@ set(CORE_SOURCES
   src/ext/libtess2/Source/sweep.c
   src/ext/libtess2/Source/tess.c
   src/ext/lodepng/lodepng.cpp
+  src/geometry/AnalyticFeatures.cc
   src/geometry/ClipperUtils.cc
   src/geometry/Geometry.cc
   src/geometry/GeometryCache.cc
@@ -1818,6 +1852,7 @@ set(INPUT_DRIVER_SOURCES
 set(GUI_SOURCES
   ${GUI_SOURCES}
   src/openscad_gui.cc
+  src/gui/AboutDialog.cc
   src/gui/AutoUpdater.cc
   src/gui/CGALWorker.cc
   src/gui/CSGWorker.cc
@@ -2104,13 +2139,51 @@ elseif(WIN32)
   list(APPEND RESOURCE_FILES ${WINDOWS_RESOURCE_PATH})
 endif()
 
-file(GLOB_RECURSE TEST_SOURCES
-  "src/utils/*_test.cc"
-  "src/core/*_test.cc"
+# Unit test translation units, found wherever they live rather than in one
+# hardcoded directory - a test next to the code it covers was previously only
+# picked up under src/utils. The GUI ones are separated because they need the Qt
+# half of OpenSCADLibInternal, which a HEADLESS build does not have.
+file(GLOB_RECURSE ALL_TEST_SOURCES
+  "src/*_test.cc"
 )
-file(GLOB_RECURSE GUI_TEST_SOURCES
-  "src/gui/*_test.cc"
-)
+
+# Three of those do not build against the code as it now stands. They are
+# excluded by name rather than deleted, because each records an intent worth
+# keeping, and each carries a note at the top saying what it would take to bring
+# it back. Removing a line here is the last step of porting one.
+#
+#   Measurement_test.cc     wants Measurement::Template<GLView> and a Result
+#                           type. The class has neither: it is a plain
+#                           Measurement holding a QGLView* and returning
+#                           std::vector<QString>. Compile error.
+#   linear_extrude_test.cc  declares three LinearExtrudeInternals functions
+#                           itself. assemblePolySetForCGAL no longer exists in
+#                           this fork at all, and assemblePolySetForManifold has
+#                           since taken colours and changed its references.
+#                           Link error.
+#   surface_node_test.cc    arrived from upstream OpenSCAD via 1ee676b0e and is
+#                           written against stock OpenSCAD's SurfaceNode, which
+#                           this fork's has diverged from in three ways: it
+#                           default-constructs SurfaceNode (ours takes a
+#                           ModuleInstantiation), it calls a member
+#                           SurfaceNode::read_png_or_dat (ours keeps that as a
+#                           free function in utils/png_util.h), and it compares
+#                           img_data_t elements against Catch::Approx (ours are
+#                           Vector3f, not a scalar). 39 compile errors. Porting
+#                           it means deciding which channel of that Vector3f
+#                           carries the height, which is a question for the
+#                           maintainers of the fork's surface() colour support.
+foreach(stale_test
+    "src/gui/Measurement_test.cc"
+    "src/geometry/linear_extrude_test.cc"
+    "src/core/surface_node_test.cc")
+  list(REMOVE_ITEM ALL_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${stale_test}")
+endforeach()
+
+set(GUI_TEST_SOURCES ${ALL_TEST_SOURCES})
+list(FILTER GUI_TEST_SOURCES INCLUDE REGEX "/src/gui/")
+set(TEST_SOURCES ${ALL_TEST_SOURCES})
+list(FILTER TEST_SOURCES EXCLUDE REGEX "/src/gui/")
 list(FILTER Sources EXCLUDE REGEX ".*_test[.]cc")
 list(REMOVE_ITEM Sources "src/main_wrapper.cc")
 
@@ -2776,25 +2849,54 @@ if (MXECROSS)
 endif()
 
 if(ENABLE_TESTS)
-  find_package(Catch2 3 QUIET)
-
-  # Note: Since Catch2 is only used for testing, we install it via Homebrew.
-  # However, we need to temporarily re-enable searching in Homebrew for this to work.
-  if(NOT Catch2_FOUND AND APPLE)
-    set(CMAKE_IGNORE_PREFIX_PATH_BACKUP "${CMAKE_IGNORE_PREFIX_PATH}")
-    set(CMAKE_IGNORE_PREFIX_PATH "")
-    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
-    find_package(Catch2 3 QUIET)
-    set(CMAKE_IGNORE_PREFIX_PATH "${CMAKE_IGNORE_PREFIX_PATH_BACKUP}")
+  # ctest has to be able to run what it registers. A cross build produces an
+  # executable for another machine and an Emscripten build produces no native
+  # executable at all, so the unit tests are simply not part of those builds.
+  if(ENABLE_UNIT_TESTS AND (CMAKE_SYSTEM_NAME STREQUAL Emscripten OR MXECROSS OR CMAKE_CROSSCOMPILING))
+    message(STATUS "Unit tests skipped: this build does not produce a natively runnable executable")
+    set(ENABLE_UNIT_TESTS OFF)
   endif()
 
-  if(NOT Catch2_FOUND)
-    find_package(Catch2 3)
+  if(ENABLE_UNIT_TESTS)
+    # 3.3 is the first release with SKIP(), which the tests use to report a
+    # known failure without failing the run.
+    find_package(Catch2 3.3 QUIET)
+
+    # Note: Since Catch2 is only used for testing, we install it via Homebrew.
+    # However, we need to temporarily re-enable searching in Homebrew for this to work.
+    if(NOT Catch2_FOUND AND APPLE)
+      set(CMAKE_IGNORE_PREFIX_PATH_BACKUP "${CMAKE_IGNORE_PREFIX_PATH}")
+      set(CMAKE_IGNORE_PREFIX_PATH "")
+      list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+      find_package(Catch2 3.3 QUIET)
+      set(CMAKE_IGNORE_PREFIX_PATH "${CMAKE_IGNORE_PREFIX_PATH_BACKUP}")
+    endif()
+
+    # Not every distribution this project builds on packages Catch2 3, and a unit
+    # test suite nobody can build is a suite nobody runs. MSYS2 does have it, and
+    # the msys2 profile now asks for it (`catch:p`), so a Windows build uses the
+    # package rather than this path. Everywhere the package is missing or too old
+    # this keeps the tests available without adding a dependency that only they
+    # need to a profile whose package name has not been checked.
+    if(NOT Catch2_FOUND AND FETCH_CATCH2)
+      message(STATUS "Catch2 3 not installed, fetching ${CATCH2_FETCH_TAG} for the unit tests")
+      include(FetchContent)
+      FetchContent_Declare(Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG ${CATCH2_FETCH_TAG}
+        GIT_SHALLOW TRUE
+      )
+      FetchContent_MakeAvailable(Catch2)
+      # find_package() puts Catch.cmake on the module path itself; a fetched
+      # copy has to be pointed at its own extras directory.
+      list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+      set(Catch2_FOUND TRUE)
+    endif()
   endif()
 
   enable_testing()
 
-  if(Catch2_FOUND)
+  if(ENABLE_UNIT_TESTS AND Catch2_FOUND)
     message(STATUS "Configuring OpenSCAD Unit Tests")
 
     # If you see a line like this:
@@ -2802,13 +2904,46 @@ if(ENABLE_TESTS)
     # You can ignore it. Something about incompatibility with POSITION_INDEPENDENT_CODE
     # and how the system Catch2 static library is compiled. It should be fine.
 
-    #    add_executable(OpenSCADUnitTests ${TEST_SOURCES})
-    #target_link_libraries(OpenSCADUnitTests PRIVATE Catch2::Catch2WithMain OpenSCADLibInternal)
-    #include(CTest)
-    #include(Catch)
-    #catch_discover_tests(OpenSCADUnitTests ADD_TAGS_AS_LABELS)
-  else()
-    message(WARNING "Catch2 3 was not found. OpenSCADUnitTests will not be built.")
+    set(UNIT_TEST_SOURCES ${TEST_SOURCES})
+    if(NOT HEADLESS)
+      list(APPEND UNIT_TEST_SOURCES ${GUI_TEST_SOURCES})
+    endif()
+
+    add_executable(OpenSCADUnitTests ${UNIT_TEST_SOURCES})
+    # The same language settings the library is built with. Without them this
+    # target would compile against the compiler's default standard and fail on
+    # headers the rest of the build compiles happily.
+    if(MSVC)
+      set_target_properties(OpenSCADUnitTests PROPERTIES CXX_STANDARD 20)
+    else()
+      set_target_properties(OpenSCADUnitTests PROPERTIES CXX_STANDARD 17)
+    endif()
+    set_target_properties(OpenSCADUnitTests PROPERTIES
+      CXX_EXTENSIONS OFF
+      CXX_STANDARD_REQUIRED ON
+    )
+    target_link_libraries(OpenSCADUnitTests PRIVATE Catch2::Catch2WithMain OpenSCADLibInternal)
+
+    include(Catch)
+    # PRE_TEST, not the default POST_BUILD: post-build discovery runs the fresh
+    # executable as part of the build, and on Windows the build tree has no DLLs
+    # beside it - only `cmake --install` gathers them - so discovery fails and
+    # takes the whole build with it. Deferring it to test time also means a
+    # cached build does not re-run discovery on every relink.
+    if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.27)
+      # Let the loader find the DLLs this target links against, for both the
+      # discovery run and the tests themselves.
+      set(UNIT_TEST_DL_PATHS DL_PATHS "$<TARGET_RUNTIME_DLL_DIRS:OpenSCADUnitTests>")
+    endif()
+    catch_discover_tests(OpenSCADUnitTests
+      ADD_TAGS_AS_LABELS
+      DISCOVERY_MODE PRE_TEST
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      ${UNIT_TEST_DL_PATHS}
+    )
+  elseif(ENABLE_UNIT_TESTS)
+    message(WARNING
+      "Catch2 3.3 was not found and FETCH_CATCH2 is off. OpenSCADUnitTests will not be built.")
   endif()
 
   add_subdirectory(tests)

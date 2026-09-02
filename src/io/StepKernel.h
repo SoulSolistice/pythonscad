@@ -26,19 +26,110 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
+#pragma once
+
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
+#include <utility>
 #include <algorithm>
 #include <sstream>
+#include <charconv>
+#include <clocale>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <math.h>
 #include "src/geometry/GeometryUtils.h"
 #include <src/geometry/Curve.h>
 #include <src/geometry/Surface.h>
 
+// Format a double as an ISO 10303-21 REAL literal.
+//
+// The default ostream formatting is unusable for STEP: it only emits 6
+// significant digits (which quietly shifts vertices and opens gaps between
+// neighbouring faces) and it produces literals such as "0" or "1e-07" which
+// are not valid REALs - the standard requires an explicit decimal point and
+// an upper case exponent marker.
+inline std::string step_real(double v)
+{
+  if (!std::isfinite(v)) v = 0.0;
+  if (v == 0.0) return "0.";
+
+  // The formatting has to be independent of the active locale: openscad.cc
+  // calls setlocale(LC_ALL, ""), so on a locale with a comma radix (de, fr,
+  // ...) a coordinate would come out as "-5,394" and a STEP reader would parse
+  // it as two separate numbers, shifting every following argument.
+  char buf[64];
+  std::string s;
+
+#ifdef __cpp_lib_to_chars
+  // std::to_chars is locale independent by definition and already yields the
+  // shortest representation which round-trips exactly.
+  const auto res = std::to_chars(buf, buf + sizeof(buf), v);
+  if (res.ec == std::errc{}) s.assign(buf, res.ptr);
+#endif
+
+  if (s.empty()) {
+    // Fallback: snprintf honours LC_NUMERIC, so the radix has to be corrected
+    // afterwards.
+    for (int prec = 15; prec <= 17; prec++) {
+      snprintf(buf, sizeof(buf), "%.*g", prec, v);
+      if (std::strtod(buf, nullptr) == v) break;
+    }
+    s = buf;
+    const char *radix = std::localeconv()->decimal_point;
+    if (radix != nullptr && radix[0] != '\0' && radix[0] != '.') {
+      std::replace(s.begin(), s.end(), radix[0], '.');
+    }
+  }
+
+  auto epos = s.find_first_of("eE");
+  if (epos == std::string::npos) {
+    if (s.find('.') == std::string::npos) s += '.';
+  } else {
+    s[epos] = 'E';
+    if (s.find('.') == std::string::npos) s.insert(epos, 1, '.');
+  }
+  return s;
+}
+
+// Escape a string for use inside an ISO 10303-21 string literal. An apostrophe
+// is written twice, a backslash (which starts a control directive) as well.
+inline std::string step_string(const std::string& str)
+{
+  std::string out;
+  out.reserve(str.size());
+  for (const char c : str) {
+    if (c == '\'') out += "''";
+    else if (c == '\\') out += "\\\\";
+    else if (static_cast<unsigned char>(c) < 0x20) out += ' ';
+    else out += c;
+  }
+  return out;
+}
+
 class StepKernel
 {
 public:
+  // Entities are arena owned: every one registers itself here in its base
+  // constructor, and ~StepKernel deletes the arena. Nothing else owns an
+  // Entity, and nothing should delete one.
+  //
+  // Registering in the *base* constructor is what makes that safe. It runs
+  // before any derived member is initialised, so an entity built as an argument
+  // to another entity's constructor is already in the arena by the time the
+  // outer one is being built, and is freed even if the outer never completes.
+  // Entities therefore do not leak on a throw.
+  //
+  // The one hole, recorded rather than fixed: if a *derived* constructor throws
+  // after this one has run, the runtime frees the storage and the arena is left
+  // holding a dangling pointer to it, which the destructor then deletes again.
+  // Closing it properly means taking self-registration out of the constructor
+  // across 126 construction sites, which is not worth doing for a path only
+  // reachable on allocation failure - but it is worth knowing about before
+  // anyone adds a constructor here that can throw for an ordinary reason.
   class Entity
   {
   public:
@@ -47,6 +138,12 @@ public:
       ent_list.push_back(this);
       id = int(ent_list.size());
     }
+
+    // An entity's id is its position in the list, so an entity that turns out
+    // not to be wanted cannot be taken out of it - every id issued afterwards
+    // would collide with one already written. It is dropped at serialisation
+    // instead, which costs a flag and keeps ids meaning what they say.
+    bool live = true;
     virtual ~Entity() {}
 
     std::vector<std::string> tokenize(const std::string& str, const std::string& delimiters = ",")
@@ -92,8 +189,8 @@ public:
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = DIRECTION('" << label << "', (" << pt[0] << ", " << pt[1] << ", "
-                << pt[2] << "));\n";
+      stream_in << "#" << id << " = DIRECTION('" << label << "', (" << step_real(pt[0]) << ", "
+                << step_real(pt[1]) << ", " << step_real(pt[2]) << "));\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
@@ -123,8 +220,8 @@ public:
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = CARTESIAN_POINT('" << label << "', (" << pt[0] << "," << pt[1] << ","
-                << pt[2] << "));\n";
+      stream_in << "#" << id << " = CARTESIAN_POINT('" << label << "', (" << step_real(pt[0]) << ","
+                << step_real(pt[1]) << "," << step_real(pt[2]) << "));\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
@@ -231,18 +328,382 @@ public:
       r = 0;
     }
 
-    CylindricalSurface(std::vector<Entity *>& ent_list, std::string name, Axis2Placement *axis_in,
-                       double r)
+    CylindricalSurface(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+                       double r_in)
       : SurfaceType(ent_list)
     {
+      name = name_in;
       axis = axis_in;
+      r = r_in;
     }
     virtual ~CylindricalSurface() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = CYLINDRICAL_SURFACE('" << label << "',#" << axis->id << ");\n";
-      stream_in << "#" << id << " = CYLINDRICAL_SURFACE('" << label << "',#" << axis->id << "," << r
+      stream_in << "#" << id << " = CYLINDRICAL_SURFACE('" << label << "',#" << axis->id << ","
+                << step_real(r) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> r;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double r;
+    Axis2Placement *axis;
+  };
+
+  /*! A torus, given by the radius of the circle the tube's centre traces and
+   * the radius of the tube itself. */
+  class ToroidalSurface : public SurfaceType
+  {
+  public:
+    ToroidalSurface(std::vector<Entity *>& ent_list) : SurfaceType(ent_list)
+    {
+      axis = 0;
+      r_major = 0;
+      r_minor = 0;
+    }
+
+    ToroidalSurface(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+                    double r_major_in, double r_minor_in)
+      : SurfaceType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      r_major = r_major_in;
+      r_minor = r_minor_in;
+    }
+    virtual ~ToroidalSurface() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = TOROIDAL_SURFACE('" << label << "',#" << axis->id << ","
+                << step_real(r_major) << "," << step_real(r_minor) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> r_major >> r_minor;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double r_major, r_minor;
+    Axis2Placement *axis;
+  };
+
+  /*! A sphere. The placement's axis is the pole of the surface's own
+   * parameterisation and carries no geometry: a sphere looks the same from
+   * every direction, but a face on one still has to say which way its seam
+   * runs. */
+  class SphericalSurface : public SurfaceType
+  {
+  public:
+    SphericalSurface(std::vector<Entity *>& ent_list) : SurfaceType(ent_list)
+    {
+      axis = 0;
+      r = 0;
+    }
+
+    SphericalSurface(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+                     double r_in)
+      : SurfaceType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      r = r_in;
+    }
+    virtual ~SphericalSurface() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = SPHERICAL_SURFACE('" << label << "',#" << axis->id << ","
+                << step_real(r) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> r;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double r;
+    Axis2Placement *axis;
+  };
+
+  /*! A cone, given by the radius in the placement's plane and the half angle it
+   * opens by along the placement's axis. ISO 10303 wants the half angle in
+   * (0, pi/2), so a cone which narrows along its axis has to be written from
+   * its other end rather than with a negative angle. */
+  class ConicalSurface : public SurfaceType
+  {
+  public:
+    ConicalSurface(std::vector<Entity *>& ent_list) : SurfaceType(ent_list)
+    {
+      axis = 0;
+      r = 0;
+      half_angle = 0;
+    }
+
+    ConicalSurface(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+                   double r_in, double half_angle_in)
+      : SurfaceType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      r = r_in;
+      half_angle = half_angle_in;
+    }
+    virtual ~ConicalSurface() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = CONICAL_SURFACE('" << label << "',#" << axis->id << ","
+                << step_real(r) << "," << step_real(half_angle) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> r >> half_angle;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double r;
+    double half_angle;
+    Axis2Placement *axis;
+  };
+
+  class RoundType : public Entity
+  {
+  public:
+    RoundType(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
+  };
+
+  /*! A tensor-product B-spline surface.
+   *
+   * Two shapes of net arrive here. A fillet's patch is a Bezier: a Bezier of
+   * degree d is the B-spline whose only knots are 0 and 1, each with
+   * multiplicity d+1, so no knot vector has to be invented - the control net is
+   * written straight out and the parameterisation follows. Both patches a
+   * fillet draws are degree 2 in at least one direction, and the corner's apex
+   * row makes three of its control points coincide - a singular point, which is
+   * how a rounded corner is normally written.
+   *
+   * A declared grid is the other shape: many more control points than degree+1,
+   * with interior knots that come from the interpolation and are not derivable
+   * from the degrees. Pass those through `setKnots`, which is the only reason
+   * this class is not Bezier-only; leave them unset and the Bezier knots are
+   * synthesised as before. */
+  class BSplineSurface : public SurfaceType
+  {
+  public:
+    BSplineSurface(std::vector<Entity *>& ent_list) : SurfaceType(ent_list) {}
+    BSplineSurface(std::vector<Entity *>& ent_list, std::string name_in, int degree_u_in,
+                   int degree_v_in, std::vector<std::vector<Point *>> net_in,
+                   std::vector<std::vector<double>> weights_in = {})
+      : SurfaceType(ent_list)
+    {
+      label = std::move(name_in);
+      degree_u = degree_u_in;
+      degree_v = degree_v_in;
+      net = std::move(net_in);
+      weights = std::move(weights_in);
+    }
+    virtual ~BSplineSurface() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      std::ostringstream ctrl;
+      for (std::size_t i = 0; i < net.size(); i++) {
+        ctrl << (i ? ",(" : "(");
+        for (std::size_t j = 0; j < net[i].size(); j++) {
+          ctrl << (j ? ",#" : "#") << net[i][j]->id;
+        }
+        ctrl << ")";
+      }
+      // ISO 10303-42 orders these u_multiplicities, v_multiplicities, u_knots,
+      // v_knots - all four multiplicities before any knot, not one direction
+      // fully then the other. Writing them interleaved gives a reader (0.,1.)
+      // where it expects v_multiplicities, and a face whose surface will not
+      // build: OpenCASCADE drops it and takes the shell as loose surfaces. Both
+      // branches below share these so the two orders cannot drift apart again -
+      // which is exactly what had happened, the polynomial one being right and
+      // the rational one wrong.
+      const std::string knots = knot_text();
+
+      if (weights.empty()) {
+        stream_in << "#" << id << " = B_SPLINE_SURFACE_WITH_KNOTS('" << label << "'," << degree_u << ","
+                  << degree_v << ",(" << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,.F.," << knots
+                  << ",.UNSPECIFIED.);\n";
+        return;
+      }
+
+      // A rational surface has no single entity of its own in ISO 10303: it is a
+      // complex instance, the subtypes named in alphabetical order, with the
+      // weights carried by RATIONAL_B_SPLINE_SURFACE. Writing the weights away
+      // and the rest as a plain B_SPLINE_SURFACE_WITH_KNOTS would describe a
+      // different surface - a parabola in place of a circular arc.
+      std::ostringstream wts;
+      for (std::size_t i = 0; i < weights.size(); i++) {
+        wts << (i ? ",(" : "(");
+        for (std::size_t j = 0; j < weights[i].size(); j++) {
+          wts << (j ? "," : "") << step_real(weights[i][j]);
+        }
+        wts << ")";
+      }
+      stream_in << "#" << id << " = ( BOUNDED_SURFACE() B_SPLINE_SURFACE(" << degree_u << "," << degree_v
+                << ",(" << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,.F.)"
+                << " B_SPLINE_SURFACE_WITH_KNOTS(" << knots
+                << ",.UNSPECIFIED.) GEOMETRIC_REPRESENTATION_ITEM()" << " RATIONAL_B_SPLINE_SURFACE(("
+                << wts.str() << "))" << " REPRESENTATION_ITEM('" << label << "') SURFACE() );\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    /*! The knots of a surface that is not a Bezier: distinct values and their
+     * multiplicities, per direction. Both directions have to be given together
+     * - a surface with general knots in one direction and Bezier knots in the
+     * other is still a surface with general knots, and the reader is told all
+     * four lists or none. */
+    void setKnots(std::vector<double> ku, std::vector<int> mu, std::vector<double> kv,
+                  std::vector<int> mv)
+    {
+      knots_u = std::move(ku);
+      mults_u = std::move(mu);
+      knots_v = std::move(kv);
+      mults_v = std::move(mv);
+    }
+
+    int degree_u = 0, degree_v = 0;
+    std::vector<std::vector<Point *>> net;     // net[u][v]
+    std::vector<std::vector<double>> weights;  // empty for a polynomial patch
+
+  private:
+    static std::string int_list(const std::vector<int>& v)
+    {
+      std::string out = "(";
+      for (std::size_t i = 0; i < v.size(); i++) out += (i ? "," : "") + std::to_string(v[i]);
+      return out + ")";
+    }
+    static std::string real_list(const std::vector<double>& v)
+    {
+      std::string out = "(";
+      for (std::size_t i = 0; i < v.size(); i++) out += (i ? "," : "") + step_real(v[i]);
+      return out + ")";
+    }
+
+    /*! The four lists, in the order ISO 10303-42 gives them. */
+    std::string knot_text() const
+    {
+      if (!knots_u.empty() && !knots_v.empty()) {
+        return int_list(mults_u) + "," + int_list(mults_v) + "," + real_list(knots_u) + "," +
+               real_list(knots_v);
+      }
+      const std::string mult_u =
+        "(" + std::to_string(degree_u + 1) + "," + std::to_string(degree_u + 1) + ")";
+      const std::string mult_v =
+        "(" + std::to_string(degree_v + 1) + "," + std::to_string(degree_v + 1) + ")";
+      return mult_u + "," + mult_v + ",(0.,1.),(0.,1.)";
+    }
+
+    std::vector<double> knots_u, knots_v;  // empty for a Bezier
+    std::vector<int> mults_u, mults_v;
+  };
+
+  /*! One boundary curve of such a patch: a row or a column of its net. */
+  class BSplineCurve : public RoundType
+  {
+  public:
+    BSplineCurve(std::vector<Entity *>& ent_list) : RoundType(ent_list) {}
+    BSplineCurve(std::vector<Entity *>& ent_list, std::string name_in, std::vector<Point *> pts_in,
+                 std::vector<double> weights_in)
+      : RoundType(ent_list)
+    {
+      label = std::move(name_in);
+      pts = std::move(pts_in);
+      weights = std::move(weights_in);
+    }
+    BSplineCurve(std::vector<Entity *>& ent_list, std::string name_in, std::vector<Point *> pts_in)
+      : RoundType(ent_list)
+    {
+      label = std::move(name_in);
+      pts = std::move(pts_in);
+    }
+    virtual ~BSplineCurve() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      const int degree = int(pts.size()) - 1;
+      std::ostringstream ctrl;
+      for (std::size_t i = 0; i < pts.size(); i++) ctrl << (i ? ",#" : "#") << pts[i]->id;
+
+      if (weights.empty()) {
+        stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << degree << ",("
+                  << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,(" << degree + 1 << "," << degree + 1
+                  << "),(0.,1.),.UNSPECIFIED.);\n";
+        return;
+      }
+
+      // The boundary of a rational patch is a rational curve of the patch's own
+      // weights, so it takes the same complex instance treatment. See
+      // BSplineSurface::serialize().
+      std::ostringstream wts;
+      for (std::size_t i = 0; i < weights.size(); i++) {
+        wts << (i ? "," : "") << step_real(weights[i]);
+      }
+      stream_in << "#" << id << " = ( BOUNDED_CURVE() B_SPLINE_CURVE(" << degree << ",(" << ctrl.str()
+                << "),.UNSPECIFIED.,.F.,.F.) B_SPLINE_CURVE_WITH_KNOTS((" << degree + 1 << ","
+                << degree + 1 << "),(0.,1.),.UNSPECIFIED.) CURVE()"
+                << " GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_CURVE((" << wts.str() << "))"
+                << " REPRESENTATION_ITEM('" << label << "') );\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    std::vector<Point *> pts;
+    std::vector<double> weights;  // empty for a polynomial curve
+  };
+
+  class Circle : public RoundType
+  {
+  public:
+    Circle(std::vector<Entity *>& ent_list) : RoundType(ent_list)
+    {
+      axis = 0;
+      r = 0;
+    }
+
+    Circle(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in, double r_in)
+      : RoundType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      r = r_in;
+    }
+    virtual ~Circle() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = CIRCLE('" << label << "',#" << axis->id << "," << step_real(r)
                 << ");\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
@@ -261,32 +722,46 @@ public:
     Axis2Placement *axis;
   };
 
-  class RoundType : public Entity
+  /*! The section of a cylinder by a plane which is not perpendicular to its
+   * axis.
+   *
+   * semi_axis_1 runs along the placement's reference direction and
+   * semi_axis_2 along the other in-plane direction, so a rim of radius r cut
+   * at an angle whose plane normal makes cos t with the axis is written with
+   * the reference direction along the steepest ascent, semi_axis_1 = r/cos t
+   * and semi_axis_2 = r.
+   *
+   * ISO 10303 also allows the trim to carry a pcurve in the cylinder's own
+   * (theta, z) parameterisation, where an ellipse unrolls to a sinusoid and
+   * has to be written as a B-spline. That is not emitted here: it is
+   * derivable from the 3D curve, and a kernel reading this file recovers it
+   * to 2e-6 of the radius, which is inside the mesh's own tessellation band.
+   * See doc/step-export-status.md. */
+  class Ellipse : public RoundType
   {
   public:
-    RoundType(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
-  };
-
-  class Circle : public RoundType
-  {
-  public:
-    Circle(std::vector<Entity *>& ent_list) : RoundType(ent_list)
+    Ellipse(std::vector<Entity *>& ent_list) : RoundType(ent_list)
     {
       axis = 0;
-      r = 0;
+      semi_1 = 0;
+      semi_2 = 0;
     }
 
-    Circle(std::vector<Entity *>& ent_list, std::string name, Axis2Placement *axis_in, double r)
+    Ellipse(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+            double semi_1_in, double semi_2_in)
       : RoundType(ent_list)
     {
+      name = name_in;
       axis = axis_in;
+      semi_1 = semi_1_in;
+      semi_2 = semi_2_in;
     }
-    virtual ~Circle() {}
+    virtual ~Ellipse() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = CIRCLE('" << label << "',#" << axis->id << ");\n";
-      stream_in << "#" << id << " = CIRCLE('" << label << "',#" << axis->id << "," << r << ");\n";
+      stream_in << "#" << id << " = ELLIPSE('" << label << "',#" << axis->id << "," << step_real(semi_1)
+                << "," << step_real(semi_2) << ");\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
@@ -296,11 +771,11 @@ public:
       std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
       std::stringstream ss(arg_str);
       int p_id;
-      ss >> p_id >> r;
+      ss >> p_id >> semi_1 >> semi_2;
       axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
     }
     std::string name;
-    double r;
+    double semi_1, semi_2;
     Axis2Placement *axis;
   };
 
@@ -349,18 +824,25 @@ public:
     {
       edgeLoop = 0;
       dir = true;
+      outer = false;
     }
-    FaceBound(std::vector<Entity *>& ent_list, EdgeLoop *edge_loop_in, bool dir_in) : Entity(ent_list)
+    FaceBound(std::vector<Entity *>& ent_list, EdgeLoop *edge_loop_in, bool dir_in,
+              bool outer_in = false)
+      : Entity(ent_list)
     {
       edgeLoop = edge_loop_in;
       dir = dir_in;
+      outer = outer_in;
     }
     virtual ~FaceBound() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = FACE_BOUND('" << label << "', #" << edgeLoop->id << ","
-                << (dir ? ".T." : ".F.") << ");\n";
+      // The outer loop of a face has to be tagged as FACE_OUTER_BOUND, otherwise
+      // importers have to guess which of the bounds is the perimeter and which
+      // ones are the holes.
+      stream_in << "#" << id << " = " << (outer ? "FACE_OUTER_BOUND" : "FACE_BOUND") << "('" << label
+                << "', #" << edgeLoop->id << "," << (dir ? ".T." : ".F.") << ");\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
@@ -378,6 +860,7 @@ public:
     }
     EdgeLoop *edgeLoop;
     bool dir;
+    bool outer;
   };
 
   class Face : public Entity
@@ -639,19 +1122,201 @@ public:
 
   class Line;
 
+  /*! Geometry in a surface's own parameter space, for a PCURVE.
+   *
+   * An edge bounding a face is a curve in space, and a reader has to know where
+   * that curve runs across the surface. It can find out by projecting, and for
+   * a plane or a cylinder that is trivial - which is why this exporter went a
+   * long way with no pcurves at all. On a swept surface it is not: a helix
+   * passes near itself once a pitch, so the nearest point of the surface to a
+   * point on the edge can be a whole turn from the right one.
+   * GridSurface::project samples every station before it starts Newton for
+   * exactly that reason. An importer that does not is left trimming the face
+   * along a path that jumps between turns, which is how SOLIDWORKS came to
+   * shred this project's threads while OpenCASCADE read the same file as a
+   * closed solid.
+   *
+   * Writing the parameters down removes the guess. These four entities are the
+   * two dimensional half of what a LINE needs, and they exist only to be
+   * referred to from a DEFINITIONAL_REPRESENTATION.
+   */
+  class Point2d : public Entity
+  {
+  public:
+    Point2d(std::vector<Entity *>& ent_list, double u_in, double v_in) : Entity(ent_list)
+    {
+      u = u_in;
+      v = v_in;
+    }
+    virtual ~Point2d() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = CARTESIAN_POINT('" << label << "',(" << step_real(u) << ","
+                << step_real(v) << "));\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    double u = 0, v = 0;
+  };
+
+  class Direction2d : public Entity
+  {
+  public:
+    Direction2d(std::vector<Entity *>& ent_list, double u_in, double v_in) : Entity(ent_list)
+    {
+      u = u_in;
+      v = v_in;
+    }
+    virtual ~Direction2d() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = DIRECTION('" << label << "',(" << step_real(u) << "," << step_real(v)
+                << "));\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    double u = 0, v = 0;
+  };
+
+  class Vector2d : public Entity
+  {
+  public:
+    Vector2d(std::vector<Entity *>& ent_list, Direction2d *dir_in, double len_in) : Entity(ent_list)
+    {
+      dir = dir_in;
+      length = len_in;
+    }
+    virtual ~Vector2d() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = VECTOR('" << label << "',#" << dir->id << "," << step_real(length)
+                << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Direction2d *dir = nullptr;
+    double length = 0;
+  };
+
+  class Line2d : public Entity
+  {
+  public:
+    Line2d(std::vector<Entity *>& ent_list, Point2d *point_in, Vector2d *vector_in) : Entity(ent_list)
+    {
+      point = point_in;
+      vector = vector_in;
+    }
+    virtual ~Line2d() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = LINE('" << label << "',#" << point->id << ",#" << vector->id
+                << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Point2d *point = nullptr;
+    Vector2d *vector = nullptr;
+  };
+
+  /*! The context those two dimensional curves live in.
+   *
+   * A complex instance, because ISO 10303 gives it no entity of its own, and
+   * one per file is enough since nothing about it varies.
+   */
+  class ParametricContext : public Entity
+  {
+  public:
+    ParametricContext(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
+    virtual ~ParametricContext() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id
+                << " = ( GEOMETRIC_REPRESENTATION_CONTEXT(2) PARAMETRIC_REPRESENTATION_CONTEXT()"
+                << " REPRESENTATION_CONTEXT('2D SPACE','') );\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+  };
+
+  class DefinitionalRepresentation : public Entity
+  {
+  public:
+    DefinitionalRepresentation(std::vector<Entity *>& ent_list, Line2d *curve_in,
+                               ParametricContext *context_in)
+      : Entity(ent_list)
+    {
+      curve = curve_in;
+      context = context_in;
+    }
+    virtual ~DefinitionalRepresentation() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = DEFINITIONAL_REPRESENTATION('" << label << "',(#" << curve->id
+                << "),#" << context->id << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Line2d *curve = nullptr;
+    ParametricContext *context = nullptr;
+  };
+
+  class PCurve : public Entity
+  {
+  public:
+    PCurve(std::vector<Entity *>& ent_list, SurfaceType *surface_in, DefinitionalRepresentation *rep_in)
+      : Entity(ent_list)
+    {
+      surface = surface_in;
+      rep = rep_in;
+    }
+    virtual ~PCurve() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PCURVE('" << label << "',#" << surface->id << ",#" << rep->id
+                << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    SurfaceType *surface = nullptr;
+    DefinitionalRepresentation *rep = nullptr;
+  };
+
+  /*! An edge's curve, given in space and on a face it bounds.
+   *
+   * The three dimensional curve is unchanged and stays the master
+   * representation, so a reader that ignores the pcurves sees exactly the file
+   * it saw before. What they add is the answer to a projection this exporter
+   * used to leave every importer to work out for itself.
+   */
   class SurfaceCurve : public RoundType
   {
   public:
-    SurfaceCurve(std::vector<Entity *>& ent_list) : RoundType(ent_list) { line = 0; }
-    SurfaceCurve(std::vector<Entity *>& ent_list, Line *surface_curve_in) : RoundType(ent_list)
+    SurfaceCurve(std::vector<Entity *>& ent_list) : RoundType(ent_list) { curve = nullptr; }
+    SurfaceCurve(std::vector<Entity *>& ent_list, RoundType *curve_in, std::vector<PCurve *> on_in)
+      : RoundType(ent_list)
     {
-      line = surface_curve_in;
+      curve = curve_in;
+      on = std::move(on_in);
     }
     virtual ~SurfaceCurve() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = SURFACE_CURVE('" << label << "', #" << line->id << ");\n";
+      stream_in << "#" << id << " = SURFACE_CURVE('" << label << "',#" << curve->id << ",(";
+      for (std::size_t i = 0; i < on.size(); i++) stream_in << (i ? ",#" : "#") << on[i]->id;
+      // .CURVE_3D., not .PCURVE_S1. ISO 10303-42 allows exactly .CURVE_3D.,
+      // .PCURVE_S1. and .PCURVE_S2. here - .PCURVE_S. is not a value at all,
+      // and writing it cost a round of SOLIDWORKS testing that changed nothing
+      // because the entity carrying it was being thrown away whole.
+      //
+      // Of the three that exist, .CURVE_3D. is the true one. The pcurve is a
+      // straight line in parameter space and the master is a straight chord in
+      // space; each is the image of the other only to within the sagitta, so
+      // they are not the same curve and one has to be definitive. It has to be
+      // the 3D one, because the planar face across this edge is bounded by that
+      // chord and nothing else - promote the pcurve and the shared edge leaves
+      // the neighbour's plane. What the pcurve is for is to say where the chord
+      // runs across the sweep, which is the part an importer cannot work out.
+      stream_in << "),.CURVE_3D.);\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
@@ -663,10 +1328,11 @@ public:
       int p1_id;
       ss >> p1_id;
 
-      line = dynamic_cast<Line *>(ent_map[p1_id]);
+      curve = dynamic_cast<RoundType *>(ent_map[p1_id]);
     }
 
-    Line *line;
+    RoundType *curve;
+    std::vector<PCurve *> on;
   };
 
   class EdgeCurve : public Entity
@@ -776,7 +1442,8 @@ public:
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = VECTOR('" << label << "',#" << dir->id << "," << length << ");\n";
+      stream_in << "#" << id << " = VECTOR('" << label << "',#" << dir->id << "," << step_real(length)
+                << ");\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
@@ -795,18 +1462,257 @@ public:
     double length;
     Direction *dir;
   };
+  // ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) ) and friends.
+  class SiUnit : public Entity
+  {
+  public:
+    enum Kind { LENGTH, PLANE_ANGLE, SOLID_ANGLE };
+    SiUnit(std::vector<Entity *>& ent_list, Kind kind_in) : Entity(ent_list) { kind = kind_in; }
+    virtual ~SiUnit() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = ";
+      switch (kind) {
+      case LENGTH:      stream_in << "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))"; break;
+      case PLANE_ANGLE: stream_in << "(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))"; break;
+      case SOLID_ANGLE: stream_in << "(NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT())"; break;
+      }
+      stream_in << ";\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Kind kind;
+  };
+
+  // The modelling tolerance. Without it importers fall back to their own
+  // default, which is often far tighter than the accuracy of the exported
+  // coordinates, and then report gaps between neighbouring faces.
+  class UncertaintyMeasure : public Entity
+  {
+  public:
+    UncertaintyMeasure(std::vector<Entity *>& ent_list, SiUnit *unit_in, double value_in)
+      : Entity(ent_list)
+    {
+      unit = unit_in;
+      value = value_in;
+    }
+    virtual ~UncertaintyMeasure() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(" << step_real(value)
+                << "),#" << unit->id << ",'distance_accuracy_value','confusion accuracy');\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    SiUnit *unit;
+    double value;
+  };
+
+  class GeometricContext : public Entity
+  {
+  public:
+    GeometricContext(std::vector<Entity *>& ent_list, UncertaintyMeasure *uncertainty_in,
+                     SiUnit *length_in, SiUnit *angle_in, SiUnit *solid_in)
+      : Entity(ent_list)
+    {
+      uncertainty = uncertainty_in;
+      length = length_in;
+      angle = angle_in;
+      solid = solid_in;
+    }
+    virtual ~GeometricContext() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = (GEOMETRIC_REPRESENTATION_CONTEXT(3)"
+                << "GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#" << uncertainty->id << "))"
+                << "GLOBAL_UNIT_ASSIGNED_CONTEXT((#" << length->id << ",#" << angle->id << ",#"
+                << solid->id << "))"
+                << "REPRESENTATION_CONTEXT('Context','3D Context with UNIT and UNCERTAINTY'));\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    UncertaintyMeasure *uncertainty;
+    SiUnit *length;
+    SiUnit *angle;
+    SiUnit *solid;
+  };
+
+  class ApplicationContext : public Entity
+  {
+  public:
+    ApplicationContext(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
+    virtual ~ApplicationContext() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id
+                << " = APPLICATION_CONTEXT('configuration controlled 3d designs of mechanical parts "
+                   "and assemblies');\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+  };
+
+  class ApplicationProtocolDefinition : public Entity
+  {
+  public:
+    ApplicationProtocolDefinition(std::vector<Entity *>& ent_list, ApplicationContext *context_in)
+      : Entity(ent_list)
+    {
+      context = context_in;
+    }
+    virtual ~ApplicationProtocolDefinition() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id
+                << " = APPLICATION_PROTOCOL_DEFINITION('international standard',"
+                   "'config_control_design',1994,#"
+                << context->id << ");\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    ApplicationContext *context;
+  };
+
+  class ProductContext : public Entity
+  {
+  public:
+    ProductContext(std::vector<Entity *>& ent_list, ApplicationContext *context_in) : Entity(ent_list)
+    {
+      context = context_in;
+    }
+    virtual ~ProductContext() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT_CONTEXT('',#" << context->id << ",'mechanical');\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    ApplicationContext *context;
+  };
+
+  class Product : public Entity
+  {
+  public:
+    Product(std::vector<Entity *>& ent_list, const std::string& name_in, ProductContext *context_in)
+      : Entity(ent_list)
+    {
+      name = name_in;
+      context = context_in;
+    }
+    virtual ~Product() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT('" << step_string(name) << "','" << step_string(name)
+                << "','',(#" << context->id << "));\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    std::string name;
+    ProductContext *context;
+  };
+
+  class ProductDefinitionFormation : public Entity
+  {
+  public:
+    ProductDefinitionFormation(std::vector<Entity *>& ent_list, Product *product_in) : Entity(ent_list)
+    {
+      product = product_in;
+    }
+    virtual ~ProductDefinitionFormation() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE('','',#"
+                << product->id << ",.NOT_KNOWN.);\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Product *product;
+  };
+
+  class ProductDefinitionContext : public Entity
+  {
+  public:
+    ProductDefinitionContext(std::vector<Entity *>& ent_list, ApplicationContext *context_in)
+      : Entity(ent_list)
+    {
+      context = context_in;
+    }
+    virtual ~ProductDefinitionContext() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT_DEFINITION_CONTEXT('part definition',#" << context->id
+                << ",'design');\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    ApplicationContext *context;
+  };
+
+  class ProductRelatedProductCategory : public Entity
+  {
+  public:
+    ProductRelatedProductCategory(std::vector<Entity *>& ent_list, Product *product_in)
+      : Entity(ent_list)
+    {
+      product = product_in;
+    }
+    virtual ~ProductRelatedProductCategory() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PRODUCT_RELATED_PRODUCT_CATEGORY('part','',(#" << product->id
+                << "));\n";
+    }
+
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    Product *product;
+  };
+
   class ProductDefinition : public Entity
   {
   public:
-    ProductDefinition(std::vector<Entity *>& ent_list) : Entity(ent_list) {}
+    ProductDefinition(std::vector<Entity *>& ent_list) : Entity(ent_list)
+    {
+      formation = 0;
+      context = 0;
+    }
+    ProductDefinition(std::vector<Entity *>& ent_list, ProductDefinitionFormation *formation_in,
+                      ProductDefinitionContext *context_in)
+      : Entity(ent_list)
+    {
+      formation = formation_in;
+      context = context_in;
+    }
     virtual ~ProductDefinition() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = PRODUCT_DEFINITION('', '');\n";
+      stream_in << "#" << id << " = PRODUCT_DEFINITION('design','',#" << formation->id << ",#"
+                << context->id << ");\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    ProductDefinitionFormation *formation;
+    ProductDefinitionContext *context;
   };
   class ProductDefinitionShape : public Entity
   {
@@ -831,20 +1737,29 @@ public:
   class ShapeRepresentation : public Entity
   {
   public:
-    ShapeRepresentation(std::vector<Entity *>& ent_list, const char *name_in) : Entity(ent_list)
+    ShapeRepresentation(std::vector<Entity *>& ent_list, const std::string& name_in,
+                        Axis2Placement *axis_in, GeometricContext *context_in)
+      : Entity(ent_list)
     {
-      name = strdup(name_in);
+      name = name_in;
+      axis = axis_in;
+      context = context_in;
     }
     virtual ~ShapeRepresentation() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = SHAPE_REPRESENTATION('" << name << "');\n";
+      // SHAPE_REPRESENTATION(name, items, context_of_items) - all three
+      // arguments are mandatory.
+      stream_in << "#" << id << " = SHAPE_REPRESENTATION('" << step_string(name) << "',(#" << axis->id
+                << "),#" << context->id << ");\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
 
-    char *name;
+    std::string name;
+    Axis2Placement *axis;
+    GeometricContext *context;
   };
   class ShapeDefinition_Representation : public Entity
   {
@@ -875,25 +1790,31 @@ public:
   class AdvancesBrepRepresentation : public Entity
   {
   public:
-    AdvancesBrepRepresentation(std::vector<Entity *>& ent_list, const char *name_in,
-                               ManifoldSolid *solid_in)
+    AdvancesBrepRepresentation(std::vector<Entity *>& ent_list, const std::string& name_in,
+                               const std::vector<ManifoldSolid *>& solids_in,
+                               GeometricContext *context_in)
       : Entity(ent_list)
     {
-      name = strdup(name_in);
-      solid = solid_in;
+      name = name_in;
+      solids = solids_in;
+      context = context_in;
     }
     virtual ~AdvancesBrepRepresentation() {}
 
     virtual void serialize(std::ostream& stream_in)
     {
-      stream_in << "#" << id << " = ADVANCED_BREP_SHAPE_REPRESENTATION('" << name << "',(#" << solid->id
-                << "),);\n";
+      stream_in << "#" << id << " = ADVANCED_BREP_SHAPE_REPRESENTATION('" << step_string(name) << "',(";
+      for (size_t i = 0; i < solids.size(); i++) {
+        if (i) stream_in << ",";
+        stream_in << "#" << solids[i]->id;
+      }
+      stream_in << "),#" << context->id << ");\n";
     }
 
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
-    char *name;
-    ManifoldSolid *solid;
-    double length;
+    std::string name;
+    std::vector<ManifoldSolid *> solids;
+    GeometricContext *context;
   };
 
   class ShapeRepresentationRelationShip : public Entity
@@ -967,20 +1888,15 @@ public:
   StepKernel::EdgeCurve *create_arc_edge_curve(StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
                                                bool dir);
 
-  void build_tri_body(const char *name, std::vector<Vector3d> tris, std::vector<IndexedFace> faces,
+  void build_tri_body(const char *name, const std::vector<Vector3d>& vertices,
+                      const std::vector<IndexedFace>& faces,
                       const std::vector<std::shared_ptr<Curve>>& curves,
-                      const std::vector<std::shared_ptr<Surface>> surfaces,
-                      const std::vector<int>& faceParents, double tol);
-  EdgeCurve *get_line_from_map(Vector3d p0, Vector3d p1,
-                               std::map<std::tuple<double, double, double, double, double, double>,
-                                        StepKernel::EdgeCurve *>& edge_map,
-                               StepKernel::Vertex *vert1, StepKernel::Vertex *vert2, bool& edge_dir,
-                               int& merge_cnt);
-  EdgeCurve *get_arc_from_map(Vector3d p0, Vector3d p1,
-                              std::map<std::tuple<double, double, double, double, double, double>,
-                                       StepKernel::EdgeCurve *>& edge_map,
-                              StepKernel::Vertex *vert1, StepKernel::Vertex *vert2, bool& edge_dir,
-                              int& merge_cnt);
+                      const std::vector<std::shared_ptr<Surface>>& surfaces,
+                      const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals,
+                      double tol, bool analytic = false, bool approximate = false);
+  EdgeCurve *get_line_from_map(std::map<std::pair<int, int>, StepKernel::EdgeCurve *>& edge_map,
+                               int ind1, int ind2, StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
+                               bool& edge_dir, int& merge_cnt);
   std::string read_line(std::ifstream& stp_file, bool skip_all_space);
   void read_step(std::string file_name);
   std::vector<Entity *> entities;

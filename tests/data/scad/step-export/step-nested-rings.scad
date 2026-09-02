@@ -1,0 +1,26 @@
+// Two concentric tubes on a common base. Their top faces are two annuli in the
+// same plane, and the hole of the inner one (r=27) lies inside the outer bound
+// of both of them.
+//
+// mergeTriangles() keeps the last enclosing loop it finds rather than the
+// innermost, so a hole can be recorded against the face further out. The face
+// it really belongs to is then written without its hole and seals the opening,
+// which the CAD system shows as a membrane spanning the bore.
+//
+// Measured, and asserted by the driver: what the exporter has to report for
+// the above to have happened. A silently faceted export is still a valid one,
+// so validity alone cannot see a recogniser that has stopped recognising.
+// EXPECT: 5 analytic surfaces available (5 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 5 surfaces recognised (0 toroidal, 0 spherical, 0 conical, 0 partial), 160 facets replaced
+//
+// The plate plus the two rings above it, the rings counted only where they
+// are not already plate: pi*(1600*2 + (30^2-27^2)*18 + (38^2-35^2)*18)
+// = 10220*pi.
+// ROUNDTRIP: Cylinder=5 Plane=6
+// VOLUME: 32107.0769197
+$fn = 32;
+union() {
+  cylinder(h = 2, r = 40);
+  difference() { cylinder(h = 20, r = 30); cylinder(h = 20, r = 27); }
+  difference() { cylinder(h = 20, r = 38); cylinder(h = 20, r = 35); }
+}

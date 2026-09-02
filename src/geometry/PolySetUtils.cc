@@ -193,6 +193,9 @@ std::shared_ptr<const PolySet> getGeometryAsPolySet(const std::shared_ptr<const 
     if (!N->isEmpty()) {
       if (auto ps = CGALUtils::createPolySetFromNefPolyhedron3(*N->p3)) {
         ps->setConvexity(N->getConvexity());
+        // the way back out of the Nef representation: hand the declarations on
+        // to whoever asked for a mesh, which is what an exporter reads
+        ps->surfaces = N->surfaces;
         return ps;
       }
       LOG(message_group::Error, "Nef->PolySet failed.");

@@ -52,7 +52,7 @@ namespace CGALUtils {
 //    non-manifold (as that's a valid intermediate state).
 // 3. Otherwise, we try to create the Nef Polyhedron via the old Polyhedron_3 route, which requires the
 //    input to be manifold.
-std::unique_ptr<CGALNefGeometry> createNefPolyhedronFromPolySet(const PolySet& ps)
+static std::unique_ptr<CGALNefGeometry> createNefPolyhedronFromPolySetImpl(const PolySet& ps)
 {
   if (ps.isEmpty()) return std::make_unique<CGALNefGeometry>();
   assert(ps.getDimension() == 3);
@@ -127,6 +127,17 @@ std::unique_ptr<CGALNefGeometry> createNefPolyhedronFromPolySet(const PolySet& p
           "Alternate construction failed. CGAL error in CGAL_Nef_polyhedron3(): %1$s", e.what());
     }
   return std::make_unique<CGALNefGeometry>(N);
+}
+
+/*! A Nef polyhedron cannot express an analytic surface, but it can carry the
+ * declarations across, and it has to: on this backend every boolean converts
+ * its operands here first, so anything dropped on the way in is gone from the
+ * result. There is one conversion in and one out, and this is the way in. */
+std::unique_ptr<CGALNefGeometry> createNefPolyhedronFromPolySet(const PolySet& ps)
+{
+  auto N = createNefPolyhedronFromPolySetImpl(ps);
+  if (N) N->surfaces = ps.surfaces;
+  return N;
 }
 
 template <typename K>
@@ -520,6 +531,7 @@ std::shared_ptr<const PolySet> getGeometryAsPolySet(const std::shared_ptr<const 
     if (!N->isEmpty()) {
       if (auto ps = CGALUtils::createPolySetFromNefPolyhedron3(*N->p3)) {
         ps->setConvexity(N->getConvexity());
+        ps->surfaces = N->surfaces;
         return ps;
       }
       LOG(message_group::Error, "Nef->PolySet failed.");

@@ -113,6 +113,26 @@ void PolySet::transform(const Transform3d& mat)
     for (auto& p : this->indices) {
       std::reverse(p.begin(), p.end());
     }
+
+  // The analytic curves and surfaces are stated in the same coordinates as the
+  // vertices, so they have to move too - leaving them behind would describe the
+  // geometry as it was before the transform. Copy first, because another
+  // PolySet may still share them. Anything the transform cannot carry (a non
+  // uniform scale turns a circle into an ellipse) is dropped.
+  std::vector<std::shared_ptr<Curve>> moved_curves;
+  for (const auto& curve : this->curves) {
+    auto copy = curve->clone();
+    if (copy->transform(mat)) moved_curves.push_back(copy);
+  }
+  this->curves = std::move(moved_curves);
+
+  std::vector<std::shared_ptr<Surface>> moved_surfaces;
+  for (const auto& surface : this->surfaces) {
+    auto copy = surface->clone();
+    if (copy->transform(mat)) moved_surfaces.push_back(copy);
+  }
+  this->surfaces = std::move(moved_surfaces);
+
   bbox_.setNull();
 }
 

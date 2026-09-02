@@ -65,4 +65,5 @@ private:
   std::vector<std::shared_ptr<const Polygon2d>> polygons;
 
   void add_vertex(const Vector2d& v);
+  void add_bezier(const Vector2d *ctrl, int degree);
 };
