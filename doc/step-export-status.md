@@ -2496,3 +2496,78 @@ objection is unchanged, since no face of either operand lies on the collar's
 chamfer and provenance cannot name the surface there, but the consequence is
 smaller than recorded: a gate keyed on provenance degrades over a hull rather
 than going blind at it.
+
+## 23. Where this stands
+
+Sections 17 to 22 are one long investigation and it reached a stopping point
+rather than an end. What follows is the state, so the next session starts from
+the record and not from a reconstruction.
+
+### Landed, on `claude/pythonscad-step-export-next-lmcu01`
+
+| change | effect |
+| --- | --- |
+| Boundary segments at constant height written as arcs | the rulings were already exact; these are the rest |
+| The trimmed quadric tier decided by proof, not by the flag | the lid's exact pass goes from 18 cylinders to 26 |
+| **A claim split into connected components, one face each** | **SOLIDWORKS: 82 faulty faces to 1, and no gaps** |
+| PCURVEs on the declared sweep | correct, and not the cause of anything |
+| `check_bound_enclosure()` | asserts on the file what a kernel was silently repairing |
+| `PolySet::original_ids` | provenance, reported and gating nothing |
+
+The face split is the result. Everything before it in that list is smaller, and
+the pcurve work in particular was landed on a diagnosis that turned out to be
+over-attributed - it is correct, it just was not the defect.
+
+### Measured, deliberately not landed
+
+**Holding every claimed corner to the surface being written.** Both reference
+parts import into SOLIDWORKS clean with it, which is the only configuration that
+has ever done so. It costs two thirds of the sweep - `step-declare-grid-strip`
+drops from 241 facets to 6 - and §20 shows why paying that is the wrong move:
+the corners it rejects are boolean-cut vertices sitting on mesh chords, and no
+fit can reach them, but sliding them onto the surface can. Landing it now would
+churn four fixtures that the snap work would churn back.
+
+### The open blocker
+
+`claude/step-snap-poc` (`bac224932`) slides cut vertices onto the surface they
+were cut from, along the plane their other faces need. It works: on the strip
+coupon 271 vertices move by at most 0.0570 against a band of 0.1290, corners on
+their own surface go from 37% to 68%, and the sweep is written over 633 facets
+rather than 241. Two things stop it:
+
+1. **Vertex ownership.** It picks the *nearest* declared surface, which is not
+   *the surface it was cut from* - the first version pulled a ridge's vertices
+   onto the wall and lost the sweep entirely. Provenance answers this and is now
+   in the tree; the mapping it needs is original id to declared surface, by
+   counting which id's facets lie on which surface. That is the next piece of
+   work.
+2. **The trimmed quadric path fragments under it** - 110 faces over 295 facets,
+   many of three edges, which the validator rejects, correctly. Whether this
+   survives a correct ownership rule is unknown and should be re-measured rather
+   than assumed.
+
+### Loose ends
+
+- **One planar face whose boundary leaves its own plane by 0.019968**, found by
+  scanning all 948 faces of a reference part. A straight edge between two points
+  of a plane cannot leave it, so the polygon is genuinely non-planar and is
+  written as a `PLANE`. The facet-merge coplanarity tolerance is `1e-8 x model
+  diagonal`, microns here, so it did not come from that drifting. Unexplained,
+  independent of everything above, and the only open item that is not a
+  trade-off.
+- **`r01-lid10` and `r02-bayonet` are near-duplicates** in the exact tier - same
+  face census over the same 4360-facet mesh, 85 bytes apart, which is the
+  filename in the header. The interop kit treats them as two samples.
+
+### Files that exist for the next kernel round
+
+```text
+build/interop-split/       the face-split reference parts, and a strict-corner variant of each
+build/interop-strict/      corners held to the surface in both paths - the clean pair
+build/interop-bisect/      the nine-face coupon that made the face-split defect visible
+build/interop-pcurve/      with pcurves, without the face split - superseded
+```
+
+These are build outputs and are not in the repository; `scripts/step-interop-kit.py`
+regenerates the kit, and `--only` restricts it to one question.

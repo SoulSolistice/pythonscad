@@ -205,3 +205,30 @@ The order matters and it is worth stating as a rule:
 
 Kernel agreement is a cross-check downstream of a derivation. It is never the
 derivation.
+
+## The ladder a change climbs
+
+Sections 17 to 22 of `step-export-status.md` cost a dozen iterations, and most
+of what went wrong was a step taken out of order - a fix landed before it was
+measured, a measurement trusted because a kernel agreed with it. The order that
+worked, in the end:
+
+1. **PoC.** Make the change badly and cheaply, on a branch, and measure it.
+   Landing it is not the goal; finding out whether the mechanism does what it is
+   supposed to is. Two of the ideas in §§19-20 died here, which is the cheapest
+   place for an idea to die.
+2. **Fixture.** A model small enough to reason about, with every expectation
+   derived from the model - never captured from a run - and every directive
+   mutation-checked. See the rest of this document for what that means.
+3. **Provenance.** Run the fixture set and read the provenance report against
+   what the models are. It answers *which solid is this* where every other check
+   answers *what is this near*, and it caught a wrong statement about `hull()`
+   in the first sweep that used it (§22).
+4. **OpenCASCADE.** The round trip, and `scripts/step-diagnostics/` for the
+   things a round trip does not say. Necessary, not sufficient: OCCT repairs
+   silently, so agreeing with it proves nothing about a defect it repairs.
+5. **Final.** A kernel that was the source of no number in steps 1 to 4 -
+   SOLIDWORKS or Fusion, through `scripts/step-interop-*`. This is the only step
+   that can tell you the export is right rather than self-consistent.
+
+Skipping 3 or 5 is what makes a wrong fix look finished.
