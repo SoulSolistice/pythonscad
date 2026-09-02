@@ -1021,3 +1021,46 @@ Eight coupons carry a derived volume, and OpenCASCADE matches every one of them
 to 0.000000% - the sole exception being `c13-oblique-trim` at -0.000256%, the
 pcurve-less ellipse re-parameterisation this document already explains, whose
 fixture allows 0.02.
+
+### And it is not our file: SOLIDWORKS breaks Fusion's rewrite of it too
+
+The test that reassigns the defect, and it took one round trip through a third
+kernel. Our `r01-lid10-analytic.stp` was opened in Fusion 360, which reads it as
+one solid, and exported straight back out as STEP. Read with OpenCASCADE:
+
+| | solids / shells | volume | area | faces |
+| --- | --- | --- | --- | --- |
+| ours | 1 / 1 | 226617.511 | 107343.693 | BSpline 2, Cone 8, Cylinder 6, Plane 1311 |
+| Fusion's rewrite | 1 / 1 | **226420.160** | **107321.917** | BSpline 5, Cone 6, Cylinder 5, Plane 1314 |
+
+Fusion did not copy the file. It re-decomposed it - two of our cones and one of
+our cylinders come back as B-splines, the plane count moves, and every seam,
+trim and placement in it is Autodesk's rather than ours. And it describes the
+same solid, to 0.087% of volume and 0.02% of area.
+
+**SOLIDWORKS shreds that file too.**
+
+That rules out a whole class of hypothesis in one measurement. Whatever
+SOLIDWORKS objects to survived a complete decompose-and-rewrite by an
+independent kernel, so it is not this exporter's entity choices, not its seam
+representation, not its face packing and not its formatting - Fusion would have
+written each of those its own way. Three of the four candidate causes earlier in
+this document are about how *we* write the file, and none of them can be it.
+
+What is left is the geometry: a thin-walled part carrying a helical thread as
+about thirteen hundred small planar faces, at this feature size, next to fitted
+surfaces. Which is where this document had already arrived by a different route -
+*"Something about lid10 in particular is pathological"* - and why finer
+tessellation crashed the session twice.
+
+Two limits on the claim, both worth keeping. It is one part and one test. And
+the geometry's lineage still runs back through our mesh, so what this shows is
+that SOLIDWORKS fails on *this shape* however it is written, not that it would
+fail on a shape Fusion authored from nothing.
+
+The control that would sharpen it is cheap and has not been run: put Fusion's
+rewrite of the **faceted** lid10 through the same loop. SOLIDWORKS reads our
+faceted lid10 perfectly - a solid of 2441 faces whose volume matches
+OpenCASCADE's to ten digits - so if Fusion's rewrite of that one also opens
+cleanly, the difference is the analytic surfaces at this scale with the writer
+eliminated on both sides.
