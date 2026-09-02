@@ -2825,3 +2825,91 @@ that:
 - **A commercial kernel.** OpenCASCADE reads every configuration above,
   including the ones the validator refuses, so it has no opinion here - the
   interop kit is the only thing that would.
+
+**All three are done - see §27.**
+
+## 27. The ladder, landed
+
+§26 listed what the ladder needed before it could stop being a proof of concept.
+All three are done.
+
+### The switch is gone
+
+`STEP_SNAP` and `STEP_SNAP_VETO` were scaffolding for measuring the variants
+apart and are not an interface. The ladder is now the behaviour, and it runs
+**under `step-approximate-surfaces` rather than under the analytic flag**. That
+is not caution, it is what the third rung implies: once a quadric-owned vertex
+is held, the only vertices left to move belong to a declared sweep, and a
+declared sweep is only ever *written* under approximation. The exact tier's
+input is left byte for byte as the mesher produced it.
+
+Rung 5, the crossing, is removed rather than left switched off. §25 measured what
+it does - the sweep gains a great deal and the file stops validating - and a rule
+that no fixture asserts and no configuration enables is not scaffolding, it is
+something to trip over later. It is recorded in §25 and in this branch's history,
+which is where a measurement belongs.
+
+### There is a fixture for rung 4
+
+`step-snap-sweep`: the same helical ridge the other sweep fixtures use, cut by a
+**cube** rather than by a declared cylinder. That one substitution is the whole
+fixture - a cube declares no surface, so provenance names exactly one owner at
+every junction vertex, and rung 4 is reachable. Every other sweep fixture cuts
+with a cylinder, which is why none of them exercised it and why the lid was the
+only thing that did.
+
+| rung | what it does here |
+| --- | --- |
+| 1 already placed | 133 vertices, the untouched ridge |
+| 2 provably on one | none - rung 1 took them |
+| 3 quadric-owned | none: there is no quadric to own one |
+| 4 one owner, a sweep | **34 vertices, slid onto the sweep** |
+
+Its assertions are structural where they can be. `two for 0, more for 0, none
+for 0` is derived: a cube declares nothing, so no vertex of this model *can*
+have a second owner, and if that line ever reads otherwise the ownership mapping
+has begun naming surfaces the model does not have. `and 0 a quadric owns` says
+rung 3 is inapplicable rather than merely quiet, which is what makes rung 4
+reachable. The slide is asserted without its count, because how many vertices a
+boolean happens to make is tessellation detail and pinning it would fail on a
+change to `$fn` that changes nothing about the rung. And `EXPECT-NOT` holds the
+analytic run silent, which is the assertion that the exact tier was left alone.
+
+All seven directives were mutation checked. The first run of that check reported
+every mutation as uncaught, and the fault was in the check: `0% tests passed`
+contains the string `tests passed`. Worth writing down, because it is the
+failure `doc/step-export-testing.md` warns about - a green result from something
+that was not looking - reproduced inside the tool built to prevent it.
+
+No `VOLUME`. The two runs measure 265.71 and 282.73, six per cent apart, and
+both are honest: the ridge is 1.6 wide against a tessellation band of 0.1290, so
+a surface anywhere inside that band moves the volume of a ribbon this thin by
+about that much. It is the band being large *relative to the feature* rather
+than a fit straying - the same figure on the lid is 0.005% - and a number that
+can be argued either way is not an assertion.
+
+### And a commercial kernel can now be asked
+
+Two coupons and a round trip, described in `doc/step-interop-validation.md`:
+
+- **`c17-snapped-sweep`**, the new fixture, whose boundary lies on its own
+  surface where every other swept coupon's sags off it by up to a station's
+  sagitta. **`c11-swept-grid` is its control** - same declaration, same fit,
+  boundary left where the mesh had it. An importer that sews one and not the
+  other has answered the question the 2026-09-01 run could not.
+- **`-RoundTrip`**, which saves each import straight back out, and
+  `scripts/step-interop-sw-roundtrip.py`, which reads both halves with
+  OpenCASCADE and says what survived. A body type is a verdict; a re-export is
+  evidence.
+
+The round trip earned itself on the only pair on disk: of `r02-bayonet`'s 29
+cylinders SOLIDWORKS kept 22, our one shell came back as three, and the file it
+wrote contains a surface with no bounds. None of that is visible in a body type
+or a face count.
+
+### What is left
+
+The ladder improves the reference part and changes no fixture, both specimens,
+and neither kernel's answer. What it has not had is a commercial importer's
+opinion on `c17` against `c11`, which is now one kit run away and is the only
+remaining question about it.
