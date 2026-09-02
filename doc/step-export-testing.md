@@ -166,3 +166,42 @@ the adversarial cases were found, not the thing being optimised. A finding on it
 is worth having only once it is expressed as a synthetic fixture that isolates
 it — which is why `step-t-junction`, `step-oblique-trim` and `step-declare-cone`
 exist.
+
+## Kernel agreement is not proof
+
+**A fix is not validated by showing that OpenCASCADE now agrees with the file.**
+This is the same closing of the circle as putting a kernel's measurement into a
+fixture and calling it an expectation, and it is easier to fall into, because it
+does not look like capturing anything.
+
+It happened here on 2026-09-02, on the face-splitting fix. The evidence offered
+was that the reference parts went from *586 faces written, 595 read* to *595
+written, 595 read*, and that not one `ROUNDTRIP-APPROX` line in any fixture
+moved. Both are true. Neither is evidence:
+
+- OpenCASCADE had been silently splitting those faces on read, so 595 *was*
+  OpenCASCADE's own repair. Matching it says the exporter now agrees with the
+  repair, not that either is right.
+- The `ROUNDTRIP-APPROX` lines were captured from that same repair when they
+  were written. They could not have moved.
+
+A wrong fix that split the faces along different lines would have produced
+exactly the same two observations.
+
+What replaced it is an assertion about the file: `check_bound_enclosure()` in
+`validatestep.py` takes each face with more than one bound, maps its loops into
+the surface's own parameters, and requires every inner bound to have a vertex
+inside the outer one. A hole does; a second region of the same surface does not.
+It is proven by being run against a file known to carry the defect - the
+pre-split `r02-bayonet-analytic.stp`, where it names two faces - and against the
+same part after, where it is silent.
+
+The order matters and it is worth stating as a rule:
+
+1. Derive the property from the model, and assert it on the file.
+2. Prove the assertion catches a file that is known to be wrong.
+3. *Then* confirm with a kernel, and preferably one that was not the source of
+   any number in step 1 - here SOLIDWORKS or Fusion rather than OpenCASCADE.
+
+Kernel agreement is a cross-check downstream of a derivation. It is never the
+derivation.

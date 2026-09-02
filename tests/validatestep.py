@@ -774,6 +774,127 @@ def check_hole_nesting(entities, problems):
                     return
 
 
+def check_bound_enclosure(entities, problems):
+    """An inner bound has to be inside the outer one, on the same patch of surface.
+
+    A face's bounds are an outer loop and the holes in it. What they are not is
+    a list of regions: two separate stretches of the same cylinder, left by a
+    boolean, are two faces, and writing them as one - the larger loop outer, the
+    rest called holes - is not a face at all. OpenCASCADE quietly splits such a
+    thing on read, which is why nothing downstream of a round trip ever caught
+    it; SOLIDWORKS builds what it can of it, which is how a thread came back
+    shredded.
+
+    So this asks the file itself rather than a kernel. On a cylinder or a cone
+    each vertex has a (theta, z) and on a plane a pair of in-plane coordinates,
+    and a hole's box has to sit inside the outer loop's box. A box test rather
+    than point-in-polygon because it is the disjoint case that matters and two
+    regions side by side on a surface have boxes that miss each other entirely,
+    while a genuine hole is inside on both axes with room to spare.
+
+    Theta is measured from the outer loop's own first vertex so that a face
+    straddling the zero of the surface's parameterisation is not split by the
+    branch cut; a face wider than half a turn is left alone, since the sign of
+    "inside" stops meaning anything there."""
+    for face in entities.values():
+        if face.name != "ADVANCED_FACE":
+            continue
+        refs = face.refs()
+        surface = entities.get(refs[-1]) if refs else None
+        if surface is None:
+            continue
+        outer = None
+        inner = []
+        for bid in refs[:-1]:
+            b = entities.get(bid)
+            if b is None:
+                continue
+            if b.name == "FACE_OUTER_BOUND":
+                outer = bid
+            else:
+                inner.append(bid)
+        if outer is None or not inner:
+            continue
+
+        if surface.name in ("CYLINDRICAL_SURFACE", "CONICAL_SURFACE"):
+            origin, axis, ref = _placement(entities, surface.refs()[0])
+            if origin is None or ref is None:
+                continue
+            other = [
+                axis[1] * ref[2] - axis[2] * ref[1],
+                axis[2] * ref[0] - axis[0] * ref[2],
+                axis[0] * ref[1] - axis[1] * ref[0],
+            ]
+
+            def coords(bid, base=None):
+                out = []
+                for p in _loop_points(entities, bid) or []:
+                    rel = [p[i] - origin[i] for i in range(3)]
+                    z = sum(rel[i] * axis[i] for i in range(3))
+                    t = math.atan2(sum(rel[i] * other[i] for i in range(3)),
+                                   sum(rel[i] * ref[i] for i in range(3)))
+                    if base is not None:
+                        t = (t - base + math.pi) % (2 * math.pi) - math.pi
+                    out.append((t, z))
+                return out
+        elif surface.name == "PLANE":
+            origin, axis, ref = _placement(entities, surface.refs()[0])
+            if origin is None or ref is None:
+                continue
+            other = [
+                axis[1] * ref[2] - axis[2] * ref[1],
+                axis[2] * ref[0] - axis[0] * ref[2],
+                axis[0] * ref[1] - axis[1] * ref[0],
+            ]
+
+            def coords(bid, base=None):
+                out = []
+                for p in _loop_points(entities, bid) or []:
+                    rel = [p[i] - origin[i] for i in range(3)]
+                    out.append((sum(rel[i] * ref[i] for i in range(3)),
+                                sum(rel[i] * other[i] for i in range(3))))
+                return out
+        else:
+            continue
+
+        seed = coords(outer)
+        if len(seed) < 3:
+            continue
+        base = seed[0][0] if surface.name != "PLANE" else None
+        ring = coords(outer, base)
+        if len(ring) < 3:
+            continue
+
+        def inside(pt):
+            # Even-odd crossing count. A bounding box will not do: two regions
+            # spread around a cylinder have boxes that overlap in both theta and
+            # z while sharing no point at all.
+            x, y = pt
+            hit = False
+            for k in range(len(ring)):
+                ax, ay = ring[k]
+                bx, by = ring[(k + 1) % len(ring)]
+                if (ay > y) != (by > y):
+                    cross = ax + (y - ay) * (bx - ax) / (by - ay)
+                    if cross > x:
+                        hit = not hit
+            return hit
+
+        for bid in inner:
+            hole = coords(bid, base)
+            if len(hole) < 3:
+                continue
+            # One vertex is enough to tell a hole from a region somewhere else:
+            # a hole is wholly inside, and a disjoint region wholly outside.
+            if not any(inside(pt) for pt in hole):
+                problems.append(
+                    "#%d: %s face has an inner bound with no vertex inside its outer one - "
+                    "two regions of a surface are two faces, not a face with a hole"
+                    % (face.id, surface.name)
+                )
+                break
+
+
 def check_cylindrical_faces(entities, problems):
     """A CYLINDRICAL_SURFACE or CONICAL_SURFACE face has one of exactly two shapes.
 
@@ -879,8 +1000,11 @@ def check_cylindrical_faces(entities, problems):
                 )
 
         # Anything but a ring is a trimmed patch, and the ring rules below say
-        # nothing about one.
-        if len(bounds) != 1 or len(face_edge_ids) > 6:
+        # nothing about one. Four edges, not six: a band is two rims and either
+        # two ends or a seam used twice, and once claims are split into their
+        # connected pieces a trimmed patch can be small enough to slip under a
+        # looser bound and be asked for end edges it was never going to have.
+        if len(bounds) != 1 or len(face_edge_ids) > 4:
             continue
         loop, _ = _bound_loop(entities, bounds[0])
         if loop is None:
@@ -1453,6 +1577,7 @@ def validateSTEP(filename):
         check_shared_vertices(entities, problems)
         check_face_normals(entities, problems)
         check_hole_nesting(entities, problems)
+        check_bound_enclosure(entities, problems)
         check_cylindrical_faces(entities, problems)
         check_bspline_faces(entities, problems)
         check_shells(entities, problems)
