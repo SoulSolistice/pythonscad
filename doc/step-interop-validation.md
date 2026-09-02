@@ -512,3 +512,74 @@ last measurable candidate and point at the topology rather than the geometry.
 
 The kit is at `build/interop-band`, ten files, and `results.csv` beside them has
 the columns to fill in.
+
+## What the sweep actually found
+
+SOLIDWORKS' answer on the family, faulty faces from the import diagnostic:
+
+| coupon | deviation | faulty faces (analytic) | faulty faces (faceted) |
+| --- | --- | --- | --- |
+| f01-band-fn024 | +3.135% | **0** | 0 |
+| f02-band-fn032 | +1.811% | **32** | 0 |
+| f03-band-fn048 | +0.769% | 1 | 0 |
+| f04-band-fn064 | +0.447% | 5 | 0 |
+| f05-band-fn096 | +0.208% | 1 | 0 |
+
+**The deviation hypothesis is refuted.** The member with the largest deviation
+by a factor of one and a half imports with nothing flagged at all, and the
+count does not fall as the sampling gets finer. It is not monotonic in
+anything. The volume delta correlated on three real parts and does not survive
+a controlled sweep, which is what the sweep was for.
+
+One thing does hold across every row: only the analytic exports are ever
+flagged. The faceted controls come back clean at every density.
+
+(f01's two rows report identical figures - 67 short edges, the same minimum
+radius of curvature, and a curvature radius at all, where every other faceted
+member reports all faces planar. That is the analytic body measured twice. It
+does not change the conclusion, since the analytic figure is the one carrying
+it, but f01-faceted is unmeasured rather than measured clean.)
+
+### The defect the sweep did find
+
+Sampling each edge along its length and projecting onto both faces it bounds:
+
+| | edges | off by >1e-4 | worst |
+| --- | --- | --- | --- |
+| line on B-spline | 258 | **254** | 0.196312 |
+| line on cylinder | 388 | **366** | 0.171103 |
+| line on plane | 496 | 0 | 0.000000 |
+| circle on cylinder | 2 | 0 | 0.000000 |
+| circle on plane | 2 | 0 | 0.000000 |
+
+(f01-band-fn024-analytic; f02 is the same picture at 464 of 472 and 702 of 724.
+The faceted control is 3366 line-on-plane incidences, all exactly zero.)
+
+**Every edge bounding a recovered curved face is still a straight line.** The
+exporter replaces a run of facets with a cylinder and leaves the mesh's
+polyline boundary in place, so the edge is the chord and the surface is the
+arc, and the gap between them is the sagitta. Only the two rim circles are
+right, because those are emitted as exact circles on purpose.
+
+This is not a subtle defect and it is present in every member of the family, at
+essentially every edge of every curved face. That is precisely why it does not
+correlate with the faulty-face count: it is not a graded fault that worsens with
+deviation, it is a systematic one that is everywhere. SOLIDWORKS' count is then
+a measure of where its healing happens to give up, which is downstream of the
+disease rather than the disease.
+
+It also explains the rest of the record without any new assumption. The faceted
+files always sew because a line on a plane is exact. OpenCASCADE and Fusion
+accept the analytic ones by widening tolerance to swallow the sagitta, which is
+exactly what `worst_tolerance` has been reporting all along and what an absolute
+threshold could never separate, because nothing is within tolerance to begin
+with. And a part with more curved area has more of these edges to bridge, which
+is the difference between a coupon and lid10.
+
+The fix is well defined and correct on its own merits, whatever SOLIDWORKS then
+does: an edge bounding an analytic face has to be a curve lying *on* that face,
+shared with the neighbour across it. On a cylinder the vertical segments are
+already right - a ruling is on the surface - and it is the circumferential and
+oblique ones that need to become arcs or curves on the surface. This is where
+pcurves stop being unnecessary; the two earlier occasions when they were shown
+not to be needed were both faces whose boundaries were exact already.
