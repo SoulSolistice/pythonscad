@@ -1303,7 +1303,20 @@ public:
     {
       stream_in << "#" << id << " = SURFACE_CURVE('" << label << "',#" << curve->id << ",(";
       for (std::size_t i = 0; i < on.size(); i++) stream_in << (i ? ",#" : "#") << on[i]->id;
-      stream_in << "),.PCURVE_S.);\n";
+      // .CURVE_3D., not .PCURVE_S1. ISO 10303-42 allows exactly .CURVE_3D.,
+      // .PCURVE_S1. and .PCURVE_S2. here - .PCURVE_S. is not a value at all,
+      // and writing it cost a round of SOLIDWORKS testing that changed nothing
+      // because the entity carrying it was being thrown away whole.
+      //
+      // Of the three that exist, .CURVE_3D. is the true one. The pcurve is a
+      // straight line in parameter space and the master is a straight chord in
+      // space; each is the image of the other only to within the sagitta, so
+      // they are not the same curve and one has to be definitive. It has to be
+      // the 3D one, because the planar face across this edge is bounded by that
+      // chord and nothing else - promote the pcurve and the shared edge leaves
+      // the neighbour's plane. What the pcurve is for is to say where the chord
+      // runs across the sweep, which is the part an importer cannot work out.
+      stream_in << "),.CURVE_3D.);\n";
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
     {
