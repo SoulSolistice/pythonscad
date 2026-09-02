@@ -258,10 +258,32 @@ bool sameSurfaceGeometrically(const Surface *a, const Surface *b)
  * is on it to 1e-7, the exact tier's own tolerance - and what it asks is where
  * a surface *runs*, not what is near it.
  */
-void reportOwnership(const PolySet& ps)
+/*! Which original solid each declared surface's facets came from, and the
+ * junction structure the snap needs on top of it. See computeOwnership. */
+struct Ownership {
+  bool valid = false;
+  std::map<int32_t, std::vector<std::size_t>> owned;        //!< original id -> surfaces it owns
+  std::map<int32_t, std::vector<std::size_t>> covered;      //!< facets of it wholly on each surface
+  std::map<int32_t, std::vector<std::size_t>> covered_cut;  //!< ...and cut across each surface
+  std::map<int32_t, std::size_t> facets;                    //!< facets of each original
+  std::vector<std::set<int32_t>> ids_at;                    //!< originals meeting at each vertex
+  std::vector<double> reach;                                //!< longest edge at each vertex
+  std::vector<std::vector<char>> on;  //!< per surface, which vertices it runs through
+
+  //! Whether declared surface `j` runs through vertex `v`.
+  [[nodiscard]] bool onSurface(std::size_t j, int v) const
+  {
+    return j < on.size() && v >= 0 && std::size_t(v) < on[j].size() && on[j][v] != 0;
+  }
+
+  [[nodiscard]] std::vector<std::size_t> candidatesAt(std::size_t v, const PolySet& ps) const;
+};
+
+Ownership computeOwnership(const PolySet& ps)
 {
-  if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) return;
-  if (ps.surfaces.empty()) return;
+  Ownership own;
+  if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) return own;
+  if (ps.surfaces.empty()) return own;
 
   const std::size_t nsurf = ps.surfaces.size();
 
@@ -427,54 +449,82 @@ void reportOwnership(const PolySet& ps)
     }
   }
 
-  // What the mapping is worth is not how many surfaces it names but how many
-  // junction vertices it disambiguates: a vertex where two originals meet is
-  // exactly where the nearest-surface rule was guessing, and the mapping helps
-  // only if it names one owner there.
-  std::vector<std::set<int32_t>> ids_at(ps.vertices.size());
-  // And how far the mesh itself concedes a vertex might be from the surface it
-  // approximates: the longest edge at it. A move further than that is not a cut
-  // vertex being put back, it is a vertex belonging to something else.
-  std::vector<double> reach(ps.vertices.size(), 0.0);
+  own.valid = true;
+  own.on = on_surface;
+  own.owned = owned;
+  own.covered = covered;
+  own.covered_cut = covered_cut;
+  own.facets = facets;
+
+  // Which originals meet at each vertex, and how far the mesh itself concedes a
+  // vertex might be from the surface it approximates: the longest edge at it. A
+  // move further than that is not a cut vertex being put back, it is a vertex
+  // belonging to something else.
+  own.ids_at.assign(ps.vertices.size(), {});
+  own.reach.assign(ps.vertices.size(), 0.0);
   for (std::size_t t = 0; t < ps.indices.size(); t++) {
     for (const int v : ps.indices[t]) {
-      if (v < 0 || std::size_t(v) >= ids_at.size()) continue;
-      ids_at[v].insert(ps.original_ids[t]);
+      if (v < 0 || std::size_t(v) >= own.ids_at.size()) continue;
+      own.ids_at[v].insert(ps.original_ids[t]);
       for (const int w : ps.indices[t]) {
         if (w >= 0 && std::size_t(w) < ps.vertices.size()) {
-          reach[v] = std::max(reach[v], (ps.vertices[w] - ps.vertices[v]).norm());
+          own.reach[v] = std::max(own.reach[v], (ps.vertices[w] - ps.vertices[v]).norm());
         }
       }
     }
   }
+  return own;
+}
+
+/*! The distinct surfaces the originals meeting at `v` own. */
+std::vector<std::size_t> Ownership::candidatesAt(std::size_t v, const PolySet& ps) const
+{
+  std::vector<std::size_t> candidates;
+  if (!valid || v >= ids_at.size()) return candidates;
+  for (const int32_t id : ids_at[v]) {
+    const auto it = owned.find(id);
+    if (it == owned.end()) continue;
+    for (const std::size_t j : it->second) {
+      // By the surface, not by the record. The list keeps two entries for one
+      // cylinder referred to from two heights (see Surface::sameAs), and
+      // counting those as two owners makes an unambiguous vertex look
+      // contested - which it did, on every junction of step-declare-cone.
+      bool have = false;
+      for (const std::size_t k : candidates) {
+        if (k == j || sameSurfaceGeometrically(ps.surfaces[k].get(), ps.surfaces[j].get())) {
+          have = true;
+          break;
+        }
+      }
+      if (!have) candidates.push_back(j);
+    }
+  }
+  return candidates;
+}
+
+void reportOwnership(const PolySet& ps, const Ownership& own)
+{
+  if (!own.valid) return;
+  const std::size_t nsurf = ps.surfaces.size();
+  const auto& owned = own.owned;
+  const auto& covered = own.covered;
+  const auto& covered_cut = own.covered_cut;
+  const auto& facets = own.facets;
+
+  // What the mapping is worth is not how many surfaces it names but how many
+  // junction vertices it disambiguates: a vertex where two originals meet is
+  // exactly where the nearest-surface rule was guessing, and the mapping helps
+  // only if it names one owner there.
   std::size_t junctions = 0, single = 0, pair = 0, many = 0, unowned = 0;
   std::size_t guess_wrong = 0, guess_right = 0, on_edge = 0;
   double worst_travel = 0, worst_within = 0, band_used = 0;
   std::size_t within_bound = 0;
   for (std::size_t v = 0; v < ps.vertices.size(); v++) {
-    if (ids_at[v].size() < 2) continue;
+    if (own.ids_at[v].size() < 2) continue;
     junctions++;
     // The surfaces owned by the originals meeting here, deduplicated: two ids
     // owning the same record is agreement, not a contest.
-    std::vector<std::size_t> candidates;
-    for (const int32_t id : ids_at[v]) {
-      const auto it = owned.find(id);
-      if (it == owned.end()) continue;
-      for (const std::size_t j : it->second) {
-        // By the surface, not by the record. The list keeps two entries for one
-        // cylinder referred to from two heights (see Surface::sameAs), and
-        // counting those as two owners makes an unambiguous vertex look
-        // contested - which it did, on every junction of step-declare-cone.
-        bool have = false;
-        for (const std::size_t k : candidates) {
-          if (k == j || sameSurfaceGeometrically(ps.surfaces[k].get(), ps.surfaces[j].get())) {
-            have = true;
-            break;
-          }
-        }
-        if (!have) candidates.push_back(j);
-      }
-    }
+    const std::vector<std::size_t> candidates = own.candidatesAt(v, ps);
     if (candidates.empty()) {
       unowned++;
       continue;
@@ -526,7 +576,7 @@ void reportOwnership(const PolySet& ps)
         // states it outright - the sagitta of its own stations - and that is a
         // property of the model rather than a constant chosen here. Two
         // quadrics declare no such thing, so the mesh's own edges stand in.
-        double bound = reach[v];
+        double bound = own.reach[v];
         for (const std::size_t j : candidates) {
           if (const auto *g = dynamic_cast<const GridSurface *>(ps.surfaces[j].get())) {
             bound = g->tessellationBand();
@@ -584,12 +634,228 @@ void reportOwnership(const PolySet& ps)
                          : dynamic_cast<const BezierPatchSurface *>(s) ? "patch"
                                                                        : "surface";
       names += (names.empty() ? "" : ", ") + std::string(kind) + " " + std::to_string(j) + " (" +
-               std::to_string(covered[entry.first][j]) + " facets whole, " +
-               std::to_string(covered_cut[entry.first][j]) + " cut)";
+               std::to_string(covered.at(entry.first)[j]) + " facets whole, " +
+               std::to_string(covered_cut.at(entry.first)[j]) + " cut)";
     }
-    LOG("STEP export: original %1$d, %2$d facets, owns %3$s", int(entry.first), int(facets[entry.first]),
-        names.c_str());
+    LOG("STEP export: original %1$d, %2$d facets, owns %3$s", int(entry.first),
+        int(facets.at(entry.first)), names.c_str());
   }
+}
+
+/*! Slide the vertices a boolean made onto the surfaces they were cut out of.
+ *
+ * A declared sweep or cylinder is smooth; the mesh of it is not. When a boolean
+ * cuts a ridge with a wall it cuts the *mesh*, so the vertex it creates lands
+ * on a facet - on the chord between two stations rather than on the curve
+ * through them - and its distance from any smooth surface interpolating those
+ * stations is that chord's sagitta. No fit reaches it, because there is nothing
+ * to fit: the point is simply not on the surface the model meant (see the
+ * status doc, section 20).
+ *
+ * The earlier proof of concept (claude/step-snap-poc) did the moving and got
+ * the *choosing* wrong: it slid a vertex onto whichever declared surface was
+ * nearest, which pulled a ridge's vertices onto the wall and lost the sweep.
+ * Ownership answers that from provenance instead, and section 24 measures what
+ * the difference is worth - on the reference lid the nearest rule picks a
+ * different surface for 207 of the 674 vertices it would act on.
+ *
+ * Two cases, deliberately kept apart so they can be measured apart:
+ *
+ *   one owner   The vertex belongs to one declared surface and to the planar
+ *               facets of whatever cut it. Those facets need it to stay in
+ *               their plane, so it slides *within* that plane onto the surface.
+ *   two owners  It belongs to both, and its place is where they cross - which
+ *               is where the trim curve between them belonged. No plane is
+ *               involved: the point satisfies both declarations at once.
+ *
+ * Alternating projections find either, wherever the constraints meet
+ * transversally, which is the only case this accepts. Bounded by what the model
+ * concedes about its own resolution: a declared sweep states it outright as the
+ * sagitta of its stations, and elsewhere the mesh's own edges stand in.
+ */
+struct SnapReport {
+  std::size_t moved_one = 0, moved_two = 0;
+  std::size_t refused_unpinned = 0, refused_far = 0, refused_stuck = 0, refused_unbounded = 0;
+  double worst = 0.0;
+};
+
+/*! The one plane a vertex is pinned to, if there is exactly one. */
+bool pinnedPlane(const std::vector<Vector4d>& planes, Vector3d& normal, double& offset)
+{
+  if (planes.empty()) return false;
+  normal = planes[0].head<3>().normalized();
+  offset = planes[0][3] / planes[0].head<3>().norm();
+  for (const auto& q : planes) {
+    const Vector3d n = q.head<3>().normalized();
+    if (fabs(n.dot(normal)) < 0.99999) return false;  // a second plane pins it to a line
+    const double d = q[3] / q.head<3>().norm();
+    if (fabs((n.dot(normal) > 0 ? d : -d) - offset) > 1e-6) return false;
+  }
+  return true;
+}
+
+SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, const Ownership& own,
+                           int mode)
+{
+  SnapReport report;
+  if (!own.valid || mode <= 0) return report;
+  const auto& triangles = ps.indices;
+
+  // The plane of every triangle, and which triangles meet at each vertex.
+  std::vector<Vector4d> tri_plane(triangles.size(), Vector4d::Zero());
+  std::vector<std::vector<std::size_t>> at(vertices.size());
+  for (std::size_t t = 0; t < triangles.size(); t++) {
+    const IndexedFace& f = triangles[t];
+    if (f.size() < 3) continue;
+    const Vector3d n = (vertices[f[1]] - vertices[f[0]]).cross(vertices[f[2]] - vertices[f[0]]);
+    if (n.norm() < 1e-12) continue;
+    const Vector3d u = n.normalized();
+    tri_plane[t] = Vector4d(u[0], u[1], u[2], u.dot(vertices[f[0]]));
+    for (const int v : f) {
+      if (v >= 0 && std::size_t(v) < at.size()) at[v].push_back(t);
+    }
+  }
+
+  for (std::size_t v = 0; v < vertices.size(); v++) {
+    if (at[v].empty()) continue;
+    const std::vector<std::size_t> candidates = own.candidatesAt(v, ps);
+    if (candidates.empty()) continue;
+
+    // What the model concedes about where its surface lies, which is what
+    // bounds the move. A declared sweep states it outright as the sagitta of
+    // its own stations. Nothing else does, so it is measured the same way: take
+    // the chords of this mesh that *do* lie on the surface near this vertex,
+    // and see how far the surface stands off their middles. That is the local
+    // tessellation error, and a vertex asked to move further than it is not a
+    // cut vertex of this surface being put back.
+    //
+    // The longest edge at the vertex was tried first, from the proof of
+    // concept, and it is not a bound at all: on step-partial-cylinder the mesh
+    // has 20-unit vertical edges, so it licensed a move of 1.9976 on a radius
+    // of 10 and broke the export.
+    double bound = 0;
+    bool bounded = false;
+    for (const std::size_t j : candidates) {
+      if (const auto *g = dynamic_cast<const GridSurface *>(ps.surfaces[j].get())) {
+        bound = std::max(bound, g->tessellationBand());
+        bounded = true;
+        continue;
+      }
+      const Surface *s = ps.surfaces[j].get();
+      for (const std::size_t t : at[v]) {
+        std::vector<int> others;
+        for (const int w : triangles[t]) {
+          if (std::size_t(w) != v && own.onSurface(j, w)) others.push_back(w);
+        }
+        for (std::size_t a = 0; a < others.size(); a++) {
+          for (std::size_t b = a + 1; b < others.size(); b++) {
+            const Vector3d mid = (vertices[others[a]] + vertices[others[b]]) / 2;
+            Vector3d q;
+            if (!closestOnSurface(s, mid, q)) continue;
+            bound = std::max(bound, (q - mid).norm());
+            bounded = true;
+          }
+        }
+      }
+    }
+    if (!bounded) {
+      // No chord of this mesh near the vertex lies on the surface, so there is
+      // nothing that says how far off it the tessellation is entitled to be.
+      report.refused_unbounded++;
+      continue;
+    }
+
+    Vector3d moved = vertices[v];
+    if (candidates.size() == 1) {
+      const Surface *s = ps.surfaces[candidates[0]].get();
+      Vector3d nearest;
+      if (!closestOnSurface(s, vertices[v], nearest)) continue;
+      if ((nearest - vertices[v]).norm() <= 1e-7) continue;  // already there
+
+      // The planes that pin it: the facets at this vertex whose own original
+      // does *not* own the surface being moved to. That is the provenance
+      // version of the proof of concept's test, which asked whether a facet had
+      // a corner near the surface - a question about distance again.
+      std::vector<Vector4d> pins;
+      for (const std::size_t t : at[v]) {
+        const auto it = own.owned.find(ps.original_ids[t]);
+        bool owns = false;
+        if (it != own.owned.end()) {
+          for (const std::size_t j : it->second) {
+            if (j == candidates[0] ||
+                sameSurfaceGeometrically(ps.surfaces[j].get(), ps.surfaces[candidates[0]].get())) {
+              owns = true;
+              break;
+            }
+          }
+        }
+        if (!owns && tri_plane[t].head<3>().norm() > 1e-12) pins.push_back(tri_plane[t]);
+      }
+      Vector3d pn;
+      double po = 0;
+      if (!pinnedPlane(pins, pn, po)) {
+        report.refused_unpinned++;
+        continue;
+      }
+      // Alternate: onto the surface, back onto the plane, until it stops moving.
+      Vector3d p = vertices[v];
+      bool ok = true;
+      for (int iter = 0; iter < 64; iter++) {
+        Vector3d q;
+        if (!closestOnSurface(s, p, q)) {
+          ok = false;
+          break;
+        }
+        const Vector3d r = q - pn * (pn.dot(q) - po);
+        if ((r - p).norm() < 1e-12) {
+          p = r;
+          break;
+        }
+        p = r;
+      }
+      Vector3d check;
+      if (!ok || !closestOnSurface(s, p, check) || (check - p).norm() > 1e-6) {
+        report.refused_stuck++;
+        continue;
+      }
+      moved = p;
+    } else if (candidates.size() == 2 && mode >= 2) {
+      const Surface *a = ps.surfaces[candidates[0]].get();
+      const Surface *b = ps.surfaces[candidates[1]].get();
+      Vector3d p = vertices[v], qa, qb;
+      bool ok = true;
+      for (int iter = 0; iter < 64; iter++) {
+        if (!closestOnSurface(a, p, qa) || !closestOnSurface(b, qa, qb)) {
+          ok = false;
+          break;
+        }
+        if ((qb - p).norm() < 1e-12) {
+          p = qb;
+          break;
+        }
+        p = qb;
+      }
+      if (!ok || !closestOnSurface(a, p, qa) || (qa - p).norm() > 1e-6) {
+        report.refused_stuck++;
+        continue;
+      }
+      if ((p - vertices[v]).norm() <= 1e-7) continue;  // already on the crossing
+      moved = p;
+    } else {
+      continue;
+    }
+
+    const double travel = (moved - vertices[v]).norm();
+    if (travel > bound) {
+      report.refused_far++;
+      continue;
+    }
+    vertices[v] = moved;
+    report.worst = std::max(report.worst, travel);
+    if (candidates.size() == 1) report.moved_one++;
+    else report.moved_two++;
+  }
+  return report;
 }
 
 }  // namespace
@@ -605,14 +871,34 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   std::vector<int> faceParents;
   std::vector<Vector4d> normals, newNormals;
 
+  Ownership ownership;
   if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
     reportProvenance(*ps);
-    reportOwnership(*ps);
+    ownership = computeOwnership(*ps);
+    reportOwnership(*ps, ownership);
+  }
+
+  // Proof of concept scaffolding, not a supported switch: STEP_SNAP=1 moves the
+  // vertices provenance names one owner for, STEP_SNAP=2 also moves the ones it
+  // names two for onto the curve where they cross. Two changes with separate
+  // failure modes, so they are measured apart before either is proposed.
+  std::vector<Vector3d> vertices = ps->vertices;
+  const char *snap_env = getenv("STEP_SNAP");
+  const int snap_mode = snap_env != nullptr ? atoi(snap_env) : 0;
+  if (snap_mode > 0 && Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
+    const SnapReport snapped = snapCutVertices(vertices, *ps, ownership, snap_mode);
+    LOG(
+      "STEP export: snapped %1$d vertices onto the surface they were cut from and %2$d onto the "
+      "curve two surfaces cross on, by up to %3$.4f; refused %4$d with no single plane to move "
+      "in, %5$d that would have moved too far, %6$d that did not converge, %7$d with nothing "
+      "to say how far the tessellation is entitled to stray",
+      int(snapped.moved_one), int(snapped.moved_two), snapped.worst, int(snapped.refused_unpinned),
+      int(snapped.refused_far), int(snapped.refused_stuck), int(snapped.refused_unbounded));
   }
 
   std::vector<IndexedFace> indicesNew;
-  normals = calcTriangleNormals(ps->vertices, ps->indices);
-  indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, ps->vertices);
+  normals = calcTriangleNormals(vertices, ps->indices);
+  indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, vertices);
 
   StepKernel sk;
 
@@ -634,7 +920,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   // without the exact pass, which decides what is left over in the first place.
   const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
 
-  sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
+  sk.build_tri_body(exportInfo.title.c_str(), vertices, indicesNew, ps->curves, ps->surfaces,
                     faceParents, newNormals, 1e-5, analytic, approximate);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
