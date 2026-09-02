@@ -22,6 +22,13 @@
     volume/area  against the faceted control, and against the exact value where
                  the coupon has one.
 
+  With -RoundTrip, each file is also saved straight back out as
+  <coupon>_SW.STEP, and scripts/step-interop-sw-roundtrip.py reads both halves of
+  that pair with OpenCASCADE. That answers what a body type cannot: whether
+  SOLIDWORKS kept the surface the coupon is about, or made a solid by discarding
+  it and sewing the rest. This document has already had to record one case of
+  exactly that.
+
   Check Entity and feature recognition need the UI and stay manual; the procedure
   is in doc/step-interop-validation.md. Feature recognition on c07-fillet-quadrics
   is the one worth doing by hand - whether SOLIDWORKS calls a cylinder a cylinder
@@ -65,7 +72,12 @@ param(
     # the settings it was made under, so a result still means something a week
     # later.
     [Parameter(Mandatory = $true)]
-    [string]$ImportSettings
+    [string]$ImportSettings,
+    # Save each imported coupon back out as <coupon>_SW.STEP, for
+    # scripts/step-interop-sw-roundtrip.py to compare against what we wrote.
+    # Off by default because it writes into the kit directory and roughly
+    # doubles the run; on for any run whose result will be argued about.
+    [switch]$RoundTrip
 )
 
 $ErrorActionPreference = 'Stop'
@@ -120,6 +132,8 @@ public class SwKitRunner
 
     // One CSV-ish record per file: file,opened,errors,warnings,body_type,
     // solids,surfaces,faces,volume_mm3,area_mm2,note
+    public static bool SaveBack;
+
     public static string Run(string path)
     {
         int errors = 0, warnings = 0;
@@ -175,6 +189,28 @@ public class SwKitRunner
             }
             catch (Exception ex) { note = (note + " massprop: " + ex.Message).Trim(); }
 
+            if (SaveBack)
+            {
+                // Straight back out, with whatever is set in Tools > Options >
+                // Export - the same caveat as the import options, and the same
+                // reason the run has to be labelled. A save that fails is
+                // recorded rather than thrown: the import result is still worth
+                // having without it.
+                string outPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(path),
+                    System.IO.Path.GetFileNameWithoutExtension(path) + "_SW.STEP");
+                int saveErr = 0, saveWarn = 0;
+                try
+                {
+                    bool ok = doc.Extension.SaveAs(outPath,
+                        (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent,
+                        null, ref saveErr, ref saveWarn);
+                    if (!ok) note = (note + " saveas failed err=" + saveErr).Trim();
+                }
+                catch (Exception ex) { note = (note + " saveas: " + ex.Message).Trim(); }
+            }
+
             return Join(path, "yes", errors, warnings, bodyType, nSolid, nSheet, faces, volume, area, note);
         }
         catch (Exception ex)
@@ -200,6 +236,8 @@ public class SwKitRunner
 }
 "@ -ErrorAction Stop
 
+# *.stp only, so a previous -RoundTrip run's *_SW.STEP files are not themselves
+# re-imported and saved back out as <coupon>_SW_SW.STEP.
 $files = Get-ChildItem -Path $KitDir -Filter *.stp | Sort-Object Name
 if ($files.Count -eq 0) { throw "no .stp files in $KitDir" }
 Write-Host "kit: $($files.Count) files in $KitDir"
@@ -210,6 +248,8 @@ catch {
            "window, then run this again. (" + $_.Exception.GetBaseException().Message + ")")
 }
 Write-Host ("attached to SOLIDWORKS revision " + $revision)
+[SwKitRunner]::SaveBack = [bool]$RoundTrip
+if ($RoundTrip) { Write-Host "round trip: each coupon will be saved back as <coupon>_SW.STEP" }
 Write-Host ""
 
 $rows = @()
@@ -234,6 +274,11 @@ foreach ($f in $files) {
 $rows | Export-Csv -Path $OutCsv -NoTypeInformation -Encoding utf8
 Write-Host ""
 Write-Host "results: $OutCsv"
+if ($RoundTrip) {
+    Write-Host ""
+    Write-Host "now compare what came back:"
+    Write-Host "  python3 scripts/step-interop-sw-roundtrip.py --kitdir $KitDir"
+}
 
 Write-Host ""
 Write-Host "=== analytic against its own faceted control ==="

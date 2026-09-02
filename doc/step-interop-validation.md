@@ -818,3 +818,63 @@ The fix is to split a claimed region into connected components before writing
 anything, one face per component, and to decide outer against inner only within
 a component. The pcurves stay: they are correct, and they will matter once the
 faces they bound are valid.
+
+## The round trip, as a step of the kit
+
+*Reading back what SOLIDWORKS made of it* did this by hand once and it was the
+most informative hour of the whole investigation. It is now part of the kit:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\step-interop-solidworks.ps1 `
+  -ImportSettings do-not-knit -RoundTrip
+```
+
+```bash
+python3 scripts/step-interop-sw-roundtrip.py --kitdir build/interop-kit
+```
+
+`-RoundTrip` saves each imported coupon straight back out as
+`<coupon>_SW.STEP`; the Python script reads both halves of the pair with
+OpenCASCADE and prints what changed, in the same surface census the rest of the
+suite is written in. It writes `sw-roundtrip.csv` beside the kit.
+
+**Why this and not the body type the driver already records.** A body type is a
+verdict, and this is evidence. "SOLIDWORKS made a solid" does not say whether it
+kept the surface the coupon is about - and this document has already had to
+record it making a solid by *healing*: reading our faces, discarding what it did
+not like, and sewing the rest. The re-export says exactly what survived. It is
+the argument of `check_bound_enclosure()` one level further out, and of
+`doc/step-export-testing.md`'s opening: a kernel agreeing with us proves nothing
+on its own, because the agreement can be what its repair pass produced.
+
+Three things it can see that nothing upstream of it can - substitution, where a
+B-spline comes back as a fan of planes and the analytic path bought nothing;
+degradation, where a cylinder comes back as a spline, so the surface survived as
+geometry but not as intent and feature recognition has nothing to find; and
+drift, where the volume moves further than the coupon's own band allows.
+
+### What it said on the first pair it was given
+
+The only re-export on disk when this was written, `r02-bayonet-strictcorners`:
+
+```text
+r02-bayonet-strictcorners          unbounded
+    Cone                       6 -> 8
+    Cylinder                  29 -> 22
+    Plane                    886 -> 884
+    shells                     1 -> 3
+    extent                 bounded -> unbounded, it contains an infinite surface
+    volume        237897.112943 -> unmeasurable, the shape is unbounded
+```
+
+Seven of our twenty-nine cylinders did not survive, our one shell came back as
+three, and the file contains a surface with no bounds at all - OpenCASCADE gives
+that the box +/-1e100, which is why its volume integrates to 2.16e168. The first
+draft of the script duly reported a drift of 9e167 per cent, which is how the
+guard came to be there: a volume is only usable if it fits inside its own
+bounding box, and a bounding box is only usable if it is finite.
+
+That result is from the strict-corners variant and is not a verdict on anything
+currently proposed - it is on disk from an older run and is here because it is
+what the tool was tested against. What it demonstrates is the point of the tool:
+every one of those six lines is invisible to a body type and a face count.

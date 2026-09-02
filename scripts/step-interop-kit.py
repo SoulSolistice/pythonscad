@@ -101,6 +101,15 @@ COUPONS = [
     ("c16-bored-cone", "tests/data/scad/step-export/step-bored-cone.scad",
      "CONICAL_SURFACE and CYLINDRICAL_SURFACE, both polyline-bounded",
      "As c15 on a taper, so the bore's own trim runs on a cone."),
+    ("c17-snapped-sweep", "tests/data/pythonscad-step-export/step-snap-sweep.py",
+     "a declared sweep whose cut vertices were moved onto it",
+     "The one coupon whose vertices are not where the mesher put them. The "
+     "ladder slides a boolean's cut vertices onto the surface they were cut "
+     "from, so this face's boundary lies on its own surface where every other "
+     "swept coupon's sags off it by up to a station's sagitta. c11 is the "
+     "control for it: same declaration, same fit, boundary left where the mesh "
+     "had it. If an importer sews this and not c11, the slack it needs is what "
+     "the 2026-09-01 run could not pin down."),
     ("r01-lid10", "examples/step_test/lid10.scad",
      "real part: cylinders, cones, circles",
      "A real model, and the one whose committed export was finding F1."),
@@ -138,7 +147,7 @@ for _i, _fn in enumerate(BAND_FAMILY):
     ))
 
 APPROX = {"c11-swept-grid", "c12-approximated", "c15-bored-cylinder",
-          "c16-bored-cone", "r01-lid10", "r02-bayonet"}
+          "c16-bored-cone", "c17-snapped-sweep", "r01-lid10", "r02-bayonet"}
 APPROX |= {"f%02d-band-fn%03d" % (i + 1, fn) for i, fn in enumerate(BAND_FAMILY)}
 
 CENSUS_KINDS = [
