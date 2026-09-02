@@ -899,3 +899,125 @@ That result is from the strict-corners variant and is not a verdict on anything
 currently proposed - it is on disk from an older run and is here because it is
 what the tool was tested against. What it demonstrates is the point of the tool:
 every one of those six lines is invisible to a body type and a face count.
+
+## c06: a coupon that passes every criterion and is wrong
+
+Run 2026-09-02, against the kit built from the exporter with the face split and
+the ladder in. **All 48 files import as solids**, both reference parts included,
+which has not happened before - lid10 and the bayonet were the two failures this
+document was opened for.
+
+And that is the finding, not the good news. `c06-partial-torus-analytic` imports
+as a solid, with the right face count, with zero import errors, and SOLIDWORKS
+measures its volume **14.16% low**. Every criterion under *Pass criteria* above
+says it passed.
+
+### Four measurements of the same file
+
+| source | volume | note |
+| --- | --- | --- |
+| Pappus, from the model's own dimensions | 11154.9335655 | no access to the exporter |
+| OpenCASCADE | 11154.933573 | |
+| Fusion 360 | 11154.934 | area 3640.244 also exact |
+| **SOLIDWORKS** | **9575.7969** | sole outlier |
+
+The first row is what makes this different from every earlier disagreement in
+this document. `2*pi*(1612 + 52*pi)` is arithmetic on the model's dimensions and
+cannot be influenced by the exporter, so this is not two kernels disagreeing
+with the blame unassigned. **The file is provably right and SOLIDWORKS is
+provably wrong on it.** That is the whole argument for deriving a fixture's
+numbers rather than capturing them, made concrete.
+
+Fusion's surface area, 3640.244 mm², is the per-face sum of our own export to
+the digit: 1633.628 of cylinder, 980.177 of plane, 1026.439 of torus.
+
+### It is the trim, and the seam is why
+
+SOLIDWORKS' own re-export of the file, read back with OpenCASCADE:
+
+| | ours | SOLIDWORKS' re-export |
+| --- | --- | --- |
+| CYLINDRICAL_SURFACE | 2 faces, area 1633.628 | 4 faces, area **1633.628** |
+| PLANE | 2 faces, area 980.177 | 2 faces, area **980.177** |
+| TOROIDAL_SURFACE | 4 faces, area **1026.439** | 8 faces, area **1916.538** |
+
+The surfaces themselves are identical in both files - `TOROIDAL_SURFACE` at
+major radii 16 and 10 with a minor radius of 2, which is what the model's arc
+centres say. Our four faces are each a quarter of a tube revolved fully, whose
+area is `pi^2*R*r`, so the four sum to `pi^2*(32+32+20+20)` = 1026.44, matching
+the measurement to six figures.
+
+SOLIDWORKS splits every periodic face at its seam - two cylinders into four,
+four tori into eight. On the cylinders that reproduces our geometry exactly. On
+the tori it covers **87% more surface than exists in the part** and encloses 14%
+less volume, so the surplus is folded back on itself. It is the trim.
+
+The fillet sense is not the explanation and can be ruled out by arithmetic
+rather than by eye. `offset(r = 2)` is an outward offset, so all four corners are
+convex; flipping a corner changes the first moment by the difference between the
+quarter disc and its complement in the corner square:
+
+| flipped | delta first moment | delta volume |
+| --- | --- | --- |
+| the two inner corners | 43.0 | 270 |
+| all four corners | 118.7 | 746 |
+| **observed deficit** | **251.3** | **1579** |
+
+### SOLIDWORKS names the entity class itself
+
+With the fault diagnostics automated - `IBody2::Check3`, `IFace2::Check` and
+`IEdge::Check`, all read-only - the analytic coupons report what the dialog
+shows. `c11-swept-grid`, another of the four disagreements:
+
+```text
+c11-swept-grid-analytic   faults=1 faultyfaces=3 faultyedges=2 gaps=0 codes=13/30
+c11-swept-grid-faceted    faults=0 faultyfaces=0 faultyedges=0 gaps=0
+```
+
+The control is clean and the analytic file is not, which is the whole method of
+this kit working as intended. And the codes are `swFaultEntityErrorCode_e`:
+
+- **13, `swEdgeVerticesTouch`** - an edge whose two vertices coincide. That is a
+  *closed* edge, which is exactly how a seam on a periodic face is written, and
+  exactly how this exporter bounds a face closed round the axis: one seam, used
+  once in either direction.
+- **30, `swTopolNotG1Continuous`** - a tangent discontinuity where smoothness was
+  expected, which is what a fitted sweep's boundary is where it meets a planar
+  neighbour.
+
+So the volume evidence and SOLIDWORKS' own diagnostic point at the same thing
+from opposite directions, and it is the seam representation rather than the
+surfaces, the fillet sense or the tolerance.
+
+### The two real parts, where a third opinion still matters
+
+| part | OpenCASCADE | Fusion 360 | SOLIDWORKS |
+| --- | --- | --- | --- |
+| r01-lid10 | 226617.51 | ~225,700 (-0.4%) | **351652.94 (+55.2%)** |
+| r02-bayonet | 238544.66 | not run | **363852.89 (+52.5%)** |
+
+Both now import as solids where they used to come in as surface bodies, so the
+face split did what it was for - and it turned a loud failure into a quiet one.
+A surface body announces itself to the user; a solid whose volume is half again
+too large does not, and nothing in *Pass criteria* would catch it.
+
+Fusion and OpenCASCADE agree on lid10 to 0.4% on volume and the same 0.4% on
+area, which is not the six-figure agreement of c06 and is worth stating as such:
+lid10 carries two fitted B-spline faces of 9,522 mm² against a total of 107,344,
+and evaluating those numerically is where a fraction of a percent lives. It is
+the same answer; SOLIDWORKS' is not.
+
+### What this changes about the kit
+
+Three of the four disagreements were invisible to everything the kit measured
+before this run, because a body type and a face count cannot see them.
+`scripts/step-interop-crosscheck.py` now puts the three volumes beside each
+other - derived, OpenCASCADE, and the CAD system's - and flags a disagreement
+past a threshold. Over the whole kit it flags exactly four files, all analytic,
+no faceted control among them, which is what says the disagreement is about the
+analytic surfaces and not about units or settings.
+
+Eight coupons carry a derived volume, and OpenCASCADE matches every one of them
+to 0.000000% - the sole exception being `c13-oblique-trim` at -0.000256%, the
+pcurve-less ellipse re-parameterisation this document already explains, whose
+fixture allows 0.02.

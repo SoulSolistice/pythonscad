@@ -17,6 +17,33 @@
     body type    solid or surface. The most decision-relevant number there is: a
                  surface body means SOLIDWORKS read the faces but could not sew
                  them into a solid, which is the interop failure a user meets.
+    faults       what the Import Diagnostics dialog shows, read-only, at all
+                 three levels: IBody2::Check3 for the body, IFace2::Check per
+                 face and IEdge::Check per edge, each returning a FaultEntity
+                 with a count and an error code per fault. Check and Check2 are
+                 the obsolete forms and are not used.
+
+                 The body-level call is one COM round trip and the per-entity
+                 walk is one per face and one per edge, which on this kit's
+                 largest bodies is several thousand. That is not a small
+                 constant: walking c12-approximated-faceted, 2050 faces, took
+                 over eighteen minutes and reported nothing, because a faceted
+                 control is planes and has nothing to report. So the walk is
+                 gated - see -MaxWalkFaces.
+
+                 The edge count is the one to read first. Every measurement in
+                 doc/step-interop-validation.md says the defect is edges that do
+                 not lie on the faces they bound - 254 of 258 on one coupon, by
+                 up to 0.196 - and that was measured with OpenCASCADE. This is
+                 SOLIDWORKS' own verdict on the same edges, per edge, so the two
+                 can be correlated rather than merely compared.
+
+                 Nothing here repairs: the dialog offers to heal and this never
+                 accepts. IPartDoc::ImportDiagnosis is the healing one and is
+                 deliberately not called, because it would measure a body other
+                 than the one that was imported.
+    gaps         IBody2::Diagnose, which reports the gaps in a body and leaves it
+                 alone. The other half of what the dialog shows.
     errors       what OpenDoc6 reports.
     faces        against the count the kit knows pythonscad wrote.
     volume/area  against the faceted control, and against the exact value where
@@ -77,7 +104,19 @@ param(
     # scripts/step-interop-sw-roundtrip.py to compare against what we wrote.
     # Off by default because it writes into the kit directory and roughly
     # doubles the run; on for any run whose result will be argued about.
-    [switch]$RoundTrip
+    [switch]$RoundTrip,
+    # Restrict the run to coupons whose file name matches, the way the Python
+    # kit's --only does. A full kit is 48 imports; re-asking one question of one
+    # pair should not cost that.
+    [string]$Only,
+    # Localising a fault to its face or edge costs one COM call per entity. On a
+    # body of a few hundred faces that is free; on the kit's 2000-face faceted
+    # controls it is tens of minutes to be told what the body-level check
+    # already said. So bodies larger than this are walked only when
+    # IBody2::Check3 or IBody2::Diagnose reports something to localise, and
+    # smaller ones are always walked so that a body-level count of zero is
+    # positively confirmed rather than assumed.
+    [int]$MaxWalkFaces = 300
 )
 
 $ErrorActionPreference = 'Stop'
@@ -133,6 +172,7 @@ public class SwKitRunner
     // One CSV-ish record per file: file,opened,errors,warnings,body_type,
     // solids,surfaces,faces,volume_mm3,area_mm2,note
     public static bool SaveBack;
+    public static int MaxWalkFaces = 300;
 
     public static string Run(string path)
     {
@@ -154,10 +194,11 @@ public class SwKitRunner
 
             PartDoc part = doc as PartDoc;
             int nSolid = 0, nSheet = 0, faces = 0;
+            object[] solids = null, sheets = null;
             if (part != null)
             {
-                object[] solids = part.GetBodies2((int)swBodyType_e.swSolidBody, true) as object[];
-                object[] sheets = part.GetBodies2((int)swBodyType_e.swSheetBody, true) as object[];
+                solids = part.GetBodies2((int)swBodyType_e.swSolidBody, true) as object[];
+                sheets = part.GetBodies2((int)swBodyType_e.swSheetBody, true) as object[];
                 if (solids != null) nSolid = solids.Length;
                 if (sheets != null) nSheet = sheets.Length;
                 foreach (object[] set in new object[][] { solids, sheets })
@@ -175,6 +216,93 @@ public class SwKitRunner
             string bodyType = (nSolid > 0 && nSheet == 0) ? "solid"
                             : (nSolid == 0 && nSheet > 0) ? "SURFACE"
                             : (nSolid > 0) ? "mixed" : "none";
+
+            // The two numbers the Import Diagnostics dialog shows, taken
+            // read-only. IBody2::Check2 is the body's fault count, IFace2::Check
+            // hands back a FaultEntity per face with its own count and error
+            // codes, and IBody2::Diagnose reports gaps. None of the three
+            // repairs anything; ImportDiagnosis is the one that heals and is
+            // deliberately not called, because it would measure a body other
+            // than the one that was imported.
+            int faultyFaces = 0, faultyEdges = 0, bodyFaults = 0, gaps = 0;
+            bool skippedWalk = false;
+            var codes = new SortedSet<int>();
+            if (part != null)
+            {
+                foreach (object[] set in new object[][] { solids, sheets })
+                {
+                    if (set == null) continue;
+                    foreach (object b in set)
+                    {
+                        Body2 body = b as Body2;
+                        if (body == null) continue;
+                        // Check3, not Check/Check2: those are the obsolete forms
+                        // and return a bare count where this returns the faults.
+                        try
+                        {
+                            FaultEntity bf = body.Check3;
+                            if (bf != null)
+                            {
+                                bodyFaults += bf.Count;
+                                for (int i = 0; i < bf.Count; i++) codes.Add(bf.ErrorCode[i]);
+                            }
+                        }
+                        catch { }
+                        try
+                        {
+                            DiagnoseResult dr = body.Diagnose();
+                            if (dr != null) gaps += dr.GetGapsCount();
+                        }
+                        catch { }
+                        // Cheap first: the body-level count and the gap count are
+                        // one call each. Walk the entities only when there is
+                        // something to localise, or when the body is small
+                        // enough that confirming zero costs nothing.
+                        int bodyFaces = 0;
+                        try { bodyFaces = body.GetFaceCount(); } catch { }
+                        bool walk = bodyFaces <= MaxWalkFaces || bodyFaults > 0 || gaps > 0;
+                        if (!walk) { skippedWalk = true; continue; }
+
+                        try
+                        {
+                            Face2 face = body.GetFirstFace() as Face2;
+                            while (face != null)
+                            {
+                                FaultEntity fe = face.Check;
+                                if (fe != null && fe.Count > 0)
+                                {
+                                    faultyFaces++;
+                                    for (int i = 0; i < fe.Count; i++) codes.Add(fe.ErrorCode[i]);
+                                }
+                                face = face.GetNextFace() as Face2;
+                            }
+                        }
+                        catch { }
+                        // And the edges, which is where this exporter's measured
+                        // defect lives. See the note at the top.
+                        try
+                        {
+                            object[] edges = body.GetEdges() as object[];
+                            if (edges != null)
+                            {
+                                foreach (object eo in edges)
+                                {
+                                    Edge edge = eo as Edge;
+                                    if (edge == null) continue;
+                                    FaultEntity ee = edge.Check;
+                                    if (ee != null && ee.Count > 0)
+                                    {
+                                        faultyEdges++;
+                                        for (int i = 0; i < ee.Count; i++) codes.Add(ee.ErrorCode[i]);
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            string codeList = string.Join("/", new List<int>(codes).ConvertAll(x => x.ToString()).ToArray());
 
             double volume = 0, area = 0;
             try
@@ -211,6 +339,13 @@ public class SwKitRunner
                 catch (Exception ex) { note = (note + " saveas: " + ex.Message).Trim(); }
             }
 
+            // "not-walked" rather than a zero, because a count nobody looked
+            // for is not a measurement. The body-level count beside it is.
+            note = (note + " faults=" + bodyFaults + " gaps=" + gaps
+                    + (skippedWalk ? " faultyfaces=not-walked faultyedges=not-walked"
+                                   : " faultyfaces=" + faultyFaces + " faultyedges=" + faultyEdges)
+                    + (codeList.Length > 0 ? " codes=" + codeList : "")).Trim();
+
             return Join(path, "yes", errors, warnings, bodyType, nSolid, nSheet, faces, volume, area, note);
         }
         catch (Exception ex)
@@ -239,6 +374,7 @@ public class SwKitRunner
 # *.stp only, so a previous -RoundTrip run's *_SW.STEP files are not themselves
 # re-imported and saved back out as <coupon>_SW_SW.STEP.
 $files = Get-ChildItem -Path $KitDir -Filter *.stp | Sort-Object Name
+if ($Only) { $files = $files | Where-Object { $_.Name -match $Only } }
 if ($files.Count -eq 0) { throw "no .stp files in $KitDir" }
 Write-Host "kit: $($files.Count) files in $KitDir"
 
@@ -249,6 +385,7 @@ catch {
 }
 Write-Host ("attached to SOLIDWORKS revision " + $revision)
 [SwKitRunner]::SaveBack = [bool]$RoundTrip
+[SwKitRunner]::MaxWalkFaces = $MaxWalkFaces
 if ($RoundTrip) { Write-Host "round trip: each coupon will be saved back as <coupon>_SW.STEP" }
 Write-Host ""
 
@@ -265,7 +402,7 @@ foreach ($f in $files) {
     }
     $rows += $row
     if ($row.opened -eq 'yes') {
-        Write-Host ("{0,-8} {1,5} faces  vol {2}  err {3}" -f $row.body_type, $row.faces, $row.volume_mm3, $row.open_errors)
+        Write-Host ("{0,-8} {1,5} faces  vol {2}  err {3}  {4}" -f $row.body_type, $row.faces, $row.volume_mm3, $row.open_errors, $row.note)
     } else {
         Write-Host ("{0} - {1}" -f $row.opened, $row.note)
     }
