@@ -26,6 +26,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
+#include <limits>
 #include "StepKernel.h"
 #include "geometry/AnalyticFeatures.h"
 #include "utils/printutils.h"
@@ -1014,15 +1015,85 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // section: a bored cylinder, whose rim is a quartic and whose face is
     // therefore lost for want of a bound. Runs last and over what nothing else
     // claimed, so it can only ever add faces.
-    if (approximate) {
+    //
+    // Which tier it runs in is decided by proof rather than by the flag. A
+    // region cut from a declared surface is mostly exact - a boolean puts its
+    // new vertices on the facet planes, so it is the fringe where the cut
+    // landed that strays off the surface and not the interior - and a face
+    // whose every corner is on the surface to 1e-7 asserts nothing the mesh
+    // does not already state. Those are written by the exact pass. Spending
+    // the tessellation band, which is what makes a face this exporter cannot
+    // prove, still needs the approximation flag.
+    {
+      const double max_off = approximate ? std::numeric_limits<double>::infinity() : 1e-7;
       std::vector<std::string> quadric_report;
       const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::recogniseQuadricPatches(
-        mesh, effective, features.consumed, smooth_angle, quadric_report);
+        mesh, effective, features.consumed, smooth_angle, max_off, quadric_report);
       for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
-      std::size_t claimed_facets = 0, refused = 0;
+      // Corners on the surface are not enough to call a face exact. The
+      // boundary between two of them is a straight edge in the mesh, and a
+      // straight edge lies on a quadric only if it runs along the axis, or
+      // around it at a constant height where it can be written as an arc.
+      // Anything else is a chord under a surface that bulges away from it by
+      // the sagitta - truthful edge, truthful surface, inconsistent pair, and
+      // it is the pair a kernel has to widen its tolerance over.
+      //
+      // So the exact tier asks for both. Measured on the reference lid, asking
+      // only for the corners bought nine more analytic faces and cost 39 edges
+      // sagging up to 0.107 off the cylinder they bounded, on an export that
+      // had none at all.
+      auto boundary_lies_on_surface = [&](const AnalyticFeatures::Patch& patch) {
+        Vector3d axis, origin;
+        if (const auto *cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get())) {
+          axis = cyl->normdir.normalized();
+          origin = cyl->refpt;
+        } else if (const auto *con = dynamic_cast<const ConeSurface *>(patch.surface.get())) {
+          axis = con->normdir.normalized();
+          origin = con->refpt;
+        } else {
+          return false;
+        }
+        for (const auto& run : patch.runs) {
+          for (std::size_t i = 0; i + 1 < run.verts.size(); i++) {
+            const Vector3d a = vertices[run.verts[i]] - origin;
+            const Vector3d b = vertices[run.verts[i + 1]] - origin;
+            const Vector3d along = b - a;
+            const double rise = fabs(along.dot(axis));
+            // Along the axis, or around it: either is exact, one as a line and
+            // one as the arc the post-pass will write.
+            if (rise > 1e-7 && (along.norm() - rise) > 1e-7) return false;
+          }
+        }
+        return true;
+      };
+
+      // All of a surface or none of it. A declared cylinder can be cut into
+      // several regions, and writing one of them as the true cylinder while its
+      // neighbour stays a run of facets puts a smooth face against a sagging
+      // one along a shared edge. The vertices still meet, so nothing opens, but
+      // the surface acquires a crease that was not in the model - and a crease
+      // a later offset or fillet would follow. The faceted half is the half
+      // that sags, so the transition is between what is right and what was
+      // already wrong; that is still not a thing to introduce halfway across a
+      // face somebody declared as one surface.
+      std::map<const Surface *, bool> surface_ok;
+      for (const auto& patch : found) {
+        if (!patch.alive) continue;
+        const Surface *key = patch.surface.get();
+        const bool ok = boundary_lies_on_surface(patch);
+        auto it = surface_ok.find(key);
+        if (it == surface_ok.end()) surface_ok.emplace(key, ok);
+        else it->second = it->second && ok;
+      }
+
+      std::size_t claimed_facets = 0, refused = 0, unbounded = 0;
       for (const auto& patch : found) {
         if (!patch.alive) {
           refused++;
+          continue;
+        }
+        if (!approximate && !surface_ok[patch.surface.get()]) {
+          unbounded++;
           continue;
         }
         quadric_faces.push_back(patch);
@@ -1030,12 +1101,21 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
         for (const std::size_t f : patch.facets) features.consumed[f] = 1;
       }
       if (!quadric_faces.empty()) {
-        LOG("STEP export: %1$d trimmed quadric%2$s written as one face each, replacing %3$d facets",
-            int(quadric_faces.size()), quadric_faces.size() == 1 ? "" : "s", int(claimed_facets));
+        LOG(
+          "STEP export: %1$d trimmed quadric%2$s written as one face each, replacing %3$d facets "
+          "(%4$s)",
+          int(quadric_faces.size()), quadric_faces.size() == 1 ? "" : "s", int(claimed_facets),
+          approximate ? "within their tessellation band" : "exactly on their surface");
       }
       if (refused > 0) {
         LOG("STEP export: %1$d trimmed quadric region%2$s could not be bounded", int(refused),
             refused == 1 ? "" : "s");
+      }
+      if (unbounded > 0) {
+        LOG(
+          "STEP export: %1$d trimmed quadric region%2$s left faceted - the surface is exact but "
+          "some of it is bounded off itself, and half a surface is worse than none",
+          int(unbounded), unbounded == 1 ? "" : "s");
       }
     }
 

@@ -429,13 +429,25 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
  * band pass and over what that pass did not consume, so it can never cost a
  * circle that would otherwise have been written.
  *
- * An approximation, and gated as one: a trim's vertices are not all on the
- * surface, and a claim which strays further than its own tessellation band is
- * dropped with a line in `report` rather than written. */
+ * `max_off` is how far a facet's corners may sit off the surface and still be
+ * claimed, on top of that facet's own tessellation band. It is what separates
+ * the two tiers this recogniser serves, and the separation is by proof rather
+ * than by flag.
+ *
+ * A region cut from a *declared* surface is mostly exact: a boolean puts new
+ * vertices on the facet planes rather than on the ideal surface, so it is the
+ * fringe where the cut landed that strays, and the interior does not. On the
+ * reference lid 32 of the 36 curved faces this pass finds are on their own
+ * surface to 1e-7. Those assert nothing the mesh does not already state and
+ * belong in the exact pass; pass a tolerance of that order to get only them.
+ *
+ * The rest is an approximation and gated as one - pass infinity, and a claim
+ * which strays further than its own tessellation band is still dropped, with a
+ * line in `report` rather than written. */
 std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
                                            const std::vector<std::shared_ptr<Surface>>& surfaces,
                                            const std::vector<char>& consumed, double smooth_angle,
-                                           std::vector<std::string>& report);
+                                           double max_off, std::vector<std::string>& report);
 
 /*! Find the bands of facets which were modelled as a surface of revolution.
  *

@@ -1945,7 +1945,7 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
 std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
                                            const std::vector<std::shared_ptr<Surface>>& surfaces,
                                            const std::vector<char>& consumed, double smooth_angle,
-                                           std::vector<std::string>& report)
+                                           double max_off, std::vector<std::string>& report)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -2053,7 +2053,11 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
       for (const int v : loops[f]) {
         off = std::max(off, offsetAt(surface.get(), vertices[v]));
       }
-      if (off > bandOf({f})) continue;
+      // The band is what the mesh concedes about where its surface lies;
+      // `max_off` is how much of that concession this tier is willing to spend.
+      // At 1e-7 it spends none, and claims only facets the surface already runs
+      // through.
+      if (off > std::min(bandOf({f}), max_off)) continue;
       claimed.push_back(f);
       worst = std::max(worst, off);
     }

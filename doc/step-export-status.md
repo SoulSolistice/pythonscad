@@ -2195,3 +2195,53 @@ This does not finish the lid. Its planar area falls by 7% and the largest thing
 left is still the thread's cut remainder, which is not a quadric at all. What it
 does finish is the excuse: a conical wall now has a surface to be written on,
 where before the fitter that could have found one was never asked.
+
+## 17. Two tiers, separated by proof rather than by flag
+
+Recognising a *trimmed* quadric - a region of a declared cylinder or cone that
+the band pass cannot write because its trim is not a plane section - used to be
+gated behind `step-approximate-surfaces` as a whole, on the grounds that a
+trim's vertices are not all on the surface.
+
+Some are and some are not, and the mesh says which. A tessellated cylinder's
+vertices lie on the true cylinder; it is the boolean that puts new ones on the
+facet planes instead, so the fringe where a cut landed strays and the interior
+does not. Measured on the reference lid: of the 36 curved faces the pass finds
+with the flag on, **32 are on their own surface to 1e-7** and only four are
+not - the thread's two B-splines and two cylinders, 13,560 mm² of 73,194.
+
+So the tier is decided by proof now. `recogniseQuadricPatches` takes a
+`max_off`, the exact pass passes 1e-7 and the approximate pass infinity, and
+the log says which was spent:
+
+```text
+STEP export: 2 trimmed quadrics written as one face each, replacing 8 facets
+  (exactly on their surface)
+```
+
+Corners on the surface are not sufficient, and finding that out cost a
+detour worth recording. With only the corner test the lid's exact export gained
+nine analytic faces and **39 edges that sag up to 0.107 off the cylinder they
+bound**, on an export that had none at all: the boundary between two corners is
+a straight edge, and a straight edge lies on a quadric only if it runs along the
+axis or around it at a constant height. Anything else is a chord under a surface
+that bulges away from it - a truthful edge, a truthful surface, and an
+inconsistent pair, which is exactly the pair a kernel has to widen its tolerance
+over. The exact tier asks for both, and is back to zero.
+
+It also asks for all of a surface or none of it. Writing one region of a
+declared cylinder as the true cylinder while its neighbour stays a run of facets
+puts a smooth face against a sagging one along a shared edge; nothing opens,
+since the vertices still meet, but the surface acquires a crease that was not in
+the model and that a later offset or fillet would follow.
+
+What it comes to on the lid, with the approximation flag off: 18 cylinders
+before, **26 after**, 6 cones unchanged, 58,981 mm² of curved surface becoming
+59,634 - which is the whole of what the approximate pass finds and can prove,
+and none of what it cannot. All 2410 edges lie on both faces they bound, and
+OpenCASCADE sews it accepting 1e-7 of slack, its own floor.
+
+`step-exact-trim` holds this: a cylinder whose rim is notched so the band pass
+has nothing to work with, while sixteen facets away from any notch are still
+exactly on the cylinder. Its `TOLERANCE: 1e-07` is the first in the suite, and
+it is the assertion the rest of the fixture is scaffolding for.
