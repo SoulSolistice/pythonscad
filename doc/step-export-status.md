@@ -2731,7 +2731,8 @@ So the snap and the trimmed quadric tier are in tension by construction, and the
 next question is theirs rather than ownership's: either the quadric path has to
 accept a region whose boundary has been moved onto the surface, or the snap has
 to leave quadric-owned vertices alone and take the sweep only. The second is a
-measurable experiment and should be the next rung.
+measurable experiment and should be the next rung. **Measured - see §26.** It
+keeps the whole of the lid's gain and changes no fixture.
 
 ### And a bound that was never a bound
 
@@ -2745,3 +2746,82 @@ the surface stands off the middles of the chords near the vertex that *do* lie
 on it. A declared sweep states the same quantity outright as its band. That
 change alone took `step-partial-cylinder` from 25 vertices moved to 8, and
 `step-exact-trim` from 16 to 4.
+
+## 26. A ladder rather than a score
+
+§25 left the snap and the trimmed quadric tier in tension and named the
+experiment: hold the quadric-owned vertices and take the sweep only. Done, as a
+precedence over each cut vertex - rungs in descending order of how well founded
+they are, first match wins:
+
+| rung | condition | action |
+| --- | --- | --- |
+| 1 | already on every surface that owns it | leave it |
+| 2 | provably on one of them | leave it |
+| 3 | a quadric owns it | leave it |
+| 4 | one owner, a declared sweep | slide in the pinning plane |
+| 5 | two owners | the curve where they cross |
+
+A vertex has one position, so the rules are exclusive anyway and the only
+question is which wins. Making that an ordering rather than an accident of
+evaluation order means the report can say which rung fired, which is what §21
+wanted out of provenance in the first place.
+
+### The result
+
+Rungs 2 and 3 are switchable (`STEP_SNAP_VETO`) because which of them is right
+was a measurement, not an argument. With both on and rung 5 off:
+
+| | baseline | ladder |
+| --- | --- | --- |
+| lid10, declared sweep | 486 facets | **631 facets** |
+| lid10, trimmed quadrics | 10 faces / 68 facets | 10 faces / 68 facets |
+| lid10, validator and OpenCASCADE | pass | pass |
+| all 39 fixtures | - | **unchanged, all valid** |
+| bayonet coupler | - | nothing moves at all |
+
+`step-partial-cylinder`'s six faces with no circular edge - the breakage §25
+recorded under the plain single-owner move - are gone. Rung 3 is what stops
+them. On the coupler the ladder holds every vertex it looks at: 448 on rung 1,
+452 on rung 2, 201 on rung 3, and the export is byte-for-byte the baseline.
+
+So the ladder keeps the whole of the reference part's gain and gives up the
+strip coupon's - 241 facets, where the crossing reached 640. That is the right
+way round rather than a disappointment: every one of the strip's junction
+vertices is quadric-owned, and §25 measured what moving those costs.
+
+### Why not weights
+
+The measurement argues it better than the principle does. An intermediate hold -
+rung 2 without rung 3, holding only the vertices already proven on a surface -
+is **worse than either extreme**:
+
+| | baseline | hold none | hold proven only | hold all quadric-owned |
+| --- | --- | --- | --- | --- |
+| step-declare-grid-strip, quadric faces | 9 | 70 | **160** | 9 |
+| step-declare-grid, quadric faces | 5 | 66 | **156** | 5 |
+| step-band-family, quadric faces | 8 | 22 | **103** | 8 |
+| valid | pass | fail | fail | pass |
+
+Holding some of a quadric region's vertices and moving the rest leaves a
+boundary that steps in and out of the surface, and the recogniser splits at
+every step - which fragments it harder than moving all of them did. A graded or
+weighted rule is that middle case by construction. This is the same shape of
+finding as §§17-21: the tunable middle is where things fail plausibly, and the
+gates that work are the ones that either fire or do not.
+
+### Where this leaves it
+
+This is the first change in the investigation that improves the reference part
+without costing anything measurable elsewhere, and it is the first that is a
+candidate to land rather than a proof of concept. What it still needs before
+that:
+
+- **A fixture that exercises rung 4.** No fixture in the suite has a
+  single-owner sweep vertex; the lid does, and the lid is not a fixture. Without
+  one the rung is asserted by nothing.
+- **The env switch removed.** `STEP_SNAP` and `STEP_SNAP_VETO` are scaffolding
+  for measuring the variants apart, not an interface.
+- **A commercial kernel.** OpenCASCADE reads every configuration above,
+  including the ones the validator refuses, so it has no opinion here - the
+  interop kit is the only thing that would.
