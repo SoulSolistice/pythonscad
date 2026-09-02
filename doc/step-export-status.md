@@ -2344,3 +2344,44 @@ alone. The declaration's job is to hand over the ordering the booleans
 destroyed; interpolating the points that are actually there is the exporter's.
 Done that way the corners are on the surface by construction, the coverage comes
 back, and the rule above costs nothing to enforce.
+
+## 20. The fit cannot reach those corners, and why
+
+The plan after §19 was to fit along the declared ordering to the mesh vertices
+in the claimed region rather than to the declared net, so that the corners would
+be on the surface by construction and the coverage would come back. It cannot
+work, and the measurement that says so is short.
+
+The corners that are off are the ones the booleans made. A boolean cuts the
+ridge with the wall, and the ridge it cuts is the *mesh* - so the new vertex
+lands on a facet, on the chord between two stations, not on the smooth curve
+through them. Its distance from any smooth surface interpolating those stations
+is the sagitta of that chord, by construction:
+
+| | worst corner off the surface | worst station mid-chord to the surface |
+| --- | --- | --- |
+| strip coupon | 0.1117 | **0.2419** |
+| lid10 | 0.2180 | **0.4333** |
+
+The corner deviations are of the order of the sagitta and bounded by it, which
+is what a point on a chord and a curve through the chord's ends must give. No
+choice of fit changes this. A surface that contains those vertices is one that
+is piecewise linear along the sweep - which is the mesh, written as a single
+face, with the smoothness given up entirely.
+
+So the third option that §19 hoped for does not exist, and the real choice is
+between three that do:
+
+1. **Hold corners to the surface.** Correct, and both reference parts import
+   into SOLIDWORKS clean. Costs the fringe, and for a thin ridge the fringe is
+   nearly all of it - the strip coupon's sweep goes from 241 facets to 6.
+2. **Keep the claim as it is.** Full coverage, one faulty face on each reference
+   part after the face split, and a boundary that wanders up to a sagitta off
+   the surface it bounds.
+3. **Move the cut vertices onto the surface.** Keeps both, and is the only one
+   that is really a fix rather than a trade. A cut vertex lies on the wall's
+   plane and on the ridge's *mesh*; sliding it along the wall plane onto the
+   ridge's *surface* keeps it in the plane its other faces need and puts it on
+   the sweep. That is the intersection of the two exact surfaces, which is what
+   the trim curve between them should have been all along, and it is the piece
+   of work the rest of this now points at.
