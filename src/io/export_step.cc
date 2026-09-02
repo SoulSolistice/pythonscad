@@ -676,6 +676,7 @@ void reportOwnership(const PolySet& ps, const Ownership& own)
 struct SnapReport {
   std::size_t moved_one = 0, moved_two = 0;
   std::size_t refused_unpinned = 0, refused_far = 0, refused_stuck = 0, refused_unbounded = 0;
+  std::size_t held_placed = 0, held_proven = 0, held_quadric = 0;
   double worst = 0.0;
 };
 
@@ -695,7 +696,7 @@ bool pinnedPlane(const std::vector<Vector4d>& planes, Vector3d& normal, double& 
 }
 
 SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, const Ownership& own,
-                           int mode)
+                           int mode, int veto)
 {
   SnapReport report;
   if (!own.valid || mode <= 0) return report;
@@ -720,6 +721,57 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
     if (at[v].empty()) continue;
     const std::vector<std::size_t> candidates = own.candidatesAt(v, ps);
     if (candidates.empty()) continue;
+
+    // The ladder. Rungs in descending order of how well founded they are, and
+    // the first one that fires decides the vertex - a vertex has one position,
+    // so the rules are exclusive anyway and the only question is which wins.
+    //
+    // Deliberately a precedence and not a weight. A score blending "how exact"
+    // with "how owned" would be one more tunable number that fails plausibly
+    // rather than loudly, which is what pointMember's band, membership by
+    // distance and ownership by nearest each were. Every rung here either fires
+    // or does not, and the report says which one did.
+    //
+    // The two holding rungs are separately switchable because which of them is
+    // right is a measurement, not an argument. STEP_SNAP_VETO=0 holds nothing,
+    // 1 holds a vertex already proven to be on one of its surfaces, 2 also
+    // holds any vertex a quadric owns.
+    bool on_all = true, on_any = false, has_quadric = false;
+    for (const std::size_t j : candidates) {
+      const bool on = own.onSurface(j, int(v));
+      on_all = on_all && on;
+      on_any = on_any || on;
+      const Surface *s = ps.surfaces[j].get();
+      if (dynamic_cast<const CylinderSurface *>(s) != nullptr ||
+          dynamic_cast<const ConeSurface *>(s) != nullptr ||
+          dynamic_cast<const SphereSurface *>(s) != nullptr ||
+          dynamic_cast<const TorusSurface *>(s) != nullptr) {
+        has_quadric = true;
+      }
+    }
+    // Rung 1: it is already where every surface that owns it says it should be.
+    if (on_all) {
+      report.held_placed++;
+      continue;
+    }
+    // Rung 2: it is provably on one of them. Moving it to satisfy another would
+    // take a point that is *on* a declared surface off that surface - trading a
+    // proof for an approximation bounded by a band, which is the one trade this
+    // exporter never makes (see the two tiers of section 17).
+    if (veto >= 1 && on_any) {
+      report.held_proven++;
+      continue;
+    }
+    // Rung 3: a quadric owns it. Section 25 measured what moving these costs:
+    // the vertex lands on the true cylinder while its neighbours stay on the
+    // prism that approximates it, and the trimmed quadric recogniser splits
+    // around the step - 9 faces over 289 facets becoming 70 over 145, and an
+    // export the validator refuses. Whether holding them keeps the sweep's gain
+    // as well is the thing being measured.
+    if (veto >= 2 && has_quadric) {
+      report.held_quadric++;
+      continue;
+    }
 
     // What the model concedes about where its surface lies, which is what
     // bounds the move. A declared sweep states it outright as the sagitta of
@@ -770,7 +822,6 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
       const Surface *s = ps.surfaces[candidates[0]].get();
       Vector3d nearest;
       if (!closestOnSurface(s, vertices[v], nearest)) continue;
-      if ((nearest - vertices[v]).norm() <= 1e-7) continue;  // already there
 
       // The planes that pin it: the facets at this vertex whose own original
       // does *not* own the surface being moved to. That is the provenance
@@ -839,7 +890,6 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
         report.refused_stuck++;
         continue;
       }
-      if ((p - vertices[v]).norm() <= 1e-7) continue;  // already on the crossing
       moved = p;
     } else {
       continue;
@@ -885,8 +935,10 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   std::vector<Vector3d> vertices = ps->vertices;
   const char *snap_env = getenv("STEP_SNAP");
   const int snap_mode = snap_env != nullptr ? atoi(snap_env) : 0;
+  const char *veto_env = getenv("STEP_SNAP_VETO");
+  const int snap_veto = veto_env != nullptr ? atoi(veto_env) : 2;
   if (snap_mode > 0 && Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
-    const SnapReport snapped = snapCutVertices(vertices, *ps, ownership, snap_mode);
+    const SnapReport snapped = snapCutVertices(vertices, *ps, ownership, snap_mode, snap_veto);
     LOG(
       "STEP export: snapped %1$d vertices onto the surface they were cut from and %2$d onto the "
       "curve two surfaces cross on, by up to %3$.4f; refused %4$d with no single plane to move "
@@ -894,6 +946,10 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
       "to say how far the tessellation is entitled to stray",
       int(snapped.moved_one), int(snapped.moved_two), snapped.worst, int(snapped.refused_unpinned),
       int(snapped.refused_far), int(snapped.refused_stuck), int(snapped.refused_unbounded));
+    LOG(
+      "STEP export: the ladder held %1$d vertices already on every surface that owns them, %2$d "
+      "provably on one of them, and %3$d a quadric owns",
+      int(snapped.held_placed), int(snapped.held_proven), int(snapped.held_quadric));
   }
 
   std::vector<IndexedFace> indicesNew;
