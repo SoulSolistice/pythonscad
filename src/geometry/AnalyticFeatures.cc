@@ -1706,7 +1706,6 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
   std::vector<Patch> patches;
   std::vector<char> taken(loops.size(), 0);
   std::size_t corners_only = 0;               // every corner on the sweep, the middle not
-  std::size_t refused_unmoved = 0;            // a corner the snap could not put on the surface
   double worst_claimed = 0.0;                 // the furthest a *claimed* facet's middle strays
   double claim_band = 0.0;                    // the allowance it was measured against
   double worst_at_u = 0.0;                    // and where along the sweep it happened
@@ -1764,15 +1763,6 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         std::vector<Vector3d> unused;  // pointMember's scratch argument, as elsewhere
         if (!const_cast<GridSurface *>(grid)->pointMember(unused, vertices[v])) {
           on = false;
-          break;
-        }
-        // A vertex that should have been moved onto this surface and could not
-        // be disqualifies the facet. Claiming it anyway is what turns a
-        // uniformly loose boundary into a mostly exact one with outliers, which
-        // is the worse of the two states. See Mesh::unmoved.
-        if (mesh.unmoved != nullptr && std::size_t(v) < mesh.unmoved->size() && (*mesh.unmoved)[v]) {
-          on = false;
-          refused_unmoved++;
           break;
         }
       }
@@ -1971,13 +1961,6 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
       format("the fitted sweep passes within %.4f of the middle of every facet it claims, against a "
              "tessellation band of %.4f - worst at %.0f%% along the sweep",
              worst_claimed, claim_band, worst_at_u * 100.0));
-  }
-  if (refused_unmoved > 0) {
-    report.push_back(
-      format("%d facets are refused because a corner belongs on this surface and could not be "
-             "put there - claiming them would leave a mostly exact boundary with outliers, "
-             "which is the worse state",
-             int(refused_unmoved)));
   }
   if (corners_only > 0) {
     // Worth a line of its own: it is the difference between the facets a

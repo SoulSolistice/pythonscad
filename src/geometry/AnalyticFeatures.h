@@ -138,21 +138,6 @@ struct Mesh {
   const std::vector<char> *valid = nullptr;    // 0 for a loop to ignore
   const std::vector<char> *is_hole = nullptr;  // 0 for an outer bound
   const std::vector<Vector3d> *normals = nullptr;
-  /*! Vertices that belong on a declared surface and could not be put there.
-   *
-   * The snap in export_step.cc slides a boolean's cut vertices onto the surface
-   * they were cut from, and refuses some - no single plane to move in, no
-   * convergence, nothing to say how far the tessellation may stray. Leaving a
-   * refused vertex inside a claim is worse than never having moved anything:
-   * the face's boundary is then mostly exact with a few outliers, a kernel
-   * takes its tolerance from the majority, and every outlier breaks a face.
-   * Measured on the bayonet as 1 faulty face in SOLIDWORKS before the snap and
-   * 83 after, with the worst deviation unchanged - see
-   * doc/step-interop-validation.md.
-   *
-   * So a claim containing one of these is refused outright. Empty means no snap
-   * ran, and then nothing is refused on this account. */
-  const std::vector<char> *unmoved = nullptr;
 };
 
 struct Result {
