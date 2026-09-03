@@ -2077,3 +2077,114 @@ replaced at the one point that mattered, while being thousands of times better
 everywhere else. `GridSurface::splineForm` writes `degree_v = 1` and solves the
 poles one rail at a time precisely to avoid that, and the numbers above are what
 remains once it has been.
+
+## Where the general coverage actually stops
+
+Everything above measures one part. This section measures the *constructs*, because
+what matters for an arbitrary model is which OpenSCAD operations leave the
+exporter something to recognise. Every figure here is one export of a ten-line
+model, and several of them contradict what this document assumed.
+
+### What already works, and it is most of it
+
+| construct | written |
+| --- | --- |
+| `linear_extrude` of a circle | `CYLINDRICAL_SURFACE` + 2 planes |
+| `linear_extrude(scale=)`, tapered | `CONICAL_SURFACE` + 2 planes |
+| `linear_extrude` of an `offset(r=)` profile | one cylinder per rounded corner |
+| `rotate_extrude` of a circle | **one** `TOROIDAL_SURFACE` for the whole solid |
+| `rotate_extrude` of a rectangle | 2 cylinders + 2 planes |
+| `rotate_extrude` of a sloped polygon | cone + 2 cylinders + 2 planes |
+
+None of this comes from the extrude *nodes* - `LinearExtrudeNode` and
+`RotateExtrudeNode` declare nothing. It comes from `geometry/linear_extrude.cc`
+and `geometry/rotate_extrude.cc`, which declare a cylinder per arc in the
+profile and a second rim for a taper, and from the recogniser fitting the cone
+between two rims. Worth knowing before looking for the code in the wrong file.
+
+**And a revolved free-form curve is already nearly free.** A wine glass outline -
+forty-odd points, no arcs, no straight runs - revolved as a hollow shell:
+
+```text
+82 analytic surfaces available
+80 surfaces recognised (80 conical), 5120 facets replaced
+written: Cone 80, Plane 2 - 82 faces
+```
+
+Five thousand facets to eighty-two faces, each an exact cone. Any turned profile
+decomposes into a stack of bands and the stack collapses.
+
+### 1. A revolve that touches its own axis collapses to nothing
+
+The same outline, drawn solid so the profile meets the axis at both ends:
+
+| same outline | faces written |
+| --- | --- |
+| hollow, never touches the axis | **82** |
+| solid, touching the axis | **2616, all planes** |
+
+Revolving a segment that ends on the axis sweeps a cone whose apex is *on* the
+axis, which is an exact `CONICAL_SURFACE`. It tessellates as a triangle fan
+meeting at one shared vertex, and a fan is not a ring:
+
+```text
+2 regions are not turned surfaces because its vertices do not lie on rings
+a region of 29 facets kept its ordering but was not recovered:
+   it has a facet that is neither a triangle nor a quad
+skipped 26 degenerated faces - 26 had no area
+r=6.23956 band of 64 facets left faceted: the band sharing this rim was dropped
+   ... and the same for every band above it
+```
+
+One unrecognised region at the apex, and the whole stack follows it down.
+
+**The cascade is not the bug and should not be "fixed".** A collapsed band's rim
+is a `CIRCLE` and a faceted neighbour's is a polyline; they cannot be the same
+edge, so a band whose neighbour stays faceted has to stay faceted too. Dropping
+it is what keeps the shell closed. The rule is right and the trigger is wrong.
+
+So the item is: **recognise an apex fan as the cone it is.** Exact, no fitting,
+no tolerance band. It matters for arbitrary models because every knob, lens,
+dome, bottle base and solid stem is a revolve that touches its axis.
+
+### 2. `linear_extrude(twist=)` declares nothing
+
+400 of a twisted square's 514 facets stay faceted, and the guard in
+`linear_extrude.cc` that handles taper has no twist path at all. The node knows
+its profile, its twist and its slice count before it tessellates, and
+`GridSurface` is already the type for exactly this - a generator handing over the
+ordering the mesh loses. A twisted square is four helicoidal faces and two caps:
+six, against 514.
+
+### 3. `PathExtrudeNode` and `SkinNode` declare nothing
+
+The same argument and the same channel. Both know a profile and a path up front,
+and both are what a user reaches for when the alternative is `polyhedron()` -
+which is the one operation that can declare nothing at all.
+
+### 4. No surface type for an ellipse
+
+`linear_extrude.cc` refuses explicitly - *an ellipse, not a circle*, and again
+for a sheared or oblique sweep. Any non-uniform `scale()` on a cylinder drops to
+facets. This is the one item here that needs a new `Surface` subclass rather
+than a new call site, so it is larger, but it unlocks a class rather than a node.
+
+### 5. `SURFACE_OF_REVOLUTION`, and a correction
+
+§8's *what not to do* records that `SURFACE_OF_REVOLUTION` "collapses zero
+faces". That was measured on the bayonet, whose profiles are arcs and lines the
+band rules already handle, and it is not true in general: a revolved arbitrary
+curve is exactly what the entity is for, and writing one would take the glass
+above from 82 faces to three.
+
+It is listed last rather than first because the measurement above changed its
+value. The band stack already reaches 82 faces on the same shape, so this buys a
+tidier file rather than coverage - unlike item 1, which is the difference between
+82 and 2616.
+
+### While measuring this: two corrections to the kit
+
+`step-interop-kit.py`'s `parameter_set()` says that `lid10.json` selects the lid
+and `bayonet_container_v1-2.json` the base. **Both set only `_resolution`.**
+Neither selects a component, which is why r01 and r02 have been exporting the
+same geometry - the near-duplicate §23 flagged as a loose end, now with a cause.
