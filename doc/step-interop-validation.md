@@ -1149,3 +1149,144 @@ dialog's own faulty-face count, which is the instrument the original claim was
 made with. Until then what is safe to say is the part that reproduces - both
 reference parts now import as solids with no gaps, where they were surface
 bodies - and that is the stronger claim anyway.
+
+## The ladder, and why half a fix is worse than none
+
+The snap of §26 in `doc/step-export-status.md` regressed the bayonet from **1
+faulty face to 83** in SOLIDWORKS. Finding out why took most of a session and
+overturned four hypotheses, so the route matters as much as the answer.
+
+### Everything measurable said the opposite
+
+Three variants of the same part, differing only in coordinates - identical
+topology, 5434 points, 1700 edges, 595 faces, 2126 lines, 53 circles, 479
+pcurves in each:
+
+| measure | split (**1 fault**) | + ladder (**83 faults**) |
+| --- | --- | --- |
+| entity counts, topology | - | **identical** |
+| boundary vertices off their own surface | 334 / 958 | **46 / 958**, seven times better |
+| planar faces off their own plane | 0 | 0 |
+| vertices not on their edge curve | 0 | 0 |
+| min face area, short edges | 9.79e-3, none | **identical** |
+| `BRepCheck_Analyzer` at a forced 1e-6 | 4 bad faces | **4 bad faces** |
+| pcurve endpoints off the surface | 475 / 3400 | **188 / 3400** |
+
+And `strict-both`, which SOLIDWORKS calls **clean**, is the *worst* of the three
+by several of them: it carries the one 6.7e-6 sliver, the one 0.019968 off-plane
+face, and eight edges whose endpoints miss by 0.021.
+
+Every OpenCASCADE instrument, at every tolerance, with every reader parameter the
+STEP user guide names - `read.precision`, `read.maxprecision` in both modes,
+`read.surfacecurve` in all three, `read.stdsameparameter`, and the `FromSTEP`
+shape-processing sequence disabled - ranks the ladder file as **better**. Not one
+of them orders the three the way SOLIDWORKS does.
+
+### What the guide corrected
+
+Two things in the OCCT STEP user guide are worth writing down, because this
+document had one of them subtly wrong:
+
+- **The tolerance is not sewing slack.** *"The resulting tolerance of TopoDS_Edge
+  is a maximal deviation of its 3D curve and its pcurve(s)."* So the 0.264 that
+  `worst_tolerance()` reports is precisely our pcurve-versus-3D disagreement,
+  which is the defect itself rather than a kernel being generous. Earlier text
+  here describing it as OCCT "widening tolerance until it covers the gap" is one
+  level off, though the conclusion drawn from it was right.
+- **Why the cap does not bind.** `read.maxprecision.mode = Preferred` may be
+  exceeded *"currently, only for deviation of a 3D curve and pcurves of an edge,
+  and vertices of such edge"* - exactly our case. Forcing the cap to 1e-7 changes
+  nothing, and now there is a documented reason.
+
+### The answer: it is the mixture
+
+Asking SOLIDWORKS *which* entities it objects to settled it. All 414 fault codes
+on both real parts are `7`, `swEdgeVertexNotLie` - a vertex that does not lie on
+the edge it bounds - and the faulty faces are not the sweep but **79 or 80 small
+planar facets along its border**, median area 24 mm², plus the one cylinder and
+the one B-spline they touch. The 86 faulty edges are all `SPCURVE_TYPE`: pcurves.
+
+Order the variants by the *count* of bad pcurve endpoints and SOLIDWORKS makes no
+sense. Order them by **purity** and it is exact:
+
+| | pcurve endpoints off | worst | SOLIDWORKS |
+| --- | --- | --- | --- |
+| split - uniformly loose | 475 | 0.218 | **1** |
+| ladder - a mixture | 188 | 0.218, **unchanged** | **83** |
+| strict-both - uniformly tight | 8 | 0.021 | **0** |
+
+The ladder halved the count and left the worst case identical. It turned a
+boundary that was uniformly ~0.2 off into one that is *mostly exact with 38
+outliers*. A kernel that infers a face's tolerance from its boundary grants the
+first case one loose tolerance and finds everything consistent; in the second it
+takes a tight tolerance from the majority, and every outlier then breaks each
+face that touches it.
+
+**This is §26's own finding one level up.** Its table for the ladder's internal
+rungs reads 70 / 160 / 9 faces for hold-none, hold-proven-only, hold-all, and
+concludes *"an intermediate hold is worse than either extreme."* That describes
+rung 2 against rung 3. It also describes the ladder against the exporter without
+it, and that generalisation was not made at the time.
+
+### Move all or refuse the claim, measured
+
+The obvious repair is to stop half-moving: a vertex the snap cannot place
+disqualifies the facets that use it, so a claim is either wholly moved or not
+made. Implemented through `AnalyticFeatures::Mesh::unmoved` and measured:
+
+| bayonet | SW faulty faces | SW volume | faces written |
+| --- | --- | --- | --- |
+| split | **1** | - | **595** |
+| ladder | 83 | 363852 (**+52%**) | 595 |
+| move-all-or-refuse | **9** | **238696, correct** | 1046 |
+| strict-both | **0** | - | 948 |
+
+It works: 81 faulty faces to 7 on the lid, 82 to 9 on the bayonet, `c17` to zero,
+and the mass-properties failure disappears with them - SOLIDWORKS' volume goes
+from +55% to +0.17%. The sweep's pcurve outliers fall from 38 to 6.
+
+**And it is still dominated.** `strict-both` has fewer faults *and* fewer faces.
+The reason is visible in the same audit: only the grid claim was gated, so the
+sweep cleaned up while the cylinders stayed at 157 outliers, held by the ladder's
+third rung and never refused. `strict-both` applies the same principle to both
+paths.
+
+So the three positions collapse into one principle - **refuse what cannot be
+placed exactly** - and the ranking on the bayonet is unambiguous:
+
+```text
+split           1 fault,   595 faces    full coverage, near-clean
+strict-both     0 faults,  948 faces    clean, at a coverage cost
+move-all        9 faults, 1046 faces    dominated by both
+ladder         83 faults,  595 faces    dominated by split
+```
+
+The pre-snap exporter already reached one faulty face with the most consolidated
+output of any variant. The snap was built to close a 0.264 deviation that, after
+the face split, SOLIDWORKS was no longer objecting to.
+
+### Three lessons this leaves
+
+**SOLIDWORKS partly redeems itself.** This document has spent a long time
+treating it as the difficult one, and on the analytic tier it is strict rather
+than wrong: it reads our pcurves, holds them against our 3D curves, and refuses
+what does not agree. OpenCASCADE absorbs the same disagreement into edge tolerance
+and says nothing. Where the two differ, the strict one has usually been pointing
+at something real - the face split and this both came out of following its
+objections. It remains the outlier on `c06`, where three sources including the
+model's own arithmetic agree against it.
+
+**Every kernel has quirks, and settings decide much of the behaviour.** OCCT's
+verdict depends on `read.precision`, `read.maxprecision`, `read.surfacecurve` and
+`read.stdsameparameter`; SOLIDWORKS' depends on Tools > Options > Import, which
+is why every run here is labelled with `-ImportSettings`. A result recorded
+without its settings cannot be compared with another one, and a kernel's default
+is a policy rather than a truth.
+
+**The diagnostic tooling earned its place.** Nothing in the previous regime could
+have found this. The body type said *pass*; the validator said *valid*;
+OpenCASCADE said *one closed solid* at every setting; 40 of 40 fixtures were
+green. What found it was the per-entity fault dump, the round-trip comparator,
+the three-way volume cross-check and the strict re-check at a tolerance we
+choose - four instruments built in one session, three of which contradicted a
+conclusion the fourth had suggested. That is the point of having more than one.

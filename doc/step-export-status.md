@@ -2929,3 +2929,33 @@ The ladder improves the reference part and changes no fixture, both specimens,
 and neither kernel's answer. What it has not had is a commercial importer's
 opinion on `c17` against `c11`, which is now one kit run away and is the only
 remaining question about it.
+
+### It had that opinion, and the ladder is rejected
+
+**Measured 2026-09-02 and it is a regression.** On the bayonet, SOLIDWORKS goes
+from **1 faulty face to 83** with the ladder in, and its mass properties from
+correct to +52%. Every local check still passes - the validator, OpenCASCADE at
+any reader setting, 40 of 40 fixtures - which is why nothing here saw it.
+
+The mechanism is in `doc/step-interop-validation.md`, *The ladder, and why half a
+fix is worse than none*, and it is this section's own conclusion generalised. The
+table above says an intermediate hold is worse than either extreme, of rung 2
+against rung 3. The ladder is an intermediate hold of the whole file: it moves
+what it can and claims the rest anyway, turning a uniformly loose boundary into a
+mostly exact one with outliers, which is the worst state to hand a kernel that
+takes a face's tolerance from its boundary.
+
+Repairing it by refusing the claim - move every claimed vertex or claim nothing -
+recovers most of it, 81 faulty faces to 7, and is still dominated by holding
+corners strictly, which reaches zero. On the bayonet the ranking is:
+
+```text
+split, before the snap    1 fault,   595 faces
+corners held strictly     0 faults,  948 faces
+move all or refuse        9 faults, 1046 faces
+the ladder               83 faults,  595 faces
+```
+
+The pre-snap exporter already reached one faulty face with the most consolidated
+output of any variant. **The snap was built to close a deviation that, after the
+face split, SOLIDWORKS was no longer objecting to.**

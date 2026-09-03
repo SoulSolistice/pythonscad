@@ -124,7 +124,13 @@ param(
     # to expect nothing, which is what a faceted control is. A first attempt at
     # 300 skipped f05-band-fn096-analytic at 534 faces and would have skipped
     # both reference parts, which are the rows the run exists for.
-    [int]$MaxWalkFaces = 1500
+    [int]$MaxWalkFaces = 1500,
+    # Write one row per faulty entity to this TSV - what kind of surface it is,
+    # its area, and where it sits - instead of only counting them. Built because
+    # every geometric measure available on our side of the file orders three
+    # variants of the bayonet the *opposite* way to SOLIDWORKS' verdict, so the
+    # only way left to find the mechanism was to ask which faces it objects to.
+    [string]$FaultDetail
 )
 
 $ErrorActionPreference = 'Stop'
@@ -366,6 +372,123 @@ public class SwKitRunner
         }
     }
 
+    static string SurfaceName(int id)
+    {
+        switch (id)
+        {
+            case 4001: return "plane";
+            case 4002: return "cylinder";
+            case 4003: return "cone";
+            case 4004: return "sphere";
+            case 4005: return "torus";
+            case 4006: return "bspline";
+            case 4007: return "blend";
+            case 4008: return "offset";
+            case 4009: return "extrude";
+            case 4010: return "revolve";
+            default:   return "type" + id;
+        }
+    }
+
+    // One line per faulty entity: what kind of surface it is, how big, and
+    // where. Everything measurable about these files from our side orders them
+    // the opposite way to SOLIDWORKS' verdict - see doc/step-interop-validation.md
+    // - so the only way left to find the mechanism is to ask which faces it
+    // objects to and look at those.
+    public static string FaultDetail(string path)
+    {
+        var sb = new System.Text.StringBuilder();
+        int errors = 0;
+        IModelDoc2 doc = null;
+        try
+        {
+            object importData = null;
+            try { importData = _sw.GetImportFileData(path); } catch { }
+            doc = (IModelDoc2)_sw.LoadFile4(path, "r", importData, ref errors);
+            if (doc == null) return "";
+            PartDoc part = doc as PartDoc;
+            if (part == null) return "";
+            string stem = System.IO.Path.GetFileNameWithoutExtension(path);
+
+            foreach (object[] set in new object[][] {
+                part.GetBodies2((int)swBodyType_e.swSolidBody, true) as object[],
+                part.GetBodies2((int)swBodyType_e.swSheetBody, true) as object[] })
+            {
+                if (set == null) continue;
+                foreach (object b in set)
+                {
+                    Body2 body = b as Body2;
+                    if (body == null) continue;
+
+                    Face2 face = body.GetFirstFace() as Face2;
+                    int fi = 0;
+                    while (face != null)
+                    {
+                        FaultEntity fe = null;
+                        try { fe = face.Check; } catch { }
+                        if (fe != null && fe.Count > 0)
+                        {
+                            string kind = "?";
+                            try { kind = SurfaceName(((Surface)face.GetSurface()).Identity()); }
+                            catch { }
+                            double area = 0;
+                            try { area = face.GetArea(); } catch { }
+                            double[] box = null;
+                            try { box = face.GetBox() as double[]; } catch { }
+                            string centre = box != null && box.Length >= 6
+                                ? string.Format(CultureInfo.InvariantCulture, "{0:F4};{1:F4};{2:F4}",
+                                    1000 * (box[0] + box[3]) / 2, 1000 * (box[1] + box[4]) / 2,
+                                    1000 * (box[2] + box[5]) / 2)
+                                : "";
+                            var codes = new List<string>();
+                            for (int i = 0; i < fe.Count; i++) codes.Add(fe.ErrorCode[i].ToString());
+                            sb.AppendLine(string.Join("\t", new string[] {
+                                stem, "face", fi.ToString(), kind,
+                                (1e6 * area).ToString("F6", CultureInfo.InvariantCulture),
+                                centre, string.Join("/", codes.ToArray()) }));
+                        }
+                        face = face.GetNextFace() as Face2;
+                        fi++;
+                    }
+
+                    object[] edges = body.GetEdges() as object[];
+                    if (edges != null)
+                    {
+                        for (int ei = 0; ei < edges.Length; ei++)
+                        {
+                            Edge edge = edges[ei] as Edge;
+                            if (edge == null) continue;
+                            FaultEntity ee = null;
+                            try { ee = edge.Check; } catch { }
+                            if (ee == null || ee.Count == 0) continue;
+                            string ckind = "?";
+                            try { ckind = "curve" + ((Curve)edge.GetCurve()).Identity(); } catch { }
+                            string mid = "";
+                            try
+                            {
+                                double[] cp = edge.GetCurveParams2() as double[];
+                                if (cp != null && cp.Length >= 6)
+                                    mid = string.Format(CultureInfo.InvariantCulture,
+                                        "{0:F4};{1:F4};{2:F4}",
+                                        1000 * (cp[0] + cp[3]) / 2, 1000 * (cp[1] + cp[4]) / 2,
+                                        1000 * (cp[2] + cp[5]) / 2);
+                            }
+                            catch { }
+                            var ecodes = new List<string>();
+                            for (int i = 0; i < ee.Count; i++) ecodes.Add(ee.ErrorCode[i].ToString());
+                            sb.AppendLine(string.Join("\t", new string[] {
+                                stem, "edge", ei.ToString(), ckind, "", mid,
+                                string.Join("/", ecodes.ToArray()) }));
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex) { sb.AppendLine("ERROR\t" + ex.Message); }
+        finally { if (doc != null) { try { _sw.CloseDoc(doc.GetTitle()); } catch { } } }
+        return sb.ToString();
+    }
+
     static string Join(string path, string opened, int errors, int warnings, string bodyType,
                        int nSolid, int nSheet, int faces, double volume, double area, string note)
     {
@@ -414,6 +537,17 @@ foreach ($f in $files) {
     } else {
         Write-Host ("{0} - {1}" -f $row.opened, $row.note)
     }
+}
+
+if ($FaultDetail) {
+    $detail = @("file`tentity`tindex`tkind`tarea_mm2`tcentre_mm`tcodes")
+    foreach ($f in $files) {
+        $d = [SwKitRunner]::FaultDetail($f.FullName)
+        if ($d) { $detail += ($d.TrimEnd("`r","`n") -split "`r?`n") }
+    }
+    $detail | Set-Content -Path $FaultDetail -Encoding utf8
+    Write-Host ""
+    Write-Host ("fault detail: {0} ({1} rows)" -f $FaultDetail, ($detail.Count - 1))
 }
 
 $rows | Export-Csv -Path $OutCsv -NoTypeInformation -Encoding utf8

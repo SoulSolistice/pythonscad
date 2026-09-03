@@ -674,6 +674,8 @@ void reportOwnership(const PolySet& ps, const Ownership& own)
  * sagitta of its stations, and elsewhere the mesh's own edges stand in.
  */
 struct SnapReport {
+  //! Per vertex: it belongs on a declared surface and could not be put there.
+  std::vector<char> unmoved;
   std::size_t moved = 0;
   std::size_t refused_unpinned = 0, refused_far = 0, refused_stuck = 0, refused_unbounded = 0;
   std::size_t held_placed = 0, held_proven = 0, held_quadric = 0;
@@ -699,6 +701,7 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
 {
   SnapReport report;
   if (!own.valid) return report;
+  report.unmoved.assign(vertices.size(), 0);
   const auto& triangles = ps.indices;
 
   // The plane of every triangle, and which triangles meet at each vertex.
@@ -811,6 +814,7 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
       // No chord of this mesh near the vertex lies on the surface, so there is
       // nothing that says how far off it the tessellation is entitled to be.
       report.refused_unbounded++;
+      report.unmoved[v] = 1;
       continue;
     }
 
@@ -843,6 +847,7 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
       double po = 0;
       if (!pinnedPlane(pins, pn, po)) {
         report.refused_unpinned++;
+        report.unmoved[v] = 1;
         continue;
       }
       // Alternate: onto the surface, back onto the plane, until it stops moving.
@@ -864,6 +869,7 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
       Vector3d check;
       if (!ok || !closestOnSurface(s, p, check) || (check - p).norm() > 1e-6) {
         report.refused_stuck++;
+        report.unmoved[v] = 1;
         continue;
       }
       moved = p;
@@ -874,6 +880,7 @@ SnapReport snapCutVertices(std::vector<Vector3d>& vertices, const PolySet& ps, c
     const double travel = (moved - vertices[v]).norm();
     if (travel > bound) {
       report.refused_far++;
+      report.unmoved[v] = 1;
       continue;
     }
     vertices[v] = moved;
@@ -929,8 +936,16 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   // sweep, and a declared sweep is only ever *written* under approximation. The
   // exact tier's input is left exactly as it was.
   std::vector<Vector3d> vertices = ps->vertices;
+  std::vector<char> unmoved;
   if (approximate) {
     const SnapReport snapped = snapCutVertices(vertices, *ps, ownership);
+    // Move every claimed vertex or refuse the claim. A vertex the snap could
+    // not place is handed to the recogniser so the facets using it are not
+    // claimed at all: half-moving a boundary is measurably worse than leaving
+    // it alone, because a kernel takes a face's tolerance from the majority of
+    // its boundary and every outlier then breaks a face. On the bayonet that is
+    // the difference between 1 faulty face in SOLIDWORKS and 83.
+    unmoved = snapped.unmoved;
     if (snapped.moved > 0) {
       LOG("STEP export: %1$d cut vertex%2$s slid onto the surface it was cut from, by up to %3$.4f",
           int(snapped.moved), snapped.moved == 1 ? "" : "es", snapped.worst);
@@ -952,7 +967,8 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   StepKernel sk;
 
   sk.build_tri_body(exportInfo.title.c_str(), vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceParents, newNormals, 1e-5, analytic, approximate);
+                    faceParents, newNormals, 1e-5, analytic, approximate,
+                    unmoved.empty() ? nullptr : &unmoved);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;

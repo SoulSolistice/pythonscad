@@ -261,7 +261,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
                                 const std::vector<std::shared_ptr<Surface>>& surfaces,
                                 const std::vector<int>& faceParents,
                                 const std::vector<Vector4d>& faceNormals, double tol, bool analytic,
-                                bool approximate)
+                                bool approximate, const std::vector<char> *unmoved)
 {
   // `curves` and `surfaces` carry the analytic geometry the model was built
   // from: a ring of N quads is exactly the mesh of an N sided prism, so the
@@ -632,6 +632,9 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     mesh.valid = &loop_valid;
     mesh.is_hole = &loop_is_hole;
     mesh.normals = &loop_normals;
+    // Vertices the snap could not put on the surface they belong to. See
+    // AnalyticFeatures::Mesh::unmoved for why a claim containing one is refused.
+    mesh.unmoved = unmoved;
     features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol);
 
     // The approximation pass, and the only place in this exporter where a

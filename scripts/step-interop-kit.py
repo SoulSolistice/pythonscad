@@ -182,6 +182,25 @@ def parameter_set(source):
     return ["-p", cfg, "-P", sorted(sets)[0]]
 
 
+BAND_RE = re.compile(r"tessellation band of ([0-9.]+)")
+
+
+def band_of(stderr):
+    """The tessellation band the exporter reported, which is the model's own.
+
+    This is the one number that says how far a fitted surface is *entitled* to
+    sit from the mesh it was fitted to - the sagitta of the model's own stations
+    - so it is what the slack a kernel has to grant should be measured against.
+    Captured from the exporter rather than derived here because the exporter
+    computes it from the declared grid; the derivation lives in
+    GridSurface::tessellationBand.
+
+    A faceted export reports none and needs none: planes through mesh vertices
+    are exact, so its entitlement is zero and any slack at all is a defect."""
+    bands = [float(m) for m in BAND_RE.findall(stderr or "")]
+    return max(bands) if bands else 0.0
+
+
 def export(binary, source, target, analytic, approx, extra=()):
     args = [binary, source, "-o", target, "--trust-python"]
     args += parameter_set(source)
@@ -192,6 +211,10 @@ def export(binary, source, target, analytic, approx, extra=()):
             args.append("--enable=step-approximate-surfaces")
     proc = subprocess.run(args, capture_output=True, text=True, cwd=ROOT)
     return proc.returncode, (proc.stderr or "")
+
+
+def _unused():  # pragma: no cover
+    pass
 
 
 def census(path):
@@ -243,6 +266,7 @@ def main():
             rc, err = export(args.binary, srcpath, target,
                              analytic=(mode == "analytic"),
                              approx=(name in APPROX), extra=extra)
+            band = band_of(err)
             if rc != 0 or not os.path.exists(target):
                 print("FAIL %-22s %-8s export rc=%s" % (name, mode, rc))
                 for line in err.strip().splitlines()[-3:]:
@@ -260,6 +284,8 @@ def main():
                 "exercises": exercises if mode == "analytic" else "control",
                 "risk": risk if mode == "analytic" else "",
                 "validator": "ok" if ok else "FAILED",
+                # What this file is entitled to be off by. See band_of().
+                "band": "%.6f" % band,
                 "faces": c.get("ADVANCED_FACE", 0),
                 "shells": c.get("CLOSED_SHELL", 0),
                 "plane": c.get("PLANE", 0),
