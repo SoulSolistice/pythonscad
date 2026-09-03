@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -315,6 +316,37 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
     }  // outlines
   }  // fragments/rings
 
+  // A profile point on the axis is one point, however many slices there are.
+  //
+  // Every slice generates its own copy of it - at radius zero the sweep leaves
+  // the position untouched, so they all land on top of each other - and the two
+  // triangles spanning an edge that reaches the axis then have a pair of
+  // coincident corners between them. One of the two has no area, and a mesh
+  // carrying zero-area facets is not a small untidiness: the STEP writer skips
+  // them and the shell opens where they were, so `rotate_extrude()` of a
+  // profile touching its axis came out as two solids of three shells where
+  // `cylinder(r1, r2 = 0)` gives one shell of 65 faces. Everything downstream
+  // followed from it - the region is not a ring, the cone that a segment
+  // reaching the axis sweeps cannot be bounded, and a band whose neighbour
+  // stays faceted has to stay faceted too, so a whole stack of bands went with
+  // it. See doc/step-export.md, item 1.
+  //
+  // Welded here rather than skipped later, because the two are not the same: a
+  // dropped facet leaves a hole, and a shared index leaves a fan.
+  std::vector<int> canonical(vertices.size());
+  for (std::size_t i = 0; i < vertices.size(); i++) canonical[i] = int(i);
+  {
+    std::map<long long, int> first_on_axis;  // quantised height -> the index that keeps it
+    for (std::size_t i = 0; i < vertices.size(); i++) {
+      const Vector3d& p = vertices[i];
+      if (p[0] * p[0] + p[1] * p[1] > 1e-18) continue;
+      const long long key = llround(p[2] / 1e-9);
+      const auto it = first_on_axis.find(key);
+      if (it == first_on_axis.end()) first_on_axis.emplace(key, int(i));
+      else canonical[i] = it->second;
+    }
+  }
+
   // Calculate all indices
   for (unsigned int slice_idx = 1; slice_idx <= num_sections; slice_idx++) {
     const int prev_slice = (slice_idx - 1) * slice_stride;
@@ -324,34 +356,28 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
       assert(outline.vertices.size() > 2);
       int color_ind = colors.size();
       colors.push_back(outline.color.unpaintedIfFullyTransparent());  // TODO effizienter
+      // Welded through canonical, and a triangle whose corners are no longer
+      // distinct is not emitted - that is the whole of the fix. The colour of a
+      // facet follows the facet, so it is pushed per triangle kept rather than
+      // twice per edge.
+      auto add = [&](int a, int b, int c) {
+        a = canonical[a % num_vertices];
+        b = canonical[b % num_vertices];
+        c = canonical[c % num_vertices];
+        if (a == b || b == c || a == c) return;
+        indices.push_back({a, b, c});
+        color_indices.push_back(color_ind);
+      };
       for (size_t i = 1; i <= outline.vertices.size(); ++i) {
         const int curr_idx = curr_outline + (i % outline.vertices.size());
         const int prev_idx = curr_outline + i - 1;
         if (flip_faces) {
-          indices.push_back({
-            (prev_slice + prev_idx) % num_vertices,
-            (curr_slice + curr_idx) % num_vertices,
-            (prev_slice + curr_idx) % num_vertices,
-          });
-          indices.push_back({
-            (curr_slice + curr_idx) % num_vertices,
-            (prev_slice + prev_idx) % num_vertices,
-            (curr_slice + prev_idx) % num_vertices,
-          });
+          add(prev_slice + prev_idx, curr_slice + curr_idx, prev_slice + curr_idx);
+          add(curr_slice + curr_idx, prev_slice + prev_idx, curr_slice + prev_idx);
         } else {
-          indices.push_back({
-            (prev_slice + curr_idx) % num_vertices,
-            (curr_slice + curr_idx) % num_vertices,
-            (prev_slice + prev_idx) % num_vertices,
-          });
-          indices.push_back({
-            (curr_slice + prev_idx) % num_vertices,
-            (prev_slice + prev_idx) % num_vertices,
-            (curr_slice + curr_idx) % num_vertices,
-          });
+          add(prev_slice + curr_idx, curr_slice + curr_idx, prev_slice + prev_idx);
+          add(curr_slice + prev_idx, prev_slice + prev_idx, curr_slice + curr_idx);
         }
-        color_indices.push_back(color_ind);
-        color_indices.push_back(color_ind);
       }
       curr_outline += outline.vertices.size();
     }
