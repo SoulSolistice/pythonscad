@@ -2188,3 +2188,74 @@ tidier file rather than coverage - unlike item 1, which is the difference betwee
 and `bayonet_container_v1-2.json` the base. **Both set only `_resolution`.**
 Neither selects a component, which is why r01 and r02 have been exporting the
 same geometry - the near-duplicate §23 flagged as a loose end, now with a cause.
+
+### 6. One derivation, not five guards - and the primitives keep what they have
+
+The five declaration sites in this exporter grew one at a time, and the shape
+they have arrived at is the shape of their history rather than of the problem.
+`geometry/rotate_extrude.cc` decides what a profile segment sweeps like this:
+
+```cpp
+if (fabs(a[1] - b[1]) < eps) continue;      // horizontal: a flat annulus
+if (a[0] <= eps || b[0] <= eps) continue;   // touching the axis: "not a wall"
+declare(a);                                  // otherwise: rims, and fit the cone
+```
+
+Three refusals and a fallthrough. The second one is wrong - a segment touching
+the axis *at constant height* sweeps a disc, which the line above has already
+taken, and one touching it *while the height changes* sweeps a cone whose apex
+is on the axis, which is a wall like any other. It cost every solid of
+revolution that meets its own axis, and it read as a deliberate decision because
+it carried a comment.
+
+That is what a set of guards costs. What replaces it is a **total function**:
+segment class and operation in, surface out, with every class of segment
+enumerated - horizontal, vertical, sloped, axis-touching, arc, arc centred on
+the axis - and no silent `continue`. An unhandled case then reads as an absence
+rather than as a decision, which is the whole difference.
+
+**The primitives keep declaring directly, and that is deliberate.** A function
+that knows its own surface should say so and be used throughout: `sphere()`,
+`cylinder()`, `cube()` answer in one line that cannot be wrong, and every quadric
+coupon that exercises them passes. The bugs are not in the primitives, they are
+in the derivations. Routing a thing that knows its answer through a
+reconstruction of that answer buys nothing and risks the part of this exporter
+that currently works best.
+
+**Everything else derives from its 2D representation.** `Outline2d` already
+half-carries it - arcs survive, which is why `offset(r = 2)` corners come out as
+cylinders - and finishing that channel is what makes one derivation possible for
+both extruders. Three roadmap items collapse into it:
+
+- item 4 dissolves: an ellipse extruded is a `SURFACE_OF_LINEAR_EXTRUSION` and
+  needs no new `Surface` subclass at all;
+- item 5 becomes one branch rather than a special case;
+- item 1 becomes one row of the enumeration rather than a hand-written guard.
+
+And the discrepancy that started this - `cylinder(r1 = 10, r2 = 0, h = 20)`
+writing a cone while the identical solid revolved from a profile writes 96
+planes - stops being possible, because both would answer from the same table.
+
+**An extrude's own parameters complete the declaration.** For a swept case the
+node holds everything the surface needs:
+
+```openscad
+linear_extrude(height = 5, v = [0, 0, 1], center = true, convexity = 10,
+               twist = -fanrot, slices = 20, scale = 1.0, $fn = 16) { ... }
+```
+
+Profile, height, direction, twist, slice count and scale together determine the
+swept surface exactly. There is nothing to fit and nothing to recover: the node
+can emit the ordered net directly, which is what `GridSurface` is for and what
+`declare_grid` makes a user do by hand today. That is item 2 with its mechanism
+named - a twisted extrude is not a shape the recogniser should be guessing at,
+it is one the generator can hand over.
+
+**One caveat, and it sets the order of work.** A declaration cannot rescue a bad
+mesh. The apex cone above was declared correctly, recognised, and still could not
+be written, because `rotate_extrude` emits twenty-four zero-area facets where the
+profile meets the axis and the shell opens where they are skipped - the same
+solid from `cylinder(r1, r2 = 0)` is one shell of 65 faces, and from the revolve
+it is two solids and three shells. So the tessellation is fixed first, the
+derivation generalised second, and the primitives left alone unless a
+measurement says otherwise.
