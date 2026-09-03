@@ -2082,7 +2082,29 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
     // A cone's normal is not perpendicular to its axis - it leans by the half
     // angle - so what a facet has to agree with is that lean, not zero.
-    const double lean = cyl != nullptr ? 0.0 : cone->slope / sqrt(1 + cone->slope * cone->slope);
+    // fabs: the facet lean below is an absolute value, so the threshold has to
+    // be one too. A cone whose radius falls with height - which is what
+    // `cylinder(r1, r2 = 0)` draws - has a negative slope, and comparing an
+    // absolute lean against a negative threshold rejected every facet of it.
+    //
+    // Latent as it stands, and deliberately left that way. Nothing declares a
+    // ConeSurface of that orientation today - primitives.cc declares the two
+    // rims of a frustum and leaves the cone between them to be recognised - so
+    // no facet reaches this test with a negative slope, and fixing it moves no
+    // face of any export in the suite.
+    //
+    // It is fixed anyway, because an absolute value compared against a signed
+    // threshold is wrong however it is reached. The next person to follow
+    // doc/step-export.md's *declare first, recognise second* and declare that
+    // cone will need it - and should know what else they will meet. With both
+    // in place the claim on step-bored-cone widens from 32 facets to 52, the
+    // trimmed-quadric path bounds them wrongly, and the solid comes out 2.75%
+    // under its derived volume: 5234.1 against 5382.2 +/- 12, with a total
+    // surface area below the mesh's own, which a fitted cone cannot have. The
+    // declaration is right and the bounding is not. That fixture's
+    // VOLUME-APPROX is the assertion that says so; the surface census does not,
+    // it improves while the solid gets worse.
+    const double lean = cyl != nullptr ? 0.0 : fabs(cone->slope) / sqrt(1 + cone->slope * cone->slope);
 
     // How far a facet may sit off the surface and still be on it is the
     // facet's *own* tessellation band, not a fraction of the radius. A
@@ -2123,6 +2145,48 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
       // At 1e-7 it spends none, and claims only facets the surface already runs
       // through.
       if (off > std::min(bandOf({f}), max_off)) continue;
+
+      // Corners on the surface are not enough, and the lean test above is not
+      // the whole of the guard the comment there claims. A facet that spans a
+      // *hole* in the surface has every corner on it and no interior on it at
+      // all. The bore through step-bored-cone is walled by one quad per
+      // angular step running the full 18mm length of the bore; all four of its
+      // corners lie on the two mouth curves, and a mouth curve is a section of
+      // the cone, so all four are on the cone to 1e-7. Its middle is 6.0 from
+      // that cone, which concedes 0.048.
+      //
+      // The lean test is what rejects a cap over a bore - a cap's normal is
+      // square to the axis - and it cannot reject this one: at theta = 180 the
+      // bore's wall runs so nearly parallel to the cone it pierces that the two
+      // normals agree to five degrees. Only the distance separates them, and
+      // only if it is asked somewhere other than at the corners.
+      //
+      // Twice the band, rather than the band: a facet that genuinely tessellates
+      // the surface puts its edge midpoints at the sagitta, and the sagitta is
+      // exactly what bandOf returns - testing against the band with no slack
+      // would make every regular facet a coin toss on rounding. Two is slack
+      // enough for an irregular tessellation and still two orders of magnitude
+      // short of a facet that spans a hole.
+      //
+      // The band alone bounds this, not `max_off`. What the exact tier promises
+      // is that nothing is asserted beyond what the mesh states, and the mesh
+      // states its vertices; a facet interior sags by the sagitta whatever tier
+      // is writing it, because that sag is what replacing facets with a smooth
+      // surface means.
+      const double interior_allow = 2 * bandOf({f});
+      double interior = 0;
+      {
+        Vector3d centre(0, 0, 0);
+        for (const int v : loops[f]) centre += vertices[v];
+        centre /= double(loops[f].size());
+        interior = offsetAt(surface.get(), centre);
+        for (std::size_t i = 0; i < loops[f].size() && interior <= interior_allow; i++) {
+          const Vector3d mid =
+            (vertices[loops[f][i]] + vertices[loops[f][(i + 1) % loops[f].size()]]) / 2;
+          interior = std::max(interior, offsetAt(surface.get(), mid));
+        }
+      }
+      if (interior > interior_allow) continue;
       claimed.push_back(f);
       worst = std::max(worst, off);
     }

@@ -18,7 +18,12 @@
 // Measured, and asserted by the driver: what the exporter has to report for
 // the above to have happened. A silently faceted export is still a valid one,
 // so validity alone cannot see a recogniser that has stopped recognising.
-// EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// Three records, and the count is what a frustum is: a circle at each rim, and
+// the cone between them. The rims alone used to be the whole of it, which left
+// the cone to be recognised from them - and a recognition needs both rims to
+// survive whatever the model does next, where a radius and a slope need
+// neither. See doc/step-export.md, *The rule: declare first, recognise second*.
+// EXPECT: 3 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 // EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 32 facets replaced
 //
 // A frustum, (pi*h/3)(r1^2 + r1*r2 + r2^2) = (pi*10/3)(64 + 96 + 144).

@@ -426,20 +426,17 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
   // geometry read this to know which is which; nothing else uses it, and
   // dropping it only costs the analytic form.
   //
-  // A frustum has no surface record of its own, so it says what it is the way
-  // hull() of two coaxial cylinders does - by declaring the circle at each rim.
-  // An exporter accepts a cone when both of its rims match a declared cylinder,
-  // so the two constructions now leave identical provenance. That is the point:
-  // the idiomatic chamfer and the primitive which draws the same shape should
-  // not export differently, and until now only the hull did.
+  // The rims. A frustum says what it is the way hull() of two coaxial cylinders
+  // does, by declaring the circle at each one, so the idiomatic chamfer and the
+  // primitive that draws the same shape leave identical provenance.
   //
   // A pie slice declares its wall too. Its two flat sides run through the axis
   // and fit no cylinder, so they are discarded on the fit rather than needing
   // to be excluded here; the arc between them is a partial cylinder like any
   // other.
   //
-  // An apex is not a rim, and it is left undeclared: there is no circle there
-  // to collapse, and a radius of zero would match every other radius of zero.
+  // An apex is not a rim and no circle is declared there: there is nothing to
+  // collapse, and a radius of zero would match every other radius of zero.
   if (!cone && !inverted_cone) {
     polyset->surfaces.push_back(
       std::make_shared<CylinderSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1), r1));
@@ -447,6 +444,29 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
       polyset->surfaces.push_back(
         std::make_shared<CylinderSurface>(Vector3d(0, 0, z2), Vector3d(0, 0, 1), r2));
     }
+  }
+
+  // And the cone itself, which the rims alone do not say.
+  //
+  // Declaring only the rims leaves the cone to be *recognised* - the exporter
+  // accepts one where both of its rims match a declared cylinder - and a
+  // recognition is conditioned on both rims still being there. A boolean is
+  // exactly what takes one away. Cut the base off `cylinder(r1 = 10, r2 = 0)`
+  // and its cone is lost entirely, 66 planes and nothing else, because an apex
+  // is not a rim and so that solid declared nothing at all; cut the same base
+  // off `cylinder(r1 = 10, r2 = 4)` and the cone survives. Uncut the two are
+  // indistinguishable, which is what let it stand.
+  //
+  // ConeSurface is a radius and a slope and needs no second rim, so it says
+  // what a pair of circles cannot. Anchored at the wider rim because a record
+  // whose own radius is zero is one every membership test has to special-case.
+  //
+  // See doc/step-export.md, *The rule: declare first, recognise second*.
+  if (r1 != r2 && z2 != z1) {
+    const bool at_bottom = r1 >= r2;
+    polyset->surfaces.push_back(std::make_shared<ConeSurface>(Vector3d(0, 0, at_bottom ? z1 : z2),
+                                                              Vector3d(0, 0, 1), at_bottom ? r1 : r2,
+                                                              (r2 - r1) / (z2 - z1)));
   }
 
   return polyset;

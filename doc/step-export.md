@@ -2259,3 +2259,307 @@ solid from `cylinder(r1, r2 = 0)` is one shell of 65 faces, and from the revolve
 it is two solids and three shells. So the tessellation is fixed first, the
 derivation generalised second, and the primitives left alone unless a
 measurement says otherwise.
+
+## The rule: declare first, recognise second
+
+Stated plainly because it has been implicit and the exporter does not follow it
+everywhere:
+
+> **A generator that knows what surface it is making declares it. Recognition is
+> for geometry whose maker could not say.**
+
+Recognition is a heuristic conditioned on what survives. A cone is fitted between
+two rims, so it needs both rims to still be there; a band needs its neighbours;
+a ring needs its vertices to lie on rings. Every one of those conditions is a
+statement about the mesh *after* the booleans have run, and a boolean is exactly
+what removes them. A declaration is a statement about intent, made before any of
+that, and carried through transforms, booleans and hulls unchanged.
+
+### The experiment that settles it
+
+Two stock primitives, the same cut, the same class of geometry. One declares and
+one does not:
+
+```openscad
+difference() {
+  cylinder(r1 = 10, r2 = 0, h = 20);      // declares nothing
+  translate([0, 0, -1.5]) rotate([12, 0, 0]) cube([60, 60, 6], center = true);
+}
+```
+
+| cut so that the base rim is gone | written |
+| --- | --- |
+| `cylinder(r1 = 10, r2 = 0)` - declares nothing | **Plane 66**, the cone is lost |
+| `cylinder(r1 = 10, r2 = 4)` - declares two cylinders | **Cone 1**, Plane 53 |
+
+Uncut, both write their cone and the difference is invisible. Cut, the one that
+only ever had recognition loses the surface entirely. That is not a defect in the
+fitting - the fitting is asked to find two rims and there is only one - it is the
+cost of inferring intent from geometry that something else has since altered.
+
+### What declares today, and what could
+
+| producer | declares | could also declare |
+| --- | --- | --- |
+| `sphere()` | `SphereSurface` | - |
+| `cylinder()`, `r1 == r2` | `CylinderSurface` | - |
+| `cylinder()`, `r1 != r2` | two `CylinderSurface` rims | **the `ConeSurface` itself** |
+| `cylinder()`, a true cone | **nothing** - the apex is not a rim | **the `ConeSurface` itself** |
+| `cube()`, `polyhedron()` | nothing, correctly | - |
+| `rotate_extrude`, vertical segment | `CylinderSurface` | - |
+| `rotate_extrude`, sloped segment | the two rims | **the `ConeSurface`** |
+| `rotate_extrude`, segment reaching the axis | **nothing** | **the `ConeSurface`** |
+| `rotate_extrude`, arc | sphere or torus | - |
+| `linear_extrude`, arc in the profile | `CylinderSurface` | - |
+| `linear_extrude(scale=)` | the two rims | **the `ConeSurface`** |
+| `linear_extrude(twist=)` | **nothing** | the swept net - roadmap item 2 |
+| `PathExtrudeNode`, `SkinNode` | **nothing** | the swept net - roadmap item 3 |
+| `FilletNode` | `BezierPatchSurface` | - |
+
+**Every cone in this exporter is recognised and none is declared.** There is no
+`ConeSurface` in `primitives.cc` at all, and the comment where one would go -
+*"An apex is not a rim, and it is left undeclared: there is no circle there to
+collapse"* - is right about the rim and draws the wrong conclusion from it. The
+absence of a circle at the apex is a reason not to declare a *cylinder* there. It
+is not a reason to leave the cone unsaid, and `ConeSurface` exists precisely
+because a radius and a slope need no second rim.
+
+That is the gap list, and it is the same shape in five places: wherever a
+generator knows a cone, it currently declares the rims and hopes.
+
+### What this does not license
+
+A declaration is still only a hint - the exporter re-checks it against the mesh
+before acting on it, which is what makes a loose scheme safe. Declaring more does
+not mean trusting more, and it does not rescue a bad mesh: the apex cone above
+was declared correctly, recognised, and still could not be written until the
+degenerate facets at the axis were welded. Declaration first, but the mesh
+underneath it has to be sound.
+
+### The channel is not the blocker - the consumption is
+
+The rule above says declare first. Acting on it immediately produced a result
+worth more than the change: **declaring the surface is not enough, because
+nothing consumes a declaration that has lost its rims.**
+
+`CylinderNode` was given the `ConeSurface` the gap list above asks for - a radius
+and a slope, needing no second rim - and measured against the cut case that
+motivated it:
+
+| the base rim cut away by a boolean | before | after declaring the cone |
+| --- | --- | --- |
+| `cylinder(r1 = 10, r2 = 0)` | Plane 66 | **Plane 66** |
+| `cylinder(r1 = 10, r2 = 4)` | Cone 1, Plane 53 | **Cone 1, Plane 53** |
+
+Not one face different. The change was reverted rather than kept on the argument
+that it ought to help, which is the rule this document has been applying to
+everything else.
+
+What the export says while doing it is the interesting part:
+
+```text
+1 analytic surface available (0 cylindrical, ..., 1 conical)
+provenance maps 2 of 2 originals onto 1 of 1 declared surface
+original 1, 81 facets, owns cone 0 (63 facets whole, 3 cut)
+1 smooth region left faceted, 64 facets in all
+  grid 100% regular over 1 interior vertices at valence 64 -
+  the generator's ordering survives, a fit could be made
+```
+
+The cone is declared. Provenance maps sixty-three facets onto it. The region is
+a hundred per cent regular and the exporter says outright that a fit could be
+made. And the region is left faceted, with no trimmed-quadric line reported at
+all - the pass that claims a region by its distance to a declared axis never
+took it.
+
+So the shape of the work is not what the gap list assumed. Declaring more
+surfaces buys nothing until there is a path that reasons from a declaration
+alone:
+
+> these facets lie on this declared surface to within what the mesh concedes,
+> therefore write it - whether or not its rims survived
+
+`recogniseQuadricPatches` is that path in principle and it handles cones; why it
+passed over a hundred-per-cent-regular region that provenance had already
+attributed is the next measurement, and it is a measurement rather than a guess.
+Until it is answered, the gap list is blocked on the consumer rather than on the
+producers, and filling it in would be five changes that each demonstrably do
+nothing.
+
+### The limits of the rule, named
+
+Declaring first has a boundary, and it is worth stating so the fallback keeps
+its place. Four producers genuinely cannot say what surface they made:
+
+- **`hull()`** - the output belongs to no operand. §21 measured it: no face of
+  either operand lies on the collar's chamfer, and fitting catches exactly that.
+  Provenance survives a hull but collapses to one id, so a gate keyed on it
+  degrades rather than going blind.
+- **`minkowski()`** - drops its records deliberately. It changes every radius it
+  touches, so a surviving declaration would be wrong in the one way the fit gate
+  cannot always catch.
+- **`polyhedron()`** - has no intent to declare at all, which is precisely why
+  `declare_grid` exists as a user-facing channel.
+- **an imported mesh** - an STL is a mesh and nothing more.
+
+Everywhere else - every primitive, every extrude, every fillet - a generator
+knows, and the question when a surface is missing should be what it would take
+to *declare* it rather than what heuristic might recover it.
+
+### And the corollary: a declaration that is not taken is a bug report
+
+The rule above says declare first. Its consumer-side half is what the section
+before this one was missing:
+
+> **A declaration takes precedence over fitting and approximation through the
+> whole consumer chain. Where one is not taken and should have been, the reason
+> has to be found rather than worked around.**
+
+The section before this recorded that declaring `CylinderNode`'s cone changed
+nothing and was reverted on that measurement. The measurement was right and the
+conclusion was wrong, because the question it should have provoked - *why was a
+declared surface not used* - was not asked. Asking it found this, in the pass
+every declared cone goes through:
+
+```cpp
+const double lean = cyl != nullptr ? 0.0 : cone->slope / sqrt(1 + cone->slope * cone->slope);
+...
+if (cyl != nullptr ? lean_of_f > 1e-6 : lean_of_f > std::min(0.99, lean * 1.05 + 1e-6))
+  continue;
+```
+
+`lean_of_f` is an absolute value and `lean` is not. A cone whose radius falls
+with height has a negative slope - which is what `cylinder(r1, r2 = 0)` draws and
+what any downward chamfer is - so the threshold went negative, every facet's
+absolute lean exceeded it, and **no declared cone of that orientation was ever
+claimed**. It is a `fabs`.
+
+### Two defects that masked each other
+
+Neither half moves a single face on its own, which is why both survived:
+
+| the base rim cut away by a boolean | cone `r1=10, r2=0` | frustum `r1=10, r2=4` |
+| --- | --- | --- |
+| before | Plane 66 | Cone 1, Plane 53 |
+| declaring the cone, alone | Plane 66 | Cone 1, Plane 53 |
+| fixing the sign, alone | Plane 66 | Cone 1, Plane 53 |
+| **both** | **Cone 2, Plane 2** | **Cone 3, Plane 3** |
+
+The declaration looked useless because the sign discarded it; the sign looked
+harmless because nothing declared a cone for it to discard. Sixty-six planes
+become four faces only when both are present. A measurement that stops at "this
+change did nothing" cannot see a pair like that, and the rule above is what
+makes the second look happen.
+
+### What the census said, and what the volume said
+
+On the reference parts the declaration looked immediately like the best result
+of the week, and the numbers it moved were all counts of what the exporter
+*claimed*:
+
+| | before | after |
+| --- | --- | --- |
+| lid10, trimmed quadrics | 6 faces over 180 facets | **18 faces over 260** |
+| lid10, surfaces recognised | 480 facets | **628** |
+| lid10, left faceted | 1216 facets | **295** |
+
+Not one of those says anything about the solid. `step-bored-cone` carries a
+hand-derived volume, and on the first attempt it was the only assertion in the
+suite that disagreed - the census improved monotonically while the geometry got
+worse:
+
+| `step-bored-cone`, approximate tier | OCCT surfaces | volume, derived 5382.20 |
+| --- | --- | --- |
+| before | Cone 2, Cyl 2, Plane 22 | 5372.25 |
+| declaring the cone, first attempt | Cone 12, Cyl 4, Plane 2 | **5234.14** |
+| **after the membership fix** | Cone 6, Cyl 2, Plane 2 | **5385.45** |
+
+The middle row is not a 2.75% error. Classifying a grid of points against the
+ideal solid put that body at **2614.9**, with 2225 sample cells *outside the
+frustum entirely*, at a radius half again the widest the part ever is.
+`GProp_VolumeProperties` reported a plausible 5234 over it regardless, because a
+face-integral can look sane on a shell whose faces are individually valid - and
+`BRepCheck_Analyzer` called it valid, and the shell was closed. Four separate
+OCCT answers agreed it was fine. The derived number was the only one that did
+not.
+
+### The root cause: corners on a surface are not a facet on it
+
+The claim widened from 32 facets to 52, and two of the extra facets per side
+were not on the cone at all. They are the bore's own wall.
+
+The bore is tessellated as one quad per angular step running its whole 18mm
+length. All four corners of each sit on the two mouth curves - and a mouth curve
+is a section of the cone - so all four are on the cone to 1e-7, while the middle
+of the facet is 6.0 away from a cone whose tessellation concedes 0.048. The
+membership test sampled corners only.
+
+The code anticipated exactly this failure and guarded it with the wrong thing:
+
+> A facet across the axis is not on the surface however close its corners fall -
+> a cap over a bore has every vertex on the rim.
+
+That guard is a test on the facet's lean against the axis, and it does reject a
+cap, whose normal is square to the axis. It cannot reject this one: at theta =
+180 the bore's wall runs so nearly parallel to the cone it pierces that the two
+normals agree to 5.5 degrees - 0.10 against a threshold of 0.206. Only the
+distance separates them, and only if it is asked somewhere other than at the
+corners. `recogniseQuadricPatches` now samples the centroid and the edge
+midpoints, against twice the band, and the reasoning for the factor of two is at
+the code.
+
+### Two defects, and which one was hiding the other
+
+The sign fix and the declaration were found as a pair that each did nothing
+alone. That reading was right about the mechanism and wrong about which defect
+was which:
+
+| | claimed | result |
+| --- | --- | --- |
+| the sign fix alone | nothing - no cone is declared for it to discard | inert |
+| the declaration alone | nothing - the sign discards every facet | inert |
+| both | 52 facets, two of them the bore's | **wrong solid** |
+| both, plus the interior sample | 52 facets, all of them the cone's | **right solid** |
+
+The sign fix did not create the hole in the membership test. It stopped hiding
+it: with the threshold negative, every facet failed, bore facets included. A
+latent bug was masking a live one, and fixing the latent one first is what
+exposed it.
+
+### What it is worth, checked three ways
+
+`step-bored-cone` is now within 0.06% of the ideal solid by point
+classification - **1 sample cell of ~92,000**, against 174 for the faceted
+export it replaces - and SOLIDWORKS, reading the same file, builds a solid of
+**four faces** measuring **5382.42** against the derived **5382.204**. Three
+kernels and one hand integral agree.
+
+The motivating case is `step-cut-cone`: a cone whose base rim a boolean removes,
+which recognition cannot survive because an apex is not a rim. Sixty-six planes
+become **Cone 2, Plane 2**.
+
+### The open item this leaves
+
+On lid10 the same change makes SOLIDWORKS fail to sew. It reads the baseline as
+a solid and the declared export as a **surface body**, with 303 faulty edges,
+all `swEdgeVertexNotLie`.
+
+What is measured, rather than assumed, about that:
+
+- OCCT reads **both** as closed, valid, single solids, with surface areas 0.02%
+  apart and an **identical** maximum edge tolerance of 0.26417.
+- Neither export contains a single B-spline edge. The `SPCURVE` entities
+  SOLIDWORKS faults are its own post-import representation, not ours.
+- SOLIDWORKS' *face* faults improve under the change, from 82 to 3.
+- SOLIDWORKS' volume for lid10 is already untrustworthy: it reports 364157 for a
+  body OCCT measures at 238693, the same 50%-scale reporting discrepancy
+  recorded for c06 in `doc/step-interop-validation.md`, and it has already been
+  shown to break Fusion's independent rewrite of this part.
+
+So this is a kernel disagreement on a part where that kernel is already known to
+disagree with two others, and it is not evidence that the exported solid is
+wrong. It is still a regression in a real interop target, it is not explained,
+and it should not be closed by argument. The trimmed-quadric boundary is the
+thing to look at: this change takes 18 of them over 260 facets where the
+baseline took 10 over 68, so whatever was marginal about that boundary is now
+carrying three times the load.
