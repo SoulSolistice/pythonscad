@@ -1767,6 +1767,31 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         }
       }
       if (!on) continue;
+      // Refuse what cannot be placed exactly. pointMember admits a vertex
+      // anywhere inside the tessellation band, which on the reference lid is
+      // 0.2527 - and a vertex admitted at that distance becomes a *vertex of
+      // the written face*, sitting a quarter of a millimetre off the surface
+      // that face is on. OpenCASCADE widens the edge tolerance over it and
+      // reports a valid solid; SOLIDWORKS holds the pcurve against the 3D curve
+      // and rebuilds 38% of the thread.
+      //
+      // The split is clean, because a cubic interpolates its own stations: a
+      // vertex the generator declared is on the fitted surface to 1e-14, and one
+      // a boolean made is not on it at all. So this costs the claim its cut
+      // facets and keeps every whole one, which is the coverage price named in
+      // doc/step-interop-validation.md, *Move all or refuse the claim*.
+      for (const int v : loops[f]) {
+        double qu = 0, qv = 0;
+        if (!grid->project(vertices[v], qu, qv)) {
+          on = false;
+          break;
+        }
+        if ((grid->evaluate(qu, qv) - vertices[v]).norm() > 0.25 * grid->membershipTolerance()) {
+          on = false;
+          break;
+        }
+      }
+      if (!on) continue;
       // Corners are not enough. Every corner of the facet closing a declared
       // profile is a point the generator emitted, so position alone claims it
       // even when the declaration does not cover that strip - which is exactly
@@ -1805,7 +1830,18 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     auto buildPatches = [&](const std::vector<std::size_t>& fs) {
       std::vector<Patch> out;
       for (const auto& piece : connectedComponents(loops, edge_loops, fs)) {
-        out.push_back(patchFromFacets(loops, edge_loops, surface, piece));
+        Patch made = patchFromFacets(loops, edge_loops, surface, piece);
+        // A boundary of fewer than three corners is not a face. The exactness
+        // test above can cut a component down to a sliver whose whole boundary
+        // is one mesh edge used twice, and that goes out as an ADVANCED_FACE of
+        // two edges and zero area - which every reader then has to have an
+        // opinion about. The claim is per component, so the guard has to be too.
+        std::set<int> corners;
+        for (const auto& run : made.runs) {
+          for (const int v : run.verts) corners.insert(v);
+        }
+        if (corners.size() < 3) continue;
+        out.push_back(std::move(made));
       }
       return out;
     };
