@@ -255,7 +255,7 @@ StepKernel::EdgeCurve *StepKernel::create_line_edge_curve(StepKernel::Vertex *ve
   return new EdgeCurve(entities, vert1, vert2, line1, dir);
 }
 
-void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& vertices,
+void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& mesh_vertices,
                                 const std::vector<IndexedFace>& faces,
                                 const std::vector<std::shared_ptr<Curve>>& curves,
                                 const std::vector<std::shared_ptr<Surface>>& surfaces,
@@ -263,6 +263,13 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
                                 const std::vector<Vector4d>& faceNormals, double tol, bool analytic,
                                 bool approximate)
 {
+  // A working copy, because one pass moves vertices: a declared sweep's face is
+  // bounded by corners the mesh put within the fit's band rather than on it, and
+  // a corner off the surface it is written on is what a strict reader refuses.
+  // See the snap below, after the sweep claims are settled. Nothing else writes
+  // to this.
+  std::vector<Vector3d> vertices = mesh_vertices;
+
   // `curves` and `surfaces` carry the analytic geometry the model was built
   // from: a ring of N quads is exactly the mesh of an N sided prism, so the
   // facets alone never say which was meant.
@@ -990,6 +997,118 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       LOG("STEP export: its facets lie over %1$d of the profile's %2$d spans - %3$s", used, segs,
           wraps ? "the region closes around the profile, so its face crosses the surface's seam"
                 : "the region is a strip, whose boundary stays inside the surface's rectangle");
+    }
+
+    // Put the sweep's corners on the sweep, or do not write it.
+    //
+    // A cubic interpolates its own stations, so a corner the generator declared
+    // is on the fitted surface already and only a corner some boolean made is
+    // off it. Those are the corners of the written face: the file says they are
+    // on that surface, OpenCASCADE widens an edge until the claim holds and
+    // reports a valid solid, and SOLIDWORKS holds the pcurve against the 3D
+    // curve and rebuilds the face from what it can trust. On the reference lid
+    // that is the difference between the two kernels agreeing about the volume
+    // to 0.04% and disagreeing by 14%.
+    //
+    // All of them or none. doc/step-interop-validation.md, *Move all or refuse
+    // the claim*, measured what a half-moved boundary does: 83 faulty faces
+    // against 9 for the same claim moved wholly, because a corner left behind
+    // is a corner every neighbour still has to meet.
+    //
+    // The neighbours are what makes this safe rather than free. A moved corner
+    // belongs to the faceted faces around the sweep too, and on the lid 155 of
+    // those are quads, which stop being planar when a corner moves. Measured,
+    // that costs 2.26e-06 on ten faces - four orders of magnitude below the
+    // 0.0128 to 0.22 it takes off the corners, and the exporter fits each
+    // plane through its own vertices either way.
+    if (!grid_faces.empty()) {
+      std::map<int, std::vector<std::size_t>> facets_at;  // corner -> facets using it
+      for (std::size_t f = 0; f < loops.size(); f++) {
+        for (const int v : loops[f]) facets_at[v].push_back(f);
+      }
+      std::size_t snapped = 0, refused = 0;
+      double moved_by = 0;
+      std::vector<AnalyticFeatures::Patch> kept;
+      for (auto& patch : grid_faces) {
+        const auto *grid = dynamic_cast<const GridSurface *>(patch.surface.get());
+        if (grid == nullptr) {
+          kept.push_back(patch);
+          continue;
+        }
+        std::map<int, Vector3d> onto;
+        bool all = true;
+        for (const auto& run : patch.runs) {
+          for (const int v : run.verts) {
+            if (onto.count(v)) continue;
+            double u = 0, w = 0;
+            if (!grid->project(vertices[v], u, w)) {
+              all = false;
+              break;
+            }
+            onto.emplace(v, grid->evaluate(u, w));
+          }
+          if (!all) break;
+        }
+        // And the neighbours have a veto. A moved corner belongs to the faceted
+        // faces around the sweep as well, and those are mostly quads - on the
+        // lid, 155 of the sweep's 163 neighbours. A quad stops being planar
+        // when one of its corners moves out of its plane, and a PLANE face
+        // whose corners are not on it is the very defect this pass exists to
+        // remove. So the move is tested against every facet that uses the
+        // corner, and a patch that cannot be moved without opening one is left
+        // faceted whole - the same all-or-nothing the boundary itself gets.
+        if (all) {
+          std::map<std::size_t, int> touched;  // facet -> unused
+          for (const auto& entry : onto) {
+            const auto it = facets_at.find(entry.first);
+            if (it == facets_at.end()) continue;
+            for (const std::size_t f : it->second) touched.emplace(f, 0);
+          }
+          for (const auto& entry : touched) {
+            const std::size_t f = entry.first;
+            if (f >= loops.size() || loops[f].size() < 4) continue;
+            std::vector<Vector3d> after;
+            for (const int v : loops[f]) {
+              const auto m = onto.find(v);
+              after.push_back(m == onto.end() ? vertices[v] : m->second);
+            }
+            const Vector3d n = (after[1] - after[0]).cross(after[2] - after[0]);
+            if (n.norm() < 1e-18) continue;
+            const Vector3d unit = n.normalized();
+            for (const Vector3d& q : after) {
+              if (fabs((q - after[0]).dot(unit)) > 1e-7) {
+                all = false;
+                break;
+              }
+            }
+            if (!all) break;
+          }
+        }
+        if (!all) {
+          refused++;
+          for (const std::size_t f : patch.facets) features.consumed[f] = 0;
+          continue;
+        }
+        for (const auto& entry : onto) {
+          moved_by = std::max(moved_by, (entry.second - vertices[entry.first]).norm());
+          vertices[entry.first] = entry.second;
+          snapped++;
+        }
+        kept.push_back(patch);
+      }
+      grid_faces = std::move(kept);
+      if (snapped > 0) {
+        LOG(
+          "STEP export: %1$d corners of %2$d declared sweep%3$s moved onto the surface they "
+          "bound, by at most %4$.4f",
+          int(snapped), int(grid_faces.size()), grid_faces.size() == 1 ? "" : "s", moved_by);
+      }
+      if (refused > 0) {
+        LOG(
+          "STEP export: %1$d declared sweep%2$s left faceted: a corner of each does not project "
+          "onto the surface, and half a boundary moved is worse than none",
+          int(refused), refused == 1 ? " is" : "s are");
+      }
     }
 
     if (!grid_faces.empty()) {
