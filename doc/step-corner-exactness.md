@@ -199,18 +199,68 @@ One stale note found on the way: `py-step-approximate-turned.py` says a frustum
 declares a `ConeSurface` since this week, so that reasoning wants re-checking
 against what the fixture now does.
 
+## Measured: why the claim fragments, and what does not fix it
+
+Placing corners on `claude/step-corner-ownership` shatters the claim. On
+`step-bored-cone`, the smallest fixture that shows it:
+
+| | trimmed quadrics | facets | facets per face |
+| --- | --- | --- | --- |
+| baseline | 6 | 52 | 8.7 |
+| with corner placement | 32 | 102 | 3.2 |
+
+The claim nearly doubles, which is the placement working - corners now sit
+exactly on their surfaces, so junction facets that used to fail the membership
+test pass it. Then it comes out in fragments: the cone's 31 facets split into 14
+pieces of 3, 1, 1, 4, 3, 3, 1, 1, 1, 2, 1, 4, 3, 3, while the bore cylinder's 20
+split cleanly into 17 and 3.
+
+**The interior test is what fragments it**, and that is this week's own work.
+Disabling it takes the cone claim from 31 facets in 14 pieces to 52 in 5, one of
+them 44. Two explanations were tested and refused, and are recorded so they are
+not guessed again:
+
+- *A collapsed band.* `bandOf` skips any dihedral above the smoothing angle, so
+  a facet tilted by a moved corner could lose every smooth neighbour and be
+  allowed nothing. Measured: **zero of 42 rejections have a zero band**. They run
+  0.003 to 0.026.
+- *The provenance gate would spare them.* It does not. The gate spares 400
+  facet-surface tests on this fixture and the fragmentation is identical,
+  because provenance *agrees* those facets are on the cone and the interior test
+  rejects them anyway.
+
+What the numbers say is that the allowance is derived from the wrong thing. The
+rejected facets have `corners-off 0.000000` and interiors of 0.013 to 0.057
+against allowances of 0.007 to 0.052. A facet on a cone of radius 10 at $fn=32
+has a sagitta of 0.048 by construction, so those interiors are *right* - it is
+the allowance that is wrong. `bandOf` measures the mesh's local flatness, the
+dihedral to a neighbour, and corner placement changes dihedrals: a facet whose
+neighbours happen to end up nearly coplanar is allowed 0.0033 while sitting a
+correct 0.048 off the cone.
+
+So the interior allowance has to come from the surface the facet is claimed for -
+the sagitta a facet of that angular span must have on it - rather than from what
+its neighbours are doing. The trap in the obvious form of that is worth writing
+down: the bore quad this test exists to reject spans 134 degrees of the cone, and
+a sagitta bound at that span is 6.09, just over the 6.0 it is out by. A pure
+sagitta bound readmits the defect. The span itself is the giveaway - no
+tessellation facet of that surface spans 134 degrees - and that is where the
+next attempt should start.
+
 ## The order of work
 
-1. **Place the corner where its two declared owners cross.** The measurement
-   above moved this to first: every inexact corner in the fixture set is a
-   junction on surfaces that were already declared, so nothing else on this list
-   fixes one. `claude/step-corner-ownership` does it and fragments the claim;
-   understanding that fragmentation is the whole of step one.
-2. **Declare what is not declared**, from the work list above. This buys
+1. **Give the interior test an allowance that comes from the surface**, not from
+   the neighbours' dihedrals. It is what fragments the claim when corners move,
+   and it blocks everything after it.
+2. **Place the corner where its two declared owners cross.** Every inexact corner
+   in the fixture set is a junction on surfaces that were already declared, so
+   nothing else on this list fixes one. `claude/step-corner-ownership` does it
+   and waits on (1).
+3. **Declare what is not declared**, from the work list above. This buys
    coverage rather than exactness - it moves the four fixtures that currently
    depend on fitting onto declared surfaces, and it is what makes the fitting
    pass dead weight rather than load-bearing. It does not have to precede (1).
-3. **Then the fixtures**, one at a time, each moved number carrying a reason.
+4. **Then the fixtures**, one at a time, each moved number carrying a reason.
 
 The placement has to happen before `mergeTriangles`, which is what makes it
 safe: triangles that stop being coplanar then simply do not merge, instead of
@@ -218,7 +268,7 @@ becoming quads with a corner out of their plane. Measured, that is 2.26e-06 on
 ten faces - the baseline - against 0.0331 for the same move made after
 recognition.
 
-On (3): `doc/step-export-testing.md` requires expectations be derived and not
+On (4): `doc/step-export-testing.md` requires expectations be derived and not
 captured. Regenerating eight fixtures' EXPECT lines from the new output would
 destroy the property that caught this week's worst bug - a solid wrong by half
 while every surface count said it had improved. Each number that moves needs a
