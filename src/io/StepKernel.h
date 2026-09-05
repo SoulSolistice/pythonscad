@@ -1892,6 +1892,8 @@ public:
                       const std::vector<IndexedFace>& faces,
                       const std::vector<std::shared_ptr<Curve>>& curves,
                       const std::vector<std::shared_ptr<Surface>>& surfaces,
+                      const std::vector<int32_t>& faceOrigin,
+                      const std::map<int32_t, std::vector<std::size_t>>& owned,
                       const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals,
                       double tol, bool analytic = false, bool approximate = false);
   EdgeCurve *get_line_from_map(std::map<std::pair<int, int>, StepKernel::EdgeCurve *>& edge_map,

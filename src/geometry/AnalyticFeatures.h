@@ -23,7 +23,10 @@
  * the fit succeeds *and* a declaration matches it.
  */
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -125,6 +128,44 @@ struct RimRef {
    * is the arc's two ends taken in the wall's direction. */
   [[nodiscard]] int traversalStart() const { return wall_ccw ? ccw_start : ccw_end; }
   [[nodiscard]] int traversalEnd() const { return wall_ccw ? ccw_end : ccw_start; }
+};
+
+/*! Who made each facet, so that a recogniser can be told rather than measure.
+ *
+ * The exporter knows this and has only ever reported it. A facet came from one
+ * original solid, that solid declared certain surfaces, and a recogniser asking
+ * "is this facet near that surface" is rediscovering by measurement what the
+ * generator already said. Every tolerance in that measurement - the tessellation
+ * band, the interior test, the outlier rules - exists to make the rediscovery
+ * reliable, and none of them is needed for a question the model answers.
+ *
+ * It gates rather than replaces. Provenance is per original solid and not per
+ * surface: a frustum's original owns its cone and both rim circles, and its cap
+ * facets belong to that same original without being on the cone. So this says
+ * which surfaces a facet *could* be on, and the geometry still says which one it
+ * is - a much easier question than the one asked without it.
+ *
+ * Silent where it knows nothing. An original absent from `owned` owns no
+ * surface by three whole facets, which is a threshold rather than a statement,
+ * and surfaces past `declared` were fitted by the approximation pass and have no
+ * provenance at all. Both are left to the measurement. */
+struct Provenance {
+  const std::vector<int32_t> *face_origin = nullptr;
+  const std::map<int32_t, std::vector<std::size_t>> *owned = nullptr;
+  std::size_t declared = 0;  // surfaces[0, declared) are the model's own
+
+  /*! Whether the maker of `facet` is known not to own `surface`. */
+  [[nodiscard]] bool excludes(std::size_t facet, std::size_t surface) const
+  {
+    if (face_origin == nullptr || owned == nullptr) return false;
+    if (surface >= declared) return false;  // fitted: nothing declared it
+    if (facet >= face_origin->size()) return false;
+    const int32_t id = (*face_origin)[facet];
+    if (id < 0) return false;
+    const auto it = owned->find(id);
+    if (it == owned->end()) return false;  // its maker owns nothing we can use
+    return std::find(it->second.begin(), it->second.end(), surface) == it->second.end();
+  }
 };
 
 /*! The mesh the recogniser reads, as the caller already has it.
@@ -446,7 +487,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
  * line in `report` rather than written. */
 std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
                                            const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                           const std::vector<char>& consumed, double smooth_angle,
+                                           const std::vector<char>& consumed,
+                                           const Provenance& provenance, double smooth_angle,
                                            double max_off, std::vector<std::string>& report);
 
 /*! Find the bands of facets which were modelled as a surface of revolution.

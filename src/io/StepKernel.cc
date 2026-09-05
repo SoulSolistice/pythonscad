@@ -255,13 +255,12 @@ StepKernel::EdgeCurve *StepKernel::create_line_edge_curve(StepKernel::Vertex *ve
   return new EdgeCurve(entities, vert1, vert2, line1, dir);
 }
 
-void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& vertices,
-                                const std::vector<IndexedFace>& faces,
-                                const std::vector<std::shared_ptr<Curve>>& curves,
-                                const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                const std::vector<int>& faceParents,
-                                const std::vector<Vector4d>& faceNormals, double tol, bool analytic,
-                                bool approximate)
+void StepKernel::build_tri_body(
+  const char *name, const std::vector<Vector3d>& vertices, const std::vector<IndexedFace>& faces,
+  const std::vector<std::shared_ptr<Curve>>& curves,
+  const std::vector<std::shared_ptr<Surface>>& surfaces, const std::vector<int32_t>& faceOrigin,
+  const std::map<int32_t, std::vector<std::size_t>>& owned, const std::vector<int>& faceParents,
+  const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate)
 {
   // `curves` and `surfaces` carry the analytic geometry the model was built
   // from: a ring of N quads is exactly the mesh of an N sided prism, so the
@@ -650,6 +649,10 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
     // six sided tessellation of a cylinder, and the reason the exact path
     // refuses to guess - never forms one.
     std::vector<std::shared_ptr<Surface>> effective = surfaces;
+    AnalyticFeatures::Provenance provenance;
+    provenance.face_origin = &faceOrigin;
+    provenance.owned = &owned;
+    provenance.declared = surfaces.size();
     if (approximate) {
       const std::vector<AnalyticFeatures::SmoothRegion> candidates =
         AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
@@ -1028,7 +1031,7 @@ void StepKernel::build_tri_body(const char *name, const std::vector<Vector3d>& v
       const double max_off = approximate ? std::numeric_limits<double>::infinity() : 1e-7;
       std::vector<std::string> quadric_report;
       const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::recogniseQuadricPatches(
-        mesh, effective, features.consumed, smooth_angle, max_off, quadric_report);
+        mesh, effective, features.consumed, provenance, smooth_angle, max_off, quadric_report);
       for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
       // Corners on the surface are not enough to call a face exact. The
       // boundary between two of them is a straight edge in the mesh, and a

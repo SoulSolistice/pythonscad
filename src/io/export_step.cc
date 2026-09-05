@@ -258,7 +258,7 @@ bool sameSurfaceGeometrically(const Surface *a, const Surface *b)
  * is on it to 1e-7, the exact tier's own tolerance - and what it asks is where
  * a surface *runs*, not what is near it.
  */
-void reportOwnership(const PolySet& ps)
+void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_t>> *out)
 {
   if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) return;
   if (ps.surfaces.empty()) return;
@@ -543,6 +543,8 @@ void reportOwnership(const PolySet& ps)
     }
   }
 
+  if (out != nullptr) *out = owned;
+
   std::set<std::size_t> named;
   for (const auto& e : owned) named.insert(e.second.begin(), e.second.end());
 
@@ -605,14 +607,49 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   std::vector<int> faceParents;
   std::vector<Vector4d> normals, newNormals;
 
+  std::map<int32_t, std::vector<std::size_t>> owned;
   if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
     reportProvenance(*ps);
-    reportOwnership(*ps);
+    reportOwnership(*ps, &owned);
   }
 
   std::vector<IndexedFace> indicesNew;
   normals = calcTriangleNormals(ps->vertices, ps->indices);
   indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, ps->vertices);
+
+  // Which original made each merged face.
+  //
+  // Provenance is per triangle and the recognisers work on merged faces, so the
+  // two have to be joined up before ownership can gate anything. A directed
+  // edge belongs to exactly one triangle of a manifold mesh, and merging only
+  // ever removes interior edges, so every boundary edge of a merged face still
+  // names one of the triangles it was made of. Taking the commonest answer over
+  // the whole boundary is proof against the odd edge a merge shared.
+  std::vector<int32_t> faceOrigin(indicesNew.size(), -1);
+  if (!ps->original_ids.empty() && ps->original_ids.size() >= ps->indices.size()) {
+    std::map<std::pair<int, int>, int32_t> edge_origin;
+    for (std::size_t t = 0; t < ps->indices.size(); t++) {
+      const IndexedFace& tri = ps->indices[t];
+      for (std::size_t i = 0; i < tri.size(); i++) {
+        edge_origin[{tri[i], tri[(i + 1) % tri.size()]}] = ps->original_ids[t];
+      }
+    }
+    for (std::size_t f = 0; f < indicesNew.size(); f++) {
+      std::map<int32_t, int> votes;
+      const IndexedFace& poly = indicesNew[f];
+      for (std::size_t i = 0; i < poly.size(); i++) {
+        const auto it = edge_origin.find({poly[i], poly[(i + 1) % poly.size()]});
+        if (it != edge_origin.end()) votes[it->second]++;
+      }
+      int best = 0;
+      for (const auto& v : votes) {
+        if (v.second > best) {
+          best = v.second;
+          faceOrigin[f] = v.first;
+        }
+      }
+    }
+  }
 
   StepKernel sk;
 
@@ -635,7 +672,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceParents, newNormals, 1e-5, analytic, approximate);
+                    faceOrigin, owned, faceParents, newNormals, 1e-5, analytic, approximate);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;

@@ -2078,7 +2078,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
  */
 std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
                                            const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                           const std::vector<char>& consumed, double smooth_angle,
+                                           const std::vector<char>& consumed,
+                                           const Provenance& provenance, double smooth_angle,
                                            double max_off, std::vector<std::string>& report)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
@@ -2088,6 +2089,7 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
   const std::vector<Vector3d>& normals = *mesh.normals;
 
   std::vector<Patch> patches;
+  std::size_t gated = 0;
   std::vector<char> taken(loops.size(), 0);
 
   std::map<EdgeKey, std::vector<std::size_t>> edge_loops;
@@ -2143,7 +2145,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     return fabs(distanceToAxis(p, cone->refpt, axis) - want) / sqrt(1 + cone->slope * cone->slope);
   };
 
-  for (const auto& surface : surfaces) {
+  for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
+    const auto& surface = surfaces[surface_index];
     const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
     const auto *cone = dynamic_cast<const ConeSurface *>(surface.get());
     if (cyl == nullptr && cone == nullptr) continue;
@@ -2192,6 +2195,13 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     for (std::size_t f = 0; f < loops.size(); f++) {
       if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
       if (loops[f].size() < 3) continue;
+      // Ask the model before measuring. See Provenance: where the generator
+      // says this facet's maker does not own this surface, no distance test can
+      // make it true, and every threshold below is spared the question.
+      if (provenance.excludes(f, surface_index)) {
+        gated++;
+        continue;
+      }
       // A facet across the axis is not on the surface however close its corners
       // fall - a cap over a bore has every vertex on the rim.
       //
@@ -2320,6 +2330,12 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
         patches.push_back(std::move(patch));
       }
     }
+  }
+  if (gated > 0) {
+    report.push_back(
+      format("provenance spared %d facet-surface tests: the model says that facet's "
+             "maker does not own that surface",
+             int(gated)));
   }
   return patches;
 }
