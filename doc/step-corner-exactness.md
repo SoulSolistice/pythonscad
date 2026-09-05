@@ -87,11 +87,78 @@ Four branches, each a partial answer that measures well and does not land:
 `claude/step-corner-ownership` is the one to build on. The other three are
 records of what was tried.
 
+## Where the exporter recognises instead of being told
+
+This comes before the corner work, and not only for tidiness: a corner can be
+placed exactly on a surface only if that surface has an exact position, and a
+*fitted* surface does not - it was fitted to the mesh, so the mesh is where it
+already is.
+
+Under `step-approximate-surfaces` the exporter fits a surface to each smooth
+region nothing declared, and then declares it on the model's behalf:
+
+> the approximation contributes a declaration, not a face, so nothing downstream
+> has to trust it
+
+That is a sound design and it is not the problem. The problem is how much of the
+output leans on it. Of the 41 fixtures, **ten rely on a fitted surface** and
+**nine declare nothing at all**:
+
+| fixture | declared | fitted | fitted as |
+| --- | --- | --- | --- |
+| `step-declare-grid-scad` | 3 | 3 | 1 cylinder, 2 ring |
+| `step-bored-cone` | 4 | 3 | 3 ring |
+| `step-bored-cylinder` | 2 | 1 | 1 ring |
+| `step-cut-cone` | 1 | 1 | 1 ring |
+| `py-step-declare-grid` | 2 | 1 | 1 cylinder |
+| `py-step-declare-grid-strip` | 2 | 1 | 1 cylinder |
+| `step-approximate-report` | **0** | 4 | 4 grid |
+| `step-extrude-refusals` | **0** | 1 | 1 cylinder |
+| `py-step-approximate-cylinder` | **0** | 1 | 1 cylinder |
+| `py-step-approximate-turned` | **0** | 2 | 1 cone, 1 ring |
+
+**Six of the eight fixtures with inexact corners are on this list.** Only
+`step-band-family` and `step-exact-trim` have inexact corners on surfaces that
+were genuinely declared - those two are the pure junction case. Whether the
+other six are inexact *because* their surface is fitted, or for the junction
+reason as well, is the first thing to measure and it has not been.
+
+### What should declare and does not
+
+Reading what the declaration-free fixtures actually model turns the gap list in
+`doc/step-export.md` from a survey into a work list:
+
+| construct | fixture | what it could declare |
+| --- | --- | --- |
+| `linear_extrude(twist=)` | `step-approximate-report`, `step-extrude-refusals` | the swept net - roadmap item 2 |
+| `linear_extrude(scale=)`, non-uniform | `step-extrude-refusals` | a ruled surface between the two profiles |
+| an extruded ellipse | `step-extrude-refusals` | an elliptical cylinder - roadmap item 4 |
+| `linear_extrude(v=)`, oblique | `step-extrude-refusals` | a cylinder along `v` |
+| `rotate_extrude`, sloped segment | - | the `ConeSurface` - see the table in `doc/step-export.md` |
+
+`step-extrude-refusals` is named for exactly this: it is the fixture of things
+the exporter declines to declare, and four of the five are declarable.
+
+### What legitimately cannot declare, and must keep fitting
+
+`py-step-approximate-cylinder` is a hand written `polyhedron()` over a computed
+point list - no generator to speak for it, which is what an imported mesh looks
+like from the exporter's side. That fixture, `hull()`, `minkowski()` and an
+imported STL are the cases the fitting path exists for, and they must keep
+working. They are also the cases where corners can never be made exact, which is
+the boundary of this whole plan and should be stated rather than discovered.
+
+One stale note found on the way: `py-step-approximate-turned.py` says a frustum
+"cannot hand over a shape... it has to hand over *rings*". `primitives.cc`
+declares a `ConeSurface` since this week, so that reasoning wants re-checking
+against what the fixture now does.
+
 ## The order of work
 
-1. **Declare what is not declared.** The gap list is in `doc/step-export.md`,
-   *What declares today, and what could*. A junction can only be placed exactly
-   when both its owners are declared, so this comes first.
+1. **Declare what is not declared**, from the work list above rather than from a
+   survey. A junction can only be placed exactly when both its owners are
+   declared, and a fitted surface has no exact position for a corner to lie on,
+   so this genuinely comes first.
 2. **Place the corner from the declaration**, not from the mesh, before
    `mergeTriangles` - which is what makes it safe, because triangles that stop
    being coplanar then simply do not merge instead of becoming broken quads.
