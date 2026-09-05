@@ -88,9 +88,16 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # EXPECT: a declared 60x4 cubic sweep claims 349 facets whole, 184 cut across it, within its tessellation band of 0.1290
 # EXPECT: 49 facets have every corner on the sweep and their middle off it
 # EXPECT: a sweep closing around its profile was cut into 2 faces, so that no face crosses the surface's seam
-# EXPECT: 2 declared sweeps cover 300 facets over 1 boundary cycle, split into 401 runs of up to 8 mesh edges, 0 unresolved
+# One facet of the claim is refused before this: a corner of it is further off
+# the fit than four times what this claim is typically off by. See
+# recogniseGridPatches - a cubic interpolates its own stations, so only a corner
+# a boolean made can be off the surface at all, and one that is off by an order
+# more than its neighbours is where the fit gave up rather than where it is
+# merely approximate.
+# EXPECT: 1 facets of the sweep are left faceted: a corner of each is further off the fit
+# EXPECT: 2 declared sweeps cover 299 facets over 1 boundary cycle, split into 402 runs of up to 7 mesh edges, 0 unresolved
 # EXPECT-NOT: written as one face each
-# APPROX: 2 declared sweeps written as one face each, replacing 300 facets
+# APPROX: 2 declared sweeps written as one face each, replacing 299 facets
 # How far the fitted surface strays *between* the stations it was
 # interpolated through, which is the only place it can. A cubic passes
 # through its data exactly, so measuring at the data says nothing; what
@@ -104,7 +111,8 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # sweep is two rather than one: the booleans leave a claim in pieces, and a
 # face cannot be in two places. ROUNDTRIP-APPROX is unchanged, because it was
 # already counting the faces OpenCASCADE split ours into.
-# APPROX: 5 trimmed quadrics written as one face each, replacing 230 facets
+# the one facet the sweep refuses is on a declared cylinder too, so it is not lost - it is claimed here instead, which is why this is 231 and not 230.
+# APPROX: 5 trimmed quadrics written as one face each, replacing 231 facets
 # EXPECT: its facets lie over 2 of the profile's 4 spans - the region is a strip, whose boundary stays inside the surface's rectangle
 #
 # What a kernel makes of each export: the declared sweep survives as a surface, not as the facets it claimed.

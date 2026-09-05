@@ -51,10 +51,13 @@ standing off the chords by about that band, in the direction it should.
 # The ROUNDTRIP-APPROX line is unchanged, and that is the point of it. OpenCASCADE
 # was already splitting these faces on read and reporting the split numbers, so
 # what the exporter writes now is what a kernel was making of it all along.
-# EXPECT: 2 declared sweeps cover 241 facets over 1 boundary cycle
+# One facet is refused first, as in step-declare-grid.py: its corner is further
+# off the fit than four times this claim's typical 0.0221.
+# EXPECT: 1 facets of the sweep are left faceted: a corner of each is further off the fit
+# EXPECT: 2 declared sweeps cover 240 facets over 1 boundary cycle
 # EXPECT: the region is a strip, whose boundary stays inside the surface's rectangle
 # EXPECT-NOT: written as one face each
-# APPROX: 2 declared sweeps written as one face each, replacing 241 facets
+# APPROX: 2 declared sweeps written as one face each, replacing 240 facets
 # How far the fitted surface strays *between* the stations it was
 # interpolated through, which is the only place it can. A cubic passes
 # through its data exactly, so measuring at the data says nothing; what
@@ -64,7 +67,8 @@ standing off the chords by about that band, in the direction it should.
 # pinned because it is what a change to the fit would move. The figure
 # that matters is that it is below the band beside it.
 # EXPECT: the fitted sweep passes within 0.0609 of the middle of every facet it claims, against a tessellation band of 0.1290
-# APPROX: 9 trimmed quadrics written as one face each, replacing 289 facets
+# as in step-declare-grid.py, the facet the sweep refuses is claimed here instead: 290 rather than 289.
+# APPROX: 9 trimmed quadrics written as one face each, replacing 290 facets
 #
 # What a kernel makes of each export: the declared strip survives as a surface.
 # Validity says the file is well formed; only this says the surface

@@ -1748,6 +1748,7 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     const int segs = grid->closed_v ? grid->cols : grid->cols - 1;
     std::vector<std::size_t> claimed;
     std::vector<int> span_of;
+    std::vector<double> stray_of;  // worst any corner of the facet is off the fit
     for (std::size_t f = 0; f < loops.size(); f++) {
       if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
       bool on = true;
@@ -1788,11 +1789,79 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         missed_against = grid->membershipTolerance();
         continue;
       }
+      // How far the facet's own corners are off the fit. These become the
+      // corners of the written face wherever the facet is on its boundary, so
+      // unlike the centroid above they are asserted in the file.
+      double stray = 0;
+      for (const int v : loops[f]) {
+        double vu = 0, vv = 0;
+        if (!grid->project(vertices[v], vu, vv)) {
+          stray = std::numeric_limits<double>::max();
+          break;
+        }
+        stray = std::max(stray, (grid->evaluate(vu, vv) - vertices[v]).norm());
+      }
       claimed.push_back(f);
+      stray_of.push_back(stray);
       if (miss > worst_claimed) worst_at_u = pu;
       worst_claimed = std::max(worst_claimed, miss);
       claim_band = std::max(claim_band, grid->membershipTolerance());
       span_of.push_back(segs > 0 ? std::max(0, std::min(segs - 1, int(pv * segs))) : 0);
+    }
+    if (claimed.empty()) continue;
+
+    // Refuse the facets where the fit gave up, judged against the rest of this
+    // same claim rather than against a fixed figure.
+    //
+    // A cubic interpolates its stations exactly, so a corner the generator
+    // declared is on the surface to 1e-14 and only a corner some boolean made
+    // can be off it at all. Measured over the reference lid's thread, those cut
+    // corners sit at a flat 0.0128 for 85% of the sweep and then jump to 0.1931
+    // and 0.2184 in the first and last twentieth - the run-in and run-out, where
+    // a cubic has least support and the model's uniform sampling is thinnest
+    // against geometry changing fastest. On step-declare-grid-scad the same
+    // measurement is 0.0379 from end to end, with a worst of 0.0387.
+    //
+    // So the two are told apart by the shape of the distribution and not by its
+    // size: a fit that is uniformly a little off is a fit, and one that is clean
+    // everywhere and wild in two places has *failed in those two places*. The
+    // median of the non-trivial strays is what "a little off" means for this
+    // claim, and four times it is the outlier test. On the lid that is 0.051,
+    // which cuts the two ends and keeps the middle; on the fixture it is 0.152,
+    // which cuts nothing.
+    //
+    // Those corners are why this matters: a corner 0.2 off the surface is a
+    // vertex of the written face, and doc/step-interop-validation.md records
+    // what a strict reader does with one.
+    {
+      std::vector<double> ranked;
+      for (const double d : stray_of) {
+        if (d > 1e-9 && d < std::numeric_limits<double>::max()) ranked.push_back(d);
+      }
+      if (!ranked.empty()) {
+        std::sort(ranked.begin(), ranked.end());
+        const double typical = ranked[ranked.size() / 2];
+        const double allow = 4 * typical;
+        std::vector<std::size_t> kept;
+        std::vector<int> kept_span;
+        std::size_t refused = 0;
+        for (std::size_t k = 0; k < claimed.size(); k++) {
+          if (stray_of[k] > allow) {
+            refused++;
+            continue;
+          }
+          kept.push_back(claimed[k]);
+          kept_span.push_back(span_of[k]);
+        }
+        if (refused > 0) {
+          report.push_back(
+            format("%d facets of the sweep are left faceted: a corner of each is further off the fit "
+                   "than four times the %.4f this claim is typically off, by up to %.4f",
+                   int(refused), typical, *std::max_element(stray_of.begin(), stray_of.end())));
+        }
+        claimed = std::move(kept);
+        span_of = std::move(kept_span);
+      }
     }
     if (claimed.empty()) continue;
 
