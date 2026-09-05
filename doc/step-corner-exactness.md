@@ -247,20 +247,76 @@ sagitta bound readmits the defect. The span itself is the giveaway - no
 tessellation facet of that surface spans 134 degrees - and that is where the
 next attempt should start.
 
+## Measured: placing corners costs the merge, and that is fatal
+
+With the allowance taken from the surface, corner placement does what it was
+meant to. On `step-bored-cone` every corner lands on the surface it is written
+on - cone p95 8.01e-14 against 4.44e-02, cylinder exactly 0 - the claim nearly
+triples from 52 facets to 140, and the volume is 5384.26 against the derived
+5382.204. The first fixture to reach what this document set as done.
+
+And it is not usable, for a reason that was never measured until it was:
+
+| fixture | faces before | faces after |
+| --- | --- | --- |
+| `step-bored-cone` | 10 | 32 |
+| `step-bored-cylinder` | 10 | 126 |
+| `step-declare-grid-scad` | 18 | 244 |
+| `py-step-declare-grid` | 11 | 685 |
+| `py-step-declare-grid-strip` | 15 | 689 |
+
+Twelve to sixty-two times the faces. Exact corners bought with the whole of the
+analytic consolidation, which is what the exporter is for.
+
+The cause is the thing that was supposed to make it safe. Placing corners before
+`mergeTriangles` does keep the faceted neighbours planar - triangles that stop
+being coplanar simply do not merge, and planarity comes out at the baseline
+2.26e-06 rather than the 0.0331 of a move made later. That was measured and is
+true. What was not measured is that *not merging is the cost*. The mesh's facets
+merge into large polygons because runs of them are coplanar; a moved corner
+breaks exactly that, so every claim arrives pre-shattered and no amount of
+fixing the claim afterwards puts it back.
+
+So a corner cannot be moved in the mesh the recognisers read. Reverted; the
+provenance gate and the surface-derived allowance stay, both being neutral on
+output and better derived than what they replace.
+
+### What this leaves
+
+The requirement has not changed - a corner of an analytic face should be on the
+surface that face is on, and a strict reader refuses it otherwise. What is now
+ruled out is getting there by moving the mesh:
+
+- **after `mergeTriangles`**: breaks the faceted neighbours, 0.0331 out of plane
+  where they are quads, and on the reference lid 155 of the sweep's 163
+  neighbours are quads.
+- **before `mergeTriangles`**: keeps them planar and destroys the merge, at the
+  cost above.
+
+Which points where the edge work already pointed: the exact geometry belongs in
+what is *written*, not in the mesh. A face's boundary should be the true curve
+where its two surfaces cross - computable from two declarations - while the mesh
+keeps the chords it has and the faceted neighbours keep meeting them. That is a
+larger change than any tried here, and it is the only remaining direction that
+does not trade the consolidation away.
+
 ## The order of work
 
-1. **Give the interior test an allowance that comes from the surface**, not from
-   the neighbours' dihedrals. It is what fragments the claim when corners move,
-   and it blocks everything after it.
-2. **Place the corner where its two declared owners cross.** Every inexact corner
-   in the fixture set is a junction on surfaces that were already declared, so
-   nothing else on this list fixes one. `claude/step-corner-ownership` does it
-   and waits on (1).
-3. **Declare what is not declared**, from the work list above. This buys
+1. ~~Give the interior test an allowance that comes from the surface.~~ Done -
+   `fix(export): take the interior allowance from the surface`.
+2. ~~Place the corner where its two declared owners cross.~~ Tried and reverted:
+   it works and costs the merge, see above.
+3. **Write the boundary from the declarations rather than moving the mesh.**
+   Where two declared surfaces meet, the edge between their faces is a curve
+   both can be trimmed by, and it is computable from the two records. The mesh
+   keeps its chords, the faceted neighbours keep meeting them, and only the
+   analytic faces get the exact boundary. Nothing measured so far rules this
+   out, and everything else is ruled out.
+4. **Declare what is not declared**, from the work list above. This buys
    coverage rather than exactness - it moves the four fixtures that currently
    depend on fitting onto declared surfaces, and it is what makes the fitting
    pass dead weight rather than load-bearing. It does not have to precede (1).
-4. **Then the fixtures**, one at a time, each moved number carrying a reason.
+5. **Then the fixtures**, one at a time, each moved number carrying a reason.
 
 The placement has to happen before `mergeTriangles`, which is what makes it
 safe: triangles that stop being coplanar then simply do not merge, instead of
@@ -268,7 +324,7 @@ becoming quads with a corner out of their plane. Measured, that is 2.26e-06 on
 ten faces - the baseline - against 0.0331 for the same move made after
 recognition.
 
-On (4): `doc/step-export-testing.md` requires expectations be derived and not
+On (5): `doc/step-export-testing.md` requires expectations be derived and not
 captured. Regenerating eight fixtures' EXPECT lines from the new output would
 destroy the property that caught this week's worst bug - a solid wrong by half
 while every surface count said it had improved. Each number that moves needs a
