@@ -256,12 +256,18 @@ StepKernel::EdgeCurve *StepKernel::create_line_edge_curve(StepKernel::Vertex *ve
 }
 
 void StepKernel::build_tri_body(
-  const char *name, const std::vector<Vector3d>& vertices, const std::vector<IndexedFace>& faces,
+  const char *name, const std::vector<Vector3d>& mesh_vertices, const std::vector<IndexedFace>& faces,
   const std::vector<std::shared_ptr<Curve>>& curves,
   const std::vector<std::shared_ptr<Surface>>& surfaces, const std::vector<int32_t>& faceOrigin,
-  const std::map<int32_t, std::vector<std::size_t>>& owned, const std::vector<int>& faceParents,
-  const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate)
+  const std::map<int, Vector3d>& cornerMoves, const std::map<int32_t, std::vector<std::size_t>>& owned,
+  const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals, double tol,
+  bool analytic, bool approximate)
 {
+  // A working copy, because the corner placement below moves junction corners
+  // onto the curve their two declared owners cross along, once recognition has
+  // run and it is known which faces would mind. Nothing else writes to this.
+  std::vector<Vector3d> vertices = mesh_vertices;
+
   // `curves` and `surfaces` carry the analytic geometry the model was built
   // from: a ring of N quads is exactly the mesh of an N sided prism, so the
   // facets alone never say which was meant.
@@ -1177,6 +1183,60 @@ void StepKernel::build_tri_body(
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
   const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;
   const std::vector<char>& consumed = features.consumed;
+
+  // Put the junction corners on the curve their two owners cross along - but
+  // only once it is known which faces are analytic, and only if no face that
+  // keeps a PLANE would be bent by it.
+  //
+  // A corner two declared surfaces made belongs on their intersection, and
+  // reportOwnership has computed that point all along. Where it may be applied
+  // is the whole difficulty, and two earlier places are ruled out by
+  // measurement, both recorded in doc/step-corner-exactness.md: before
+  // mergeTriangles it keeps the neighbours planar and destroys the merge, at
+  // twelve to sixty-two times the faces; after the merge but before recognition
+  // it bends the faceted neighbours by 0.0331 where they are polygons.
+  //
+  // Here is the place that costs neither. Recognition has already run on the
+  // untouched, fully merged mesh, so the claims are what they were; and an
+  // analytic face does not care whether its corners are coplanar, only a PLANE
+  // does. On step-bored-cone 52 faces use a movable corner and every one of
+  // them is written analytic, so nothing is bent and nothing is split.
+  //
+  // All of them or none, and per export rather than per corner. A boundary half
+  // moved is worse than one not moved at all - doc/step-interop-validation.md
+  // measured that at 83 faulty faces against 9 - so where a polygon that keeps
+  // its plane would be bent, this declines the lot and the export is exactly
+  // what it was.
+  if (!cornerMoves.empty()) {
+    std::size_t analytic_faces = 0, bent = 0;
+    for (std::size_t i = 0; i < loops.size(); i++) {
+      if (!loop_valid[i]) continue;
+      bool uses = false;
+      for (const int v : loops[i]) {
+        if (cornerMoves.count(v) != 0) uses = true;
+      }
+      if (!uses) continue;
+      if (consumed[i]) analytic_faces++;
+      else if (loops[i].size() > 3) bent++;
+    }
+    if (bent > 0) {
+      LOG(
+        "STEP export: %1$d corners are left where the mesh put them: moving them would bend "
+        "%2$d face%3$s that keeps a plane, and half a boundary moved is worse than none",
+        int(cornerMoves.size()), int(bent), bent == 1 ? "" : "s");
+    } else if (analytic_faces > 0) {
+      double worst = 0;
+      for (const auto& m : cornerMoves) {
+        if (m.first < 0 || std::size_t(m.first) >= vertices.size()) continue;
+        worst = std::max(worst, (m.second - vertices[m.first]).norm());
+        vertices[m.first] = m.second;
+      }
+      LOG(
+        "STEP export: %1$d corners moved onto the curve where their two declared owners cross, "
+        "by at most %2$.4f; %3$d analytic faces now bound themselves on their own surface",
+        int(cornerMoves.size()), worst, int(analytic_faces));
+    }
+  }
 
   // Emit the recognised bands: one CYLINDRICAL_SURFACE or CONICAL_SURFACE face
   // each, bounded by a circle or an arc at either rim.

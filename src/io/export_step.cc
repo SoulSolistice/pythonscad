@@ -258,7 +258,8 @@ bool sameSurfaceGeometrically(const Surface *a, const Surface *b)
  * is on it to 1e-7, the exact tier's own tolerance - and what it asks is where
  * a surface *runs*, not what is near it.
  */
-void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_t>> *out)
+void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_t>> *out,
+                     std::map<int, Vector3d> *out_moves)
 {
   if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) return;
   if (ps.surfaces.empty()) return;
@@ -521,6 +522,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       if (ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-6) {
         on_edge++;
         const double travel = (p - ps.vertices[v]).norm();
+        const Vector3d exact_here = p;
         worst_travel = std::max(worst_travel, travel);
         // What the mesh concedes about where its surface lies. A declared sweep
         // states it outright - the sagitta of its own stations - and that is a
@@ -536,6 +538,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         if (travel <= bound) {
           within_bound++;
           worst_within = std::max(worst_within, travel);
+          if (out_moves != nullptr) out_moves->emplace(int(v), exact_here);
         }
       }
     } else {
@@ -608,14 +611,40 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   std::vector<Vector4d> normals, newNormals;
 
   std::map<int32_t, std::vector<std::size_t>> owned;
+  std::map<int, Vector3d> corner_moves;
   if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
     reportProvenance(*ps);
-    reportOwnership(*ps, &owned);
+    reportOwnership(*ps, &owned, &corner_moves);
   }
 
   std::vector<IndexedFace> indicesNew;
   normals = calcTriangleNormals(ps->vertices, ps->indices);
   indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, ps->vertices);
+
+  {  // TEMP: what splitting only the affected polygons would cost
+    std::map<std::size_t, int> by_size;
+    std::size_t touched = 0, extra = 0;
+    for (const auto& poly : indicesNew) {
+      bool hit = false;
+      for (const int v : poly) {
+        if (corner_moves.count(v)) hit = true;
+      }
+      if (!hit) continue;
+      touched++;
+      by_size[poly.size()]++;
+      if (poly.size() > 3) extra += poly.size() - 3;
+    }
+    std::string sizes;
+    for (const auto& e : by_size) {
+      char b[32];
+      snprintf(b, sizeof(b), " %dx%d-gon", e.second, int(e.first));
+      sizes += b;
+    }
+    LOG(
+      "STEP export: TEMP %1$d corners would move; %2$d merged faces use one:%3$s; splitting them "
+      "adds %4$d faces to %5$d",
+      int(corner_moves.size()), int(touched), sizes.c_str(), int(extra), int(indicesNew.size()));
+  }
 
   // Which original made each merged face.
   //
@@ -672,7 +701,8 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceOrigin, owned, faceParents, newNormals, 1e-5, analytic, approximate);
+                    faceOrigin, corner_moves, owned, faceParents, newNormals, 1e-5, analytic,
+                    approximate);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;
