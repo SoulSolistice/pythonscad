@@ -113,6 +113,82 @@ def required_tolerances():
     return out
 
 
+def corner_stray(shape):
+    """How far each face's own corners sit off the surface that face is on.
+
+    This is the quantity a strict reader measures, and the granted tolerance is
+    not. A corner is a vertex of the written face: the file asserts it is on
+    that surface. OpenCASCADE widens an edge's tolerance until the assertion
+    holds - `DE_ShapeFixParameters` lets it spend up to a millimetre doing so -
+    and then reports a valid solid. SOLIDWORKS holds the pcurve against the 3D
+    curve, refuses, and rebuilds the face from what it can trust.
+
+    Measured over the reference lid, this is the only local number that orders
+    the exports the way a commercial kernel does:
+
+        corner-off p95   OpenCASCADE against SOLIDWORKS, by volume
+        no fitted face   0.04%
+        3.3e-14          0.07%
+        6.2e-13          0.13%
+        0.0128          14.0%
+        0.0218          53%
+
+    The p95 rather than the max, because one corner out of five hundred does not
+    stop a kernel: the variant with the intact thread and the one with the
+    wrecked thread share a max of 0.21843 and differ by twelve orders of
+    magnitude at the 95th percentile.
+    """
+    import math
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_VERTEX
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone
+    from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
+
+    def off(a, face, p):
+        t = a.GetType()
+        if t == GeomAbs_Plane:
+            return abs(a.Plane().Distance(p))
+        if t in (GeomAbs_Cylinder, GeomAbs_Cone):
+            q = a.Cylinder() if t == GeomAbs_Cylinder else a.Cone()
+            ax = q.Axis()
+            d, o = ax.Direction(), ax.Location()
+            v = (p.X() - o.X(), p.Y() - o.Y(), p.Z() - o.Z())
+            h = v[0] * d.X() + v[1] * d.Y() + v[2] * d.Z()
+            r = math.sqrt(max(0.0, sum(x * x for x in v) - h * h))
+            if t == GeomAbs_Cylinder:
+                return abs(r - q.Radius())
+            want = q.RefRadius() + h * math.tan(q.SemiAngle())
+            return abs(r - want) * math.cos(q.SemiAngle())
+        try:
+            pr = GeomAPI_ProjectPointOnSurf(p, BRep_Tool.Surface_s(face))
+            return pr.LowerDistance() if pr.NbPoints() > 0 else 0.0
+        except Exception:
+            return 0.0
+
+    strays = []
+    exp = TopExp_Explorer(shape, TopAbs_FACE)
+    while exp.More():
+        face = TopoDS.Face_s(exp.Current())
+        a = BRepAdaptor_Surface(face)
+        seen = set()
+        v = TopExp_Explorer(face, TopAbs_VERTEX)
+        while v.More():
+            vt = TopoDS.Vertex_s(v.Current())
+            h = vt.TShape().This()
+            if h not in seen:
+                seen.add(h)
+                strays.append(off(a, face, BRep_Tool.Pnt_s(vt)))
+            v.Next()
+        exp.Next()
+    if not strays:
+        return 0.0, 0.0
+    strays.sort()
+    return strays[min(len(strays) - 1, int(len(strays) * 0.95))], strays[-1]
+
+
 def audit(path, tol):
     from OCP.STEPControl import STEPControl_Reader
     from OCP.IFSelect import IFSelect_ReturnStatus
@@ -135,6 +211,7 @@ def audit(path, tol):
     # What OCCT granted itself on the way in, before we take it away.
     granted = ShapeAnalysis_ShapeTolerance().Tolerance(shape, 1)
     as_read = BRepCheck_Analyzer(shape).IsValid()
+    stray_p95, stray_max = corner_stray(shape)
 
     ShapeFix_ShapeTolerance().SetTolerance(shape, tol)
     an = BRepCheck_Analyzer(shape)
@@ -156,6 +233,7 @@ def audit(path, tol):
         "valid_at_tolerance": an.IsValid(),
         "faces": faces, "bad_faces": bad_faces,
         "edges": edges, "bad_edges": bad_edges,
+        "corner_off_p95": stray_p95, "corner_off_max": stray_max,
     }
 
 
@@ -210,8 +288,8 @@ def main():
                          entitled=("" if entitled is None else "%.6f" % entitled), **r))
         flag = "  <<<" if (r["bad_faces"] or r["bad_edges"]) else ""
         mark = " " if why == "declared" else "?"
-        print("%-32s %8.2e%s %10.6f %5d/%-7d %5d/%-7d%s" % (
-            name[:32], want, mark, r["granted_tolerance"],
+        print("%-32s %8.2e%s %10.6f %10.2e %5d/%-7d %5d/%-7d%s" % (
+            name[:32], want, mark, r["granted_tolerance"], r["corner_off_p95"],
             r["bad_faces"], r["faces"], r["bad_edges"], r["edges"], flag))
 
     out = args.out or os.path.join(kitdir, "occt-strict.csv")
@@ -226,6 +304,26 @@ def main():
           % (clean, len(rows)))
     print("without the slack OpenCASCADE granted them on the way in.")
     print("The largest such slack: %.6f" % worst)
+
+    # The column the granted tolerance cannot supply. See corner_stray().
+    loose = [r for r in rows if r["corner_off_p95"] > 1e-9]
+    print("")
+    print("%d of %d files put a face's own corners off the surface that face is on,"
+          % (len(loose), len(rows)))
+    print("at the 95th percentile, which is what a strict reader measures:")
+    if loose:
+        print("")
+        print("   %-32s %12s %12s" % ("file", "p95", "max"))
+        for r in sorted(loose, key=lambda x: -x["corner_off_p95"]):
+            print("   %-32s %12.3e %12.3e" % (r["file"][:32], r["corner_off_p95"],
+                                              r["corner_off_max"]))
+        print("")
+        print("   A corner is a vertex of the written face and the file asserts it is on")
+        print("   that surface. OpenCASCADE widens an edge until the assertion holds and")
+        print("   reports a valid solid either way, so the column above is the one that")
+        print("   moves when a commercial kernel stops agreeing about the volume.")
+    else:
+        print("   none - every corner is on its own surface.")
     if over:
         print("\nThese needed more slack than their own model concedes:\n")
         print("   %-32s %11s %11s" % ("file", "granted", "entitled to"))
