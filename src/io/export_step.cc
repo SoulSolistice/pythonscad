@@ -258,7 +258,7 @@ bool sameSurfaceGeometrically(const Surface *a, const Surface *b)
  * is on it to 1e-7, the exact tier's own tolerance - and what it asks is where
  * a surface *runs*, not what is near it.
  */
-void reportOwnership(PolySet& ps, bool move, std::map<int32_t, std::vector<std::size_t>> *out)
+void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_t>> *out)
 {
   if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) return;
   if (ps.surfaces.empty()) return;
@@ -450,8 +450,7 @@ void reportOwnership(PolySet& ps, bool move, std::map<int32_t, std::vector<std::
   std::size_t junctions = 0, single = 0, pair = 0, many = 0, unowned = 0;
   std::size_t guess_wrong = 0, guess_right = 0, on_edge = 0;
   double worst_travel = 0, worst_within = 0, band_used = 0;
-  std::size_t within_bound = 0, moved = 0;
-  double worst_moved = 0;
+  std::size_t within_bound = 0;
   for (std::size_t v = 0; v < ps.vertices.size(); v++) {
     if (ids_at[v].size() < 2) continue;
     junctions++;
@@ -522,7 +521,6 @@ void reportOwnership(PolySet& ps, bool move, std::map<int32_t, std::vector<std::
       if (ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-6) {
         on_edge++;
         const double travel = (p - ps.vertices[v]).norm();
-        const Vector3d was = ps.vertices[v];
         worst_travel = std::max(worst_travel, travel);
         // What the mesh concedes about where its surface lies. A declared sweep
         // states it outright - the sagitta of its own stations - and that is a
@@ -538,27 +536,6 @@ void reportOwnership(PolySet& ps, bool move, std::map<int32_t, std::vector<std::
         if (travel <= bound) {
           within_bound++;
           worst_within = std::max(worst_within, travel);
-          // And put it there. A corner belongs to whatever made it: this one was
-          // made by a boolean between two declared surfaces, so it belongs on
-          // the curve where they cross, and that curve is computable from the
-          // declarations rather than recoverable from the mesh.
-          //
-          // Doing it here, before anything is recognised, is what makes it safe.
-          // Projecting a corner onto one of its two surfaces afterwards is not
-          // the same operation and does not work: it takes the corner off the
-          // other one. Measured on the reference lid, snapping the thread's
-          // corners onto the thread left the walls exactly as they were, at a
-          // p95 of 0.036 against the thread's 0.013 - the wall was always the
-          // worse of the two, and it is the face SOLIDWORKS rebuilds.
-          //
-          // Only where the two cross transversally and only within what the mesh
-          // concedes at that vertex. Everything else stays where it is, which is
-          // why this cannot pull a vertex belonging to something else.
-          if (move) {
-            ps.vertices[v] = p;
-            moved++;
-            worst_moved = std::max(worst_moved, travel);
-          }
         }
       }
     } else {
@@ -567,13 +544,6 @@ void reportOwnership(PolySet& ps, bool move, std::map<int32_t, std::vector<std::
   }
 
   if (out != nullptr) *out = owned;
-
-  if (moved > 0) {
-    LOG(
-      "STEP export: %1$d corners moved onto the curve where their two declared owners cross, "
-      "by at most %2$.4f",
-      int(moved), worst_moved);
-  }
 
   std::set<std::size_t> named;
   for (const auto& e : owned) named.insert(e.second.begin(), e.second.end());
@@ -640,14 +610,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   std::map<int32_t, std::vector<std::size_t>> owned;
   if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
     reportProvenance(*ps);
-    // A corner belongs to whatever made it, and a corner two declared surfaces
-    // made belongs on the curve where they cross. Under the approximation flag
-    // it is put there; the exact tier asserts nothing the mesh does not already
-    // state, and moving a vertex is such an assertion.
-    const bool place_corners = Feature::ExperimentalStepApproximateSurfaces.is_enabled();
-    auto owned_ps = std::make_shared<PolySet>(*ps);
-    reportOwnership(*owned_ps, place_corners, &owned);
-    if (place_corners) ps = owned_ps;
+    reportOwnership(*ps, &owned);
   }
 
   std::vector<IndexedFace> indicesNew;
