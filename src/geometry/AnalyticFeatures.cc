@@ -2190,7 +2190,36 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     // concedes about where its own surface lies, so a facet inside it is one
     // this cylinder could be the surface of, and a facet outside it belongs to
     // something else.
+    // How far a facet reaches around the axis, and how far off the surface that
+    // reach puts its middle.
+    const Vector3d ref = perpendicular(axis);
+    const Vector3d ref2 = axis.cross(ref);
+    auto spanOf = [&](std::size_t f) {
+      std::vector<double> t;
+      for (const int v : loops[f]) {
+        const Vector3d rel = vertices[v] - (cyl != nullptr ? cyl->refpt : cone->refpt);
+        double a = atan2(rel.dot(ref2), rel.dot(ref));
+        if (a < 0) a += 2 * M_PI;
+        t.push_back(a);
+      }
+      std::sort(t.begin(), t.end());
+      // The widest gap between consecutive angles is the part the facet does
+      // *not* cover, so the span is the turn less that gap. This is what tells
+      // a facet straddling the seam from one wrapped right round.
+      double gap = t.front() + 2 * M_PI - t.back();
+      for (std::size_t i = 0; i + 1 < t.size(); i++) gap = std::max(gap, t[i + 1] - t[i]);
+      return std::max(0.0, 2 * M_PI - gap);
+    };
+    auto sagittaOf = [&](std::size_t f) {
+      double r = 0;
+      for (const int v : loops[f]) {
+        r = std::max(r, distanceToAxis(vertices[v], cyl != nullptr ? cyl->refpt : cone->refpt, axis));
+      }
+      return r * (1 - cos(std::min(M_PI, spanOf(f)) / 2));
+    };
+
     std::vector<std::size_t> claimed;
+    std::vector<double> span_of_claim;
     double worst = 0;
     for (std::size_t f = 0; f < loops.size(); f++) {
       if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
@@ -2240,19 +2269,25 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
       // normals agree to five degrees. Only the distance separates them, and
       // only if it is asked somewhere other than at the corners.
       //
-      // Twice the band, rather than the band: a facet that genuinely tessellates
-      // the surface puts its edge midpoints at the sagitta, and the sagitta is
-      // exactly what bandOf returns - testing against the band with no slack
-      // would make every regular facet a coin toss on rounding. Two is slack
-      // enough for an irregular tessellation and still two orders of magnitude
-      // short of a facet that spans a hole.
+      // The allowance comes from the surface, not from the neighbours.
       //
-      // The band alone bounds this, not `max_off`. What the exact tier promises
-      // is that nothing is asserted beyond what the mesh states, and the mesh
-      // states its vertices; a facet interior sags by the sagitta whatever tier
-      // is writing it, because that sag is what replacing facets with a smooth
-      // surface means.
-      const double interior_allow = 2 * bandOf({f});
+      // It used to be twice `bandOf`, which is the dihedral to whatever lies
+      // across each edge - a statement about the mesh's local flatness. That
+      // holds only while the mesh stays as the generator emitted it. Move a
+      // corner onto the curve where its two declared owners cross, which is
+      // what a corner belongs on, and the dihedrals change: measured on
+      // step-bored-cone, a facet still sitting a correct 0.048 off a cone of
+      // radius 10 was allowed 0.0033 because its neighbours happened to come
+      // out nearly coplanar. The claim shattered into fourteen pieces of one
+      // and three facets.
+      //
+      // A facet whose corners are on a quadric and which spans `theta` about
+      // its axis stands off it by R(1 - cos(theta/2)) at the middle of its
+      // widest chord. That is the whole of it: computable from the surface and
+      // the facet, needing no neighbour, and unchanged by anything done to the
+      // corners. The quarter allows for a tessellation whose facets are not
+      // even arcs.
+      const double interior_allow = 1.25 * sagittaOf(f) + 1e-12;
       double interior = 0;
       {
         Vector3d centre(0, 0, 0);
@@ -2267,7 +2302,45 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
       }
       if (interior > interior_allow) continue;
       claimed.push_back(f);
+      span_of_claim.push_back(spanOf(f));
       worst = std::max(worst, off);
+    }
+    if (claimed.size() < 3) continue;
+
+    // And refuse a facet that reaches further round the axis than a facet of
+    // this surface's tessellation does.
+    //
+    // The sagitta above is honest and, taken alone, readmits exactly the defect
+    // the interior test was written for. The bore through step-bored-cone is
+    // walled by one quad per angular step running its whole length, and each
+    // spans 134 degrees of the cone it pierces: the sagitta at that span is
+    // 6.09, and the facet is 6.0 out, so it passes. What gives it away is the
+    // span itself - no facet of a tessellation reaches 134 degrees when its
+    // neighbours reach eleven. Judged against this claim's own median, as the
+    // sweep's corners are, so that nothing here assumes a resolution.
+    {
+      std::vector<double> ranked = span_of_claim;
+      std::sort(ranked.begin(), ranked.end());
+      const double typical = ranked[ranked.size() / 2];
+      if (typical > 0) {
+        std::vector<std::size_t> kept;
+        std::size_t reached = 0;
+        for (std::size_t k = 0; k < claimed.size(); k++) {
+          if (span_of_claim[k] > 4 * typical) {
+            reached++;
+            continue;
+          }
+          kept.push_back(claimed[k]);
+        }
+        if (reached > 0) {
+          report.push_back(
+            format("%d facets reach further round the declared %s r=%g than four times the %.1f "
+                   "degrees this claim's facets typically do, and are left faceted",
+                   int(reached), cyl != nullptr ? "cylinder" : "cone", cyl != nullptr ? cyl->r : cone->r,
+                   typical * 180 / M_PI));
+        }
+        claimed = std::move(kept);
+      }
     }
     if (claimed.size() < 3) continue;
 
@@ -2285,8 +2358,6 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     // the simpler answer - the one a declared sweep already takes when it
     // closes around its profile - is to cut it so that no face wraps at all.
     const Vector3d base = cyl != nullptr ? cyl->refpt : cone->refpt;
-    const Vector3d ref = perpendicular(axis);
-    const Vector3d ref2 = axis.cross(ref);
     std::vector<char> quadrant(4, 0);
     std::vector<double> theta(claimed.size());
     for (std::size_t i = 0; i < claimed.size(); i++) {
