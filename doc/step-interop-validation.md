@@ -996,6 +996,10 @@ surfaces, the fillet sense or the tolerance.
 | r01-lid10 | 226617.51 | ~225,700 (-0.4%) | **351652.94 (+55.2%)** |
 | r02-bayonet | 238544.66 | not run | **363852.89 (+52.5%)** |
 
+*Corrected below: those two SOLIDWORKS readings are a defect in what we wrote,
+not in how it measures. See "Corrected: on the two real parts it is evidence of
+ours".*
+
 Both now import as solids where they used to come in as surface bodies, so the
 face split did what it was for - and it turned a loud failure into a quiet one.
 A surface body announces itself to the user; a solid whose volume is half again
@@ -1124,6 +1128,36 @@ OpenCASCADE reads back from the body SOLIDWORKS itself saved:
 Only c06 is self-consistent, which is what makes c06 a geometry defect and the
 other three a mass-properties one. A +55% reading is not evidence that the solid
 is half again too big.
+
+#### Corrected: on the two real parts it is evidence of ours
+
+That last sentence was wrong about r01 and r02, and the correction is worth more
+than the original entry. It reads +55% because the thread's face is written with
+corners that are not on it, and SOLIDWORKS rebuilds what it cannot trust. Export
+the same lid with the sweep left faceted - `step-analytic-surfaces` alone, no
+approximation flag - and the two kernels agree:
+
+| r01-lid10, same model, same settings | OpenCASCADE | SOLIDWORKS | apart |
+| --- | --- | --- | --- |
+| thread faceted (exact tier) | 226945.52 | 227028.38 | **0.04%** |
+| thread as one fitted face | 225066.76 | 256515.31 | **14.0%** |
+
+Zero faulty faces on the first, and the volume agrees to a fraction of a
+percent. Nothing about SOLIDWORKS' mass properties changed between those two
+rows; what changed is whether the file asserts a corner that is on the surface
+it claims. The reading was ours all along, and the "mass-properties quirk"
+reading let it stand for weeks.
+
+c06 is untouched by this: it is self-consistent, and three sources including the
+model's own arithmetic still disagree with SOLIDWORKS about it.
+
+What makes the difference measurable without a commercial kernel is in
+`scripts/step-occt-strict.py` - the distance from a face's corners to its own
+surface, at the 95th percentile. The tolerance OpenCASCADE grants does not do
+it: it is *largest* on the variant SOLIDWORKS reads happily. See
+`DE_ShapeFixParameters`, whose `MaxTolerance3d` defaults to 1.0, which is the
+licence OpenCASCADE is exercising when it widens an edge and calls the result
+valid.
 
 ### An open discrepancy with the recorded result
 
