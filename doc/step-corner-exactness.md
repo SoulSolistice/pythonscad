@@ -117,11 +117,57 @@ output leans on it. Of the 41 fixtures, **ten rely on a fitted surface** and
 | `py-step-approximate-cylinder` | **0** | 1 | 1 cylinder |
 | `py-step-approximate-turned` | **0** | 2 | 1 cone, 1 ring |
 
-**Six of the eight fixtures with inexact corners are on this list.** Only
-`step-band-family` and `step-exact-trim` have inexact corners on surfaces that
-were genuinely declared - those two are the pure junction case. Whether the
-other six are inexact *because* their surface is fitted, or for the junction
-reason as well, is the first thing to measure and it has not been.
+Six of the eight fixtures with inexact corners are on this list, which looked
+like a cause and is not.
+
+### Measured: the fit is not why the corners are inexact
+
+Exporting each of the eight with the fitting pass disabled - so that only
+genuinely declared surfaces can produce a face - leaves the strays **identical to
+the last digit**:
+
+| fixture | corner-off p95, with fitting | with fitting disabled |
+| --- | --- | --- |
+| `step-declare-grid-scad` | 9.6305e-02 | 9.6305e-02 |
+| `step-band-family` | 8.9616e-02 | 8.9616e-02 |
+| `step-bored-cone` | 4.7337e-02 | 4.7337e-02 |
+| `step-bored-cylinder` | 4.6222e-02 | 4.6222e-02 |
+| `step-exact-trim` | 3.4204e-02 | 3.4204e-02 |
+| `step-cut-cone` | 3.1598e-02 | 3.1598e-02 |
+
+**All eight are the junction case.** Not one inexact corner in the fixture set is
+on a fitted surface. The overlap was a coincidence of the same coupons being
+boolean-cut, which is both why they have a region to fit and why they have
+junctions to get wrong.
+
+So declaring more surfaces will not make a single corner exact. That work is
+worth doing for coverage - it is why `step-approximate-report` writes 6 faces
+instead of 2050 - but it is not this. The corner fix is
+`claude/step-corner-ownership` and nothing else on the list substitutes for it.
+
+### And the fitting earns its place in only half the cases
+
+The same experiment says something about the fitting pass itself. On every
+fixture that declares anything, it invents hundreds of ring cylinders and
+produces **no face at all**:
+
+| fixture | faces | with fitting disabled |
+| --- | --- | --- |
+| `step-declare-grid-scad` | 18 | 18 |
+| `step-bored-cone` | 10 | 10 |
+| `step-bored-cylinder` | 10 | 10 |
+| `step-cut-cone` | 4 | 4 |
+| `py-step-declare-grid` | 11 | 11 |
+| `step-approximate-report` | **6** | 2050 |
+| `py-step-approximate-turned` | **6** | 532 |
+| `py-step-approximate-cylinder` | **3** | 66 |
+| `py-step-declare-grid-strip` | **15** | 70 |
+| `step-extrude-refusals` | **2121** | 2152 |
+
+It is doing all of its work where nothing is declared, which is exactly what its
+comment says it is for. Where a declaration exists it is dead weight - not
+wrong, but hundreds of surfaces built and discarded. Declaring the extrudes
+would move the bottom four rows into the top group and make that concrete.
 
 ### What should declare and does not
 
@@ -155,14 +201,22 @@ against what the fixture now does.
 
 ## The order of work
 
-1. **Declare what is not declared**, from the work list above rather than from a
-   survey. A junction can only be placed exactly when both its owners are
-   declared, and a fitted surface has no exact position for a corner to lie on,
-   so this genuinely comes first.
-2. **Place the corner from the declaration**, not from the mesh, before
-   `mergeTriangles` - which is what makes it safe, because triangles that stop
-   being coplanar then simply do not merge instead of becoming broken quads.
+1. **Place the corner where its two declared owners cross.** The measurement
+   above moved this to first: every inexact corner in the fixture set is a
+   junction on surfaces that were already declared, so nothing else on this list
+   fixes one. `claude/step-corner-ownership` does it and fragments the claim;
+   understanding that fragmentation is the whole of step one.
+2. **Declare what is not declared**, from the work list above. This buys
+   coverage rather than exactness - it moves the four fixtures that currently
+   depend on fitting onto declared surfaces, and it is what makes the fitting
+   pass dead weight rather than load-bearing. It does not have to precede (1).
 3. **Then the fixtures**, one at a time, each moved number carrying a reason.
+
+The placement has to happen before `mergeTriangles`, which is what makes it
+safe: triangles that stop being coplanar then simply do not merge, instead of
+becoming quads with a corner out of their plane. Measured, that is 2.26e-06 on
+ten faces - the baseline - against 0.0331 for the same move made after
+recognition.
 
 On (3): `doc/step-export-testing.md` requires expectations be derived and not
 captured. Regenerating eight fixtures' EXPECT lines from the new output would
