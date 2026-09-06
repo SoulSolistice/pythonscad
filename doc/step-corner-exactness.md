@@ -300,6 +300,61 @@ keeps the chords it has and the faceted neighbours keep meeting them. That is a
 larger change than any tried here, and it is the only remaining direction that
 does not trade the consolidation away.
 
+## Where it stands after the placement
+
+A junction corner is now put on the curve its two declared owners cross along,
+after recognition - where the claims are already fixed and an analytic face does
+not care whether its corners are coplanar. Two coupons reach exactness at no
+cost at all, and the interop kit says so independently of the fixtures:
+
+    9 of 46 kit files still put a face's corners off its own surface
+
+    f01-band-fn024-analytic     1.022e-01
+    f02-band-fn032-analytic     8.221e-02
+    r02-bayonet-analytic        3.590e-02
+    c11-swept-grid-analytic     2.457e-02
+    f03-band-fn048-analytic     2.295e-02
+    f04-band-fn064-analytic     2.055e-02
+    r01-lid10-analytic          1.281e-02
+    f05-band-fn096-analytic     4.955e-03
+    c10-bspline-text-analytic   3.922e-09   (noise)
+
+    c15-bored-cylinder-analytic and c16-bored-cone-analytic: exact
+
+The band family is the theory measured: 0.102 at `$fn = 24` falling to 0.005 at
+`$fn = 96`, twenty-fold for a four-fold resolution, which is the sagitta and
+nothing else. It also says the remaining strays are not a defect to be found but
+a tessellation to be placed - the same work, on corners the placement does not
+yet reach.
+
+### What the placement does not reach
+
+Only corners whose **two** owners are declared surfaces. That leaves out the
+common case: a corner where a declared quadric meets a *plane* the mesh carries
+but nothing declared. `step-cut-cone` is entirely this - a declared cone cut by
+a cube's face - and nothing moves there at all. So is most of `step-band-family`
+and `step-declare-grid-scad`, where the placement runs and the p95 barely
+shifts, 8.96e-02 to 8.89e-02 and 9.63e-02 to 9.60e-02.
+
+A plane is an exact surface and the intersection of a quadric with one is a
+conic. Widening the placement to treat a planar face as an implicit declaration
+is the next step, and it is what makes the rest of this list worth doing.
+
+### Splitting, implemented and parked
+
+`claude/step-corner-split` fans out the planar polygons a moved corner would
+otherwise bend, so the move can proceed instead of being declined. It works -
+both exports come back closed and valid - and it is not landed, because on
+today's fixtures it costs 5 and 16 faces to gain three parts in a thousand. The
+corners it unblocks are not the corners that stray. It becomes worth landing
+once the placement reaches the quadric-plane junctions above, and not before.
+
+Two guards found while building it did land, being bugs either way: the
+placement belongs under the approximation flag, since the exact tier asserts
+nothing the mesh does not state; and a triangle, which stays planar wherever its
+corners are, can still turn over when a corner crosses the line of the opposite
+edge.
+
 ## The order of work
 
 1. ~~Give the interior test an allowance that comes from the surface.~~ Done -
