@@ -1207,7 +1207,11 @@ void StepKernel::build_tri_body(
   // measured that at 83 faulty faces against 9 - so where a polygon that keeps
   // its plane would be bent, this declines the lot and the export is exactly
   // what it was.
-  if (!cornerMoves.empty()) {
+  // Under the approximation flag only. The exact tier asserts nothing the mesh
+  // does not already state, and moving a vertex is such an assertion - without
+  // this gate step-bored-cone's analytic export comes out with a PLANE
+  // disagreeing with the winding of its own bound.
+  if (approximate && !cornerMoves.empty()) {
     std::size_t analytic_faces = 0, bent = 0;
     for (std::size_t i = 0; i < loops.size(); i++) {
       if (!loop_valid[i]) continue;
@@ -1216,8 +1220,24 @@ void StepKernel::build_tri_body(
         if (cornerMoves.count(v) != 0) uses = true;
       }
       if (!uses) continue;
-      if (consumed[i]) analytic_faces++;
-      else if (loops[i].size() > 3) bent++;
+      if (consumed[i]) {
+        analytic_faces++;
+        continue;
+      }
+      // A triangle stays planar wherever its corners are and can still turn
+      // over: where a corner crosses the line of the opposite edge the winding
+      // reverses, and the face then contradicts the normal the shell was
+      // oriented by. Splitting cannot rescue one - every triangle of a fan
+      // turns with it - so a face that would turn stops the move outright.
+      Vector3d after(0, 0, 0);
+      for (std::size_t k = 0; k < loops[i].size(); k++) {
+        const int va = loops[i][k], vb = loops[i][(k + 1) % loops[i].size()];
+        const auto ma = cornerMoves.find(va), mb = cornerMoves.find(vb);
+        const Vector3d& pa = ma == cornerMoves.end() ? vertices[va] : ma->second;
+        const Vector3d& pb = mb == cornerMoves.end() ? vertices[vb] : mb->second;
+        after += pa.cross(pb);
+      }
+      if (after.dot(loop_normals[i]) <= 0 || loops[i].size() > 3) bent++;
     }
     if (bent > 0) {
       LOG(
