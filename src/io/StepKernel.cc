@@ -1183,6 +1183,7 @@ void StepKernel::build_tri_body(
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
   const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;
   const std::vector<char>& consumed = features.consumed;
+  std::set<std::size_t> split_for_corners;  // fanned out, see below
 
   // Put the junction corners on the curve their two owners cross along - but
   // only once it is known which faces are analytic, and only if no face that
@@ -1300,7 +1301,8 @@ void StepKernel::build_tri_body(
       const auto m = moves.find(v);
       return m == moves.end() ? vertices[v] : m->second;
     };
-    std::size_t analytic_faces = 0, bent = 0;
+    std::size_t analytic_faces = 0, bent = 0, turned = 0;
+    std::set<std::size_t> splittable;
     for (std::size_t i = 0; i < loops.size(); i++) {
       if (!loop_valid[i]) continue;
       bool uses = false;
@@ -1322,7 +1324,7 @@ void StepKernel::build_tri_body(
         after += at_moved(loops[i][k]).cross(at_moved(loops[i][(k + 1) % loops[i].size()]));
       }
       if (after.dot(loop_normals[i]) <= 0) {
-        bent++;
+        turned++;
         continue;
       }
       // Whether it is actually taken out of its plane, rather than whether it
@@ -1335,8 +1337,24 @@ void StepKernel::build_tri_body(
       for (const int w : loops[i]) {
         out_of_plane = std::max(out_of_plane, fabs((at_moved(w) - p0).dot(loop_normals[i])));
       }
-      if (out_of_plane > 1e-9) bent++;
+      if (out_of_plane <= 1e-9) continue;
+      // Bent, and a bent polygon can be fanned out into triangles instead of
+      // being left alone: a triangle is planar wherever its corners are. Only
+      // one with a hole cannot, because a fan from one corner triangulates a
+      // simple loop and an inner bound would have to be threaded into it.
+      bool has_hole = false;
+      for (std::size_t j = 0; j < loops.size(); j++) {
+        if (loop_valid[j] && !consumed[j] && parents[j] == int(i)) has_hole = true;
+      }
+      if (has_hole || loops[i].size() < 4) bent++;
+      else splittable.insert(i);
     }
+    // A face that turns over cannot be rescued by splitting - every triangle of
+    // the fan turns with it - so it stops the move outright, and so does a
+    // polygon that cannot be split. Otherwise the fans go ahead: all of the
+    // corners move or none of them do.
+    bent += turned;
+    if (bent == 0) split_for_corners = splittable;
     if (bent > 0) {
       LOG(
         "STEP export: %1$d corners are left where the mesh put them: moving them would bend "
@@ -1353,6 +1371,15 @@ void StepKernel::build_tri_body(
         "STEP export: %1$d corners moved onto the curve where their two declared owners cross, "
         "by at most %2$.4f; %3$d analytic faces now bound themselves on their own surface",
         int(moves.size()), worst, int(analytic_faces));
+      if (!split_for_corners.empty()) {
+        std::size_t added = 0;
+        for (const std::size_t i : split_for_corners) added += loops[i].size() - 3;
+        LOG(
+          "STEP export: %1$d face%2$s that keeps a plane fanned into triangles to follow them, "
+          "adding %3$d face%4$s",
+          int(split_for_corners.size()), split_for_corners.size() == 1 ? "" : "s", int(added),
+          added == 1 ? "" : "s");
+      }
     }
   }
 
@@ -2042,7 +2069,7 @@ void StepKernel::build_tri_body(
   std::vector<std::vector<EdgeCurve *>> loop_edges(face_cnt);
 
   for (std::size_t i = 0; i < face_cnt; i++) {
-    if (!loop_valid[i] || consumed[i]) continue;
+    if (!loop_valid[i] || consumed[i] || split_for_corners.count(i) != 0) continue;
     const std::vector<int>& loop = loops[i];
     const int n = int(loop.size());
 
@@ -2117,11 +2144,59 @@ void StepKernel::build_tri_body(
     face_bounds[i] = new FaceBound(entities, edge_loop, true, !loop_is_hole[i]);
   }
 
+  // The fans for the polygons the corner placement bent.
+  //
+  // Each triangle takes its boundary edges from the same map every other face
+  // uses, so the shell still stitches along them; the diagonals are new and
+  // used by exactly the two triangles that share them. The plane is the
+  // polygon's own normal, which is what its corners no longer all sit on.
+  for (const std::size_t i : split_for_corners) {
+    const std::vector<int>& loop = loops[i];
+    const Vector3d& norm = loop_normals[i];
+    for (std::size_t k = 1; k + 1 < loop.size(); k++) {
+      const int tri[3] = {loop[0], loop[k], loop[k + 1]};
+      const Vector3d e1 = vertices[tri[1]] - vertices[tri[0]];
+      const Vector3d e2 = vertices[tri[2]] - vertices[tri[0]];
+      if (e1.cross(e2).norm() < area_eps) continue;
+      std::vector<OrientedEdge *> oriented;
+      std::vector<EdgeCurve *> edges_here;
+      for (int j = 0; j < 3; j++) {
+        const int a = tri[j], b = tri[(j + 1) % 3];
+        bool dir = true;
+        EdgeCurve *e =
+          get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+        oriented.push_back(new OrientedEdge(entities, e, dir));
+        edges_here.push_back(e);
+      }
+      // The triangle's own plane, not the polygon's. A triangle is planar
+      // wherever its corners are, which is the whole reason for fanning one
+      // out - but only if the PLANE written under it is the one its corners
+      // actually lie on. Taking the polygon's normal instead left every fan
+      // triangle asserting a plane its corners had just moved off, and
+      // step-declare-grid-scad carried the entire 0.096 on its planes while its
+      // cylinders and its sweep were already exact.
+      Vector3d tn = e1.cross(e2);
+      if (tn.dot(norm) < 0) tn = -tn;
+      tn.normalize();
+      Vector3d ref = e1 - tn * tn.dot(e1);
+      if (ref.norm() < 1e-12) ref = AnalyticFeatures::perpendicular(tn);
+      else ref.normalize();
+      auto axis = new Axis2Placement(entities, new Direction(entities, tn), new Direction(entities, ref),
+                                     new Point(entities, vertices[tri[0]]));
+      std::vector<FaceBound *> bounds;
+      bounds.push_back(new FaceBound(entities, new EdgeLoop(entities, oriented), true, true));
+      sfaces_extra.push_back(new Face(entities, bounds, new Plane(entities, axis), true));
+      face_edges_extra.push_back(edges_here);
+    }
+  }
+
   // Combine every outer loop with the loops of its holes into one ADVANCED_FACE.
   std::vector<Face *> sfaces;
   std::vector<std::vector<EdgeCurve *>> face_edges;
   for (std::size_t i = 0; i < face_cnt; i++) {
-    if (!loop_valid[i] || loop_is_hole[i] || consumed[i]) continue;
+    if (!loop_valid[i] || loop_is_hole[i] || consumed[i] || split_for_corners.count(i) != 0) {
+      continue;
+    }
     std::vector<FaceBound *> singface;
     singface.push_back(face_bounds[i]);
     std::vector<EdgeCurve *> edges = loop_edges[i];
