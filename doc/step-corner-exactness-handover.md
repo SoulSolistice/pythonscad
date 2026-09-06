@@ -130,7 +130,72 @@ the measure governing this whole exercise reports perfection. That is the
 handover's own first trap - a census improving while the geometry gets worse -
 and taking `Plane=96` into the fixture would ratify it permanently.
 
-### What decides it, and it is already measured
+### Measured: the placement mixes a declaration with a fit
+
+Investigated 2026-09-06, on the principle that the placement should favour a
+declaration, or something computed from one, over anything read off the mesh.
+Doing that turns out to name the defect exactly, and it needs no threshold.
+
+**A plane is never declared.** `Surface.h` has sphere, torus, Bezier, cylinder,
+cone and grid, and no plane; `curves` held no `ArcCurve` on either fixture. So
+the exporter cannot ask whether a plane is a face of the model - the channel to
+say so does not exist.
+
+**But the cap plane is derived from a declaration anyway.** `primitives.cc`
+anchors a cylinder's record *at its rim* - "the rims. A frustum says what it is
+... by declaring the circle at each one" - so `refpt` with `normdir` is that
+rim's plane. Dumped from the two fixtures:
+
+    step-declare-grid.py    cylinder refpt (0, 0, 0)   axis (0, 0, 1)
+    step-declare-grid-scad  cylinder refpt (0, 0, 0)   axis (0, 0, 1)
+                            cylinder refpt (0, 0, -1)  axis (0, 0, 1)
+
+`z = 0` is exactly the plane of the 95-corner disc being fanned. The four faces
+fanned on `-scad` are bore *facet* planes, radial normals at the inradius
+19.90369, and they match no declaration at all. The distinction the section above
+reaches for by measuring middles and spans is simply **stated by the model**.
+
+**And the three declarations agree with each other.** Walking the declared rim
+circle `r = 19.2, z = 0` against the declared sweep finds them crossing at
+`a = 30.0008 degrees`, off the sweep by **3.8e-15**. The declarations are
+mutually consistent to machine precision; it is the placement that is not.
+
+**What the placement actually targets.** It puts the corner where its two owners
+cross - but one of those owners is a *fitted* B-spline which states its own
+accuracy as a tessellation band of 0.1290, and the other is an exact declared
+cylinder. For the disc corner:
+
+    on the declared plane z = 0                      exactly
+    off the declared cylinder r = 19.2               0.0103   = 19.2(1-cos(pi/96))
+    off the fitted sweep                             0.0378   against its band of 0.1290
+
+So it is 0.0103 out on something exact and 0.0378 out on something that never
+claimed better than 0.1290 - and the move sacrifices the exact plane to chase
+the fitted surface. That is the wrong way round, and it is not a rare corner:
+across the three fixtures, corners already sitting *exactly* on their exact
+owner and inside the fitted owner's own band are 281 of 514, 98 of 194 and 95 of
+286 - a third to a half of every move made.
+
+**What follows.** The target should be built from the exact declarations and the
+fit used only as a tolerance:
+
+1. Collect what the corner is on that is *exact* - its declared quadric owners,
+   and any plane a declaration anchors that it lies in.
+2. Place it on the intersection of those. For the disc corner that is the rim
+   circle `r = 19.2, z = 0`, reached by a radial move of 0.0103 which keeps
+   `z = 0`, so the disc stays flat and nothing is fanned.
+3. Use the fitted owner only to check the result is within its declared band -
+   0.0378 against 0.1290 here, so there is nothing left to correct.
+
+This also dissolves the `step-band-family` convergence problem below: projecting
+onto exact declarations does not depend on two surfaces crossing transversally,
+which is what 418 of its 704 corners fail at.
+
+A PoC that only *skips* the corners in (3) was measured and is not sufficient on
+its own - the disc corner is 0.0103 off its cylinder, so it is not skipped, and
+the disc is fanned exactly as before. The move has to be re-aimed, not gated.
+
+### What decides it, if the declarations are not used
 
 A corner may be taken off a plane only when that plane is a **tessellation chord
 of a surface the corner is being placed on**, and not when it is a face of the
