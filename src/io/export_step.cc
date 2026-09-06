@@ -592,31 +592,6 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   normals = calcTriangleNormals(ps->vertices, ps->indices);
   indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, ps->vertices);
 
-  {  // TEMP: what splitting only the affected polygons would cost
-    std::map<std::size_t, int> by_size;
-    std::size_t touched = 0, extra = 0;
-    for (const auto& poly : indicesNew) {
-      bool hit = false;
-      for (const int v : poly) {
-        if (corner_moves.count(v)) hit = true;
-      }
-      if (!hit) continue;
-      touched++;
-      by_size[poly.size()]++;
-      if (poly.size() > 3) extra += poly.size() - 3;
-    }
-    std::string sizes;
-    for (const auto& e : by_size) {
-      char b[32];
-      snprintf(b, sizeof(b), " %dx%d-gon", e.second, int(e.first));
-      sizes += b;
-    }
-    LOG(
-      "STEP export: TEMP %1$d corners would move; %2$d merged faces use one:%3$s; splitting them "
-      "adds %4$d faces to %5$d",
-      int(corner_moves.size()), int(touched), sizes.c_str(), int(extra), int(indicesNew.size()));
-  }
-
   // Which original made each merged face.
   //
   // Provenance is per triangle and the recognisers work on merged faces, so the
