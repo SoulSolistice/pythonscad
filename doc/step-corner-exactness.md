@@ -340,6 +340,37 @@ A plane is an exact surface and the intersection of a quadric with one is a
 conic. Widening the placement to treat a planar face as an implicit declaration
 is the next step, and it is what makes the rest of this list worth doing.
 
+#### Attempted, and how it fails
+
+The conic itself is not the problem. Alternating projection between the declared
+quadric and the plane converges exactly as it does between two declarations, and
+on `step-cut-cone` it lands every corner, moving at most 0.0387. What defeated
+three attempts is a smaller question: *which* plane.
+
+At a cut corner the facets meeting there are the quadric's wall facets, the
+cutting plane's, and sometimes a third - the sliver of the original base that a
+tilted cut leaves behind. A corner on two planes is a triple point and must not
+be moved onto either conic; a corner on one may be. So the second plane has to
+be found, and every way of finding it from the raw triangles was wrong:
+
+- **by provenance.** A frustum's cap belongs to the same original as its wall,
+  so asking whether the maker owns the surface calls the cap part of the cone
+  and loses the plane the corner is also on. It then moves off the base.
+- **by distance, at the edge's scale.** Cut facets near the rim fall within an
+  edge length of the quadric and are taken for wall facets, so no second plane
+  is found at all and nothing moves.
+- **by distance, at the sagitta's scale.** Better, and still wrong on a thin
+  face: the base sliver's own middle is within any threshold that a wall facet
+  must pass.
+
+The mistake is common to all three - asking raw triangles which plane they
+belong to, when `mergeTriangles` answers it exactly a few lines later. A merged
+planar face *is* a plane, and the planes at a corner are then simply the
+distinct ones among the faces using it. The placement for this case belongs in
+`build_tri_body` beside the two-owner one, after the merge, where
+`loop_normals` makes the question arithmetic rather than a guess. That is the
+next attempt, and no fourth threshold should be tried before it.
+
 ### Splitting, implemented and parked
 
 `claude/step-corner-split` fans out the planar polygons a moved corner would
