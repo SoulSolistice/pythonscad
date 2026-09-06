@@ -1183,7 +1183,7 @@ void StepKernel::build_tri_body(
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
   const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;
   const std::vector<char>& consumed = features.consumed;
-  std::set<std::size_t> split_for_corners;  // fanned out, see below
+  std::map<std::size_t, std::size_t> split_for_corners;  // face -> fan apex, see below
 
   // Put the junction corners on the curve their two owners cross along - but
   // only once it is known which faces are analytic, and only if no face that
@@ -1302,7 +1302,7 @@ void StepKernel::build_tri_body(
       return m == moves.end() ? vertices[v] : m->second;
     };
     std::size_t analytic_faces = 0, bent = 0, turned = 0;
-    std::set<std::size_t> splittable;
+    std::map<std::size_t, std::size_t> splittable;
     for (std::size_t i = 0; i < loops.size(); i++) {
       if (!loop_valid[i]) continue;
       bool uses = false;
@@ -1346,8 +1346,43 @@ void StepKernel::build_tri_body(
       for (std::size_t j = 0; j < loops.size(); j++) {
         if (loop_valid[j] && !consumed[j] && parents[j] == int(i)) has_hole = true;
       }
-      if (has_hole || loops[i].size() < 4) bent++;
-      else splittable.insert(i);
+      if (has_hole || loops[i].size() < 4) {
+        bent++;
+        continue;
+      }
+      // Which corner the fan starts from is not free, and corner 0 is not the
+      // answer. A fan triangulates the polygon only where every ear it cuts is
+      // wound the way the polygon is; an ear wound the other way lies *outside*
+      // it, and the face written for it contradicts the loop it is bounded by.
+      //
+      // The move is what makes this bite. Before it these polygons are convex
+      // and every corner would do - measured on step-declare-grid-scad, all
+      // seven apexes of the 7-gons. After it, three corners of a bore facet sit
+      // on the trim line the ridge left, nearly in a line, and a fan from one of
+      // them cuts an ear of area -4.0e-05: inverted, and only just. So the apex
+      // is chosen for the ear it leaves worst, and the polygon is split only if
+      // some corner leaves none of them inverted. On the same fixture that is 2
+      // to 3 corners of each polygon, at a worst ear of 0.19 to 0.72 against
+      // corner 0's -4.0e-05.
+      const Vector3d nhat = loop_normals[i].normalized();
+      const std::size_t n = loops[i].size();
+      std::size_t best_apex = 0;
+      double best_worst_ear = -1;
+      for (std::size_t a = 0; a < n; a++) {
+        double worst_ear = std::numeric_limits<double>::max();
+        for (std::size_t k = 1; k + 1 < n; k++) {
+          const Vector3d& q0 = at_moved(loops[i][a]);
+          const Vector3d& q1 = at_moved(loops[i][(a + k) % n]);
+          const Vector3d& q2 = at_moved(loops[i][(a + k + 1) % n]);
+          worst_ear = std::min(worst_ear, 0.5 * (q1 - q0).cross(q2 - q0).dot(nhat));
+        }
+        if (worst_ear > best_worst_ear) {
+          best_worst_ear = worst_ear;
+          best_apex = a;
+        }
+      }
+      if (best_worst_ear <= 0) bent++;
+      else splittable.emplace(i, best_apex);
     }
     // A face that turns over cannot be rescued by splitting - every triangle of
     // the fan turns with it - so it stops the move outright, and so does a
@@ -1373,12 +1408,12 @@ void StepKernel::build_tri_body(
         int(moves.size()), worst, int(analytic_faces));
       if (!split_for_corners.empty()) {
         std::size_t added = 0;
-        for (const std::size_t i : split_for_corners) added += loops[i].size() - 3;
+        for (const auto& sc : split_for_corners) added += loops[sc.first].size() - 3;
         LOG(
-          "STEP export: %1$d face%2$s that keeps a plane fanned into triangles to follow them, "
-          "adding %3$d face%4$s",
-          int(split_for_corners.size()), split_for_corners.size() == 1 ? "" : "s", int(added),
-          added == 1 ? "" : "s");
+          "STEP export: %1$d face%2$s that keep%3$s a plane fanned into triangles to follow them, "
+          "adding %4$d face%5$s",
+          int(split_for_corners.size()), split_for_corners.size() == 1 ? "" : "s",
+          split_for_corners.size() == 1 ? "s" : "", int(added), added == 1 ? "" : "s");
       }
     }
   }
@@ -2148,13 +2183,15 @@ void StepKernel::build_tri_body(
   //
   // Each triangle takes its boundary edges from the same map every other face
   // uses, so the shell still stitches along them; the diagonals are new and
-  // used by exactly the two triangles that share them. The plane is the
-  // polygon's own normal, which is what its corners no longer all sit on.
-  for (const std::size_t i : split_for_corners) {
+  // used by exactly the two triangles that share them. Each triangle carries
+  // the plane its own three corners lie on, which is the point of the fan -
+  // the polygon's plane is the one they no longer all sit on.
+  for (const auto& sc : split_for_corners) {
+    const std::size_t i = sc.first, apex = sc.second;
     const std::vector<int>& loop = loops[i];
-    const Vector3d& norm = loop_normals[i];
-    for (std::size_t k = 1; k + 1 < loop.size(); k++) {
-      const int tri[3] = {loop[0], loop[k], loop[k + 1]};
+    const std::size_t n = loop.size();
+    for (std::size_t k = 1; k + 1 < n; k++) {
+      const int tri[3] = {loop[apex], loop[(apex + k) % n], loop[(apex + k + 1) % n]};
       const Vector3d e1 = vertices[tri[1]] - vertices[tri[0]];
       const Vector3d e2 = vertices[tri[2]] - vertices[tri[0]];
       if (e1.cross(e2).norm() < area_eps) continue;
@@ -2175,8 +2212,15 @@ void StepKernel::build_tri_body(
       // triangle asserting a plane its corners had just moved off, and
       // step-declare-grid-scad carried the entire 0.096 on its planes while its
       // cylinders and its sweep were already exact.
+      //
+      // And it is written the way the bound winds, never turned to agree with
+      // the polygon. Turning it is what an inverted ear used to produce: a
+      // PLANE exactly opposite the loop bounding it, which is not a face.
+      // Choosing the apex is what makes that unnecessary - every ear of the
+      // chosen fan winds with the polygon - so a disagreement here is a bug
+      // rather than a case to paper over, and the triangle is dropped.
       Vector3d tn = e1.cross(e2);
-      if (tn.dot(norm) < 0) tn = -tn;
+      if (tn.dot(loop_normals[i]) <= 0) continue;
       tn.normalize();
       Vector3d ref = e1 - tn * tn.dot(e1);
       if (ref.norm() < 1e-12) ref = AnalyticFeatures::perpendicular(tn);
