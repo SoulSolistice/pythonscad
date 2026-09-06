@@ -35,6 +35,7 @@
 #include <src/geometry/PolySetUtils.h>
 #include <src/geometry/GeometryEvaluator.h>
 #include <src/geometry/Surface.h>
+#include <src/geometry/AnalyticFeatures.h>
 #include <set>
 #include <limits>
 #include <climits>
@@ -79,46 +80,7 @@ void reportProvenance(const PolySet& ps)
     int(fragments));
 }
 
-/*! Closest point on a declared surface, where one can be written down.
- *
- * Not every kind: a Bezier patch and a grid answer by projection, which can
- * fail to converge, and the caller has to treat that as "not this surface"
- * rather than as an answer. */
-bool closestOnSurface(const Surface *s, const Vector3d& p, Vector3d& out)
-{
-  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(s)) {
-    const Vector3d axis = cyl->normdir.normalized();
-    const Vector3d rel = p - cyl->refpt;
-    const Vector3d radial = rel - axis * rel.dot(axis);
-    if (radial.norm() < 1e-12) return false;
-    out = cyl->refpt + axis * rel.dot(axis) + radial.normalized() * cyl->r;
-    return true;
-  }
-  if (const auto *cone = dynamic_cast<const ConeSurface *>(s)) {
-    const Vector3d axis = cone->normdir.normalized();
-    const Vector3d rel = p - cone->refpt;
-    const double h = rel.dot(axis);
-    const Vector3d radial = rel - axis * h;
-    if (radial.norm() < 1e-12) return false;
-    const double want = cone->r + h * cone->slope;
-    if (want <= 0) return false;
-    out = cone->refpt + axis * h + radial.normalized() * want;
-    return true;
-  }
-  if (const auto *sph = dynamic_cast<const SphereSurface *>(s)) {
-    const Vector3d rel = p - sph->refpt;
-    if (rel.norm() < 1e-12) return false;
-    out = sph->refpt + rel.normalized() * sph->r;
-    return true;
-  }
-  if (const auto *grid = dynamic_cast<const GridSurface *>(s)) {
-    double u = 0, v = 0;
-    if (!grid->project(p, u, v)) return false;
-    out = grid->evaluate(u, v);
-    return true;
-  }
-  return false;
-}
+using AnalyticFeatures::closestOnSurface;
 
 /*! The surface's own normal where it passes closest to `p`.
  *
@@ -259,7 +221,7 @@ bool sameSurfaceGeometrically(const Surface *a, const Surface *b)
  * a surface *runs*, not what is near it.
  */
 void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_t>> *out,
-                     std::map<int, Vector3d> *out_moves)
+                     std::map<int, Vector3d> *out_moves, std::map<int, std::size_t> *out_single)
 {
   if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) return;
   if (ps.surfaces.empty()) return;
@@ -497,6 +459,14 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       }
       if (nearest == candidates[0]) guess_right++;
       else guess_wrong++;
+      // One declared owner is not one surface. The corner still lies where two
+      // things cross, and the other is very often a plane the mesh carries and
+      // nothing declared - a cube face taking the base off a cone. *Which*
+      // plane cannot be answered from raw triangles, and is answered exactly
+      // once mergeTriangles has run, so the vertex is handed on and placed in
+      // build_tri_body. doc/step-corner-exactness.md records the three ways of
+      // guessing it from triangles that do not work.
+      if (out_single != nullptr) out_single->emplace(int(v), candidates[0]);
     } else if (candidates.size() == 2) {
       pair++;
       // Two declared owners is not a contest to be broken but the trim curve
@@ -612,9 +582,10 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
 
   std::map<int32_t, std::vector<std::size_t>> owned;
   std::map<int, Vector3d> corner_moves;
+  std::map<int, std::size_t> single_owner;
   if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
     reportProvenance(*ps);
-    reportOwnership(*ps, &owned, &corner_moves);
+    reportOwnership(*ps, &owned, &corner_moves, &single_owner);
   }
 
   std::vector<IndexedFace> indicesNew;
@@ -701,8 +672,8 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceOrigin, corner_moves, owned, faceParents, newNormals, 1e-5, analytic,
-                    approximate);
+                    faceOrigin, corner_moves, single_owner, owned, faceParents, newNormals, 1e-5,
+                    analytic, approximate);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;

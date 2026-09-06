@@ -501,6 +501,13 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
 /*! An arbitrary unit vector perpendicular to `norm`. */
 Vector3d perpendicular(const Vector3d& norm);
 
+/*! Closest point on a declared surface, where one can be written down.
+ *
+ * Not every kind: a Bezier patch and a grid answer by projection, which can
+ * fail to converge, and the caller has to treat that as "not this surface"
+ * rather than as an answer. */
+bool closestOnSurface(const Surface *s, const Vector3d& p, Vector3d& out);
+
 /*! Least squares circle centre for points known to lie on a circle about
  * `axis`, returned projected onto the plane at `level`.
  *

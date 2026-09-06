@@ -259,9 +259,9 @@ void StepKernel::build_tri_body(
   const char *name, const std::vector<Vector3d>& mesh_vertices, const std::vector<IndexedFace>& faces,
   const std::vector<std::shared_ptr<Curve>>& curves,
   const std::vector<std::shared_ptr<Surface>>& surfaces, const std::vector<int32_t>& faceOrigin,
-  const std::map<int, Vector3d>& cornerMoves, const std::map<int32_t, std::vector<std::size_t>>& owned,
-  const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals, double tol,
-  bool analytic, bool approximate)
+  const std::map<int, Vector3d>& cornerMoves, const std::map<int, std::size_t>& singleOwner,
+  const std::map<int32_t, std::vector<std::size_t>>& owned, const std::vector<int>& faceParents,
+  const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate)
 {
   // A working copy, because the corner placement below moves junction corners
   // onto the curve their two declared owners cross along, once recognition has
@@ -1207,17 +1207,105 @@ void StepKernel::build_tri_body(
   // measured that at 83 faulty faces against 9 - so where a polygon that keeps
   // its plane would be bent, this declines the lot and the export is exactly
   // what it was.
+  // The other half of the placement: a corner one declared surface shares with
+  // a plane the mesh carries and nothing declared.
+  //
+  // Here rather than beside the two-owner case in reportOwnership, because
+  // *which* plane is only answerable here. Asked of raw triangles it cannot be
+  // done: a frustum cap shares an original with its wall, and no distance
+  // threshold separates a cut facet near the rim from a wall facet, or a thin
+  // base sliver from either - three attempts, all in
+  // doc/step-corner-exactness.md. mergeTriangles has since answered it exactly,
+  // because a merged face that keeps a PLANE *is* a plane: the planes at a
+  // corner are the distinct ones among the faces using it.
+  //
+  // One plane, and the corner goes on the conic where it meets the declared
+  // surface. Two, and it is a triple point - the cut and the sliver of base a
+  // tilted cut leaves behind - which belongs on neither conic and stays.
+  std::map<int, Vector3d> moves = cornerMoves;
+  if (approximate && !singleOwner.empty()) {
+    std::map<int, std::vector<std::size_t>> faces_at;
+    for (std::size_t i = 0; i < loops.size(); i++) {
+      if (!loop_valid[i] || consumed[i] || loops[i].size() < 3) continue;
+      for (const int v : loops[i]) faces_at[v].push_back(i);
+    }
+    std::size_t placed = 0, triple = 0;
+    double worst_plane = 0;
+    for (const auto& entry : singleOwner) {
+      const int v = entry.first;
+      if (v < 0 || std::size_t(v) >= vertices.size()) continue;
+      if (moves.count(v) != 0 || entry.second >= surfaces.size()) continue;
+      const auto at = faces_at.find(v);
+      if (at == faces_at.end()) continue;
+      Vector3d pn(0, 0, 0);
+      double pd = 0, reach_here = 0;
+      bool one = true, any = false;
+      for (const std::size_t i : at->second) {
+        const Vector3d n = loop_normals[i].normalized();
+        const double d = n.dot(vertices[loops[i][0]]);
+        for (const int w : loops[i]) {
+          reach_here = std::max(reach_here, (vertices[w] - vertices[v]).norm());
+        }
+        if (!any) {
+          pn = n;
+          pd = d;
+          any = true;
+        } else if ((n - pn).norm() > 1e-6 || fabs(d - pd) > 1e-6) {
+          one = false;
+          break;
+        }
+      }
+      if (!any) continue;
+      if (!one) {
+        triple++;
+        continue;
+      }
+      const Surface *own = surfaces[entry.second].get();
+      Vector3d p = vertices[v], qa;
+      bool ok = true;
+      for (int iter = 0; iter < 64; iter++) {
+        if (!AnalyticFeatures::closestOnSurface(own, p, qa)) {
+          ok = false;
+          break;
+        }
+        const Vector3d qb = qa - pn * (pn.dot(qa) - pd);
+        if ((qb - p).norm() < 1e-12) {
+          p = qb;
+          break;
+        }
+        p = qb;
+      }
+      if (!ok || !AnalyticFeatures::closestOnSurface(own, p, qa)) continue;
+      if ((qa - p).norm() > 1e-6 || fabs(pn.dot(p) - pd) > 1e-6) continue;
+      const double travel = (p - vertices[v]).norm();
+      if (travel > reach_here) continue;
+      worst_plane = std::max(worst_plane, travel);
+      moves.emplace(v, p);
+      placed++;
+    }
+    if (placed > 0) {
+      LOG(
+        "STEP export: %1$d corners a declared surface shares with one plane of the mesh reach "
+        "the conic where the two cross, moving at most %2$.4f; %3$d sit on two planes and stay",
+        int(placed), worst_plane, int(triple));
+    }
+  }
+
   // Under the approximation flag only. The exact tier asserts nothing the mesh
   // does not already state, and moving a vertex is such an assertion - without
   // this gate step-bored-cone's analytic export comes out with a PLANE
   // disagreeing with the winding of its own bound.
-  if (approximate && !cornerMoves.empty()) {
+  if (approximate && !moves.empty()) {
+    auto at_moved = [&](int v) -> const Vector3d& {
+      const auto m = moves.find(v);
+      return m == moves.end() ? vertices[v] : m->second;
+    };
     std::size_t analytic_faces = 0, bent = 0;
     for (std::size_t i = 0; i < loops.size(); i++) {
       if (!loop_valid[i]) continue;
       bool uses = false;
       for (const int v : loops[i]) {
-        if (cornerMoves.count(v) != 0) uses = true;
+        if (moves.count(v) != 0) uses = true;
       }
       if (!uses) continue;
       if (consumed[i]) {
@@ -1231,22 +1319,32 @@ void StepKernel::build_tri_body(
       // turns with it - so a face that would turn stops the move outright.
       Vector3d after(0, 0, 0);
       for (std::size_t k = 0; k < loops[i].size(); k++) {
-        const int va = loops[i][k], vb = loops[i][(k + 1) % loops[i].size()];
-        const auto ma = cornerMoves.find(va), mb = cornerMoves.find(vb);
-        const Vector3d& pa = ma == cornerMoves.end() ? vertices[va] : ma->second;
-        const Vector3d& pb = mb == cornerMoves.end() ? vertices[vb] : mb->second;
-        after += pa.cross(pb);
+        after += at_moved(loops[i][k]).cross(at_moved(loops[i][(k + 1) % loops[i].size()]));
       }
-      if (after.dot(loop_normals[i]) <= 0 || loops[i].size() > 3) bent++;
+      if (after.dot(loop_normals[i]) <= 0) {
+        bent++;
+        continue;
+      }
+      // Whether it is actually taken out of its plane, rather than whether it
+      // has more than three corners. A corner cut by a plane moves *along* that
+      // plane - the conic it lands on lies in it - so its face is not bent at
+      // all, and assuming otherwise declined the whole of step-cut-cone for a
+      // move that could not have touched it.
+      const Vector3d& p0 = at_moved(loops[i][0]);
+      double out_of_plane = 0;
+      for (const int w : loops[i]) {
+        out_of_plane = std::max(out_of_plane, fabs((at_moved(w) - p0).dot(loop_normals[i])));
+      }
+      if (out_of_plane > 1e-9) bent++;
     }
     if (bent > 0) {
       LOG(
         "STEP export: %1$d corners are left where the mesh put them: moving them would bend "
         "%2$d face%3$s that keeps a plane, and half a boundary moved is worse than none",
-        int(cornerMoves.size()), int(bent), bent == 1 ? "" : "s");
+        int(moves.size()), int(bent), bent == 1 ? "" : "s");
     } else if (analytic_faces > 0) {
       double worst = 0;
-      for (const auto& m : cornerMoves) {
+      for (const auto& m : moves) {
         if (m.first < 0 || std::size_t(m.first) >= vertices.size()) continue;
         worst = std::max(worst, (m.second - vertices[m.first]).norm());
         vertices[m.first] = m.second;
@@ -1254,7 +1352,7 @@ void StepKernel::build_tri_body(
       LOG(
         "STEP export: %1$d corners moved onto the curve where their two declared owners cross, "
         "by at most %2$.4f; %3$d analytic faces now bound themselves on their own surface",
-        int(cornerMoves.size()), worst, int(analytic_faces));
+        int(moves.size()), worst, int(analytic_faces));
     }
   }
 

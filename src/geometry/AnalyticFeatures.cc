@@ -17,6 +17,47 @@
 
 namespace AnalyticFeatures {
 
+/*! Closest point on a declared surface, where one can be written down.
+ *
+ * Not every kind: a Bezier patch and a grid answer by projection, which can
+ * fail to converge, and the caller has to treat that as "not this surface"
+ * rather than as an answer. */
+bool closestOnSurface(const Surface *s, const Vector3d& p, Vector3d& out)
+{
+  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(s)) {
+    const Vector3d axis = cyl->normdir.normalized();
+    const Vector3d rel = p - cyl->refpt;
+    const Vector3d radial = rel - axis * rel.dot(axis);
+    if (radial.norm() < 1e-12) return false;
+    out = cyl->refpt + axis * rel.dot(axis) + radial.normalized() * cyl->r;
+    return true;
+  }
+  if (const auto *cone = dynamic_cast<const ConeSurface *>(s)) {
+    const Vector3d axis = cone->normdir.normalized();
+    const Vector3d rel = p - cone->refpt;
+    const double h = rel.dot(axis);
+    const Vector3d radial = rel - axis * h;
+    if (radial.norm() < 1e-12) return false;
+    const double want = cone->r + h * cone->slope;
+    if (want <= 0) return false;
+    out = cone->refpt + axis * h + radial.normalized() * want;
+    return true;
+  }
+  if (const auto *sph = dynamic_cast<const SphereSurface *>(s)) {
+    const Vector3d rel = p - sph->refpt;
+    if (rel.norm() < 1e-12) return false;
+    out = sph->refpt + rel.normalized() * sph->r;
+    return true;
+  }
+  if (const auto *grid = dynamic_cast<const GridSurface *>(s)) {
+    double u = 0, v = 0;
+    if (!grid->project(p, u, v)) return false;
+    out = grid->evaluate(u, v);
+    return true;
+  }
+  return false;
+}
+
 Vector3d perpendicular(const Vector3d& norm)
 {
   const Vector3d axis = fabs(norm[0]) < 0.9 ? Vector3d(1, 0, 0) : Vector3d(0, 1, 0);

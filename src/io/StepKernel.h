@@ -1893,6 +1893,7 @@ public:
                       const std::vector<std::shared_ptr<Curve>>& curves,
                       const std::vector<std::shared_ptr<Surface>>& surfaces,
                       const std::vector<int32_t>& faceOrigin, const std::map<int, Vector3d>& cornerMoves,
+                      const std::map<int, std::size_t>& singleOwner,
                       const std::map<int32_t, std::vector<std::size_t>>& owned,
                       const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals,
                       double tol, bool analytic = false, bool approximate = false);
