@@ -221,7 +221,8 @@ bool sameSurfaceGeometrically(const Surface *a, const Surface *b)
  * a surface *runs*, not what is near it.
  */
 void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_t>> *out,
-                     std::map<int, Vector3d> *out_moves, std::map<int, std::size_t> *out_single)
+                     std::map<int, Vector3d> *out_moves, std::map<int, std::size_t> *out_single,
+                     std::map<int, std::pair<std::size_t, std::size_t>> *out_split)
 {
   if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) return;
   if (ps.surfaces.empty()) return;
@@ -489,6 +490,21 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         }
         p = qb;
       }
+      // Which of the two is exact and which is a fit, because they are not
+      // worth the same. A declared quadric states where the surface is; a
+      // GridSurface was interpolated through the model's own stations and says
+      // so, publishing a tessellation band. Where a corner has one of each, the
+      // exact one is the thing to be placed on and the fit is a tolerance to be
+      // checked against - see doc/step-corner-exactness-handover.md. Handed on
+      // for build_tri_body, which is where the planes are answerable.
+      if (out_split != nullptr) {
+        const bool a_fit = dynamic_cast<const GridSurface *>(a) != nullptr;
+        const bool b_fit = dynamic_cast<const GridSurface *>(b) != nullptr;
+        if (a_fit != b_fit) {
+          out_split->emplace(int(v), a_fit ? std::make_pair(candidates[1], candidates[0])
+                                           : std::make_pair(candidates[0], candidates[1]));
+        }
+      }
       if (ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-6) {
         on_edge++;
         const double travel = (p - ps.vertices[v]).norm();
@@ -583,9 +599,10 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   std::map<int32_t, std::vector<std::size_t>> owned;
   std::map<int, Vector3d> corner_moves;
   std::map<int, std::size_t> single_owner;
+  std::map<int, std::pair<std::size_t, std::size_t>> owner_split;  // corner -> (exact, fitted)
   if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
     reportProvenance(*ps);
-    reportOwnership(*ps, &owned, &corner_moves, &single_owner);
+    reportOwnership(*ps, &owned, &corner_moves, &single_owner, &owner_split);
   }
 
   std::vector<IndexedFace> indicesNew;
@@ -647,8 +664,8 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceOrigin, corner_moves, single_owner, owned, faceParents, newNormals, 1e-5,
-                    analytic, approximate);
+                    faceOrigin, corner_moves, single_owner, owner_split, owned, faceParents, newNormals,
+                    1e-5, analytic, approximate);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;

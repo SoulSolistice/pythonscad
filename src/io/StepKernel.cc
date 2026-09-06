@@ -260,6 +260,7 @@ void StepKernel::build_tri_body(
   const std::vector<std::shared_ptr<Curve>>& curves,
   const std::vector<std::shared_ptr<Surface>>& surfaces, const std::vector<int32_t>& faceOrigin,
   const std::map<int, Vector3d>& cornerMoves, const std::map<int, std::size_t>& singleOwner,
+  const std::map<int, std::pair<std::size_t, std::size_t>>& ownerSplit,
   const std::map<int32_t, std::vector<std::size_t>>& owned, const std::vector<int>& faceParents,
   const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate)
 {
@@ -1289,6 +1290,135 @@ void StepKernel::build_tri_body(
         "STEP export: %1$d corners a declared surface shares with one plane of the mesh reach "
         "the conic where the two cross, moving at most %2$.4f; %3$d sit on two planes and stay",
         int(placed), worst_plane, int(triple));
+    }
+  }
+
+  // Keep every exact thing the corner is already on.
+  //
+  // A corner owned by a declared quadric and a declared sweep was being put
+  // where the two cross - but the two are not worth the same. The quadric
+  // states where its surface is; the sweep was interpolated through the model's
+  // stations and publishes a tessellation band saying how well. Aiming at their
+  // crossing curve spends an exact surface to satisfy a fitted one.
+  //
+  // It shows up as a plane. The mesh's flat bottom on step-declare-grid.py is a
+  // 95-corner face, and one of its corners is owned by the wall cylinder and
+  // the ridge's sweep; placed on their crossing curve it leaves z = 0 by
+  // 0.0423, and a face that big cannot be fanned without turning the part's
+  // flat bottom into 93 triangles, three of them off level and one by 21
+  // degrees. The corner was exactly on that plane, 0.0103 off the cylinder -
+  // 19.2(1 - cos(pi/96)), the wall's own sagitta - and 0.0378 off the sweep,
+  // which had declared a band of 0.1290. Nothing was wrong with it that the
+  // sweep was entitled to complain about.
+  //
+  // So: a plane the mesh carries *and a declaration vouches for* is kept, and
+  // the corner is placed on that plane crossed with its exact owner instead.
+  // Measured over the fixture set, 1533 merged planes are bent by a move and
+  // exactly 2 are vouched for - the flat bottoms of step-declare-grid.py and
+  // -strip, matching a declaration's own plane to 0.00e+00 - so this reaches
+  // the case it is for and no other.
+  //
+  // The direction is what makes it safe: a declaration only ever *confirms* a
+  // plane the mesh already has, and never invents one. refpt is not reliably a
+  // rim - declare_cylinder takes the caller's centre, and a fitted cylinder's
+  // refpt is wherever the fit landed - so a plane the mesh does not carry must
+  // not be conjured out of one.
+  if (approximate && !moves.empty() && !ownerSplit.empty()) {
+    std::map<int, std::vector<std::size_t>> faces_at;
+    for (std::size_t i = 0; i < loops.size(); i++) {
+      if (!loop_valid[i] || consumed[i] || loops[i].size() < 3) continue;
+      for (const int v : loops[i]) faces_at[v].push_back(i);
+    }
+    std::size_t rerouted = 0, dropped = 0;
+    double worst_reroute = 0;
+    for (const auto& sp : ownerSplit) {
+      const int v = sp.first;
+      if (moves.count(v) == 0) continue;
+      if (v < 0 || std::size_t(v) >= vertices.size()) continue;
+      if (sp.second.first >= surfaces.size() || sp.second.second >= surfaces.size()) continue;
+      const auto at = faces_at.find(v);
+      if (at == faces_at.end()) continue;
+      // The planes at this corner that a declaration vouches for.
+      std::vector<std::pair<Vector3d, double>> vouched;
+      for (const std::size_t i : at->second) {
+        const double nn = loop_normals[i].norm();
+        if (nn < 1e-12) continue;
+        const Vector3d nhat = loop_normals[i] / nn;
+        const double d = nhat.dot(vertices[loops[i][0]]);
+        if (fabs(nhat.dot(vertices[v]) - d) > tol) continue;  // the corner is not on it
+        for (const auto& sf : surfaces) {
+          const double an = sf->normdir.norm();
+          if (an < 1e-12) continue;
+          const Vector3d ahat = sf->normdir / an;
+          const double par = ahat.dot(nhat);
+          if (1.0 - fabs(par) > 1e-6) continue;
+          if (fabs(ahat.dot(sf->refpt) - par * d) > tol) continue;
+          bool have = false;
+          for (const auto& w : vouched) {
+            if ((w.first - nhat).norm() < 1e-6 && fabs(w.second - d) < tol) have = true;
+          }
+          if (!have) vouched.emplace_back(nhat, d);
+          break;
+        }
+      }
+      if (vouched.empty()) continue;  // nothing exact is being given up
+      // Already in every one of them? Then the move keeps them and stands.
+      bool leaves = false;
+      for (const auto& w : vouched) {
+        if (fabs(w.first.dot(moves[v]) - w.second) > 1e-9) leaves = true;
+      }
+      if (!leaves) continue;
+      // Two vouched planes and the exact owner is one constraint too many; a
+      // corner on two planes is a triple point already, and it stays.
+      if (vouched.size() > 1) {
+        moves.erase(v);
+        dropped++;
+        continue;
+      }
+      // Place it where the exact owner crosses the plane, nearest to where the
+      // mesh put it. Both are exact, so this is the answer rather than a
+      // compromise between one and a fit.
+      const Surface *own = surfaces[sp.second.first].get();
+      const Vector3d pn = vouched[0].first;
+      const double pd = vouched[0].second;
+      Vector3d p = vertices[v], q;
+      bool ok = true;
+      for (int iter = 0; iter < 64; iter++) {
+        if (!AnalyticFeatures::closestOnSurface(own, p, q)) {
+          ok = false;
+          break;
+        }
+        const Vector3d next = q - pn * (pn.dot(q) - pd);
+        if ((next - p).norm() < 1e-12) {
+          p = next;
+          break;
+        }
+        p = next;
+      }
+      if (!ok || !AnalyticFeatures::closestOnSurface(own, p, q) || (q - p).norm() > 1e-6 ||
+          fabs(pn.dot(p) - pd) > 1e-9) {
+        moves.erase(v);
+        dropped++;
+        continue;
+      }
+      // And the fit only has to agree to within what it declared.
+      const auto *fit = dynamic_cast<const GridSurface *>(surfaces[sp.second.second].get());
+      if (fit != nullptr && AnalyticFeatures::closestOnSurface(fit, p, q) &&
+          (q - p).norm() > fit->membershipTolerance()) {
+        moves.erase(v);
+        dropped++;
+        continue;
+      }
+      worst_reroute = std::max(worst_reroute, (p - vertices[v]).norm());
+      moves[v] = p;
+      rerouted++;
+    }
+    if (rerouted > 0 || dropped > 0) {
+      LOG(
+        "STEP export: %1$d corners are placed on a plane a declaration vouches for crossed with "
+        "their exact owner rather than on the fit, moving at most %2$.4f; %3$d stay where the "
+        "mesh put them",
+        int(rerouted), worst_reroute, int(dropped));
     }
   }
 

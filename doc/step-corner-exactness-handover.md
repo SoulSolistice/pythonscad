@@ -75,8 +75,8 @@ face's own corners are from the surface it is on. **Done is 0 to within 1e-9.**
     step-band-family          8.89e-02         planes done, cyl and sweep not
     step-cut-cone             3.16e-02         two triple points, correctly left
     step-exact-trim           3.42e-02         not looked at
-    py-step-declare-grid      6.35e-16         reads done and is not - see the disc
-    py-step-declare-grid-strip 6.35e-16        the same face, the same reason
+    py-step-declare-grid      1.86e-13         done, and the flat bottom kept
+    py-step-declare-grid-strip 1.86e-13        done, and the flat bottom kept
 
 Beware the p95 on a small face: with nineteen corners it *is* the maximum, which
 is why `step-cut-cone` reads 3.16e-02 for two corners out of nineteen. Look at
@@ -107,7 +107,52 @@ inverted.
 opposed PLANE above. The triangle's plane is now written the way its bound
 winds, always; choosing the apex is what makes the two agree.
 
-## The disc, and why the Python pair is still red
+## The disc: fixed by aiming at the declaration
+
+**Resolved 2026-09-06.** The section below records how it was found; this is what
+it turned out to be and how it was fixed. The Python pair is green again with
+`ROUNDTRIP-APPROX: Plane=4` **unchanged** - their numbers never needed deriving,
+the placement needed correcting.
+
+The corner was owned by a declared cylinder and a declared *sweep*, and those are
+not worth the same: the cylinder states where its surface is, the sweep was
+interpolated through the model's stations and publishes a tessellation band
+saying how well. Aiming at the curve where the two cross spends the exact one to
+satisfy the fitted one. For that corner:
+
+    on the declared plane z = 0          exactly
+    off the declared cylinder r = 19.2   0.0103    = 19.2(1 - cos(pi/96))
+    off the fitted sweep                 0.0378    against its declared band of 0.1290
+
+It is placed instead where its exact owner crosses the plane, and the fit only
+has to agree within the band it declared. On the two fixtures that is a move of
+at most 0.0847, the flat bottom stays one face, and nothing is fanned.
+
+Two things make it safe:
+
+- **A declaration only ever confirms a plane the mesh already carries.** It never
+  invents one. `refpt` is not reliably a rim - `declare_cylinder` takes the
+  caller's centre and a *fitted* cylinder's `refpt` is wherever the fit landed -
+  so the test runs from the mesh's plane outwards, never from the declaration in.
+- **Measured over the whole fixture set before it was written**: 1533 merged
+  planes are bent by a move and **exactly 2 are vouched for** - the flat bottoms
+  of `step-declare-grid.py` and `-strip`, matching a declaration's own plane to
+  `0.00e+00`. The other 1531 are tessellation chords, extent 0.51 to 10.81, and
+  keep being abandoned as before. No false positives.
+
+Mutation checked: make the vouching test match nothing and exactly those two
+fixtures fail again.
+
+### What it does not reach
+
+The rule protects a plane a declaration vouches for. A real flat face nothing
+declares is still unprotected - `step-declare-grid-scad`'s two ridge end caps are
+exactly that, real faces of the model that no declaration anchors. They are not
+bent by any move today, so it does not bite, but it is the next thing to break.
+The fix is in the declaration channel rather than here: see "what the declaration
+channel cannot say".
+
+## How the disc was found, and why the pair was red
 
 `step-declare-grid.py` and `-strip` fan exactly one face, and it is the wrong
 one: a **95-corner polygon which is the part's flat bottom**. Its middle lies
@@ -223,6 +268,28 @@ three.
 The work is to ask the recogniser the question it already answers - is this
 planar face a member of that surface - rather than to re-derive it in
 `build_tri_body`.
+
+## What the declaration channel cannot say
+
+Found while fixing the above, and each of these is a plane the exporter cannot be
+told about:
+
+- **There is no plane declaration at all.** `Surface.h` has sphere, torus,
+  Bezier, cylinder, cone and grid. A model cannot state that a face is flat; the
+  cap plane is only reachable because `primitives.cc` anchors a cylinder's record
+  at its rim, so `refpt` with `normdir` happens to be that rim's plane.
+- **A straight cylinder declares one rim, not two.** For `r1 == r2` only one
+  `CylinderSurface` is pushed, at `z1`, and `addSurfaceUnique` would fold a
+  second one into it anyway since coaxial cylinders of equal radius count as the
+  same surface. So a part whose sweep meets the *top* cap gets no protection.
+  `step-declare-grid.py`'s ridge only reaches the bottom, which is the only
+  reason this is not already a bug.
+- **A grid declares no end planes.** The ridge's two end caps are faces of the
+  model and nothing anchors them.
+
+Carrying the rim as its own declaration - a plane, or the `ArcCurve` that already
+exists and is unused here - is the structural fix, and it is what makes the rule
+above general rather than lucky.
 
 ## The immediate task
 
