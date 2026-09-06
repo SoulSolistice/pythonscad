@@ -1338,7 +1338,28 @@ void StepKernel::build_tri_body(
       if (sp.second.first >= surfaces.size() || sp.second.second >= surfaces.size()) continue;
       const auto at = faces_at.find(v);
       if (at == faces_at.end()) continue;
-      // The planes at this corner that a declaration vouches for.
+      // The planes at this corner that are faces of the model rather than
+      // tessellation, told apart by the declared surface itself.
+      //
+      // A chord facet of a surface is spanned by two directions tangent to it,
+      // so its plane's normal is parallel to the surface's own normal there. A
+      // plane that cuts *across* the surface - a cylinder's cap - has a normal
+      // perpendicular to it. So the question is only whether the plane's normal
+      // is closer to parallel or to perpendicular, which is a midpoint rather
+      // than a tuned constant, and the two cases are nowhere near it: measured
+      // over the fixtures, cutting planes read 0.000000 to 0.000003 and chords
+      // read 0.885 to 1.000.
+      //
+      // This asks the declaration and not the mesh, which is the point. An
+      // earlier version compared the plane against the one a declared surface's
+      // refpt is anchored at; that works only where the anchor happens to be
+      // the rim, so it vouched for a cylinder's bottom cap and not its top -
+      // primitives.cc pushes one record for r1 == r2 - and never for a sweep's
+      // end caps. This needs no anchor and no second declaration.
+      const Surface *exact = surfaces[sp.second.first].get();
+      Vector3d q_at;
+      if (!AnalyticFeatures::closestOnSurface(exact, vertices[v], q_at)) continue;
+      const double off_at = (vertices[v] - q_at).norm();
       std::vector<std::pair<Vector3d, double>> vouched;
       for (const std::size_t i : at->second) {
         const double nn = loop_normals[i].norm();
@@ -1346,20 +1367,18 @@ void StepKernel::build_tri_body(
         const Vector3d nhat = loop_normals[i] / nn;
         const double d = nhat.dot(vertices[loops[i][0]]);
         if (fabs(nhat.dot(vertices[v]) - d) > tol) continue;  // the corner is not on it
-        for (const auto& sf : surfaces) {
-          const double an = sf->normdir.norm();
-          if (an < 1e-12) continue;
-          const Vector3d ahat = sf->normdir / an;
-          const double par = ahat.dot(nhat);
-          if (1.0 - fabs(par) > 1e-6) continue;
-          if (fabs(ahat.dot(sf->refpt) - par * d) > tol) continue;
-          bool have = false;
-          for (const auto& w : vouched) {
-            if ((w.first - nhat).norm() < 1e-6 && fabs(w.second - d) < tol) have = true;
-          }
-          if (!have) vouched.emplace_back(nhat, d);
-          break;
+        // How much of a step along the plane's normal the surface takes back,
+        // which is |n . nS| without needing a normal from the Surface API.
+        const double delta = 1e-4;
+        Vector3d q_off;
+        if (!AnalyticFeatures::closestOnSurface(exact, vertices[v] + nhat * delta, q_off)) continue;
+        const double along = fabs(((vertices[v] + nhat * delta) - q_off).norm() - off_at) / delta;
+        if (along >= 0.5) continue;  // parallel to the surface's normal: a chord
+        bool have = false;
+        for (const auto& w : vouched) {
+          if ((w.first - nhat).norm() < 1e-6 && fabs(w.second - d) < tol) have = true;
         }
+        if (!have) vouched.emplace_back(nhat, d);
       }
       if (vouched.empty()) continue;  // nothing exact is being given up
       // Already in every one of them? Then the move keeps them and stands.
@@ -1378,7 +1397,7 @@ void StepKernel::build_tri_body(
       // Place it where the exact owner crosses the plane, nearest to where the
       // mesh put it. Both are exact, so this is the answer rather than a
       // compromise between one and a fit.
-      const Surface *own = surfaces[sp.second.first].get();
+      const Surface *own = exact;
       const Vector3d pn = vouched[0].first;
       const double pd = vouched[0].second;
       Vector3d p = vertices[v], q;

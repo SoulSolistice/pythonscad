@@ -143,14 +143,45 @@ Two things make it safe:
 Mutation checked: make the vouching test match nothing and exactly those two
 fixtures fail again.
 
-### What it does not reach
+### How the plane is told from a chord, and why no rim declaration was needed
 
-The rule protects a plane a declaration vouches for. A real flat face nothing
-declares is still unprotected - `step-declare-grid-scad`'s two ridge end caps are
-exactly that, real faces of the model that no declaration anchors. They are not
-bent by any move today, so it does not bite, but it is the next thing to break.
-The fix is in the declaration channel rather than here: see "what the declaration
-channel cannot say".
+The first version of this asked whether a plane matched the one a declared
+surface's `refpt` is anchored at. That works only where the anchor happens to be
+the rim, and it left two holes: `primitives.cc` pushes one `CylinderSurface` for
+`r1 == r2`, so a cylinder's *far* cap is anchored by nothing, and a sweep's end
+caps never are.
+
+Setting out to close those by declaring the rim found that neither obvious route
+works. **An `ArcCurve` does not survive a boolean** - `ManifoldGeometry` carries
+`surfaces_` through and has no curves at all, so a declared rim would be dropped
+by the very union that creates the junction. **A new `PlaneSurface` would churn
+every fixture**: the surface census in the report counts declared surfaces, so
+two more per cylinder moves the `EXPECT: N analytic surfaces available` line
+everywhere.
+
+Neither is needed, because the declaration already answers the question. A chord
+facet of a surface is spanned by two directions tangent to it, so its plane's
+normal is **parallel** to the surface's own normal there; a plane that cuts
+across - a cap - has a normal **perpendicular** to it. So the test is only
+whether the plane's normal is closer to parallel or to perpendicular, which is a
+midpoint rather than a tuned constant. Measured over the fixtures, with the
+surface normal taken numerically so no Surface API is needed:
+
+    cutting planes   the two flat bottoms          0.000000
+                     ridge end caps, and a 6-gon   0.000003
+    chords           step-declare-grid-scad        0.995 to 1.000
+                     step-band-family              0.885 to 0.923
+
+Five orders of magnitude apart with nothing between them. This asks the
+declaration, needs no anchor, and closes both holes at once - the far cap and
+the sweep's end caps are now vouched for as well.
+
+`step-declare-grid-topcap.py` is the regression guard: `step-declare-grid.py`
+reflected, with the wall translated so its record is anchored at the far end, so
+the ridge arrives at the cap nothing anchors. Every number in it is its twin's,
+a reflection being an isometry, and any number that differs is the bug. Proven
+against a file known to be wrong by restoring the anchor-matching test, under
+which it comes out `Plane=96` while its twin stays at `Plane=4`.
 
 ## How the disc was found, and why the pair was red
 
@@ -271,25 +302,24 @@ planar face a member of that surface - rather than to re-derive it in
 
 ## What the declaration channel cannot say
 
-Found while fixing the above, and each of these is a plane the exporter cannot be
-told about:
+Still true, and still worth knowing, but **no longer blocking the corner work** -
+the test above needs none of it:
 
 - **There is no plane declaration at all.** `Surface.h` has sphere, torus,
-  Bezier, cylinder, cone and grid. A model cannot state that a face is flat; the
-  cap plane is only reachable because `primitives.cc` anchors a cylinder's record
-  at its rim, so `refpt` with `normdir` happens to be that rim's plane.
+  Bezier, cylinder, cone and grid. A model cannot state that a face is flat.
 - **A straight cylinder declares one rim, not two.** For `r1 == r2` only one
   `CylinderSurface` is pushed, at `z1`, and `addSurfaceUnique` would fold a
   second one into it anyway since coaxial cylinders of equal radius count as the
-  same surface. So a part whose sweep meets the *top* cap gets no protection.
-  `step-declare-grid.py`'s ridge only reaches the bottom, which is the only
-  reason this is not already a bug.
-- **A grid declares no end planes.** The ridge's two end caps are faces of the
-  model and nothing anchors them.
+  same surface.
+- **A grid declares no end planes**, and `curves` never reaches the exporter
+  through a boolean at all: `ManifoldGeometry` has no curves member, so
+  `ArcCurve` is dead outside `import_step.cc`. `StepKernel` says as much with
+  `(void)curves;`.
 
-Carrying the rim as its own declaration - a plane, or the `ArcCurve` that already
-exists and is unused here - is the structural fix, and it is what makes the rule
-above general rather than lucky.
+What would buy something is the *reverse* of the corner work: a declared plane
+would let the exporter write a cap as a declared face rather than recognise it,
+and would give a corner on two planes a triple point to be placed at. Neither is
+needed for exactness today.
 
 ## The immediate task
 
