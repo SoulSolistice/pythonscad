@@ -3443,6 +3443,75 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         // flat.
         const Vector3d base = bands[low].base;
         const Vector3d top_centre = bands[high].base + bands[seed].axis * bands[high].height;
+
+        // ---- does the run reach both poles? --------------------------------
+        //
+        // A sphere carries no latitude bound - `sphere()` means the whole
+        // sphere, and a fitted one is the sphere its rings lie on, neither of
+        // them bounded - but the mesh ends in a flat disc at either end,
+        // because OpenSCAD's tessellation puts its outermost ring half a ring
+        // step short of the axis instead of converging to a pole vertex. Those
+        // discs are the tessellation's, not the model's. Written as they stand
+        // they export a sphere with its poles sliced off: 523.5806 where a
+        // radius 5 sphere has 523.5988, which is 0.0035% and a disagreement
+        // with (4/3)pi r^3 in the fourth figure.
+        //
+        // So the run absorbs them - but only once the gap they span is the one
+        // the tessellation leaves rather than one a boolean cut. The test is
+        // angular and measured against the run's own bands: a cap subtends half
+        // of one ring step, so a gap of a whole step or more means a ring is
+        // missing and something has taken a piece out of this sphere. A cut
+        // lands where the modeller put it, and anywhere is far outside half a
+        // step at any $fn worth exporting.
+        //
+        // The one cut this cannot see is one exactly at the last ring: it
+        // removes no facet, so the mesh it leaves is identical to the uncut
+        // sphere's and nothing downstream of the mesh can tell them apart.
+        //
+        // Both ends or neither, which is a deliberate boundary rather than an
+        // oversight. A sphere with something standing on one pole - a knob
+        // welded to the top - has a real polar cap at the other end that could
+        // be closed on its own, but the face that would take it is a shape this
+        // writer does not have: one rim, and a seam running from that rim to a
+        // degenerate pole. Refusing leaves such a model exporting exactly as it
+        // did before, which is the safe direction to be wrong in.
+        bool pole_closed = false;
+        std::size_t cap_low = 0, cap_high = 0;
+        if (const auto *sph = dynamic_cast<const SphereSurface *>(surface.get())) {
+          const Vector3d axis = bands[seed].axis;
+          // the angle a point subtends from the pole the axis points at
+          auto polar = [&](const Vector3d& p) {
+            const double c = (p - sph->refpt).dot(axis) / sph->r;
+            return acos(std::max(-1.0, std::min(1.0, c)));
+          };
+          const RimRef& lo_rim = rims[low].first;
+          const RimRef& hi_rim = rims[high].second;
+          // Each end rim has to be the whole bound of one neighbouring face,
+          // which is what a cap is: a rim bordering many faces is a junction
+          // with something else and the sphere does not end there.
+          if (lo_rim.kind == RimRef::WHOLE_LOOP && hi_rim.kind == RimRef::WHOLE_LOOP &&
+              lo_rim.loop < loops.size() && hi_rim.loop < loops.size()) {
+            const double gap_low = M_PI - polar(base);
+            const double gap_high = polar(top_centre);
+            const double step_low =
+              fabs(polar(bands[low].base) - polar(bands[low].base + axis * bands[low].height));
+            const double step_high =
+              fabs(polar(bands[high].base) - polar(bands[high].base + axis * bands[high].height));
+            // and the caps have to be flat discs across the axis rather than
+            // whatever else a single neighbouring face might be
+            const auto across = [&](std::size_t f) {
+              return fabs(fabs(loop_normals[f].normalized().dot(axis)) - 1.0) <= 1e-6;
+            };
+            if (gap_low <= step_low && gap_high <= step_high && step_low > 0 && step_high > 0 &&
+                across(lo_rim.loop) && across(hi_rim.loop)) {
+              pole_closed = true;
+              cap_low = lo_rim.loop;
+              cap_high = hi_rim.loop;
+              walls.push_back(cap_low);
+              walls.push_back(cap_high);
+            }
+          }
+        }
         const std::vector<int> bottom_set = bands[low].bottom_set;
         const std::vector<int> top_set = bands[high].top_set;
         const double r_bottom = bands[low].r_bottom;
@@ -3467,6 +3536,14 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         merged.seam_top = seam_top;
         merged.outward = outward;
         merged.zone = surface;
+        merged.pole_closed = pole_closed;
+        // The caps are the face's now, so they stop being faces of their own.
+        // Their rims go with them: the closed sphere has no rim at all, and the
+        // circles that used to bound the run's ends are not written.
+        if (pole_closed) {
+          consumed[cap_low] = 1;
+          consumed[cap_high] = 1;
+        }
         rims[seed] = ends;
         for (const std::size_t bi : run) {
           if (bi == seed) continue;

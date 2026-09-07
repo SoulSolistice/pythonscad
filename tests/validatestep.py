@@ -1018,6 +1018,89 @@ def check_surface_curves(entities, problems):
                     "#%d: PCURVE runs %g from the 3D curve it belongs to - the two say different "
                     "things about where the edge is" % (pcurve.id, worst)
                 )
+def check_closed_sphere(entities, face, surface, radius, oriented, problems):
+    """A sphere closed on itself, bounded by its seam meridian and nothing else.
+
+    A whole `sphere()` has no rim. Its two polar caps belong to the spherical
+    face rather than sitting beside it - the flat discs an OpenSCAD sphere ends
+    in are the tessellation's, not the model's - so the only boundary left is
+    the seam: a meridian running pole to pole, used once in either direction,
+    with the poles where the two usages meet. OCCT writes the same solid as a
+    FACE_BOUND over a VERTEX_LOOP with no edges at all, and reads this form back
+    as one Sphere with two degenerate edges, which are the zero length edges it
+    inserts at the poles itself.
+
+    This is a face shape, not an allowance for one. A two edge spherical face is
+    only the *whole* sphere if the seam runs from one pole to the other, and
+    that is what is checked here: one distinct edge used once in either
+    direction, whose curve is a great circle - radius exactly the sphere's - and
+    whose two ends are antipodal, r from the centre, and on the surface's own
+    axis. A face bounded by any other pair of points is some patch of the sphere
+    whose remaining boundary has gone missing, and it would leave the shell
+    open; a seam on a small circle is a rim of some other sphere. Both are
+    mistakes this exporter could make, and neither reaches here.
+    """
+    place = _placement(entities, surface.refs()[0]) if surface.refs() else None
+    if place is None:
+        problems.append("#%d: SPHERICAL_SURFACE has no readable placement" % surface.id)
+        return
+    centre, axis, _ref = place
+
+    seams, ends_seen = set(), []
+    for oid in oriented:
+        ends = _edge_endpoints(entities, oid)
+        oe = entities.get(oid)
+        if ends is None or oe is None or not oe.refs():
+            problems.append("#%d: closed spherical face has an unreadable edge" % face.id)
+            return
+        seams.add(ends[2])
+        ends_seen.append(ends)
+    if len(seams) != 1:
+        problems.append(
+            "#%d: a sphere closed on itself needs one seam edge used twice, found %d"
+            % (face.id, len(seams))
+        )
+        return
+    if ends_seen[0][3] == ends_seen[1][3]:
+        problems.append(
+            "#%d: the seam of a closed spherical face is used twice the same way round" % face.id
+        )
+        return
+
+    geom = _edge_geometry(entities, oriented[0])
+    if geom is None or geom.name != "CIRCLE":
+        problems.append(
+            "#%d: the seam of a closed spherical face is %s, not the meridian CIRCLE it has to be"
+            % (face.id, "unreadable" if geom is None else geom.name)
+        )
+        return
+    cr = geom.floats()[-1] if geom.floats() else None
+    if cr is None or abs(cr - radius) > 1e-6 * max(1.0, radius):
+        problems.append(
+            "#%d: seam CIRCLE #%d has radius %s, but a meridian of this sphere is a great "
+            "circle at %s" % (face.id, geom.id, cr, radius)
+        )
+
+    poles = [_vertex_point(entities, ends_seen[0][0]), _vertex_point(entities, ends_seen[0][1])]
+    if any(p is None for p in poles):
+        problems.append("#%d: closed spherical face has an unreadable pole vertex" % face.id)
+        return
+    tol = 1e-6 * max(1.0, radius)
+    for p in poles:
+        rel = [p[i] - centre[i] for i in range(3)]
+        along = sum(rel[i] * axis[i] for i in range(3))
+        off = math.sqrt(max(0.0, sum(c * c for c in rel) - along * along))
+        if abs(abs(along) - radius) > tol or off > tol:
+            problems.append(
+                "#%d: the seam ends at %s, which is not a pole of the sphere at %s r=%s"
+                % (face.id, p, centre, radius)
+            )
+            return
+    if abs(sum((poles[0][i] - centre[i]) * axis[i] for i in range(3))
+           + sum((poles[1][i] - centre[i]) * axis[i] for i in range(3))) > tol:
+        problems.append(
+            "#%d: the seam of a closed spherical face ends twice at the same pole" % face.id
+        )
 
 
 def check_cylindrical_faces(entities, problems):
@@ -1137,6 +1220,14 @@ def check_cylindrical_faces(entities, problems):
             continue
 
         oriented = loop.refs()
+
+        # A sphere closed on itself has no rim at all and so has two edges,
+        # which is below every floor the rules below set. It is its own shape:
+        # see check_closed_sphere for what makes it one.
+        if surface.name == "SPHERICAL_SURFACE" and len(oriented) == 2:
+            check_closed_sphere(entities, face, surface, radius, oriented, problems)
+            continue
+
         # Four is the floor for a face of revolution - two rims and two ends, or
         # two rims and a seam used twice - and the reason is that a rim runs at
         # constant height and a ruling at constant angle, so in the surface's own

@@ -1,4 +1,4 @@
-// A sphere, which collapses into a stack of exact cones.
+// A sphere, which collapses into a stack of exact cones and then closes.
 //
 // A sphere is not a band and is not going to become one: its facets span many
 // rings rather than two rims, so the strip walk cannot describe it and a
@@ -8,12 +8,11 @@
 // declaring the rings collapses the whole sphere with no new recogniser work,
 // exactly as a torus does.
 //
-// Two things about OpenSCAD's sphere make this easier than the roadmap assumed:
+// Two things about OpenSCAD's sphere shape the pass:
 //
-//   - It has **no poles**. The rings sit at phi = 180(i+0.5)/num_rings, so the
-//     first and last are ordinary circles closed by a flat cap rather than a
-//     fan of triangles meeting at a point. Every band's outer rim is therefore
-//     the complete bound of one face, which is the easiest rim case there is.
+//   - It has **no pole vertex**. The rings sit at phi = 180(i+0.5)/num_rings,
+//     so the first and last are ordinary circles and the mesh closes each end
+//     with a flat disc rather than a fan of triangles meeting at a point.
 //   - The ring radii repeat in pairs about the equator, so 16 rings give 8
 //     distinct records, and the two rings straddling the equator have the same
 //     radius - that band is a cylinder, not a cone.
@@ -34,8 +33,8 @@
 //
 // Expected at $fn = 32: num_rings = 16, so 480 quads plus two caps, 482 faces.
 // 9 analytic surfaces available (8 cylindrical, 1 spherical, 0 toroidal, 0 Bezier),
-// 1 surface recognised - spherical, not conical, not partial - with 480 facets
-// replaced. 3 faces out of 482: the zone and the two caps.
+// 1 surface recognised - spherical, not conical, not partial - with 482 facets
+// replaced: the 480 quads and the two caps the closure absorbs.
 //
 // If the report says 15 surfaces and 14 conical, the merge did not happen and
 // this is the cone stack again.
@@ -44,14 +43,41 @@
 // the above to have happened. A silently faceted export is still a valid one,
 // so validity alone cannot see a recogniser that has stopped recognising.
 // EXPECT: 9 analytic surfaces available (8 cylindrical, 1 spherical, 0 toroidal, 0 Bezier)
-// EXPECT: 1 surface recognised (0 toroidal, 1 spherical, 0 conical, 0 partial), 480 facets replaced
+// EXPECT: 1 surface recognised (0 toroidal, 1 spherical, 0 conical, 0 partial), 482 facets replaced
 //
-// Not (4/3)*pi*r^3. An OpenSCAD sphere's tessellation has no pole vertex: its
-// outermost ring sits at 180/$fn = 5.625 degrees off the axis, so the export
-// is the sphere with two flat caps, and the caps are real geometry rather
-// than an artefact. (4/3)*pi*1000 less two caps of pi*h^2*(3r-h)/3 at
-// h = 10*(1 - cos 5.625) = 0.04815273, so 4188.7902048 - 0.1454535.
-// ROUNDTRIP: Plane=2 Sphere=1
-// VOLUME: 4188.6447513
+// **The caps are the tessellation's, not the model's.** This fixture used to
+// assert 4188.6447513 - the sphere less two spherical caps of height
+// 10*(1 - cos 5.625) - on the argument that an OpenSCAD sphere legitimately
+// ends in a flat disc at either pole and the export was being faithful to the
+// mesh. It was faithful to the mesh and wrong about the model: `sphere()`
+// declares a whole sphere and carries no latitude bound, so a disc at the pole
+// is an artefact of how many rings the tessellation chose, and writing it
+// exported a solid 0.0035% short with two planar faces the model never asked
+// for. What the export owes is the declared sphere.
+//
+// So: one face, no planes, and (4/3)*pi*r^3 exactly. A sphere closed on itself
+// has no rim to bound it - it is bounded by its seam meridian alone, used once
+// in either direction, with the poles where the two usages meet. The two
+// degenerate edges are the zero length ones OCCT inserts at those poles itself.
+// ROUNDTRIP: Sphere=1
+// EDGES: Circle=1 degenerate=2
+// RADII: Sphere=10
+//
+// And the same again with the approximation flag, which every fixture is now
+// exported under. Nothing changes and that is the assertion: the analytic pass
+// has already covered all 482 facets, so there is no uncovered region left for
+// a fit to be attempted on, and a tier that invented one here would be fitting
+// a surface to facets that already have theirs.
+// ROUNDTRIP-APPROX: Sphere=1
+// EDGES-APPROX: Circle=1 degenerate=2
+// VOLUME-APPROX: 4188.7902048
+//
+// (4/3)*pi*1000, derived from the declaration and from nothing the exporter
+// printed. The tessellation does not appear in it, which is the point: this is
+// the assertion that separates the declared sphere from the mesh's inscribed
+// polyhedron with its poles sliced off. A face census cannot make that
+// separation - both read as one Sphere beside some planes - so the volume is
+// the check that matters here.
+// VOLUME: 4188.7902048
 $fn = 32;
 sphere(r = 10);

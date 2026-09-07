@@ -34,9 +34,25 @@ survive it, which is what lets the proposals be rough.
 
 The frustum's 48 wall facets become one CONICAL_SURFACE, and OpenCASCADE reads
 the volume back as 1960.353816 against an exact pi*h*(r1^2+r1*r2+r2^2)/3 of
-1960.35. The sphere's 480 become one SPHERICAL_SURFACE of radius exactly 10 -
-one face, not the fifteen the rings alone would give, because a SphereSurface
-among the declarations lets the zone pass absorb the whole stack of cones.
+1960.3538158. The sphere's 480 become one SPHERICAL_SURFACE of radius exactly
+10 - one face, not the fifteen the rings alone would give, because a
+SphereSurface among the declarations lets the zone pass absorb the whole stack
+of cones.
+
+The ball also closes at its poles, and it is worth being clear about why, since
+nothing here was declared. The profile above is OpenSCAD's own sphere
+tessellation written out by hand - phi = pi(i + 0.5)/rings, so no pole vertex
+and a flat disc at either end - and the pole closure does not ask what the model
+meant. It asks three structural questions of the mesh: do the run's bands lie on
+one sphere, does the run reach the last ring at either end, and is each end
+closed by a flat disc across the axis. A fitted sphere answers them exactly as a
+declared one does, so the ball is written as the whole quadric and the two discs
+go with it. That is the difference between Plane=4 here and Plane=2, and between
+a ball 0.1454535 short and one that is (4/3)pi R^3.
+
+The frustum's own two caps stay, and they are the control: its ends are real
+flats that the model put there, at radius 4 and radius 10, nowhere near a pole
+of anything. A closure that ate those would be the bug this pass has to avoid.
 """
 # EXPECT: no analytic surfaces were declared
 # EXPECT-NOT: surface recognised
@@ -46,7 +62,9 @@ among the declarations lets the zone pass absorb the whole stack of cones.
 # band pass to make a cone out of a stack of them, which the rim rules
 # then often refuse. Fitting the cone says what the surface is.
 # APPROX: approximation took 2 of 2 uncovered regions - 0 as cylinders, 1 as cones, 1 as rings of a turned surface, 0 as swept grids
-# APPROX: 2 surfaces recognised (0 toroidal, 1 spherical, 1 conical, 0 partial), 528 facets replaced
+# 530 facets: the frustum's one band of 48, the ball's 15 bands of 32 = 480,
+# and the ball's two polar caps, which this face now replaces as well.
+# APPROX: 2 surfaces recognised (0 toroidal, 1 spherical, 1 conical, 0 partial), 530 facets replaced
 # APPROX: approximation found nothing left to fit
 #
 # What a kernel makes of each export: the frustum comes back a cone and the ball a sphere, from rings alone.
@@ -54,7 +72,23 @@ among the declarations lets the zone pass absorb the whole stack of cones.
 # survived as one. A fit read back as the planes it replaced would
 # pass every other check in this fixture.
 # ROUNDTRIP: Plane=532
-# ROUNDTRIP-APPROX: Cone=1 Plane=4 Sphere=1
+# Two planes, not four: the frustum keeps both of its caps and the ball has none.
+# ROUNDTRIP-APPROX: Cone=1 Plane=2 Sphere=1
+#
+# Derived, and new to this fixture - it asserted no volume at all before, which
+# left the approximation's *shape* unchecked. Two disjoint solids, so the
+# volumes add:
+#
+#   frustum   pi*h*(r1^2 + r1*r2 + r2^2)/3, r1 = 10, r2 = 4, h = 12  1960.3538158
+#   ball      (4/3)*pi*R^3, R = 10                                   4188.7902048
+#                                                                    ------------
+#                                                                    6149.1440206
+#
+# Neither term comes from the exporter. The frustum's is the closed form for the
+# solid the profile describes, the ball's is the sphere the rings lie on, and a
+# capped ball would miss it by 0.1454535 - 2.4e-5 relative, which is 24 times the
+# default tolerance and so a failure rather than a rounding.
+# VOLUME-APPROX: 6149.1440206
 from pythonscad import *
 import math
 

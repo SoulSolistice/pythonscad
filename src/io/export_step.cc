@@ -23,6 +23,8 @@
  *
  */
 
+#include <clocale>
+#include <string>
 #include "export.h"
 #include "Feature.h"
 #include "StepKernel.h"
@@ -669,9 +671,44 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
 
 }  // namespace
 
+/*! Hold LC_NUMERIC at "C" for as long as it exists.
+ *
+ * `openscad.cc` calls `setlocale(LC_ALL, "")`, so on a comma radix locale - de,
+ * fr, ... - every `%f` the export runs through comes out with a comma. The
+ * written file survives that because `step_real()` corrects the radix itself,
+ * but the *report* does not: on a German machine the recogniser announces "the
+ * fitted sweep passes within 0,0660 of the middle", and every fixture asserting
+ * that line fails on the separator while the numbers agree exactly. Three did.
+ *
+ * A test suite that passes or fails on the developer's locale is not measuring
+ * the exporter, and the failures look like geometry regressions, which is the
+ * expensive way to find out.
+ *
+ * export_stl, export_dxf, export_svg, export_amf and export_gcode all bracket
+ * their output the same way; STEP was the one that did not. They use a bare
+ * pair of setlocale calls, which leaks "C" into the rest of the process if the
+ * export throws between them - and this one has a great deal more that can
+ * throw - so it is a guard here instead. */
+namespace {
+struct CNumericRadix {
+  std::string saved;
+  CNumericRadix()
+  {
+    const char *cur = setlocale(LC_NUMERIC, nullptr);
+    if (cur != nullptr) saved = cur;
+    setlocale(LC_NUMERIC, "C");
+  }
+  ~CNumericRadix() { setlocale(LC_NUMERIC, saved.empty() ? "" : saved.c_str()); }
+  CNumericRadix(const CNumericRadix&) = delete;
+  CNumericRadix& operator=(const CNumericRadix&) = delete;
+};
+}  // namespace
+
 void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& output,
                  const ExportInfo& exportInfo)
 {
+  const CNumericRadix radix_is_a_point;
+
   auto ps = PolySetUtils::getGeometryAsPolySet(geom);
   if (ps == nullptr) return;
 

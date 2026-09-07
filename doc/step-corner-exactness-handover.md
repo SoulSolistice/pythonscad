@@ -118,7 +118,7 @@ which is what the "how the disc was found" section below ends in.
     that converge` - and the midpoint test, which was the unplanned one and worth
     more than either
 11. `feat(export): trim two quadrics to the curve where they actually cross`
-    + `feat(export): say a crossing curve lies on both surfaces, with a pcurve on each`
+    and `feat(export): say a crossing curve lies on both surfaces, with a pcurve on each`
 12. `feat(export): declare the planes an extrude sweeps, and write faces on them`
 
 ### The numbers worth carrying
@@ -1085,21 +1085,50 @@ intersection curve both landed on 2026-09-07. What is left:
 1. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
    suite that noticed the chorded trim; every census figure was identical before
    and after. Any fixture whose model has a closed-form volume should state it.
-2. **`sphere()` exports with its poles flattened**, found while measuring which
-   entities still rest on the mesh and not chased there. `$fn=32; sphere(r=5)`
-   comes back as `Plane 2, Sphere 1` - two planar polar caps at z = +/-4.9759 -
-   and measures **523.580594** where the ideal is `4/3 pi 125` = **523.5988**.
-   The difference is not noise, it is the wrong solid: a sphere less two caps of
-   height `5 - 4.9759 = 0.0241` is **523.5806**, which matches to six figures.
-   The cause is the tessellation, not the recogniser: OpenSCAD's sphere mesh has
-   a horizontal facet ring at each pole instead of converging to a point, and
-   the exporter writes it faithfully - the spherical face is on the true declared
-   sphere and the caps are the mesh's artefact preserved. Faithful to the mesh,
-   wrong about the model, which declared a whole sphere. A closed spherical face
-   is bounded by its two seams, which is the shape `check_cylindrical_faces`
-   already describes for a periodic face. **The volume is the check that
-   matters** - a face census cannot tell a sphere from a sphere with its poles
-   cut off, since both read as `Sphere 1` plus some planes.
+   `step-approximate-turned` gained one on 2026-09-08 and it is a fair example
+   of the cost of not having it: the fixture asserted a census, a facet count
+   and a surface report, and every one of them was satisfied by a ball whose
+   poles were flat. Its volume is `pi*h*(r1^2+r1*r2+r2^2)/3 + (4/3)*pi*R^3` from
+   the model's own literals - the two solids are disjoint, so they add.
+2. ~~**`sphere()` exports with its poles flattened**~~ - **done, 2026-09-08.**
+   `$fn=32; sphere(r=5)` came back as `Plane 2, Sphere 1`, two planar polar caps
+   at z = +/-4.9759, measuring **523.580594** against `4/3 pi 125` =
+   **523.5988**; a sphere less two caps of height 0.0241 is **523.5806**, which
+   matched to six figures. Faithful to the mesh, wrong about the model. A run of
+   bands reaching the last ring at either end now absorbs both caps and is
+   written as the complete quadric, bounded by its seam meridian alone - used
+   once in either direction, poles at centre +/- r along the axis, no rim at
+   all. It reads back as one `Sphere` with two degenerate edges at 523.598776.
+   `step-sphere`, `step-sphere-closed` and `step-approximate-turned` cover it.
+
+   Two things the entry above got wrong, both worth keeping as warnings:
+
+   - **"bounded by its two seams, which is the shape `check_cylindrical_faces`
+     already describes for a periodic face" is not true.** A sphere is periodic
+     in one direction only, so it has one seam used twice and no rim, which is
+     *two* edges - below the floor of four the periodic branch sets and below
+     the three the fillet octant is let through on. The validator rejected the
+     shape, and it rejected OpenCASCADE's own export of a sphere too, which is
+     the quickest way to see it: OCCT writes a `VERTEX_LOOP` with no edges at
+     all. `check_closed_sphere()` is the rule that was needed, and
+     `closed-sphere-check-mutations.py` holds it to seven near misses, because
+     an acceptance never shown to refuse anything is a deleted check.
+   - **The gate cannot be "the cap is small".** It is angular and relative to
+     the run's own bands: the tessellation leaves exactly half a ring step, so a
+     gap of a whole step or more means a ring is missing and something has cut
+     the sphere. Both ends have to qualify or neither does - a sphere with a knob
+     on one pole exports exactly as it did before, since the face that would
+     close only the far end (one rim, one seam to a degenerate pole) is a shape
+     the writer does not have. The one cut this cannot see is one exactly at the
+     last ring, which removes no facet and leaves the uncut sphere's mesh.
+
+   **The volume was the check that mattered**, as the entry said - a face census
+   cannot tell a sphere from a sphere with its poles cut off, since both read as
+   `Sphere 1` plus some planes. It is also the trap in miniature: this defect had
+   been *written down as a correct derivation* in `step-export-testing.md` ("a
+   sphere is not `(4/3)pi r^3`"), argued for in prose, and confirmed by
+   OpenCASCADE to six figures. Every check was downstream of the same mistaken
+   premise. That entry is now a warning rather than an example.
 3. **The twist.** `linear_extrude`'s walls are the last thing its parameters
    determine that is not declared - see "declaring the planes, and what each
    extrude parameter does with them" for why `slices` and `$fn` are not the

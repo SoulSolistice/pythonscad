@@ -44,11 +44,20 @@ consistent one.
 Writing the derivation beside the number is part of it, because the derivations
 are where the surprises live:
 
-- **A sphere is not `(4/3)pi r^3`.** OpenSCAD's tessellation has no pole vertex;
-  its outermost ring sits at `180/$fn` off the axis, so the export legitimately
-  keeps two flat caps. `step-sphere` states 4188.6447513, being
-  `4188.7902048 - 0.1454535`, and the caps are real geometry rather than an
-  artefact.
+- **A sphere *is* `(4/3)pi r^3`, and this entry used to say the opposite.** The
+  claim was that OpenSCAD's tessellation has no pole vertex, so its outermost
+  ring sits half a ring step off the axis and the export legitimately keeps two
+  flat caps; `step-sphere` asserted `4188.7902048 - 0.1454535` on that basis.
+  The reasoning was faithful to the mesh and wrong about the model. `sphere()`
+  declares a whole sphere and carries no latitude bound, so the disc at the pole
+  says how many rings the tessellation chose and nothing about the part - which
+  makes it exactly the kind of number this section says not to write down. The
+  export now closes the sphere at its poles and the fixture states `4188.7902048`.
+  Worth reading as a warning: the derivation was written out in full, argued for
+  in prose, agreed with by OpenCASCADE to six figures, and still encoded a
+  defect, because every one of those checks was downstream of the same mistaken
+  premise. Deriving from the *model* means from what the model declared, not
+  from what its mesh happens to be.
 - **A filleted cube comes apart into the pieces the fillet is made of** — the
   Minkowski sum of `cube(a-2r)` with a ball: `512 + 384 + 24*pi + (4/3)*pi`.
 - **`step-rounded-profile` falls out of Pappus** as `2*pi*(1612 + 52*pi)`, once

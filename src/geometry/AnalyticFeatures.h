@@ -57,9 +57,33 @@ struct Band {
    * its tessellation is already a frustum whose two rims are circles, and the
    * whole zone is the maximal run of them joined at shared rims whose vertices
    * all lie on one declared sphere. The merged band keeps the outer rims of the
-   * run, so the rim rules that were resolved for the ends still hold and the
-   * caps at either end are untouched. */
+   * run, so the rim rules that were resolved for the ends still hold. Whether
+   * the caps at either end are kept beside it or absorbed into it is
+   * `pole_closed` below. */
   std::shared_ptr<const Surface> zone;
+
+  /*! Set when a spherical zone reaches both poles, so the face closes on
+   * itself and the two polar caps are part of it rather than beside it.
+   *
+   * An OpenSCAD sphere has no pole vertex: its outermost ring sits half a ring
+   * step short of the axis, and the mesh closes that gap with a flat disc. The
+   * disc is the tessellation's business and not the model's - `sphere()`
+   * declares a whole sphere and says nothing about a latitude bound - so a run
+   * which reaches the last ring at either end absorbs both discs and is
+   * written as the complete quadric. Leaving them in place cost two planar
+   * faces and 0.0035% of the volume, and made the exported solid a sphere with
+   * its poles sliced off rather than the one the model asked for.
+   *
+   * A *fitted* sphere qualifies on the same evidence. The closure does not ask
+   * what the model meant, only what the mesh is: that the run's bands lie on
+   * one sphere, that it reaches the last ring at either end, and that each end
+   * is a flat disc across the axis. A declaration answers the first of those
+   * outright and a fit has to earn it, which is the only difference.
+   *
+   * See `capsClosePoles()` for what has to hold before this is set: the gap the
+   * cap spans has to be the one the tessellation leaves, not one a boolean cut. */
+  bool pole_closed = false;
+
   Vector3d axis, base;  // base is the centre of the bottom rim
   double r_bottom = 0, r_top = 0;
   double height = 0;

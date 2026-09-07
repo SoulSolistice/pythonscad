@@ -2678,6 +2678,64 @@ void StepKernel::build_tri_body(
       continue;
     }
 
+    // A sphere which reaches both poles closes on itself, so like the complete
+    // torus above it is bounded by its seam and by nothing else. What differs is
+    // that a sphere is periodic in one direction only: the seam is a meridian
+    // running pole to pole - half of a great circle - used once in either
+    // direction, and the poles are where the two usages meet. There is no rim,
+    // because the two polar caps that used to bound the run are part of this
+    // face now.
+    //
+    // The poles come from the surface record - centre +/- r along the axis - and
+    // not from the mesh, which has a vertex at neither of them. Nothing else
+    // refers to them, so inventing them here costs no other loop a rewrite: the
+    // same argument the seam itself rests on.
+    //
+    // OCCT reads this back as one Sphere with two degenerate edges, which are
+    // the zero length edges it inserts at the poles itself, and measures the
+    // volume as (4/3)pi r^3.
+    if (band.pole_closed) {
+      const auto *sph = dynamic_cast<const SphereSurface *>(band.zone.get());
+      if (sph != nullptr) {
+        const Vector3d centre = sph->refpt;
+        const Vector3d axis = band.axis.normalized();
+        // the longitude the seam runs down, which is also the direction the
+        // surface's own parameterisation is measured from
+        const Vector3d rel = vertices[band.seam_bottom] - centre;
+        const Vector3d radial = (rel - axis * rel.dot(axis)).normalized();
+
+        auto placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
+          auto point = new Point(entities, origin);
+          auto dir_axis = new Direction(entities, dir);
+          auto dir_ref = new Direction(entities, towards);
+          return new Axis2Placement(entities, dir_axis, dir_ref, point);
+        };
+
+        auto surface = new SphericalSurface(entities, "", placement(centre, axis, radial), sph->r);
+        auto south = new Vertex(entities, new Point(entities, centre - axis * sph->r));
+        auto north = new Vertex(entities, new Point(entities, centre + axis * sph->r));
+
+        // Parameterised from the south pole, so that a quarter turn reaches the
+        // seam's own longitude and a half turn the north pole. `radial x axis`
+        // is the normal that makes that the positive sweep; the other way round
+        // the arc runs down the far side of the sphere, and the face is bounded
+        // by the wrong half of the great circle.
+        auto meridian =
+          new Circle(entities, "", placement(centre, radial.cross(axis), Vector3d(-axis)), sph->r);
+        auto edge_seam = new EdgeCurve(entities, south, north, meridian, true);
+
+        std::vector<OrientedEdge *> loop{
+          new OrientedEdge(entities, edge_seam, true),
+          new OrientedEdge(entities, edge_seam, false),
+        };
+        auto edge_loop = new EdgeLoop(entities, loop);
+        std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
+        sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
+        face_edges_extra.push_back({edge_seam});
+        continue;
+      }
+    }
+
     const Vector3d top_centre = band.base + band.axis * band.height;
     const bool is_cone = band.isCone();
 

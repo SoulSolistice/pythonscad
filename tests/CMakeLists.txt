@@ -1197,6 +1197,15 @@ add_test(NAME bspline-check-mutations
   COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/bspline-check-mutations.py
 )
 
+# The same calibration for check_closed_sphere(). A whole sphere is bounded by
+# its seam and nothing else, which is two edges - fewer than any other face of
+# revolution - so teaching validatestep.py that shape is adding an acceptance,
+# and an acceptance never shown to refuse anything is a deleted check. Each
+# mutation is nearly a closed sphere and wrong in one way the exporter could be.
+add_test(NAME closed-sphere-check-mutations
+  COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/closed-sphere-check-mutations.py
+)
+
 # Export/import color support
 add_cmdline_test(offcolorpngtest EXPERIMENTAL SCRIPT ${EXPORT_IMPORT_PNGTEST_PY} SUFFIX png FILES ${COLOR_3D_TEST_FILES} EXPECTEDDIR render-manifold ARGS ${OPENSCAD_EXE_ARG} --format=OFF --backend=manifold --render --trust-python)
 if (ENABLE_LIB3MF_TESTS)
