@@ -32,10 +32,34 @@ than as a principle.
 **381 lie exactly on the bore cylinder**, and the **129 that stray from the sweep
 are all among them**, at r = 20.000000 to 1e-9. The other 252 lie on *both* to
 1e-9, which is what a genuine crossing looks like. So every stray is a corner
-where two ownerships are claimed and only the wall's is true - the taper, where
-the ridge's depth goes to zero and its surface arrives at the wall's, while a
-cubic through the model's stations misses by up to 0.1 because that is where it
-has least support.
+where two ownerships are claimed and only the wall's is true.
+
+**The fit is not at fault anywhere, and an earlier note here said it was.** Split
+the same 472 corners by where they came from:
+
+    the generator's own points        91 corners   none stray   max 1.42e-14
+    made by the boolean, at r = 20   381 corners   129 stray    max 1.01e-01
+
+A cubic interpolates its stations exactly, at both ends as much as in the middle,
+and the measurement says so. The "a cubic has least support at the run-out"
+reasoning - true of the lid, and quoted beside the 4x outlier test - does not
+apply to this: it was the explanation offered here first and it is wrong.
+
+**Why the strays cluster at u < 0.2 and u > 0.8** is the shape of the cut, not
+the quality of the fit. Where the ridge is shallow - `f` tapering to zero - the
+wall's cut runs *along the crest*, where the sweep and the cylinder are nearly
+tangent, and a near-tangent cut lands off both surfaces. Through the middle the
+ridge protrudes fully, the cut runs along its base where the two cross
+transversally, and there it lands on the fit as well: those are the 252.
+`step-declare-grid.py` has a constant profile, is never shallow, and strays only
+at the one end its wall's bottom disc cuts - which is the same rule seen from the
+other side.
+
+**So there is no crease and nothing to continue tangentially.** The turn between
+successive stations is 11.18 degrees at every station of step-band-family,
+uniform end to end; the taper's kink is in the radial component only and the
+helix's own turning swamps it. The surface is one smooth swept family throughout,
+and trimming its ends away would discard a surface that is exactly right.
 
 **The re-trim is viable topologically.** 374 edges are shared by the sweep and a
 cylinder and **no edge in the file is used by three kinds of face**, so the whole
@@ -57,12 +81,21 @@ The last three fail the same way, and it is the way the interior test failed
 before it: **the refused facets are scattered through the region, so the claim
 comes apart**. A region is not repaired by removing facets from the middle of it.
 
-**What is left to try**, and it follows from that: the trim has to be
-*contiguous*. The run-in and run-out are where a cubic has least support - the
-doc's own words, beside the 4x outlier test - so the sweep's claim should stop at
-a station, trimming its own parameter range at each end, rather than dropping
-facets wherever the fit happens to miss. That keeps one face and one boundary,
-and it is the shape the true re-trim would take anyway.
+**The contiguous trim was tried on that reasoning and is also wrong.** Keeping
+the longest run of stations whose facets the fit passes through collapsed the
+claim to a *single facet*: the per-facet stray is scattered through the whole
+region, while it is only the *boundary corner* error that is concentrated at the
+ends. The two are different measurements and only the second has the signature.
+Reverted.
+
+**What is left is the intersection curve, and the diagnosis now says exactly what
+it must do.** The 129 strays are the corners the mesh placed *off* the curve
+where the sweep and the cylinder cross; the 252 are the ones it happened to place
+on it. Trim both faces to that curve and every shared corner is exact on both,
+losing no surface - there is nothing wrong with the surface. The blocker is
+computing it where the two are **near-tangent**, which is precisely where the
+strays are: alternating projection reaches 99 of 129, at a median move of 0.054
+and a max of 0.362.
 
 ## The one sentence
 
