@@ -501,11 +501,14 @@ placed at all; that is now done, so the way is clear.
 
 ## What the declaration channel cannot say
 
-Still true, and still worth knowing, but **no longer blocking the corner work** -
-the test above needs none of it:
+Still worth knowing, but **no longer blocking the corner work** - the test above
+needs none of it:
 
-- **There is no plane declaration at all.** `Surface.h` has sphere, torus,
-  Bezier, cylinder, cone and grid. A model cannot state that a face is flat.
+- ~~**There is no plane declaration at all.**~~ Superseded: `PlaneSurface` is in
+  `Surface.h`, `cube()` declares its six face planes and `cylinder()` both caps.
+  What is still missing is coverage - `linear_extrude` declares neither its walls
+  nor its caps, and on lid10 provenance maps only **14 of 25** declared surfaces
+  onto an original at all.
 - **A straight cylinder declares one rim, not two.** For `r1 == r2` only one
   `CylinderSurface` is pushed, at `z1`, and `addSurfaceUnique` would fold a
   second one into it anyway since coaxial cylinders of equal radius count as the
@@ -603,6 +606,47 @@ measured 5320.49 - 0.24 per cent low. **Nothing else in the fixture's census
 moved when the trim was fixed except the surface names.** The volume is the only
 line that knew the difference, which is the argument for `VOLUME:` in general.
 
+## Measured 2026-09-07: what the remaining refusals are actually blocked on
+
+Asked which is the better follow-up - declaring more entities, or teaching a
+planar face to carry a conic - and the measurement says **neither, except in one
+place**. Five models still refuse a quadric for its boundary:
+
+    step-cut-cone            4 regions
+    step-bored-cylinder     10
+    step-bored-cone         10
+    step-declare-grid-scad  26
+    lid10                   30
+
+The experiment is two one-line relaxations of what just landed, run together and
+then thrown away: accept a plane section claimed by **one** face rather than two
+(which is the planar neighbour, granted for free), and let a **cone**'s boundary
+be covered by one as well. Both together, the refusals go:
+
+    step-cut-cone            4 -> 0
+    everything else          unchanged
+
+So `step-cut-cone` is the whole of what the plane story buys, it does not buy it
+without the cone work, and the two are one piece of work rather than two. A cone
+cut by a plane tilted less than its half angle is an ellipse - 12 degrees here
+against a half angle of `atan(10/20)` = 26.57 - so the curve is as writable as
+the cylinder's, and the face on the other side is a cube's, which is where the
+planar neighbour comes in.
+
+**The other 76 regions are not plane sections at all**, which is why neither
+relaxation moves them: a cylinder bored by a cylinder of a *different* radius
+meets it in a quartic, and the declared grid meets the bore in something with no
+name at all. They need a general intersection curve between two curved surfaces -
+`SURFACE_CURVE` with a pcurve on each - and that is the next large piece.
+
+Two more figures from lid10, both measured the same afternoon and neither
+touched by the above:
+
+- of its **1598** two-owner junction vertices only **463** reach the curve where
+  the two owners cross;
+- **28 edges written as an arc, 28 left straight**, so half the arc candidates
+  are still chords.
+
 ## The immediate task
 
 ~~Update the three fixtures~~ - done for `step-declare-grid-scad`, and refused
@@ -627,18 +671,21 @@ table above.
 done; the suite is 44/44. What the curve trim leaves open, in the order it
 should be taken:
 
-1. **The trim fires only where a quadric meets a quadric.** Across the whole
-   suite the only model where a plane section is agreed on both sides is
-   `step-cylinder-cross`. Everywhere else the face across the ellipse is a
-   *planar* one written from the mesh, which writes chords, so the section is
-   not agreed and both sides stay chorded. Teaching a planar face to accept an
-   elliptical edge is the next real gain, and it is where the fixtures that
-   still carry a chorded trim would move.
-2. **A cone is not covered.** A plane cuts a cone in an ellipse, a parabola or a
-   hyperbola depending on the tilt, and only the first of those closes;
-   `coplanarStretches` is called for cylinders only. The tilt test that decides
-   which is a few lines, but a fixture with a hand-derived answer has to come
-   first - `step-cylinder-cross` is the model for what that looks like.
+1. **The cone's plane section, and the planar face that carries it - one piece
+   of work, not two.** `coplanarStretches` is called for cylinders only, and a
+   section is only written where a quadric stands on both sides. Measured
+   together (see "what the remaining refusals are actually blocked on"), the pair
+   takes `step-cut-cone` from four refused regions to none, and neither half does
+   anything on its own. A plane cuts a cone in an ellipse, a parabola or a
+   hyperbola depending on the tilt and only the first closes, so the tilt test is
+   part of it. A fixture with a hand-derived answer comes first -
+   `step-cylinder-cross` is the model for what that looks like.
+2. **The general intersection curve**, which is where the other 76 refused
+   regions are and where the work stops being small. Two cylinders of *unequal*
+   radius meet in a quartic; `SURFACE_CURVE` with a pcurve on each surface is
+   what carries it. `step-bored-cylinder` is the coupon and its removed volume
+   has a closed form in complete elliptic integrals, so the `VOLUME:` check
+   survives the move to a curve with no elementary parametrisation.
 3. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
    suite that noticed the chorded trim; every census figure was identical before
    and after. Any fixture whose model has a closed-form volume should state it.
