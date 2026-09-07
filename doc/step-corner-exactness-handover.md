@@ -73,8 +73,8 @@ face's own corners are from the surface it is on. **Done is 0 to within 1e-9.**
     step-bored-cylinder       7.99e-14         done
     step-declare-grid-scad    3.79e-12         done, fixture derived and updated
     step-band-family          8.89e-02         planes done, cyl and sweep not
-    step-cut-cone             3.16e-02         two triple points, correctly left
-    step-exact-trim           3.42e-02         not looked at
+    step-cut-cone             4.45e-13         done, its two triple points placed
+    step-exact-trim           3.55e-15         done, 32 triple points placed
     py-step-declare-grid      1.86e-13         done, and the flat bottom kept
     py-step-declare-grid-strip 1.86e-13        done, and the flat bottom kept
 
@@ -299,6 +299,53 @@ three.
 The work is to ask the recogniser the question it already answers - is this
 planar face a member of that surface - rather than to re-derive it in
 `build_tri_body`.
+
+## Triple points, and the threshold that wants replacing
+
+A corner where a declared surface meets **two** faces of the model was declined
+outright - "belongs on neither conic and stays". That point is computable, and
+declining it left 48 corners on `step-exact-trim`, 6 on `step-shared-arc` and 2
+on `step-cut-cone` where the mesh put them. Placing them takes two of the last
+three straying fixtures to exact:
+
+    step-exact-trim   3.42e-02  ->  3.55e-15    32 of its 48 placed
+    step-cut-cone     3.16e-02  ->  4.45e-13    both placed
+    step-shared-arc   3.77e-15  ->  3.77e-15    unharmed
+
+Two things had to be got right, and the first one bit hard.
+
+**How far a corner may travel.** The line two faces cross along can meet the
+surface *twice*, and the far crossing is a perfectly good solution to the wrong
+problem. Bounding the move by the face's extent let a corner on
+`step-shared-arc` move 2.0 and took a cone that was exact to **1.41 out** - a
+fixture that had never strayed at all. The bound is the corner's nearest
+neighbour: it is correcting its own tessellation, so it belongs nearer than the
+vertex next to it. That also declines 16 of `step-exact-trim`'s 48, which cost
+nothing - the file is exact either way, so they were not the straying ones.
+
+**Which planes count.** Not every plane at the corner is a face; some are the
+tessellation's own chords of the very surface being placed on, and a chord is
+not a constraint. 16 of `step-exact-trim`'s corners have three planes of which
+one is a chord, and taking all three over-determines the point.
+
+That test is the weakest thing in this document. A chord's plane normal is
+parallel to the surface's normal there and a face's is not, so the bound is the
+tessellation's angular half-step - `cos(pi/6)`, nothing coarser than a hexagon
+being a tessellation. Measured, chords read 0.885 to 1.000 and faces 0.000 to
+0.643, and **the closest pair is `step-band-family`'s 0.885 against
+`step-cut-cone`'s 0.643**. That is a real margin but a thin one, and it is an
+inference standing in for something the model knew. The earlier 0.5 form of the
+same test read *exactly* 0.5000 on one of `step-cut-cone`'s real cut planes - the
+threshold sitting on top of the data it had to separate.
+
+**This is what a declared plane would fix**, and it is a better reason for one
+than any in the section below: it turns the classification from a threshold that
+has to be defended by measurement into a lookup, and gives the fallback - still
+needed for `hull()`, `minkowski()` and imported meshes, which declare nothing - a
+ground truth to be validated against rather than argued about. Adding it needs
+the placement to handle a corner with three or more candidates first, or the
+extra declaration pushes those corners into the `many` bucket and nothing is
+placed at all; that is now done, so the way is clear.
 
 ## What the declaration channel cannot say
 

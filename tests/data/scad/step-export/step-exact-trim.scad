@@ -60,6 +60,25 @@
 // OpenCASCADE measuring the file agrees to the six figures it prints - which is
 // what says the derivation is right rather than merely repeatable.
 // VOLUME: 6052.356342 +/- 0.001
+//
+// The approximation tier asserted nothing at all until the corner placement
+// reached this model, which meant the whole of the following was free to
+// regress in silence.
+//
+// Each notch is a box cut through the rim, and where its two faces meet the
+// declared cylinder is a corner of three exact things: the cylinder, the
+// notch's floor at z = 17, and one of its sides at y = +/-1.5. That is two
+// corners on the floor and two more where the notch opens onto the top at
+// z = 20 - four to a notch, and eight notches, so 32. Placed, they sit on the
+// cylinder rather than on the chord plane the mesh cut them on, which is a
+// move of up to 10*(1 - cos(pi/32)) = 0.048163.
+//
+// The rest of the corners on that cylinder are the 32-gon's own vertices, which
+// were on it already. So the file's 96 vertices at radius 10 are every vertex
+// the cylinder carries, and *none* sits at the inradius 9.951847 - which is the
+// property this whole tier exists to hold and the one a chord left behind would
+// break.
+// APPROX: 32 corners where a declared surface meets two faces of the model are placed where all three cross
 $fn = 32;
 difference() {
 	cylinder(r = 10, h = 20);

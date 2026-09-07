@@ -1231,7 +1231,7 @@ void StepKernel::build_tri_body(
       if (!loop_valid[i] || consumed[i] || loops[i].size() < 3) continue;
       for (const int v : loops[i]) faces_at[v].push_back(i);
     }
-    std::size_t placed = 0, triple = 0;
+    std::size_t placed = 0, triple = 0, placed_triple = 0;
     double worst_plane = 0;
     for (const auto& entry : singleOwner) {
       const int v = entry.first;
@@ -1259,7 +1259,112 @@ void StepKernel::build_tri_body(
       }
       if (!any) continue;
       if (!one) {
-        triple++;
+        // More than one plane, which is a corner where three exact things meet:
+        // the declared surface and two faces of the model. That point is
+        // computable, and until now it was declined outright - "belongs on
+        // neither conic and stays" - which left 48 corners on step-exact-trim,
+        // 6 on step-shared-arc and 2 on step-cut-cone where the mesh put them.
+        //
+        // The planes have to be sorted first, because not every plane at the
+        // corner is a face: some are the tessellation's own chords of the very
+        // surface being placed on, and a chord is not a constraint. On
+        // step-exact-trim 16 of the 48 corners have three planes and one of
+        // them is a chord; taking all three would over-determine the point and
+        // decline it again.
+        //
+        // A chord's plane normal is parallel to the surface's normal there, a
+        // face's is not. The bound is the tessellation's own angular half-step:
+        // a facet of an n-gon lies within pi/n of the surface normal at any of
+        // its corners, and nothing coarser than a hexagon is a tessellation, so
+        // cos(pi/6) admits every chord. Measured, chords read 0.885 to 1.000
+        // and faces 0.000 to 0.643 - the closest pair being step-band-family's
+        // 0.885 against step-cut-cone's 0.643.
+        //
+        // That margin is the weakest thing here and it is an inference standing
+        // in for something the model knew: a declared plane would make this a
+        // lookup. See doc/step-corner-exactness-handover.md.
+        std::vector<std::pair<Vector3d, double>> faces_here;
+        double reach_all = 0;
+        {
+          const Surface *os = surfaces[entry.second].get();
+          Vector3d q0;
+          if (!AnalyticFeatures::closestOnSurface(os, vertices[v], q0)) {
+            triple++;
+            continue;
+          }
+          const double off0 = (vertices[v] - q0).norm();
+          for (const std::size_t i : at->second) {
+            const Vector3d n = loop_normals[i].normalized();
+            const double d = n.dot(vertices[loops[i][0]]);
+            // How far the corner may travel: to its nearest neighbour and no
+            // further. The face's whole extent is far too loose - the line two
+            // faces cross along can meet the surface twice, and on
+            // step-shared-arc the far one is 2.0 away and takes a cone that was
+            // exact to 1.41 out. A corner is correcting its own tessellation,
+            // so it belongs nearer than the vertex next to it.
+            for (const int w : loops[i]) {
+              if (w == v) continue;
+              const double e = (vertices[w] - vertices[v]).norm();
+              if (e > 1e-12) reach_all = reach_all == 0 ? e : std::min(reach_all, e);
+            }
+            bool have = false;
+            for (const auto& w : faces_here) {
+              if ((w.first - n).norm() < 1e-6 && fabs(w.second - d) < 1e-6) have = true;
+            }
+            if (have) continue;
+            Vector3d q1;
+            if (!AnalyticFeatures::closestOnSurface(os, vertices[v] + n * 1e-4, q1)) continue;
+            const double along = fabs(((vertices[v] + n * 1e-4) - q1).norm() - off0) / 1e-4;
+            if (along >= cos(M_PI / 6)) continue;  // a chord of this surface
+            faces_here.emplace_back(n, d);
+          }
+        }
+        if (faces_here.size() != 2) {
+          triple++;
+          continue;
+        }
+        // Where the two faces cross is a line; where that line meets the
+        // surface is the corner. Projecting onto the line is exact, so this
+        // alternates between two closed forms rather than three.
+        const Vector3d n1 = faces_here[0].first, n2 = faces_here[1].first;
+        const double d1 = faces_here[0].second, d2 = faces_here[1].second;
+        const Vector3d dir = n1.cross(n2);
+        if (dir.norm() < 1e-9) {
+          triple++;
+          continue;
+        }
+        const Vector3d dhat = dir.normalized();
+        // A point on the line: solve n1.x = d1, n2.x = d2 within span(n1, n2).
+        const double c = n1.dot(n2), det = 1 - c * c;
+        if (fabs(det) < 1e-12) {
+          triple++;
+          continue;
+        }
+        const Vector3d online = n1 * ((d1 - d2 * c) / det) + n2 * ((d2 - d1 * c) / det);
+        const Surface *own3 = surfaces[entry.second].get();
+        Vector3d p3 = vertices[v], q3;
+        bool ok3 = true;
+        for (int iter = 0; iter < 64; iter++) {
+          if (!AnalyticFeatures::closestOnSurface(own3, p3, q3)) {
+            ok3 = false;
+            break;
+          }
+          const Vector3d next = online + dhat * dhat.dot(q3 - online);
+          if ((next - p3).norm() < 1e-12) {
+            p3 = next;
+            break;
+          }
+          p3 = next;
+        }
+        if (!ok3 || !AnalyticFeatures::closestOnSurface(own3, p3, q3) || (q3 - p3).norm() > 1e-6 ||
+            fabs(n1.dot(p3) - d1) > 1e-9 || fabs(n2.dot(p3) - d2) > 1e-9 ||
+            (p3 - vertices[v]).norm() > reach_all) {
+          triple++;
+          continue;
+        }
+        worst_plane = std::max(worst_plane, (p3 - vertices[v]).norm());
+        moves.emplace(v, p3);
+        placed_triple++;
         continue;
       }
       const Surface *own = surfaces[entry.second].get();
@@ -1284,6 +1389,12 @@ void StepKernel::build_tri_body(
       worst_plane = std::max(worst_plane, travel);
       moves.emplace(v, p);
       placed++;
+    }
+    if (placed_triple > 0) {
+      LOG(
+        "STEP export: %1$d corners where a declared surface meets two faces of the model are "
+        "placed where all three cross; %2$d more are left where the mesh put them",
+        int(placed_triple), int(triple));
     }
     if (placed > 0) {
       LOG(
