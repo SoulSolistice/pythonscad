@@ -19,6 +19,51 @@ surface is entitled to and the most any mesh can say:
 The eight coupons the baseline listed are all resolved. What follows is how, and
 the rest of this document is the record of getting there.
 
+## The sweep's last stray: diagnosed, and four ways of fixing it that do not work
+
+`step-band-family`'s B-spline reads 7.44e-02 (max 0.1015) inside a published band
+of 0.2077. That allowance is the one thing in this document that moved the
+goalpost: the band says how well the *surface* fits the mesh, not whether a
+*corner* lies on the surface, and a corner can be projected onto a B-spline
+exactly however coarse the fit is. Treat it as a marker for what follows rather
+than as a principle.
+
+**The diagnosis, and it is not about fitting.** Of the sweep face's 472 corners,
+**381 lie exactly on the bore cylinder**, and the **129 that stray from the sweep
+are all among them**, at r = 20.000000 to 1e-9. The other 252 lie on *both* to
+1e-9, which is what a genuine crossing looks like. So every stray is a corner
+where two ownerships are claimed and only the wall's is true - the taper, where
+the ridge's depth goes to zero and its surface arrives at the wall's, while a
+cubic through the model's stations misses by up to 0.1 because that is where it
+has least support.
+
+**The re-trim is viable topologically.** 374 edges are shared by the sweep and a
+cylinder and **no edge in the file is used by three kinds of face**, so the whole
+sweep/cylinder boundary is private to those two: re-trimming it disturbs no
+faceted neighbour. That is the precondition item 3 of `step-corner-exactness.md`
+assumes, and it holds.
+
+**Four attempts, all measured, none usable:**
+
+| attempt | result |
+| --- | --- |
+| move the shared corners onto both surfaces | 99 of 129 converge, but a median 0.054 and max 0.362 - relocating a corner, not refining it |
+| 512 alternating iterations instead of 64 | more converge, at moves up to 0.4438; the B-spline stray does not shift at all |
+| refuse a facet whose *every* corner an exact surface holds | no effect: a taper facet has only some |
+| refuse a facet whose *any* corner it holds | the sweep shatters into 36 faces |
+| refuse where the held corner is also the missed one | 35 faces, 673 in the file, stray only 7.44e-02 to 6.73e-02 |
+
+The last three fail the same way, and it is the way the interior test failed
+before it: **the refused facets are scattered through the region, so the claim
+comes apart**. A region is not repaired by removing facets from the middle of it.
+
+**What is left to try**, and it follows from that: the trim has to be
+*contiguous*. The run-in and run-out are where a cubic has least support - the
+doc's own words, beside the 4x outlier test - so the sweep's claim should stop at
+a station, trimming its own parameter range at each end, rather than dropping
+facets wherever the fit happens to miss. That keeps one face and one boundary,
+and it is the shape the true re-trim would take anyway.
+
 ## The one sentence
 
 A corner of an analytic face should lie on the surface that face is written on;
