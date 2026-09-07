@@ -282,9 +282,10 @@ void StepKernel::build_tri_body(
   // out - which is a feature nobody has asked for yet.
   (void)curves;
   if (!surfaces.empty()) {
-    int cylinders = 0, spheres = 0, tori = 0, patches = 0, grids = 0, cones = 0;
+    int cylinders = 0, spheres = 0, tori = 0, patches = 0, grids = 0, cones = 0, planes = 0;
     for (const auto& surface : surfaces) {
-      if (dynamic_cast<const CylinderSurface *>(surface.get()) != nullptr) cylinders++;
+      if (dynamic_cast<const PlaneSurface *>(surface.get()) != nullptr) planes++;
+      else if (dynamic_cast<const CylinderSurface *>(surface.get()) != nullptr) cylinders++;
       else if (dynamic_cast<const SphereSurface *>(surface.get()) != nullptr) spheres++;
       else if (dynamic_cast<const TorusSurface *>(surface.get()) != nullptr) tori++;
       else if (dynamic_cast<const BezierPatchSurface *>(surface.get()) != nullptr) patches++;
@@ -302,10 +303,22 @@ void StepKernel::build_tri_body(
     // the same terms: only when there is one. Listing it always would say
     // nothing and would rewrite the EXPECT line of every fixture here.
     if (cones > 0) extra += ", " + std::to_string(cones) + " conical";
+    char pn[64] = "";
+    if (planes > 0) {
+      snprintf(pn, sizeof(pn), ", and %d declared plane%s", planes, planes == 1 ? "" : "s");
+    }
+    const std::string plane_note(pn);
     LOG(
+      // Planes are counted apart from the curved surfaces rather than added in.
+      // This census is what the recognisers have to match facets against, and a
+      // declared plane is not that - a merged planar face is already exact, so
+      // nothing is recognised *onto* a plane. It is declared so that a face of
+      // the model can be told from a chord of a tessellation, which happens
+      // after the merge and reads this list directly.
       "STEP export: %1$d analytic surface%2$s available (%3$d cylindrical, %4$d spherical, "
-      "%5$d toroidal, %6$d Bezier%7$s)",
-      int(surfaces.size()), surfaces.size() == 1 ? "" : "s", cylinders, spheres, tori, patches, extra);
+      "%5$d toroidal, %6$d Bezier%7$s)%8$s",
+      int(surfaces.size()) - planes, surfaces.size() - planes == 1 ? "" : "s", cylinders, spheres, tori,
+      patches, extra, plane_note.c_str());
   }
 
   const double model_tol = tol > 0 ? tol : 1e-5;
@@ -1225,6 +1238,7 @@ void StepKernel::build_tri_body(
   // surface. Two, and it is a triple point - the cut and the sliver of base a
   // tilted cut leaves behind - which belongs on neither conic and stays.
   std::map<int, Vector3d> moves = cornerMoves;
+  std::size_t on_conic = 0, on_triple = 0;  // what each later path added to `moves`
   if (approximate && !singleOwner.empty()) {
     std::map<int, std::vector<std::size_t>> faces_at;
     for (std::size_t i = 0; i < loops.size(); i++) {
@@ -1232,7 +1246,7 @@ void StepKernel::build_tri_body(
       for (const int v : loops[i]) faces_at[v].push_back(i);
     }
     std::size_t placed = 0, triple = 0, placed_triple = 0;
-    double worst_plane = 0;
+    double worst_plane = 0, worst_triple = 0;
     for (const auto& entry : singleOwner) {
       const int v = entry.first;
       if (v < 0 || std::size_t(v) >= vertices.size()) continue;
@@ -1362,7 +1376,7 @@ void StepKernel::build_tri_body(
           triple++;
           continue;
         }
-        worst_plane = std::max(worst_plane, (p3 - vertices[v]).norm());
+        worst_triple = std::max(worst_triple, (p3 - vertices[v]).norm());
         moves.emplace(v, p3);
         placed_triple++;
         continue;
@@ -1390,11 +1404,14 @@ void StepKernel::build_tri_body(
       moves.emplace(v, p);
       placed++;
     }
+    on_conic = placed;
+    on_triple = placed_triple;
     if (placed_triple > 0) {
       LOG(
         "STEP export: %1$d corners where a declared surface meets two faces of the model are "
-        "placed where all three cross; %2$d more are left where the mesh put them",
-        int(placed_triple), int(triple));
+        "placed where all three cross, moving at most %2$.4f; %3$d more are left where the mesh "
+        "put them",
+        int(placed_triple), worst_triple, int(triple));
     }
     if (placed > 0) {
       LOG(
@@ -1662,10 +1679,19 @@ void StepKernel::build_tri_body(
         worst = std::max(worst, (m.second - vertices[m.first]).norm());
         vertices[m.first] = m.second;
       }
+      // Three populations, not one. `moves` starts as the corners two declared
+      // owners cross at and then takes the conic and triple-point placements
+      // above, so calling the total "their two declared owners" was false
+      // wherever the other paths fired: on step-exact-trim provenance names two
+      // owners for *zero* vertices and this line still claimed 40 of them.
+      // Each is named now, and they sum to the total by construction - every
+      // path checks `moves.count(v)` before inserting.
       LOG(
-        "STEP export: %1$d corners moved onto the curve where their two declared owners cross, "
-        "by at most %2$.4f; %3$d analytic faces now bound themselves on their own surface",
-        int(moves.size()), worst, int(analytic_faces));
+        "STEP export: %1$d corners moved, by at most %2$.4f - %3$d where two declared owners "
+        "cross, %4$d onto a conic with one plane, %5$d where three exact things meet; %6$d "
+        "analytic faces now bound themselves on their own surface",
+        int(moves.size()), worst, int(cornerMoves.size()), int(on_conic), int(on_triple),
+        int(analytic_faces));
       if (!split_for_corners.empty()) {
         std::size_t added = 0;
         for (const auto& sc : split_for_corners) added += loops[sc.first].size() - 3;

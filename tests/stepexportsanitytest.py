@@ -88,6 +88,112 @@ def normalized(path):
         return [line for line in f.read().splitlines() if not line.startswith("FILE_NAME")]
 
 
+def report_contradictions(output):
+    """Relations the exporter's own report must satisfy, whatever the model is.
+
+    Every other check here comes from a fixture: a number worked out from the
+    model and asserted against a run. This one comes from the report itself, and
+    asks only that it does not contradict itself - a total equal to its parts, a
+    population that is the same population two lines later, a maximum over a set
+    that is empty being zero. None of it is a captured value, so it applies to
+    every fixture at once and needs nothing written per model.
+
+    It exists because a wrong number here passes everything else. Two were found
+    by hand on 2026-09-07 and neither failed a test:
+
+      - `worst_plane` was written by two placement paths and reported as one
+        of them, so step-shared-arc said 2 corners reached a conic "moving at
+        most 2.0000" when the 2.0 belonged to a different set of corners.
+      - the summary said "N corners moved onto the curve where their two
+        declared owners cross" with N the size of a map three paths write to.
+        On step-exact-trim provenance names two owners for *zero* vertices and
+        the line still claimed 40 of them.
+
+    The first is why counts are checked against their own extrema, and the
+    second is why totals are checked against their breakdown."""
+    out, bad = " ".join(output.split()), []
+
+    census = re.search(r"(\d+) analytic surfaces? available \(([^)]*)\)", out)
+    kinds = None
+    if census:
+        kinds = sum(int(n) for n in re.findall(r"(\d+) \w+", census.group(2)))
+        if int(census.group(1)) != kinds:
+            bad.append("the surface census totals %s but its kinds add to %d"
+                       % (census.group(1), kinds))
+
+    prov = re.search(r"onto (\d+) of (\d+) declared surfaces?", out)
+    if prov and census and int(prov.group(2)) != int(census.group(1)):
+        bad.append("provenance counts %s declared surfaces, the census %s"
+                   % (prov.group(2), census.group(1)))
+    if prov and int(prov.group(1)) > int(prov.group(2)):
+        bad.append("provenance names more surfaces than are declared")
+
+    buckets = re.search(r"of (\d+) junction vertices it names one owner for (\d+), two for "
+                        r"(\d+), more for (\d+), none for (\d+)", out)
+    if buckets:
+        total, parts = int(buckets.group(1)), [int(buckets.group(i)) for i in (2, 3, 4, 5)]
+        if sum(parts) != total:
+            bad.append("the junction buckets add to %d, not %d" % (sum(parts), total))
+
+    pair = re.search(r"of (\d+) junction vertices owned by two surfaces, (\d+) reach the curve",
+                     out)
+    if pair:
+        if buckets and int(pair.group(1)) != int(buckets.group(3)):
+            bad.append("two-owner vertices counted as %s and as %s"
+                       % (pair.group(1), buckets.group(3)))
+        if int(pair.group(2)) > int(pair.group(1)):
+            bad.append("more vertices reach the crossing curve than are owned by two surfaces")
+    within = re.search(r"(\d+) of those move no further than", out)
+    if within and pair and int(within.group(1)) > int(pair.group(2)):
+        bad.append("more corners stay within the band than reached the curve at all")
+
+    # A bound that the thing it bounds exceeds. This is what a "the band is X"
+    # figure looks like when the loop that set it kept the last grid it saw
+    # rather than the widest: the corners were each judged against their own
+    # sweep's band and the line names one of them, so a model with two sweeps of
+    # different resolutions reports corners moving further than the bound they
+    # are said to respect. See step-declare-grid-two-bands.py.
+    band = re.search(r"move no further than their sweep's own tessellation band, the widest of "
+                     r"which is ([\d.]+), by at most ([\d.]+)", out)
+    if band and float(band.group(2)) > float(band.group(1)) + 1e-9:
+        bad.append("corners said to move no further than a band of %s move up to %s"
+                   % (band.group(1), band.group(2)))
+
+    moved = re.search(r"(\d+) corners moved, by at most ([\d.]+) - (\d+) where two declared "
+                      r"owners cross, (\d+) onto a conic with one plane, (\d+) where three "
+                      r"exact things meet", out)
+    if moved:
+        total = int(moved.group(1))
+        parts = [int(moved.group(i)) for i in (3, 4, 5)]
+        if sum(parts) != total:
+            bad.append("%d corners moved but the three paths account for %d"
+                       % (total, sum(parts)))
+        # every path's own worst is over a subset of the same moves
+        for label, pat in (("onto a conic", r"reach the conic where the two cross, moving at most "
+                                            r"([\d.]+)"),
+                           ("at a triple point", r"placed where all three cross, moving at most "
+                                                 r"([\d.]+)")):
+            m = re.search(pat, out)
+            if m and float(m.group(1)) > float(moved.group(2)) + 1e-9:
+                bad.append("corners placed %s move further than any corner moved" % label)
+
+    # A maximum over an empty set is not a number: if nothing was placed, nothing
+    # can have moved at most anything. This is the shape a shared accumulator
+    # takes when the path that owns the sentence did not fire.
+    for count, worst, what in re.findall(
+            r"(\d+) corners? (?:[a-z ]+?)(?:reach|are placed|placed)[^.;]*?"
+            r"(?:moving|by) at most ([\d.]+)()", out):
+        if int(count) == 0 and float(worst) > 0:
+            bad.append("no corners placed, yet a travel of %s is reported" % worst)
+
+    stay = re.findall(r"(\d+) (?:more are left where the mesh put them|sit on two planes and stay)",
+                      out)
+    if len(stay) == 2 and stay[0] != stay[1]:
+        bad.append("corners left where the mesh put them counted as %s and as %s"
+                   % (stay[0], stay[1]))
+    return bad
+
+
 def expectations(path):
     # Directive names are matched as whole words. Without that guard one name is
     # a substring of another - ROUNDTRIP-APPROX: was read as an APPROX: line and
@@ -392,6 +498,9 @@ def check_approximation(openscad, inputfile, stepfile, args):
         openscad, inputfile, approxfile,
         args + ["--enable=step-analytic-surfaces", "--enable=step-approximate-surfaces"],
     )
+    for line in report_contradictions(output):
+        print("the approximation run's own report contradicts itself: " + line, file=sys.stderr)
+        return False
     if not validateSTEP(approxfile):
         print("the approximation export is not valid", file=sys.stderr)
         return False
@@ -446,7 +555,12 @@ if ok:
     analytic_flag = "--enable=step-analytic-surfaces"
     print("Re-exporting with " + analytic_flag, file=sys.stderr)
     output = export(args.openscad, inputfile, analyticfile, remaining_args + [analytic_flag])
-    if not validateSTEP(analyticfile):
+    contradictions = report_contradictions(output)
+    if contradictions:
+        for line in contradictions:
+            print("the analytic run's own report contradicts itself: " + line, file=sys.stderr)
+        ok = False
+    elif not validateSTEP(analyticfile):
         print("the analytic export is not valid", file=sys.stderr)
         ok = False
     elif not check_expectations(inputfile, output):

@@ -153,6 +153,39 @@ void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
   }
 }
 
+PlaneSurface::PlaneSurface(Vector3d refpt, Vector3d normdir)
+{
+  this->refpt = refpt;
+  this->normdir = normdir.normalized();
+}
+
+std::shared_ptr<Surface> PlaneSurface::clone() const
+{
+  return std::make_shared<PlaneSurface>(*this);
+}
+
+int PlaneSurface::operator==(const PlaneSurface& other)
+{
+  if (fabs(fabs(normdir.dot(other.normdir)) - 1.0) > 1e-6) return 0;
+  return fabs(normdir.dot(refpt - other.refpt)) > 1e-6 ? 0 : 1;
+}
+
+bool PlaneSurface::sameAs(const Surface& other) const
+{
+  // The plane, not the point on it. Every other subclass anchors something -
+  // a centre, an apex, a rim - so the base class compares refpt and is right
+  // to; a plane's refpt is only somewhere it passes through, and two records
+  // anchored a metre apart on the same plane are one surface.
+  if (typeid(*this) != typeid(other)) return false;
+  if (fabs(fabs(normdir.dot(other.normdir)) - 1.0) > 1e-9) return false;
+  return fabs(normdir.dot(refpt - other.refpt)) < 1e-9;
+}
+
+int PlaneSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
+{
+  return fabs(normdir.dot(pt - refpt)) > 1e-5 ? 0 : 1;
+}
+
 SphereSurface::SphereSurface(Vector3d refpt, Vector3d normdir, double r)
 {
   this->refpt = refpt;

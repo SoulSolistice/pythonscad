@@ -145,6 +145,23 @@ std::unique_ptr<const Geometry> CubeNode::createGeometry() const
     {2, 0, 4, 6},  // left
   };
 
+  // And that those six faces are flat, which the facets cannot say for
+  // themselves. A plane read off the mesh is exact either way; what a
+  // declaration adds is that the model *meant* a face there, which is what
+  // tells a face of the part from a chord of some curved surface's
+  // tessellation when the two meet at a corner. See PlaneSurface.
+  for (int i = 0; i < 3; i++) {
+    Vector3d n(0, 0, 0);
+    n[i] = 1;
+    Vector3d lo(0, 0, 0), hi(0, 0, 0);
+    for (int j = 0; j < 3; j++) {
+      lo[j] = coord1[j];
+      hi[j] = coord2[j];
+    }
+    ps->surfaces.push_back(std::make_shared<PlaneSurface>(lo, n));
+    ps->surfaces.push_back(std::make_shared<PlaneSurface>(hi, n));
+  }
+
   return ps;
 }
 
@@ -444,6 +461,18 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
       polyset->surfaces.push_back(
         std::make_shared<CylinderSurface>(Vector3d(0, 0, z2), Vector3d(0, 0, 1), r2));
     }
+  }
+
+  // The caps, as planes. The wall's record is anchored at a rim, so the plane
+  // of *that* rim was already recoverable from it and the other one was not -
+  // which made a placement that read the anchor protect one cap and shatter the
+  // other. Declared, both are stated outright and neither is inferred. An apex
+  // has no cap, for the same reason it has no rim.
+  if (r1 > 0) {
+    polyset->surfaces.push_back(std::make_shared<PlaneSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1)));
+  }
+  if (r2 > 0) {
+    polyset->surfaces.push_back(std::make_shared<PlaneSurface>(Vector3d(0, 0, z2), Vector3d(0, 0, 1)));
   }
 
   // And the cone itself, which the rims alone do not say.

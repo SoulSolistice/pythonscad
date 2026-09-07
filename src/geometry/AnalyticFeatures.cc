@@ -43,6 +43,11 @@ bool closestOnSurface(const Surface *s, const Vector3d& p, Vector3d& out)
     out = cone->refpt + axis * h + radial.normalized() * want;
     return true;
   }
+  if (const auto *pl = dynamic_cast<const PlaneSurface *>(s)) {
+    const Vector3d n = pl->normdir.normalized();
+    out = p - n * n.dot(p - pl->refpt);
+    return true;
+  }
   if (const auto *sph = dynamic_cast<const SphereSurface *>(s)) {
     const Vector3d rel = p - sph->refpt;
     if (rel.norm() < 1e-12) return false;
@@ -1827,7 +1832,10 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
       if (miss > grid->membershipTolerance()) {
         corners_only++;
         worst_miss = std::max(worst_miss, miss);
-        missed_against = grid->membershipTolerance();
+        // The widest, not the last seen: claim_band two lines down already
+        // takes a max, and the two describing the same kind of quantity
+        // differently is what made this one wrong.
+        missed_against = std::max(missed_against, grid->membershipTolerance());
         continue;
       }
       // How far the facet's own corners are off the fit. These become the
@@ -2079,7 +2087,7 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     // declared open, every corner of which the generator emitted.
     report.push_back(
       format("%d facets have every corner on the sweep and their middle off it, "
-             "by up to %.4f against an allowance of %.4f",
+             "by up to %.4f against an allowance of at most %.4f",
              int(corners_only), worst_miss, missed_against));
   }
   if (live > 0) {

@@ -229,6 +229,25 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
 
   const std::size_t nsurf = ps.surfaces.size();
 
+  // Which of the records are planes, because they take no part in any of this.
+  std::vector<char> is_plane(nsurf, 0);
+  std::size_t nplane = 0;
+  for (std::size_t j = 0; j < nsurf; j++) {
+    if (dynamic_cast<const PlaneSurface *>(ps.surfaces[j].get()) != nullptr) {
+      is_plane[j] = 1;
+      nplane++;
+    }
+  }
+  const std::size_t ncurved = nsurf - nplane;
+
+  // Declared planes take no part in ownership. A corner's owners here are the
+  // curved surfaces provenance can name from the originals that made it; which
+  // *plane* a corner is on is a different question, answerable only once
+  // mergeTriangles has run - doc/step-corner-exactness.md records three ways of
+  // guessing it from raw triangles that do not work - and build_tri_body reads
+  // the declarations there. Letting a plane in here would put a corner on its
+  // own cap into the three-owner bucket, which places nothing at all.
+
   // On the surface, tightly. See the note above for why not pointMember.
   const double tol = 1e-7;
   auto runsThrough = [&](const Surface *s, const Vector3d& p) {
@@ -328,6 +347,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     if (fn.norm() < 1e-18) continue;
 
     for (std::size_t j = 0; j < nsurf; j++) {
+      if (is_plane[j] != 0) continue;
       std::vector<int> on;
       bool bad = false;
       for (const int v : f) {
@@ -387,7 +407,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   std::map<int32_t, std::vector<std::size_t>> owned;
   for (const auto& entry : covered) {
     for (std::size_t j = 0; j < nsurf; j++) {
-      if (entry.second[j] >= least) owned[entry.first].push_back(j);
+      if (is_plane[j] == 0 && entry.second[j] >= least) owned[entry.first].push_back(j);
     }
   }
 
@@ -425,6 +445,8 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       const auto it = owned.find(id);
       if (it == owned.end()) continue;
       for (const std::size_t j : it->second) {
+        // A declared plane is not an owner here; see the note above nsurf.
+        if (is_plane[j] != 0) continue;
         // By the surface, not by the record. The list keeps two entries for one
         // cylinder referred to from two heights (see Surface::sameAs), and
         // counting those as two owners makes an unambiguous vertex look
@@ -451,6 +473,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       double best = std::numeric_limits<double>::infinity();
       for (std::size_t j = 0; j < nsurf; j++) {
         Vector3d q;
+        if (is_plane[j] != 0) continue;
         if (!closestOnSurface(ps.surfaces[j].get(), ps.vertices[v], q)) continue;
         const double d = (q - ps.vertices[v]).norm();
         if (d < best) {
@@ -518,7 +541,11 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         for (const std::size_t j : candidates) {
           if (const auto *g = dynamic_cast<const GridSurface *>(ps.surfaces[j].get())) {
             bound = g->tessellationBand();
-            band_used = bound;
+            // The widest, not the last one seen. Each corner is judged against
+            // its own grid's band, so with two declared sweeps of different
+            // resolutions a last-wins value names a band most of the counted
+            // corners were never measured against.
+            band_used = std::max(band_used, bound);
           }
         }
         if (travel <= bound) {
@@ -541,7 +568,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     "STEP export: provenance maps %1$d of %2$d originals onto %3$d of %4$d declared surface%5$s; "
     "of %6$d junction vertices it names one owner for %7$d, two for %8$d, more for %9$d, none "
     "for %10$d",
-    int(owned.size()), int(facets.size()), int(named.size()), int(nsurf), nsurf == 1 ? "" : "s",
+    int(owned.size()), int(facets.size()), int(named.size()), int(ncurved), ncurved == 1 ? "" : "s",
     int(junctions), int(single), int(pair), int(many), int(unowned));
   if (single > 0) {
     LOG(
@@ -552,8 +579,8 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   if (pair > 0 && band_used > 0) {
     LOG(
       "STEP export: of %1$d junction vertices owned by two surfaces, %2$d reach the curve where "
-      "the two cross, moving at most %3$.4f; %4$d of those move no further than the sweep's "
-      "tessellation band of %5$.4f, by at most %6$.4f",
+      "the two cross, moving at most %3$.4f; %4$d of those move no further than their sweep's "
+      "own tessellation band, the widest of which is %5$.4f, by at most %6$.4f",
       int(pair), int(on_edge), worst_travel, int(within_bound), band_used, worst_within);
   } else if (pair > 0) {
     LOG(

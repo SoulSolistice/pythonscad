@@ -191,6 +191,34 @@ private:
   int operator==(const Surface& other) override { return 0; }
 };
 
+/*! A plane, declared by the model that meant a flat face.
+ *
+ * The one surface a model could not state until now, and the gap was not
+ * cosmetic: the corner placement has to tell a face of the part from a chord of
+ * some curved surface's tessellation, and with nothing declared it had to infer
+ * that from geometry. The inference works and is measured, but it rests on a
+ * threshold - see doc/step-corner-exactness-handover.md, where the closest pair
+ * of cases sits at 0.885 against 0.643. A declaration turns it into a lookup,
+ * and gives the inference, still needed wherever nothing declares (hull(),
+ * minkowski(), an imported mesh), something to be checked against.
+ *
+ * Held as the base class's `refpt` and `normdir` and nothing else, so two
+ * records of the same plane anchored at different points are the same surface -
+ * which is why `sameAs` compares the plane rather than the point, unlike every
+ * other subclass here. */
+class PlaneSurface : public Surface
+{
+public:
+  PlaneSurface(Vector3d refpt, Vector3d normdir);
+  int operator==(const PlaneSurface& other);
+  int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
+  [[nodiscard]] std::shared_ptr<Surface> clone() const override;
+  [[nodiscard]] bool sameAs(const Surface& other) const override;
+
+private:
+  int operator==(const Surface& other) override { return 0; }
+};
+
 class CylinderSurface : public Surface
 {
 public:
