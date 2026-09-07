@@ -244,7 +244,8 @@ struct PlaneStretch {
 };
 
 std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
-                                            const std::vector<Vector3d>& vertices, const Vector3d& axis)
+                                            const std::vector<Vector3d>& vertices, const Vector3d& axis,
+                                            double min_cos_tilt)
 {
   std::vector<PlaneStretch> out;
   const std::size_t n = cycle.size();
@@ -300,16 +301,304 @@ std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
     }
     if (best_s == n) break;
     for (std::size_t k = 0; k + 1 < best_len; k++) spent[(best_s + k) % n] = 1;
-    // Perpendicular to the axis is a circle, which the arc pass already writes;
-    // parallel to it is a pair of rulings and no conic at all. Either way the
-    // edges are still spent, so the search does not offer the same stretch back.
+    // Perpendicular to the axis is a circle, which the arc pass already writes.
+    // The floor below it belongs to the surface: on a cylinder any other tilt
+    // gives an ellipse, but on a cone the section is one only while the plane
+    // still crosses every generator - at the half angle it is a parabola and
+    // past it a hyperbola, and neither of those closes. Either way the edges are
+    // still spent, so the search does not offer the same stretch back.
     const double cos_tilt = fabs(nor[best_s].dot(axis));
-    if (cos_tilt < 1e-6 || cos_tilt > 1 - 1e-9) continue;
+    if (cos_tilt < min_cos_tilt || cos_tilt > 1 - 1e-9) continue;
     PlaneStretch st;
     st.start = best_s;
     st.count = best_len;
     st.normal = nor[best_s];
     out.push_back(st);
+  }
+  return out;
+}
+
+/*! The ellipse a plane cuts from a cylinder or a cone.
+ *
+ * `a` is the semi-axis along `major`, and is the longer of the two - which is
+ * the order ISO 10303-42 gives an ELLIPSE its two radii in.
+ *
+ * A cylinder is the easy half: the section's centre is where the plane meets the
+ * axis, the short semi-axis is the cylinder's own radius, and the long one is
+ * that divided by the cosine of the tilt.
+ *
+ * A cone is worked in its plane of symmetry - the one containing the axis and
+ * perpendicular to the cutting plane - because that is where the section's two
+ * extreme points are. The cone shows there as its two outermost generators and
+ * the cutting plane as a line, so the two crossings are the ends of the major
+ * axis and the centre and `a` follow from them. `b` is the half chord through
+ * the centre at right angles to that, and the cone's own quadratic gives it in
+ * one square root: the direction is perpendicular to the axis and to the major
+ * axis both, so every linear term in it drops out.
+ */
+struct SectionEllipse {
+  Vector3d centre, major;
+  double a = 0, b = 0;
+};
+
+bool planeSectionEllipse(const Surface *surface, const Vector3d& normal, const Vector3d& on_plane,
+                         SectionEllipse& out)
+{
+  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(surface)) {
+    const Vector3d axis = cyl->normdir.normalized();
+    const double cos_tilt = normal.dot(axis);
+    if (fabs(cos_tilt) < 1e-9) return false;
+    out.centre = cyl->refpt + axis * (normal.dot(on_plane - cyl->refpt) / cos_tilt);
+    const Vector3d in_plane = axis - normal * cos_tilt;
+    if (in_plane.norm() < 1e-12) return false;
+    out.major = in_plane.normalized();
+    out.a = cyl->r / fabs(cos_tilt);
+    out.b = cyl->r;
+    return true;
+  }
+  const auto *cone = dynamic_cast<const ConeSurface *>(surface);
+  if (cone == nullptr || fabs(cone->slope) < 1e-12) return false;
+  const Vector3d axis = cone->normdir.normalized();
+  const Vector3d apex = cone->refpt + axis * (-cone->r / cone->slope);
+  const double cos_a = 1.0 / sqrt(1.0 + cone->slope * cone->slope);
+  const double sin_a = fabs(cone->slope) * cos_a;
+  if (fabs(normal.dot(axis)) <= sin_a) return false;  // a parabola or a hyperbola
+  Vector3d across = normal - axis * normal.dot(axis);
+  if (across.norm() < 1e-12) return false;
+  across.normalize();
+  // Out from the apex is whichever way the radius grows.
+  const Vector3d out_dir = cone->slope > 0 ? axis : -axis;
+  Vector3d ends[2];
+  for (int side = 0; side < 2; side++) {
+    const Vector3d gen = out_dir * cos_a + across * (side == 0 ? sin_a : -sin_a);
+    const double denom = normal.dot(gen);
+    if (fabs(denom) < 1e-12) return false;
+    const double along = normal.dot(on_plane - apex) / denom;
+    if (along <= 0) return false;  // the other nappe, so not one closed section
+    ends[side] = apex + gen * along;
+  }
+  out.centre = (ends[0] + ends[1]) * 0.5;
+  const Vector3d half = (ends[0] - ends[1]) * 0.5;
+  out.a = half.norm();
+  if (out.a < 1e-12) return false;
+  out.major = half / out.a;
+  const Vector3d rel = out.centre - apex;
+  const double up = rel.dot(axis);
+  const double b2 = up * up / (cos_a * cos_a) - rel.squaredNorm();
+  if (b2 <= 0) return false;
+  out.b = sqrt(b2);
+  return out.a >= out.b;
+}
+
+/*! How far off perpendicular a plane may tilt and still cut a closed section. */
+double sectionTiltFloor(const Surface *surface)
+{
+  // A cylinder's rulings are parallel, so every plane but one along them closes;
+  // a cone's meet, and past the half angle the section runs away to infinity.
+  if (const auto *cone = dynamic_cast<const ConeSurface *>(surface)) {
+    return fabs(cone->slope) / sqrt(1.0 + cone->slope * cone->slope);
+  }
+  return 1e-6;
+}
+
+/*! A quadric patch's boundary, as cycles, with the plane sections found on it.
+ *
+ * One place answers this because three ask it - whether a face may be written at
+ * all, which sections its faces agree on, and the writer itself - and all three
+ * have to agree exactly, because a curve one face writes and its neighbour does
+ * not is a hole in the shell.
+ *
+ * A section's plane comes from one of two places, and which is not a detail.
+ * Where the face across it is a *planar* one the plane is that face's own, known
+ * exactly and known however short the shared stretch is - a single edge is
+ * enough. Only where the neighbour is another quadric is there no plane to be
+ * had from anywhere, and then it has to be fitted to three consecutive boundary
+ * vertices and grown along the cycle. That fit is the weaker of the two and it
+ * is used second: it needs two edges before it can see a plane at all, and a
+ * cone cut by a slab meets that cut in a single edge on two of its four
+ * regions - which is exactly the case that refused the whole surface while the
+ * fit was the only way in.
+ *
+ * Cycles come back rolled so that no section straddles their seam, since the
+ * writer reads a cycle left to right. Sections index into `verts` and never
+ * wrap.
+ */
+struct BoundarySection {
+  std::size_t start = 0, count = 0;  // count is vertices, so count - 1 edges
+  Vector3d normal, on_plane;
+  int loop = -1;          // the planar face across it, or -1 where another quadric is
+  bool declared = false;  // the plane came from the model, not from the mesh
+};
+
+/*! A plane that cuts a quadric, taken from a face rather than fitted.
+ *
+ * `declared` says the model stated it, which is the difference that matters: a
+ * declaration cannot drift, where a plane fitted to mesh vertices moves with the
+ * tessellation, with whatever the boolean did, and with the tolerance the fit
+ * was given. Everything derived from it inherits that - the section's centre and
+ * its two semi-axes are all differences of the plane against the surface, and a
+ * plane that is exact makes them exact too.
+ */
+struct CutPlane {
+  Vector3d normal, on_plane;
+  bool declared = false;
+};
+
+struct BoundaryCycle {
+  std::vector<int> verts;
+  std::vector<int> owner;  // per edge: the neighbouring planar loop, or -1
+  std::vector<BoundarySection> sections;
+};
+
+bool surfaceAxis(const Surface *surface, Vector3d& axis)
+{
+  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(surface)) {
+    axis = cyl->normdir.normalized();
+    return true;
+  }
+  if (const auto *cone = dynamic_cast<const ConeSurface *>(surface)) {
+    axis = cone->normdir.normalized();
+    return true;
+  }
+  return false;
+}
+
+void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
+                  const std::vector<CutPlane>& planes, BoundaryCycle& cycle)
+{
+  cycle.sections.clear();
+  Vector3d axis;
+  if (!surfaceAxis(surface, axis)) return;
+  const double floor_tilt = sectionTiltFloor(surface);
+  const std::size_t n = cycle.verts.size();
+  if (n < 3) return;
+
+  // Which of the surface's cutting planes each boundary edge lies in. A plane is
+  // only usable if it makes a closed section: perpendicular to the axis it makes
+  // a circle, which the arc pass writes, and past the floor a cone's section
+  // runs away to infinity.
+  std::vector<double> scale(planes.size(), 0);
+  for (std::size_t p = 0; p < planes.size(); p++) {
+    const double cos_tilt = fabs(planes[p].normal.dot(axis));
+    if (cos_tilt < floor_tilt || cos_tilt > 1 - 1e-9) continue;
+    SectionEllipse sec;
+    if (!planeSectionEllipse(surface, planes[p].normal, planes[p].on_plane, sec)) continue;
+    scale[p] = sec.a;
+  }
+  std::vector<int> plane_of(n, -1);
+  for (std::size_t e = 0; e < n; e++) {
+    for (std::size_t p = 0; p < planes.size(); p++) {
+      if (scale[p] <= 0) continue;
+      const double tol = 1e-9 * scale[p];
+      const Vector3d& u = vertices[cycle.verts[e]];
+      const Vector3d& v = vertices[cycle.verts[(e + 1) % n]];
+      if (fabs((u - planes[p].on_plane).dot(planes[p].normal)) > tol) continue;
+      if (fabs((v - planes[p].on_plane).dot(planes[p].normal)) > tol) continue;
+      plane_of[e] = int(p);
+      break;
+    }
+  }
+
+  // Group into maximal runs sharing a plane *and* a neighbour. The plane is what
+  // makes the curve; the neighbour is who has to be handed it, and a curve
+  // spanning two neighbours could be handed to neither.
+  std::vector<char> taken_edge(n, 0);
+  for (std::size_t e = 0; e < n; e++) {
+    if (plane_of[e] < 0) continue;
+    const std::size_t prev = (e + n - 1) % n;
+    if (plane_of[prev] == plane_of[e] && cycle.owner[prev] == cycle.owner[e] && e > 0) continue;
+    std::size_t count = 1;
+    while (count < n && plane_of[(e + count) % n] == plane_of[e] &&
+           cycle.owner[(e + count) % n] == cycle.owner[e]) {
+      count++;
+    }
+    BoundarySection bs;
+    bs.start = e;
+    bs.count = count + 1;
+    bs.normal = planes[plane_of[e]].normal;
+    bs.on_plane = planes[plane_of[e]].on_plane;
+    bs.declared = planes[plane_of[e]].declared;
+    bs.loop = cycle.owner[e];
+    cycle.sections.push_back(bs);
+    for (std::size_t k = 0; k < count; k++) taken_edge[(e + k) % n] = 1;
+  }
+
+  // And last, where no face anywhere declares the plane, fit one to the boundary
+  // itself. That is the weaker way round - it needs two edges before it can see
+  // a plane at all - and it exists for the case where nothing planar is in the
+  // picture: two cylinders crossing meet along an ellipse that is nobody's face.
+  for (const auto& st : coplanarStretches(cycle.verts, vertices, axis, floor_tilt)) {
+    bool free_run = true;
+    for (std::size_t k = 0; free_run && k + 1 < st.count; k++) {
+      free_run = !taken_edge[(st.start + k) % n];
+    }
+    if (!free_run) continue;
+    const Vector3d on_plane = vertices[cycle.verts[st.start % n]];
+    SectionEllipse sec;
+    if (!planeSectionEllipse(surface, st.normal, on_plane, sec)) continue;
+    BoundarySection bs;
+    bs.start = st.start;
+    bs.count = st.count;
+    bs.normal = st.normal;
+    bs.on_plane = on_plane;
+    cycle.sections.push_back(bs);
+    for (std::size_t k = 0; k + 1 < st.count; k++) taken_edge[(st.start + k) % n] = 1;
+  }
+}
+
+std::map<std::size_t, BoundaryCycle> boundaryCycles(const AnalyticFeatures::Patch& patch,
+                                                    const std::vector<Vector3d>& vertices,
+                                                    const std::vector<std::vector<int>>& loops,
+                                                    const std::vector<char>& loop_valid,
+                                                    const std::vector<char>& taken,
+                                                    const std::vector<CutPlane>& planes)
+{
+  std::map<std::size_t, BoundaryCycle> out;
+  for (const auto& run : patch.runs) {
+    BoundaryCycle& cycle = out[run.bound];
+    // Only a neighbour that is going to be written as a planar face can be
+    // handed a curve; one another claim has already taken is not there to take
+    // it, and the shell would open along it. `taken` is that test, and it has to
+    // include the claims this same pass is about to make - two cylinders meeting
+    // along an ellipse each see a facet loop of the other, which is not a planar
+    // face at all and settles the curve between themselves.
+    int who = -1;
+    if (run.loop < loops.size() && loop_valid[run.loop] != 0 && taken[run.loop] == 0 &&
+        loops[run.loop].size() >= 3) {
+      who = int(run.loop);
+    }
+    for (std::size_t i = 0; i + 1 < run.verts.size(); i++) {
+      cycle.verts.push_back(run.verts[i]);
+      cycle.owner.push_back(who);
+    }
+  }
+  for (auto& entry : out) {
+    BoundaryCycle& cycle = entry.second;
+    findSections(patch.surface.get(), vertices, planes, cycle);
+    // Move the seam onto an edge no section covers, so the writer meets each
+    // section whole. Cutting at a section's own start is not enough: freeing one
+    // that way pushes the next across the new seam wherever two meet end to end,
+    // which is how the two ellipse arcs of a Steinmetz face meet at the pinch.
+    const std::size_t n = cycle.verts.size();
+    bool wraps = false;
+    std::vector<char> covered(n, 0);
+    for (const auto& bs : cycle.sections) {
+      if (bs.start + bs.count > n) wraps = true;
+      for (std::size_t k = 0; k + 1 < bs.count; k++) covered[(bs.start + k) % n] = 1;
+    }
+    if (!wraps) continue;
+    std::size_t free_edge = n;
+    for (std::size_t e = 0; e < n; e++) {
+      if (!covered[e]) {
+        free_edge = e;
+        break;
+      }
+    }
+    if (free_edge >= n) continue;  // every edge is a section, so nothing to cut at
+    const long roll = long((free_edge + 1) % n);
+    std::rotate(cycle.verts.begin(), cycle.verts.begin() + roll, cycle.verts.end());
+    std::rotate(cycle.owner.begin(), cycle.owner.begin() + roll, cycle.owner.end());
+    findSections(patch.surface.get(), vertices, planes, cycle);
   }
   return out;
 }
@@ -731,6 +1020,29 @@ void StepKernel::build_tri_body(
   // face writes and its neighbour does not is a hole in the shell, so this is a
   // joint decision and not one a face can take for itself.
   std::set<std::set<int>> section_curves;
+  // The planes the model declared, kept where the writer can reach them. A
+  // declared plane cannot drift with the mesh, and a section derived from one is
+  // exact rather than merely close, so it is preferred wherever it agrees with
+  // the face at hand.
+  std::vector<std::pair<Vector3d, Vector3d>> declared_planes;  // point, unit normal
+  // Deciding which plane sections get written, over a given set of faces. This
+  // is a function rather than a step because it has to be asked **twice**, on
+  // two different meshes: once while it is being settled which faces are
+  // analytic at all, and again immediately before they are written. The corner
+  // placement runs between those two points and moves vertices - by up to 0.07
+  // on step-band-family - so a section agreed on the first mesh need not exist
+  // on the second, and a curve one face writes and its neighbour does not is a
+  // hole in the shell. Measured before this was split in two: 132 edges with one
+  // face, every one of them an ellipse the other side had stopped seeing.
+  std::function<void(const std::vector<const AnalyticFeatures::Patch *>&)> decide_sections;
+  // Which facet loops are not available to be written as planar faces. Filled
+  // by the quadric pass and read again by its writer, so both sides of every
+  // section agree about who is across it.
+  std::vector<char> taken;
+  // The planes that cut each quadric surface, gathered once so that every face
+  // of that surface sees the same list and they agree about the curve between
+  // them. Filled by the quadric pass, read again by its writer.
+  std::map<const Surface *, std::vector<CutPlane>> section_planes;
   // Parallel to `bezier_patches`: the exact quadric that patch lies on, or null
   // where it is written as the spline it is in general. See quadricOfPatch.
   std::vector<std::shared_ptr<Surface>> patch_quadric;
@@ -1170,120 +1482,161 @@ void StepKernel::build_tri_body(
       auto boundary_lies_on_surface = [&](const AnalyticFeatures::Patch& patch,
                                           const std::set<std::set<int>>& agreed) {
         Vector3d axis, origin;
+        double radius = 0, slope = 0;
         if (const auto *cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get())) {
           axis = cyl->normdir.normalized();
           origin = cyl->refpt;
+          radius = cyl->r;
         } else if (const auto *con = dynamic_cast<const ConeSurface *>(patch.surface.get())) {
           axis = con->normdir.normalized();
           origin = con->refpt;
+          radius = con->r;
+          slope = con->slope;
         } else {
           return false;
         }
-        // The boundary as cycles, which is how the writer sees it too - a run is
-        // whatever one neighbour covers, so an ellipse arrives as one run per
-        // edge and only the cycle shows the curve.
-        std::map<std::size_t, std::vector<int>> cycles;
-        for (const auto& run : patch.runs) {
-          std::vector<int>& cycle = cycles[run.bound];
-          for (std::size_t i = 0; i + 1 < run.verts.size(); i++) cycle.push_back(run.verts[i]);
-        }
-        const bool is_cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get()) != nullptr;
-        for (const auto& entry : cycles) {
-          const std::vector<int>& cycle = entry.second;
+        for (const auto& entry : boundaryCycles(patch, vertices, loops, loop_valid, taken,
+                                                section_planes[patch.surface.get()])) {
+          const BoundaryCycle& cycle = entry.second;
+          const std::size_t n = cycle.verts.size();
+          if (n < 3) continue;
           // Edges a plane section covers are exact as the conic written for
-          // them, so they are not asked to lie on the surface as chords. Only a
-          // cylinder for now: a plane cuts a cone in an ellipse, a parabola or a
-          // hyperbola depending on the tilt, and only the first of those closes.
-          // And only where the face on the other side writes the same conic:
-          // `agreed` is that decision, taken over all the faces at once.
-          const std::size_t n = cycle.size();
+          // them, so they are not asked to lie on the surface as chords - but
+          // only where the face on the other side writes the same conic, which
+          // is what `agreed` records, decided over all the faces at once.
           std::vector<char> covered(n, 0);
-          if (is_cyl) {
-            for (const auto& st : coplanarStretches(cycle, vertices, axis)) {
-              std::set<int> key;
-              for (std::size_t k = 0; k < st.count; k++) key.insert(cycle[(st.start + k) % n]);
-              if (agreed.find(key) == agreed.end()) continue;
-              for (std::size_t k = 0; k + 1 < st.count; k++) covered[(st.start + k) % n] = 1;
-            }
+          for (const auto& bs : cycle.sections) {
+            std::set<int> key;
+            for (std::size_t k = 0; k < bs.count; k++) key.insert(cycle.verts[(bs.start + k) % n]);
+            if (agreed.find(key) == agreed.end()) continue;
+            for (std::size_t k = 0; k + 1 < bs.count; k++) covered[(bs.start + k) % n] = 1;
           }
+          // How far a point is off the surface, radially. A cone's radius is a
+          // function of height, which is the whole of the difference.
+          auto off_surface = [&](const Vector3d& p) {
+            const Vector3d rel = p - origin;
+            const double along = rel.dot(axis);
+            const double want = radius + slope * along;
+            return fabs((rel - axis * along).norm() - want);
+          };
           for (std::size_t i = 0; i < n; i++) {
             if (covered[i]) continue;
-            const Vector3d a = vertices[cycle[i]] - origin;
-            const Vector3d b = vertices[cycle[(i + 1) % n]] - origin;
+            const Vector3d a = vertices[cycle.verts[i]] - origin;
+            const Vector3d b = vertices[cycle.verts[(i + 1) % n]] - origin;
             const Vector3d along = b - a;
             const double rise = fabs(along.dot(axis));
-            // Along the axis, or around it: either is exact, one as a line and
-            // one as the arc the post-pass will write.
-            if (rise > 1e-7 && (along.norm() - rise) > 1e-7) return false;
+            // Round the axis at constant height is exact as the arc the
+            // post-pass will write. A straight edge is exact when the surface
+            // contains the whole line, and the midpoint settles that on its own:
+            // a line meets a quadric twice unless it lies in it, so a third
+            // point on the surface means every point of it is. That is the test
+            // rather than "parallel to the axis", which is only a cylinder's
+            // answer - a cone's rulings run to its apex, and calling those
+            // chords refused four regions of step-cut-cone for edges that were
+            // exactly on the cone all along.
+            const Vector3d mid = origin + (a + b) * 0.5;
+            if (rise > 1e-7 && off_surface(mid) > 1e-7) return false;
           }
         }
         return true;
       };
 
-      // All of a surface or none of it. A declared cylinder can be cut into
-      // several regions, and writing one of them as the true cylinder while its
-      // neighbour stays a run of facets puts a smooth face against a sagging
-      // one along a shared edge. The vertices still meet, so nothing opens, but
-      // the surface acquires a crease that was not in the model - and a crease
-      // a later offset or fillet would follow. The faceted half is the half
-      // that sags, so the transition is between what is right and what was
-      // already wrong; that is still not a thing to introduce halfway across a
-      // face somebody declared as one surface.
-      // The plane sections a patch would like to write, each named by the mesh
-      // vertices it runs through. Two faces meeting along one of these arrive at
-      // the same set from either side, which is what lets them agree.
-      auto sections_of = [&](const AnalyticFeatures::Patch& patch) {
-        std::vector<std::set<int>> keys;
-        const auto *cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get());
-        if (cyl == nullptr) return keys;
-        const Vector3d axis = cyl->normdir.normalized();
-        std::map<std::size_t, std::vector<int>> cycles;
-        for (const auto& run : patch.runs) {
-          std::vector<int>& cycle = cycles[run.bound];
-          for (std::size_t i = 0; i + 1 < run.verts.size(); i++) cycle.push_back(run.verts[i]);
+      for (const auto& sf : effective) {
+        const auto *pl = dynamic_cast<const PlaneSurface *>(sf.get());
+        if (pl != nullptr) declared_planes.emplace_back(pl->refpt, pl->normdir.normalized());
+      }
+      decide_sections = [&](const std::vector<const AnalyticFeatures::Patch *>& standing) {
+        // Whose facets are not there to be written as a planar face: what an
+        // earlier pass consumed, plus what this one is standing to claim.
+        taken = features.consumed;
+        for (const auto *patch : standing) {
+          for (const std::size_t f : patch->facets) taken[f] = 1;
         }
-        for (const auto& entry : cycles) {
-          const std::vector<int>& cycle = entry.second;
-          const std::size_t n = cycle.size();
-          for (const auto& st : coplanarStretches(cycle, vertices, axis)) {
-            std::set<int> key;
-            for (std::size_t k = 0; k < st.count; k++) key.insert(cycle[(st.start + k) % n]);
-            keys.push_back(key);
+        // A loop a band will use as its rim is spoken for too. It is still
+        // written as a planar face, so it does not look consumed, but the band
+        // replaces a stretch of it with a circle and the writer takes the band's
+        // answer - so a second curve handed to the same loop is dropped in
+        // silence.
+        for (const auto& rim : features.rims) {
+          for (const AnalyticFeatures::RimRef *side : {&rim.first, &rim.second}) {
+            if (side->kind == AnalyticFeatures::RimRef::WHOLE_LOOP ||
+                side->kind == AnalyticFeatures::RimRef::LOOP_RUN) {
+              if (side->loop < taken.size()) taken[side->loop] = 1;
+            }
           }
         }
-        return keys;
+        // And the planes those faces cut each surface with. Gathered per surface
+        // rather than per region, because a plane that cuts a cone cuts all of
+        // it: the region meeting the cut along a single edge could never have
+        // seen the plane from that edge alone, and refused the whole surface for
+        // it.
+        section_planes.clear();
+        for (const auto *patch : standing) {
+          std::vector<CutPlane>& list = section_planes[patch->surface.get()];
+          for (const auto& run : patch->runs) {
+            if (run.loop >= loops.size() || loop_valid[run.loop] == 0) continue;
+            if (taken[run.loop] != 0 || loops[run.loop].size() < 3) continue;
+            CutPlane cp;
+            cp.normal = loop_normals[run.loop].normalized();
+            cp.on_plane = vertices[loops[run.loop][0]];
+            // A declared plane in preference to the mesh's own. The fit moves
+            // with the tessellation and with whatever the boolean left behind;
+            // the declaration cannot move at all, and the section derived from
+            // it is exact rather than merely close.
+            for (const auto& pl : declared_planes) {
+              if (fabs(fabs(pl.second.dot(cp.normal)) - 1.0) > 1e-6) continue;
+              if (fabs((cp.on_plane - pl.first).dot(pl.second)) > 1e-6) continue;
+              cp.normal = cp.normal.dot(pl.second) > 0 ? pl.second : Vector3d(-pl.second);
+              cp.on_plane = pl.first;
+              cp.declared = true;
+              break;
+            }
+            bool have = false;
+            for (const auto& seen : list) {
+              have = fabs(fabs(seen.normal.dot(cp.normal)) - 1.0) < 1e-9 &&
+                     fabs((cp.on_plane - seen.on_plane).dot(seen.normal)) < 1e-9;
+              if (have) break;
+            }
+            if (!have) list.push_back(cp);
+          }
+        }
+        // A section is written where both its faces will write it. A planar face
+        // across it is not a claimant - it never asks for a curve - so it counts
+        // as the second, and is handed the same edge when the faces are written.
+        std::map<std::set<int>, int> claims;
+        for (const auto *patch : standing) {
+          for (const auto& entry : boundaryCycles(*patch, vertices, loops, loop_valid, taken,
+                                                  section_planes[patch->surface.get()])) {
+            const BoundaryCycle& cycle = entry.second;
+            const std::size_t n = cycle.verts.size();
+            for (const auto& bs : cycle.sections) {
+              std::set<int> key;
+              for (std::size_t k = 0; k < bs.count; k++) key.insert(cycle.verts[(bs.start + k) % n]);
+              claims[key] += bs.loop >= 0 ? 2 : 1;
+            }
+          }
+        }
+        section_curves.clear();
+        for (const auto& claim : claims) {
+          if (claim.second == 2) section_curves.insert(claim.first);
+        }
       };
 
-      // All of a surface or none of it. A declared cylinder can be cut into
-      // several regions, and writing one of them as the true cylinder while its
-      // neighbour stays a run of facets puts a smooth face against a sagging
-      // one along a shared edge. The vertices still meet, so nothing opens, but
-      // the surface acquires a crease that was not in the model - and a crease
-      // a later offset or fillet would follow.
-      //
-      // A plane section is the same question asked about a curve rather than a
-      // surface, and it is stricter, because getting it wrong does open the
-      // shell: the two faces that meet along an ellipse have to write the same
-      // ellipse, so a section counts only when it turns up twice among the faces
-      // still standing. That makes the two decisions circular - a face may be
-      // writable only because a section covers its chords, and the section is
-      // only available while that face stands - so they are settled together, by
-      // dropping whatever the last round refused and asking again. Refusals only
-      // ever grow, so it stops.
+      // All of a surface or none of it, and that decision and the sections are
+      // circular - a face may be writable only because a section covers its
+      // chords, and the section is only there while that face stands - so they
+      // are settled together, by dropping whatever the last round refused and
+      // asking again. Refusals only ever grow, so it stops.
       std::map<const Surface *, bool> surface_ok;
       {
         std::vector<char> standing(found.size(), 0);
         for (std::size_t i = 0; i < found.size(); i++) standing[i] = found[i].alive ? 1 : 0;
         for (;;) {
-          std::map<std::set<int>, int> claims;
+          std::vector<const AnalyticFeatures::Patch *> live;
           for (std::size_t i = 0; i < found.size(); i++) {
-            if (!standing[i]) continue;
-            for (const auto& key : sections_of(found[i])) claims[key]++;
+            if (standing[i]) live.push_back(&found[i]);
           }
-          section_curves.clear();
-          for (const auto& claim : claims) {
-            if (claim.second == 2) section_curves.insert(claim.first);
-          }
+          decide_sections(live);
           surface_ok.clear();
           for (std::size_t i = 0; i < found.size(); i++) {
             if (!standing[i]) continue;
@@ -2599,7 +2952,40 @@ void StepKernel::build_tri_body(
   // One curve per plane section, shared by the two faces that meet along it -
   // the same rule the band pass follows for a shared rim. Without it each face
   // would write its own ellipse and the shell would come apart along them.
+  // Ask again, now that the corner placement has moved what it is going to move.
+  // The faces are settled; what is being re-decided is only which sections both
+  // of their faces can still see, and it has to be decided on the geometry that
+  // is about to be written rather than on the geometry it was chosen from.
+  if (decide_sections) {
+    const std::set<std::set<int>> agreed_before = section_curves;
+    std::vector<const AnalyticFeatures::Patch *> live;
+    live.reserve(quadric_faces.size());
+    for (const auto& patch : quadric_faces) live.push_back(&patch);
+    decide_sections(live);
+    std::size_t lost = 0;
+    for (const auto& key : agreed_before) {
+      if (section_curves.find(key) == section_curves.end()) lost++;
+    }
+    if (lost > 0) {
+      // Say so rather than let it pass: this is the one place the two meshes can
+      // disagree, and in the exact tier it means a face was called exact partly
+      // because a section covered chords which are now written as chords after
+      // all. A plane fitted to mesh facets is what does not survive: the
+      // placement moves a corner onto the surface the model declared, which is
+      // exactly off the facet plane it happened to share with a neighbour. A
+      // declared plane survives, because that is what the corner was moved onto.
+      LOG(message_group::Export_Warning,
+          "STEP export: %1$d plane section%2$s agreed before the corners were placed and %3$s not "
+          "after, so %4$s boundary is written as chords%5$s",
+          int(lost), lost == 1 ? "" : "s", lost == 1 ? "does" : "do",
+          lost == 1 ? "that much of a" : "that much of the",
+          approximate ? "" : " under a face called exact");
+    }
+  }
+
   std::map<std::set<int>, EdgeCurve *> section_edges;
+  std::set<std::set<int>> section_subs;  // sections already handed to a planar face
+  int sections_declared = 0, sections_fitted = 0;
   auto conic_placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
     return new Axis2Placement(entities, new Direction(entities, dir), new Direction(entities, towards),
                               new Point(entities, origin));
@@ -2611,18 +2997,30 @@ void StepKernel::build_tri_body(
     const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
     const Vector3d base = cyl != nullptr ? cyl->refpt : cone->refpt;
 
-    std::map<std::size_t, std::vector<int>> cycles;
-    for (const auto& run : patch.runs) {
-      std::vector<int>& cycle = cycles[run.bound];
-      for (std::size_t i = 0; i + 1 < run.verts.size(); i++) cycle.push_back(run.verts[i]);
-    }
-    if (cycles.empty()) continue;
+    const std::map<std::size_t, BoundaryCycle> boundary =
+      boundaryCycles(patch, vertices, loops, loop_valid, taken, section_planes[patch.surface.get()]);
+    if (boundary.empty()) continue;
 
-    // The reference direction is a radius through the first boundary vertex, so
-    // the face starts where its own boundary does rather than at some seam of
-    // the surface's own.
-    const Vector3d rel0 = vertices[cycles.begin()->second.front()] - base;
-    const Vector3d ref = (rel0 - axis * axis.dot(rel0)).normalized();
+    // The reference direction is a radius through the first boundary vertex that
+    // has one, so the face starts where its own boundary does rather than at
+    // some seam of the surface's own. "That has one" is not defensiveness: a
+    // cone's face can be bounded through its apex, which is on the axis and has
+    // no radius at all, and taking that one wrote a zero DIRECTION into the
+    // file - a placement no reader can use, on a face that was correct in every
+    // other respect.
+    Vector3d ref = Vector3d::Zero();
+    for (const auto& entry : boundary) {
+      for (const int v : entry.second.verts) {
+        const Vector3d rel = vertices[v] - base;
+        const Vector3d radial = rel - axis * axis.dot(rel);
+        if (radial.norm() > 1e-9) {
+          ref = radial.normalized();
+          break;
+        }
+      }
+      if (ref.norm() > 0.5) break;
+    }
+    if (ref.norm() < 0.5) ref = AnalyticFeatures::perpendicular(axis);
     auto point = new Point(entities, base);
     auto dir_ref = new Direction(entities, ref);
     SurfaceType *surface = nullptr;
@@ -2644,9 +3042,9 @@ void StepKernel::build_tri_body(
     std::size_t outer = 0;
     double widest = -1.0;
     const Vector3d ref2 = axis.cross(ref);
-    for (const auto& entry : cycles) {
+    for (const auto& entry : boundary) {
       std::vector<std::pair<double, double>> uv;
-      for (const int v : entry.second) {
+      for (const int v : entry.second.verts) {
         const Vector3d rel = vertices[v] - base;
         double t = atan2(rel.dot(ref2), rel.dot(ref));
         if (t < 0) t += 2 * M_PI;
@@ -2666,64 +3064,32 @@ void StepKernel::build_tri_body(
 
     std::vector<FaceBound *> bounds;
     std::vector<EdgeCurve *> face_edges_here;
-    for (const auto& entry : cycles) {
-      std::vector<int> cycle = entry.second;
-      if (cycle.size() < 3) continue;
+    for (const auto& entry : boundary) {
+      const std::vector<int>& cycle = entry.second.verts;
+      const std::size_t n = cycle.size();
+      if (n < 3) continue;
       // Where the boundary is a plane section, write the ellipse it is rather
       // than the chords the mesh carries. Everything else stays a straight edge:
       // this replaces a stretch of the boundary, never the whole of it.
-      std::vector<PlaneStretch> stretches;
-      if (cyl != nullptr) {
-        stretches = coplanarStretches(cycle, vertices, axis);
-        // A stretch found on the circle can straddle the cycle's arbitrary seam,
-        // and the walk below reads the cycle left to right. So move the seam
-        // onto an edge no stretch covers - the ruling between two arcs, here.
-        // Cutting at a stretch's own start is not enough: freeing one stretch
-        // that way pushes the next one across the new seam whenever the two meet
-        // end to end, which is exactly how the two ellipse arcs of a Steinmetz
-        // face meet at the pinch.
-        const std::size_t n = cycle.size();
-        bool wraps = false;
-        std::vector<char> covered(n, 0);
-        for (const auto& st : stretches) {
-          if (st.start + st.count > n) wraps = true;
-          for (std::size_t k = 0; k + 1 < st.count; k++) covered[(st.start + k) % n] = 1;
-        }
-        if (wraps) {
-          std::size_t free_edge = n;
-          for (std::size_t e = 0; e < n; e++) {
-            if (!covered[e]) {
-              free_edge = e;
-              break;
-            }
-          }
-          if (free_edge < n) {
-            std::rotate(cycle.begin(), cycle.begin() + long((free_edge + 1) % n), cycle.end());
-            stretches = coplanarStretches(cycle, vertices, axis);
-          }
-        }
-      }
-      std::vector<int> starts_at(cycle.size(), -1);
-      for (std::size_t k = 0; k < stretches.size(); k++) {
-        // A stretch the roll above could not free stays a run of chords, which
-        // is what the boundary test then refuses the surface for.
-        if (stretches[k].start + stretches[k].count > cycle.size()) continue;
-        // And one the face on the other side is not writing stays a run of
-        // chords too, however good a curve it is - see `section_curves`.
+      std::vector<int> starts_at(n, -1);
+      for (std::size_t k = 0; k < entry.second.sections.size(); k++) {
+        const BoundarySection& bs = entry.second.sections[k];
+        // A section the roll could not free stays a run of chords, which is what
+        // the boundary test then refuses the surface for; so does one the face
+        // on the other side is not writing - see `section_curves`.
         std::set<int> key;
-        for (std::size_t c = 0; c < stretches[k].count; c++) {
-          key.insert(cycle[stretches[k].start + c]);
-        }
+        for (std::size_t c = 0; c < bs.count; c++) key.insert(cycle[(bs.start + c) % n]);
+        if (bs.start + bs.count > n) continue;
         if (section_curves.find(key) == section_curves.end()) continue;
-        starts_at[stretches[k].start] = int(k);
+        starts_at[bs.start] = int(k);
       }
       std::vector<OrientedEdge *> loop;
-      for (std::size_t i = 0; i < cycle.size();) {
+      for (std::size_t i = 0; i < n;) {
         if (starts_at[i] >= 0) {
-          const PlaneStretch& st = stretches[starts_at[i]];
-          const int a = cycle[st.start], b = cycle[st.start + st.count - 1];
+          const BoundarySection& bs = entry.second.sections[starts_at[i]];
+          const int a = cycle[bs.start], b = cycle[bs.start + bs.count - 1];
           std::set<int> key;
-          for (std::size_t k = 0; k < st.count; k++) key.insert(cycle[st.start + k]);
+          for (std::size_t k = 0; k < bs.count; k++) key.insert(cycle[bs.start + k]);
           EdgeCurve *edge = nullptr;
           bool dir = true;
           const auto found = section_edges.find(key);
@@ -2731,22 +3097,20 @@ void StepKernel::build_tri_body(
             edge = found->second;
             dir = edge->vert1 == get_vertex(a);
           } else {
-            // Where the plane meets the axis is the ellipse's centre; its minor
-            // semi-axis is the cylinder's own radius and its major is longer by
-            // the secant of the tilt - the same construction the tilted band rim
-            // uses, and for the same reason.
-            const double cos_tilt = st.normal.dot(axis);
-            const Vector3d centre = base + axis * (st.normal.dot(vertices[a] - base) / cos_tilt);
-            const Vector3d major = (axis - st.normal * cos_tilt).normalized();
-            auto ell = new Ellipse(entities, "", conic_placement(centre, st.normal, major),
-                                   cyl->r / fabs(cos_tilt), cyl->r);
+            SectionEllipse sec;
+            if (!planeSectionEllipse(patch.surface.get(), bs.normal, bs.on_plane, sec)) {
+              starts_at[i] = -1;  // fall back to the chords, which is what was there
+              continue;
+            }
+            auto ell =
+              new Ellipse(entities, "", conic_placement(sec.centre, bs.normal, sec.major), sec.a, sec.b);
             // An ELLIPSE runs counter clockwise about its own axis, so the edge
-            // says whether it agrees - decided by whether the stretch's middle
+            // says whether it agrees - decided by whether the section's middle
             // lies on the counter clockwise side of its two ends.
-            const Vector3d minor = st.normal.cross(major);
+            const Vector3d minor = bs.normal.cross(sec.major);
             auto param = [&](const Vector3d& q) {
-              const Vector3d rel = q - centre;
-              return atan2(rel.dot(minor) / cyl->r, rel.dot(major) / (cyl->r / fabs(cos_tilt)));
+              const Vector3d rel = q - sec.centre;
+              return atan2(rel.dot(minor) / sec.b, rel.dot(sec.major) / sec.a);
             };
             auto ccw = [](double from, double to) {
               double d = to - from;
@@ -2755,17 +3119,52 @@ void StepKernel::build_tri_body(
               return d;
             };
             const double ta = param(vertices[a]), tb = param(vertices[b]);
-            const double tm = param(vertices[cycle[st.start + st.count / 2]]);
-            dir = ccw(ta, tm) < ccw(ta, tb);
+            if (bs.count > 2) {
+              // A vertex of the section's own interior settles it exactly.
+              const double tm = param(vertices[cycle[bs.start + bs.count / 2]]);
+              dir = ccw(ta, tm) < ccw(ta, tb);
+            } else {
+              // A section of one edge has no interior vertex to ask, and asking
+              // for one returns its far end - which made the test read "equal",
+              // took the same branch every time, and sent half the arcs the long
+              // way round. What decides it instead is that the edge is one
+              // segment of a tessellation: it spans at most a third of the way
+              // round even at the coarsest $fn, so the arc that replaces it is
+              // the shorter one.
+              dir = ccw(ta, tb) <= M_PI;
+            }
             edge = new EdgeCurve(entities, get_vertex(dir ? a : b), get_vertex(dir ? b : a), ell, true);
             section_edges.emplace(key, edge);
+            if (bs.declared) sections_declared++;
+            else sections_fitted++;
           }
           loop.push_back(new OrientedEdge(entities, edge, dir));
           face_edges_here.push_back(edge);
-          i = st.start + st.count - 1;
+          // And the planar face across it gives up the segments the curve
+          // replaces, the same way a band's rim does. The region's boundary is
+          // walked the way its own facets go, so the far face necessarily goes
+          // the other way; two faces traversing a shared edge the same way is
+          // precisely what leaves a shell open.
+          if (bs.loop >= 0 && section_subs.insert(key).second) {
+            const std::vector<int>& other = loops[bs.loop];
+            const std::size_t m = other.size();
+            const std::size_t span = bs.count - 1;
+            for (std::size_t j = 0; j < m; j++) {
+              bool fwd = true, rev = true;
+              for (std::size_t c = 0; c <= span; c++) {
+                fwd = fwd && other[(j + c) % m] == cycle[bs.start + c];
+                rev = rev && other[(j + c) % m] == cycle[bs.start + span - c];
+              }
+              if (!fwd && !rev) continue;
+              if (span == m) rim_of_loop[bs.loop] = {edge, !dir};
+              else arc_subs[bs.loop].push_back({j, span, edge, !dir});
+              break;
+            }
+          }
+          i = bs.start + bs.count - 1;
           continue;
         }
-        const int a = cycle[i], b = cycle[(i + 1) % cycle.size()];
+        const int a = cycle[i], b = cycle[(i + 1) % n];
         bool dir = true;
         EdgeCurve *edge =
           get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
@@ -3083,6 +3482,19 @@ void StepKernel::build_tri_body(
   if (arcs_promoted > 0 || arcs_declined > 0) {
     LOG("STEP export: %1$d edge%2$s written as an arc on the surface it bounds, %3$d left straight",
         arcs_promoted, arcs_promoted == 1 ? "" : "s", arcs_declined);
+  }
+  if (sections_declared + sections_fitted > 0) {
+    // Where each section's plane came from, because it is the difference
+    // between a curve that is exact and one that is only as good as the mesh
+    // it was fitted to. A declared plane cannot move; a fitted one moves with
+    // the tessellation, with what the boolean left behind, and with the
+    // tolerance the fit was given - and the section's centre and both its
+    // semi-axes are differences taken against that plane.
+    LOG(
+      "STEP export: %1$d plane section%2$s written as the conic it is - %3$d on a plane the "
+      "model declared, %4$d on one taken from the mesh",
+      sections_declared + sections_fitted, sections_declared + sections_fitted == 1 ? "" : "s",
+      sections_declared, sections_fitted);
   }
 
   // A CLOSED_SHELL has to be a single connected shell, so split disconnected

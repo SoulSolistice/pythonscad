@@ -895,6 +895,35 @@ def check_bound_enclosure(entities, problems):
                 break
 
 
+def _face_reaches_cone_apex(entities, surface, face_edge_ids):
+    """Whether one of a conical face's own vertices is the cone's apex.
+
+    Where a face reaches the apex the surface degenerates to a point, so that
+    side of the face is not an edge and is not bounded by one. The apex is
+    computed from the CONICAL_SURFACE's own placement and half angle - not from
+    the face - so this is evidence about the geometry rather than a reading of
+    what the file chose to write there."""
+    if surface.name != "CONICAL_SURFACE":
+        return False
+    numbers = surface.floats()
+    if len(numbers) < 2 or math.tan(numbers[1]) <= 1e-9:
+        return False
+    placement = _placement(entities, surface.refs()[0]) if surface.refs() else None
+    if placement is None:
+        return False
+    origin, axis, _ref = placement
+    radius = numbers[0]
+    apex = [origin[i] - axis[i] * (radius / math.tan(numbers[1])) for i in range(3)]
+    for oid in face_edge_ids:
+        for vid in _edge_endpoints(entities, oid) or ():
+            pt = _vertex_point(entities, vid)
+            if pt is None:
+                continue
+            if math.sqrt(sum((pt[i] - apex[i]) ** 2 for i in range(3))) <= 1e-6 * max(1.0, radius):
+                return True
+    return False
+
+
 def check_cylindrical_faces(entities, problems):
     """A CYLINDRICAL_SURFACE or CONICAL_SURFACE face has one of exactly two shapes.
 
@@ -1031,13 +1060,29 @@ def check_cylindrical_faces(entities, problems):
         # ruling. Two equal cylinders crossing at right angles make eight of
         # those and nothing else.
         #
-        # The arcs are checked below in either case.
-        has_ellipse = False
+        # A cone closes to a point on its own, at the apex, so a face reaching it
+        # is a triangle for the same reason one side down.
+        #
+        # Both exceptions ask for the degeneracy to be *there* rather than for a
+        # curve that could have one. Relaxing a rule because the file contains an
+        # ELLIPSE would be taking the exporter's word for the shape and then
+        # checking the shape against it; the two arcs have to be found sharing a
+        # vertex, and the apex has to be found among the face's own, before
+        # anything is allowed through. The arcs are checked on their surface
+        # below in either case.
+        seen_ellipse_ends = {}
+        arc_pinch = False
         for oid in oriented:
             geom = _edge_geometry(entities, oid)
-            if geom is not None and geom.name == "ELLIPSE":
-                has_ellipse = True
-        min_edges = 3 if surface.name == "SPHERICAL_SURFACE" or has_ellipse else 4
+            ends = _edge_endpoints(entities, oid)
+            if geom is None or ends is None or geom.name != "ELLIPSE":
+                continue
+            for vid in ends:
+                if seen_ellipse_ends.get(vid, geom.id) != geom.id:
+                    arc_pinch = True
+                seen_ellipse_ends[vid] = geom.id
+        at_apex = _face_reaches_cone_apex(entities, surface, face_edge_ids)
+        min_edges = 3 if surface.name == "SPHERICAL_SURFACE" or arc_pinch or at_apex else 4
         if len(oriented) < min_edges:
             problems.append(
                 "#%d: %s face has %d edges, expected at least %d"
@@ -1161,14 +1206,26 @@ def check_cylindrical_faces(entities, problems):
             # face is split the rim is split with it, and a face then carries
             # several consecutive arcs along one rim - which is exactly what
             # SolidWorks produces when it re-saves one of ours.
-            if len(circles) + len(ellipses) < 2:
+            # Two rims, unless the surface has only one. A cone closes to a
+            # point at its apex, so a face reaching the apex is bounded by one
+            # rim and two generators meeting there - the same degeneracy as the
+            # sphere's pole, one dimension over. Cutting a cone with a plane
+            # makes four of those and nothing else. The apex has to really be a
+            # vertex of the face, which is what makes this a shape rather than
+            # an excuse.
+            if len(circles) + len(ellipses) < (1 if at_apex else 2):
                 problems.append(
-                    "#%d: %s face is bounded by %d circular edges, expected at least 2"
-                    % (face.id, surface.name, len(circles) + len(ellipses))
+                    "#%d: %s face is bounded by %d circular edges, expected at least %d"
+                    % (
+                        face.id,
+                        surface.name,
+                        len(circles) + len(ellipses),
+                        1 if at_apex else 2,
+                    )
                 )
                 continue
             for _, geom, _ends in ellipses:
-                if surface.name != "CYLINDRICAL_SURFACE":
+                if surface.name not in ("CYLINDRICAL_SURFACE", "CONICAL_SURFACE"):
                     problems.append(
                         "#%d: ELLIPSE #%d bounds a %s, where a plane section is not one"
                         % (face.id, geom.id, surface.name)
@@ -1180,13 +1237,53 @@ def check_cylindrical_faces(entities, problems):
                         "#%d: rim ELLIPSE #%d has semi-axes %s, wanted a major then a "
                         "positive minor" % (face.id, geom.id, axes)
                     )
-                elif abs(axes[1] - radius) > 1e-6 * max(1.0, radius):
+                    continue
+                if surface.name == "CYLINDRICAL_SURFACE" and abs(axes[1] - radius) > 1e-6 * max(
+                    1.0, radius
+                ):
                     # The minor axis of a plane section of a cylinder is the
                     # cylinder's own radius, whatever the angle of the cut. A
                     # rim which is not that wide is on some other surface.
                     problems.append(
                         "#%d: rim ELLIPSE #%d has minor semi-axis %s, but its cylinder has %s"
                         % (face.id, geom.id, axes[1], radius)
+                    )
+                    continue
+                # A cone has no such one-line identity - both its semi-axes move
+                # with the tilt - so the ellipse is checked the way it was built
+                # instead: walk round it and ask the surface. A curve every point
+                # of which is on the surface is on the surface, and this catches
+                # what an identity on the two radii alone cannot - a centre in
+                # the wrong place, or a major axis aimed the wrong way, either of
+                # which leaves both radii right and the rim off the face.
+                ell = _placement(entities, geom.refs()[0])
+                if ell is None:
+                    problems.append("#%d: ELLIPSE #%d has no usable placement" % (face.id, geom.id))
+                    continue
+                centre, e_axis, e_ref = ell
+                minor_dir = [
+                    e_axis[(i + 1) % 3] * e_ref[(i + 2) % 3] - e_axis[(i + 2) % 3] * e_ref[(i + 1) % 3]
+                    for i in range(3)
+                ]
+                half = numbers[1] if surface.name == "CONICAL_SURFACE" and len(numbers) > 1 else 0.0
+                worst_on = 0.0
+                for k in range(8):
+                    t = 2 * math.pi * k / 8
+                    pt = [
+                        centre[i] + axes[0] * math.cos(t) * e_ref[i] + axes[1] * math.sin(t) * minor_dir[i]
+                        for i in range(3)
+                    ]
+                    rel = [pt[i] - origin[i] for i in range(3)]
+                    along = sum(rel[i] * axis[i] for i in range(3))
+                    perp = [rel[i] - along * axis[i] for i in range(3)]
+                    want = radius + along * math.tan(half)
+                    worst_on = max(
+                        worst_on, abs(math.sqrt(sum(c * c for c in perp)) - want) * math.cos(half)
+                    )
+                if worst_on > 1e-6 * max(1.0, radius):
+                    problems.append(
+                        "#%d: ELLIPSE #%d leaves its %s by up to %g - a plane section of one "
+                        "lies on it exactly" % (face.id, geom.id, surface.name, worst_on)
                     )
             for _, geom, _ends in circles:
                 cr = geom.floats()[-1] if geom.floats() else None
@@ -1257,15 +1354,8 @@ def check_cylindrical_faces(entities, problems):
                 # its own. One ruling is then the whole of the ends. The test is
                 # that the crossing is really there: two elliptical arcs sharing
                 # a vertex, which is the pinch.
-                pinch = False
-                if surface.name == "CYLINDRICAL_SURFACE" and len(line_edges) == 1:
-                    seen = {}
-                    for oid, _geom, ends in ellipses:
-                        for vid in ends:
-                            if seen.get(vid, oid) != oid:
-                                pinch = True
-                            seen[vid] = oid
-                if not great and not pinch:
+                pinch = arc_pinch and len(line_edges) == 1
+                if not great and not pinch and not at_apex:
                     problems.append(
                         "#%d: a partial %s face needs two distinct end edges, found %d"
                         % (face.id, surface.name, len(line_edges))

@@ -531,8 +531,14 @@ def check_approximation(openscad, inputfile, stepfile, args):
     # which does not say that the surface it fitted survived as a surface. A
     # declared sweep written as a B-spline and then read back as 160 planes
     # would pass every other check in this file.
+    #
+    # EDGES-APPROX: says the same about the curves, and it is the half that
+    # notices a boundary. A face census cannot: a cylinder trimmed by chords and
+    # the same cylinder trimmed by the conic it is cut on read as one Cylinder
+    # either way, and only the edges say which.
     if not check_roundtrip(inputfile, approxfile, "approximation",
                            keyed_expectations(inputfile, "ROUNDTRIP-APPROX") or None,
+                           expect_edges=keyed_expectations(inputfile, "EDGES-APPROX") or None,
                            expect_volume=volume_expectation(inputfile, "VOLUME-APPROX"),
                            expect_tolerance=float_expectation(inputfile, "TOLERANCE-APPROX"),
                            fitted_band=reported_band(output)):

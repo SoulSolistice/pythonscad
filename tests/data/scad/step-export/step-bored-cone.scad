@@ -14,7 +14,20 @@
 // first, recognise second*.
 // EXPECT: 4 analytic surfaces available (3 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 2 conical, 2 partial), 20 facets replaced
-// ROUNDTRIP: Cone=2 Plane=54
+//
+// The exact tier now writes the bore as well, and for the same reason as in
+// step-bored-cylinder: the taper is the faceted one here, so each of its facets
+// is a flat plane, and a plane cuts the bore *cylinder* in an ellipse. The mesh
+// edges where the bore meets a taper facet are chords of that ellipse; the
+// ellipse replaces them and the taper facet across it is handed the same edge.
+// EXPECT: 10 trimmed quadrics written as one face each, replacing 24 facets
+// EXPECT: 20 plane sections written as the conic it is
+//
+// The census moves by arithmetic: each replaced facet was one PLANE, so
+// 54 - 24 = 30 remain, and the ten new faces are all the bore, so they are
+// cylinders and the two conical band faces are untouched.
+// ROUNDTRIP: Cone=2 Cylinder=10 Plane=30
+// EDGES: Ellipse=20
 //
 // With the approximation flag the trimmed-quadric path takes the bore - a
 // cylinder whose two rims are the curve where it meets the taper, the case the
@@ -30,6 +43,17 @@
 // APPROX: 6 trimmed quadrics written as one face each, replacing 52 facets
 // APPROX: approximation found nothing left to fit
 // ROUNDTRIP-APPROX: Cone=6 Cylinder=2 Plane=2
+//
+// Sixteen elliptical arcs survive into the approximation export. It is stated
+// and deliberately not explained: with the taper written as six cone faces and
+// the bore as two cylinders, neither surface is the faceted one any more, so the
+// planes doing the cutting are neither the model's nor a simple count of the
+// tessellation, and the tilt test that would bound them - a plane cuts a cone in
+// a closed section only while `|n . axis| > sin(alpha)`, which 28 of the bore's
+// 32 facet planes satisfy on this taper - does not predict sixteen. Working out
+// what does is a job for the day this number moves; guessing at one now would be
+// inventing it, which is what doc/step-export-testing.md is about.
+// EDGES-APPROX: Ellipse=16
 //
 // Cone=6 is also the assertion that guards the membership test. A facet that
 // spans a hole in a surface has every corner on that surface and no interior on

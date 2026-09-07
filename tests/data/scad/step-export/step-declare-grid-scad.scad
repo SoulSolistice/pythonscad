@@ -33,7 +33,28 @@
 // approximation flag the sweep survives as a surface rather than as the 160
 // planes it would otherwise be, which is the whole claim and is worth asserting
 // rather than inferring from a face count.
-// ROUNDTRIP: Cylinder=1 Plane=244
+//
+// The exact tier also writes twenty-six pieces of the bore, and the sweep it
+// left faceted is what makes them writable. Each facet of the ridge is a flat
+// plane, and a plane cuts the bore cylinder in an ellipse; the mesh edges where
+// the bore meets a ridge facet are chords of that ellipse, the ellipse replaces
+// them, and the ridge facet across it is handed the same edge.
+// EXPECT: 26 trimmed quadrics written as one face each, replacing 26 facets
+//
+// Thirty-two arcs, one for each of the sweep's spans - it has 33 stations, so
+// 32 steps - and all thirty-two are *congruent*: semi-axes 20.9304 and 20.0.
+// That is the model speaking rather than the mesh. The sweep is a helix of
+// constant pitch carrying a constant profile, so every span presents the bore
+// the same plane, rotated and raised; and the minor semi-axis is 20 because a
+// plane section of a cylinder is as wide as the cylinder however it is tilted,
+// which here is the bore's own radius.
+// EXPECT: 32 plane sections written as the conic it is
+// EDGES: Ellipse=32
+//
+// So the census moves by arithmetic: each replaced facet was one PLANE, so
+// 244 - 26 = 218 remain, and the outer wall's one cylinder is joined by the
+// twenty-six new ones for 27.
+// ROUNDTRIP: Cylinder=27 Plane=218
 //
 // The two walls go out as well, and not as facets. They are declared
 // cylinders the band pass could not write - the ridge cut into one leaves a

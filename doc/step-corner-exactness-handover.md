@@ -6,6 +6,17 @@ next.
 
 ## Done
 
+**2026-09-07, later still: the cone's section, the planar neighbour, and a
+straight-edge test that only knew cylinders.** Every model in the suite that
+refused a quadric for its own boundary now writes it - `step-cut-cone`,
+`step-bored-cone`, `step-bored-cylinder`, `step-declare-grid-scad` and the three
+`step-declare-grid` Python fixtures, 76 regions between them. Two of those three
+changes were the ones planned; the third was a bug the widening uncovered, and it
+was worth more than either. `step-cut-cone`'s approximation export now measures
+1661.646504 against a hand-integrated 1661.646512. See "the cone's section, the
+planar neighbour, and the two meshes" below - and read the two-meshes part before
+touching any of it.
+
 **2026-09-07, later: the trim of a quadric can be the curve it is.** Where a
 boundary runs across a cylinder in a plane it is written as the ELLIPSE it is,
 rather than as the mesh's chords, and the exact tier no longer refuses the face
@@ -606,11 +617,169 @@ measured 5320.49 - 0.24 per cent low. **Nothing else in the fixture's census
 moved when the trim was fixed except the surface names.** The volume is the only
 line that knew the difference, which is the argument for `VOLUME:` in general.
 
-## Measured 2026-09-07: what the remaining refusals are actually blocked on
+## The cone's section, the planar neighbour, and the two meshes
+
+The curve trim was cylinder-only and needed a quadric on both sides, so it fired
+on exactly one model. Both limits are gone, and removing them turned up two
+things that were wrong for longer than either.
+
+### A plane section of a cone
+
+`planeSectionEllipse` answers for both surfaces. The cone is worked in its plane
+of symmetry - the one containing the axis and perpendicular to the cut - where
+the cone shows as its two outermost generators and the cutting plane as a line.
+The two crossings are the ends of the major axis, so the centre and `a` follow;
+`b` is the half chord through the centre at right angles, and the cone's own
+quadratic gives it in one square root because that direction is perpendicular to
+the axis and to the major axis both, so every linear term drops out.
+
+    b^2 = h^2 / cos^2(alpha) - |C - apex|^2,   h = (C - apex) . axis
+
+Checked twice before any code was written, and the second way is worth keeping
+because a fixture can state it: **b is the geometric mean of the cone's radii at
+the two ends of the major axis.** On `step-cut-cone` both give 9.268985, and the
+exporter writes 9.268985.
+
+The tilt test is not optional: a plane cuts a cone in an ellipse only while it
+crosses every generator, `|n . axis| > sin(alpha)`; at the half angle it is a
+parabola and past it a hyperbola, and neither closes.
+
+### The plane comes from a face, not from the boundary
+
+The first version fitted a plane to three consecutive boundary vertices and grew
+it along the cycle. That is the weaker way round and it has a hard floor: it
+needs two edges before it can see a plane at all. On `step-cut-cone` two of the
+four regions meet the cut along a **single edge**, so the fit could never see it,
+and the whole surface was refused for those two edges.
+
+Now the planes are gathered per *surface* from the faces adjacent to any of its
+regions, and each boundary edge is tested against them. A plane that cuts a cone
+cuts all of it, so the region that meets the cut along one edge is told what the
+plane is by the region that meets it along thirteen. The fit remains, last, for
+the case where nothing planar is in the picture at all - two cylinders crossing
+meet along an ellipse that is nobody's face.
+
+### A declared plane in preference to a fitted one, and why it is not a nicety
+
+Where a declared `PlaneSurface` agrees with the neighbouring face, its exact
+normal and point are used instead of the fit. The export now says which:
+
+    step-cut-cone            2 sections, 2 declared,  0 fitted
+    step-cylinder-cross      8 sections, 0 declared,  8 fitted
+    step-bored-cylinder     20 sections, 0 declared, 20 fitted
+    step-declare-grid-scad  32 sections, 0 declared, 32 fitted
+
+The 20 and the 32 are *bore facet planes* - artefacts of `$fn`, not of the model.
+The curve is exact against the mesh, but its input moves when the tessellation
+does.
+
+And the measurement that settles the argument: **only a declared plane survives
+the corner placement.** On `step-band-family` 180 sections were agreed before the
+placement ran and none after it, every one of them on a fitted facet plane. That
+is not a coincidence and it is not a tolerance to widen: the placement moves a
+corner onto the surface the model *declared*, which is exactly off the facet
+plane it happened to share with a neighbour. Where the plane is itself declared
+the corner stays in it, because that is what it was moved onto.
+
+### One decision, taken twice, on two different meshes
+
+That is also the shape of the bug it uncovered. The corner placement runs
+*between* the pass that decides which faces are analytic and the pass that writes
+them, and it moves vertices - by up to 0.1536 on `step-band-family`. A section
+agreed on the first mesh need not exist on the second, and a curve one face
+writes while its neighbour has stopped seeing it is a hole in the shell: 132
+edges with one face, 44 ellipses and the 88 chords their neighbours still wrote.
+
+`decide_sections` is therefore a function rather than a step, and it is asked
+twice - once while the faces are being settled, once immediately before they are
+written, the second answer being the one that is written. Where the two differ
+the export says so, because in the exact tier it means a face was called exact
+partly on a section that is now chords.
+
+**The trap to avoid here is a vertex checksum apart.** Two calls to one
+deterministic function returned different answers, and four rounds of reading the
+code found nothing, because the inputs named in the call were all identical - it
+was the mesh underneath them that had moved. Checksumming `vertices` at both
+points took one build and ended it.
+
+### What the midpoint test found, which was none of the above
+
+Widening the sections turned up a straight-edge bug that had nothing to do with
+them. `boundary_lies_on_surface` accepted an edge "along the axis, or around it
+at constant height" - and *along the axis* is a cylinder's answer. A cone's
+rulings run to its apex, so every generator was being counted a chord and every
+region bounded by one refused.
+
+The test that replaces it is one line and does not enumerate cases: **a straight
+edge lies on a quadric when its midpoint does.** A line meets a quadric twice
+unless it lies in it, so a third point on the surface means every point is. That
+alone took four models from refusing 50 regions between them to writing all of
+them.
+
+### What it did to the specimen
+
+lid10, exported with `-p examples/step_test/lid10.json -P "New set 1"`:
+
+    trimmed quadrics written      11  ->  40
+    regions refused for their boundary   30  ->   1
+    ELLIPSE edges                  0  -> 253
+    validatestep complaints        2  ->   0
+
+The two complaints it used to carry were cylindrical faces bounded by one rim,
+and they are gone because the export changed, not because a rule did - the apex
+exception is conical only and never applied to them.
+
+One thing it does *not* fix, and the check that says so: `steproundtrip.py` still
+reports a PLANE face with a corner 2.2623e-06 off its own surface against an
+allowance of 1.2595e-06. That is not this work. The **plain faceted export, with
+the analytic pass switched off entirely, reports the identical figure** - lid10's
+mesh has a facet its own vertices are not coplanar to, and the invariant's
+`1e-8 * extent` is marginally too tight at this model's size. Worth settling on
+its own; measuring the faceted export first is what keeps it from being blamed on
+whatever changed last.
+
+### The validator, and not letting it agree with the exporter
+
+Three rules had to widen, and widening a validator to accept what the exporter
+now writes is how a suite stops testing anything. Each is tied to evidence the
+file has to *show*, not to a curve it merely contains:
+
+- three edges on a face of revolution, where two elliptical arcs are found
+  sharing a vertex (the pinch) or the cone's apex is found among the face's own
+  vertices - the apex computed from the surface's placement, not read off the
+  boundary;
+- one rim instead of two, under the same apex evidence;
+- an ELLIPSE bounding a CONICAL_SURFACE, which is simply true below the half
+  angle.
+
+The first draft of the first rule relaxed on `has_ellipse` - the presence of the
+curve, which is the exporter's own claim - and that is the circularity. It is
+fixed.
+
+One rule *strengthened* at the same time, and it is the one that pays: every
+bounding ELLIPSE is now walked at eight parameters and each point asked of the
+surface. That catches a centre in the wrong place or a major axis aimed the wrong
+way, either of which leaves both radii correct and the rim off the face.
+
+Mutation checked, and the check is worth repeating whenever these rules move:
+nudging one CONICAL_SURFACE's half angle by 0.01 rad in an accepted export - no
+vertex touched, every loop still closed - moves the computed apex off the face's
+corner, and the *only* complaint is the edge-count rule. The relaxation is
+carrying its weight.
+
+## Measured 2026-09-07: what the remaining refusals were blocked on
+
+**Superseded the same day by the section above** - all five of these now write
+their quadrics, and the reason the measurement below did not predict it is worth
+keeping: the experiment relaxed the two things it was asking about and nothing
+moved, because the actual blocker was a third thing neither relaxation touched
+(a cone's generators being counted as chords). A measurement that says "neither
+of your two options" is not a measurement that says "nothing will help". Kept as
+written, for that.
 
 Asked which is the better follow-up - declaring more entities, or teaching a
-planar face to carry a conic - and the measurement says **neither, except in one
-place**. Five models still refuse a quadric for its boundary:
+planar face to carry a conic - and the measurement said **neither, except in one
+place**. Five models then refused a quadric for its boundary:
 
     step-cut-cone            4 regions
     step-bored-cylinder     10
@@ -671,8 +840,11 @@ table above.
 done; the suite is 44/44. What the curve trim leaves open, in the order it
 should be taken:
 
-1. **The cone's plane section, and the planar face that carries it - one piece
-   of work, not two.** `coplanarStretches` is called for cylinders only, and a
+**Superseded 2026-09-07: items 1 and 2 are done.** What is left of this list is
+item 3, plus what the section above records as still open.
+
+1. ~~**The cone's plane section, and the planar face that carries it - one piece
+   of work, not two.**~~ `coplanarStretches` is called for cylinders only, and a
    section is only written where a quadric stands on both sides. Measured
    together (see "what the remaining refusals are actually blocked on"), the pair
    takes `step-cut-cone` from four refused regions to none, and neither half does
@@ -728,6 +900,27 @@ comparison in this session.
 - **A fan triangle needs its own plane, not the polygon's.** Getting this wrong
   made the whole triangulation look worthless - fourteen faces for three parts
   in a thousand - when it was one line and the fixture goes fully exact.
+- **The mesh moves between recognition and writing.** The corner placement runs
+  after the pass that decides which faces are analytic and before the pass that
+  writes them, so any decision taken on vertex *positions* has to be taken twice
+  or it describes a mesh that no longer exists. Two calls to one deterministic
+  function returned different answers and four readings of the code found
+  nothing, because every argument named in the call was identical. Checksumming
+  `vertices` at both call sites found it in one build; do that first next time.
+- **Do not relax a validator rule on the presence of a curve.** The first draft
+  of the three-edge rule triggered on the file containing an ELLIPSE - which is
+  the exporter's own claim, so the check and the thing being checked agreed by
+  construction. Every relaxation has to name evidence the file must *show*: two
+  arcs found sharing a vertex, or the apex computed from the surface's placement
+  and found among the face's own vertices. Mutation-check it: nudging one
+  CONICAL_SURFACE's half angle by 0.01 rad, touching no vertex, must make the
+  rule fire.
+- **A count is not a derivation, and a plausible reason is worse than none.** A
+  fixture line here said sixteen ellipses survived "because the tilt test
+  excludes the rest". The tilt test admits twenty-eight of the thirty-two, which
+  one line of arithmetic said and the prose did not. State the number and say it
+  is not explained; that is what `step-cylinder-cross` already does for its lobe
+  halving.
 - **An analytic curve on a trimmed face is a joint decision, not a local one.**
   The two faces meeting along it must write the *same* curve or the shell opens,
   and the failure is silent in the exporter and loud only in

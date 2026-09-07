@@ -1722,6 +1722,13 @@ Patch patchFromFacets(const std::vector<std::vector<int>>& loops,
       // only by accident, so neither field means anything here; the emitter
       // reads `kind`, `verts` and `bound`.
       run.bound = ci;
+      // Which face is across the run. The split was made on it, so it is known
+      // here for nothing, and the exporter needs it to hand that face a curve
+      // when one replaces this run - a plane section of a quadric, say, whose
+      // plane is the neighbour's own and is not otherwise recoverable. `kind`
+      // stays UNRESOLVED: this says which face, not where in it, and a consumer
+      // that needs the position still has to ask.
+      run.loop = neighbour;
       std::size_t j = i;
       run.verts.push_back(cycle[(begin + j) % n]);
       while (j < n && across[(begin + j) % n] == neighbour) {
