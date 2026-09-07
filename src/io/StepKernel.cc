@@ -1238,7 +1238,92 @@ void StepKernel::build_tri_body(
   // surface. Two, and it is a triple point - the cut and the sliver of base a
   // tilted cut leaves behind - which belongs on neither conic and stays.
   std::map<int, Vector3d> moves = cornerMoves;
-  std::size_t on_conic = 0, on_triple = 0;  // what each later path added to `moves`
+  std::size_t on_conic = 0, on_triple = 0, on_own = 0;  // what each path added to `moves`
+
+  // A corner of a trimmed quadric that nothing else holds goes on that quadric.
+  //
+  // The placement above reaches a corner two surfaces made. It does not reach a
+  // corner the *mesh* made in the middle of a facet, which a trim then left on
+  // the boundary of the face written on that quadric: nothing declared it, so
+  // provenance names no owners for it and no crossing curve applies. It is
+  // nonetheless a corner of an analytic face, sitting at the inradius of the
+  // polygon the surface was tessellated as - 20(1 - cos(pi/32)) = 0.0963 inside
+  // the cylinder its own face is written on.
+  //
+  // On step-band-family that is the last 39 corners, at the height where the
+  // ridge tapers to nothing and the trim runs along the bore's own facets
+  // instead of across them. They are moved onto the surface their face names,
+  // and only where no other exact declared surface already holds them - a
+  // corner on two of them belongs where both agree, which is the crossing curve
+  // the paths above compute, not on either one alone.
+  if (approximate) {
+    std::size_t onto_own = 0;
+    double worst_own = 0;
+    for (const auto& patch : quadric_faces) {
+      const Surface *surf = patch.surface.get();
+      if (surf == nullptr) continue;
+      for (const auto& run : patch.runs) {
+        for (const int v : run.verts) {
+          if (v < 0 || std::size_t(v) >= vertices.size()) continue;
+          if (moves.count(v) != 0) continue;
+          Vector3d q;
+          if (!AnalyticFeatures::closestOnSurface(surf, vertices[v], q)) continue;
+          const double off = (q - vertices[v]).norm();
+          if (off <= 1e-9) continue;
+          bool held = false;
+          for (const auto& other : surfaces) {
+            if (other.get() == surf) continue;
+            if (dynamic_cast<const GridSurface *>(other.get()) != nullptr) continue;
+            Vector3d qo;
+            if (AnalyticFeatures::closestOnSurface(other.get(), vertices[v], qo) &&
+                (qo - vertices[v]).norm() <= 1e-9) {
+              held = true;
+              break;
+            }
+          }
+          if (held) continue;
+          moves.emplace(v, q);
+          worst_own = std::max(worst_own, off);
+          onto_own++;
+        }
+      }
+    }
+    on_own = onto_own;
+    if (onto_own > 0) {
+      LOG(
+        "STEP export: %1$d corners of a trimmed quadric that nothing else holds are placed on the "
+        "surface their own face is written on, moving at most %2$.4f",
+        int(onto_own), worst_own);
+    }
+  }
+
+  // A welded vertex stays where it is.
+  //
+  // Those are the insertions that keep the shell conformal: a vertex one face
+  // has on an edge another face spans in one line, added to both so they meet
+  // edge for edge. It therefore sits on the *boundary* of faces whose loops do
+  // not contain it, and the bend gate below - which reads each face's own loop -
+  // cannot see what moving it does to them. On step-declare-grid-two-bands one
+  // such vertex was moved 1.73e-07 off the flat bottom it lies on the rim of,
+  // and every loop in the file was still within 1e-9 of its own plane: the face
+  // asserted a plane a corner of it was off, and nothing internal could tell.
+  {
+    std::size_t held = 0;
+    for (auto it = moves.begin(); it != moves.end();) {
+      if (welded_verts.count(it->first) != 0) {
+        it = moves.erase(it);
+        held++;
+      } else {
+        ++it;
+      }
+    }
+    if (held > 0) {
+      LOG(
+        "STEP export: %1$d corners are left where the mesh put them: they were welded onto an "
+        "edge to keep the shell conformal, and sit on faces whose loops do not name them",
+        int(held));
+    }
+  }
   if (approximate && !singleOwner.empty()) {
     std::map<int, std::vector<std::size_t>> faces_at;
     for (std::size_t i = 0; i < loops.size(); i++) {
@@ -1397,7 +1482,13 @@ void StepKernel::build_tri_body(
         p = qb;
       }
       if (!ok || !AnalyticFeatures::closestOnSurface(own, p, qa)) continue;
-      if ((qa - p).norm() > 1e-6 || fabs(pn.dot(p) - pd) > 1e-6) continue;
+      // Tight, because the file will be read as though it were exact. Accepting
+      // 1e-6 here put a corner 1.73e-07 off a plane it was placed *in*, which is
+      // outside OpenCASCADE's own Precision::Confusion of 1e-7 - so the face
+      // asserted a plane its corner was not on, by the kernel's own reckoning.
+      // The alternating projection converges, so there is no reason to accept
+      // less than it converges to.
+      if ((qa - p).norm() > 1e-9 || fabs(pn.dot(p) - pd) > 1e-9) continue;
       const double travel = (p - vertices[v]).norm();
       if (travel > reach_here) continue;
       worst_plane = std::max(worst_plane, travel);
@@ -1609,10 +1700,28 @@ void StepKernel::build_tri_body(
       // plane - the conic it lands on lies in it - so its face is not bent at
       // all, and assuming otherwise declined the whole of step-cut-cone for a
       // move that could not have touched it.
+      // Against the plane the *face* will assert, which is the outer loop's -
+      // its point and its normal, exactly as written below - and over every
+      // corner that face carries, its holes included.
+      //
+      // Measuring each loop against its own plane is not the same thing and
+      // lets this through: two loops coplanar in the mesh drift apart by a
+      // fraction of the move, and a hole's far corner is then off the outer
+      // loop's plane by that drift times the face's extent. On
+      // step-declare-grid-two-bands that put a corner 1.73e-07 off a disc of
+      // radius 19.2 - outside OpenCASCADE's own Precision::Confusion, so the
+      // face asserted a plane its corner was not on, while every loop was
+      // within 1e-9 of its own.
       const Vector3d& p0 = at_moved(loops[i][0]);
       double out_of_plane = 0;
       for (const int w : loops[i]) {
         out_of_plane = std::max(out_of_plane, fabs((at_moved(w) - p0).dot(loop_normals[i])));
+      }
+      for (std::size_t j = 0; j < loops.size(); j++) {
+        if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
+        for (const int w : loops[j]) {
+          out_of_plane = std::max(out_of_plane, fabs((at_moved(w) - p0).dot(loop_normals[i])));
+        }
       }
       if (out_of_plane <= 1e-9) continue;
       // Bent, and a bent polygon can be fanned out into triangles instead of
@@ -1688,9 +1797,10 @@ void StepKernel::build_tri_body(
       // path checks `moves.count(v)` before inserting.
       LOG(
         "STEP export: %1$d corners moved, by at most %2$.4f - %3$d where two declared owners "
-        "cross, %4$d onto a conic with one plane, %5$d where three exact things meet; %6$d "
-        "analytic faces now bound themselves on their own surface",
-        int(moves.size()), worst, int(cornerMoves.size()), int(on_conic), int(on_triple),
+        "cross, %4$d onto a conic with one plane, %5$d where three exact things meet, %6$d onto "
+        "the quadric their own face is written on; %7$d analytic faces now bound themselves on "
+        "their own surface",
+        int(moves.size()), worst, int(cornerMoves.size()), int(on_conic), int(on_triple), int(on_own),
         int(analytic_faces));
       if (!split_for_corners.empty()) {
         std::size_t added = 0;

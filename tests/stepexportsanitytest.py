@@ -161,10 +161,10 @@ def report_contradictions(output):
 
     moved = re.search(r"(\d+) corners moved, by at most ([\d.]+) - (\d+) where two declared "
                       r"owners cross, (\d+) onto a conic with one plane, (\d+) where three "
-                      r"exact things meet", out)
+                      r"exact things meet, (\d+) onto the quadric their own face", out)
     if moved:
         total = int(moved.group(1))
-        parts = [int(moved.group(i)) for i in (3, 4, 5)]
+        parts = [int(moved.group(i)) for i in (3, 4, 5, 6)]
         if sum(parts) != total:
             bad.append("%d corners moved but the three paths account for %d"
                        % (total, sum(parts)))
@@ -361,9 +361,20 @@ def canonical_expectations(path):
     return wanted
 
 
+def reported_band(output):
+    """The widest tessellation band the exporter said it fitted something to.
+
+    A B-spline face's corners are bounded by what its own fit published, and the
+    exporter prints that on every export that has one. Nothing here is captured:
+    the number is the surface's own statement about itself, read back and used as
+    the allowance rather than invented by this harness."""
+    bands = [float(m) for m in re.findall(r"tessellation band of ([\d.]+)", output or "")]
+    return max(bands) if bands else None
+
+
 def check_roundtrip(path, stepfile, what, expect_surfaces=None, expect_canonical=None,
                     expect_edges=None, expect_radii=None, expect_volume=None,
-                    expect_tolerance=None):
+                    expect_tolerance=None, fitted_band=None):
     """Read the export back with a real CAD kernel. Skipped when OCCT is absent.
 
     Returns True when the round trip passed or could not be run, so a machine
@@ -376,6 +387,7 @@ def check_roundtrip(path, stepfile, what, expect_surfaces=None, expect_canonical
         expect_radii=expect_radii,
         expect_volume=expect_volume,
         expect_tolerance=expect_tolerance,
+        fitted_band=fitted_band,
     )
     if result is None:
         print("note: " + report[0], file=sys.stderr)
@@ -522,7 +534,8 @@ def check_approximation(openscad, inputfile, stepfile, args):
     if not check_roundtrip(inputfile, approxfile, "approximation",
                            keyed_expectations(inputfile, "ROUNDTRIP-APPROX") or None,
                            expect_volume=volume_expectation(inputfile, "VOLUME-APPROX"),
-                           expect_tolerance=float_expectation(inputfile, "TOLERANCE-APPROX")):
+                           expect_tolerance=float_expectation(inputfile, "TOLERANCE-APPROX"),
+                           fitted_band=reported_band(output)):
         return False
     ok = True
     flat = " ".join(output.split())
@@ -575,6 +588,7 @@ if ok:
         keyed_expectations(inputfile, "RADII", float) or None,
         volume_expectation(inputfile),
         expect_tolerance=float_expectation(inputfile, "TOLERANCE"),
+        fitted_band=reported_band(output),
     ):
         ok = False
     else:
@@ -622,9 +636,21 @@ if ok:
             else:
                 os.unlink(cgalfile)
 
-# Fixtures which state APPROX: lines get one more export, with the
-# approximation pass switched on as well.
-if ok and re.search(r"(?<![-\w])APPROX(-NOT)?:", open(inputfile, encoding="utf-8", errors="replace").read()):
+# Every fixture gets one more export with the approximation pass switched on,
+# whether or not it states anything about it.
+#
+# This used to run only for fixtures carrying APPROX: lines, to save an export,
+# and that made the tier invisible for the other 32 of 43 - not merely
+# unasserted but *never produced*, so it was never validated, never read back by
+# a kernel, and never measured. Every corner placement, every fan and every fit
+# lives on this tier. step-band-family sat with a cylinder whose corners were
+# 0.0963 inside it, on an export the suite did not make; disabling the fix that
+# repairs it changed nothing anywhere, which is how the hole was found.
+#
+# A fixture that says nothing about the tier still gets what needs no
+# expectation: the file has to be valid, it has to read back as one solid, and
+# every corner of an analytic face has to lie on the surface it is written on.
+if ok:
     ok = check_approximation(args.openscad, inputfile, stepfile, remaining_args)
 
 if ok:

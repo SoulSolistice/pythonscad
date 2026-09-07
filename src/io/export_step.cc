@@ -544,7 +544,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // sweep crosses the bore at a median 15.85 degrees where the projection
       // fails against 42.70 where it succeeds, which is the whole difference
       // between the two populations.
-      if (!(ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-6)) {
+      if (!(ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-9)) {
         const auto *a_fit = dynamic_cast<const GridSurface *>(a);
         const auto *b_fit = dynamic_cast<const GridSurface *>(b);
         const Surface *exact =
@@ -575,7 +575,11 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
           }
         }
       }
-      if (ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-6) {
+      // To what the projection converges to, not to a millionth. Accepting 1e-6
+      // put a corner 5.82e-07 off the cylinder its own face is written on -
+      // small, but the file says that vertex is on that cylinder and it is not,
+      // and it is the exporter's own slack rather than anything the model did.
+      if (ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-9) {
         on_edge++;
         const double travel = (p - ps.vertices[v]).norm();
         const Vector3d exact_here = p;

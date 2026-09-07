@@ -4,6 +4,21 @@ Written 2026-09-06, at the end of a long session. `doc/step-corner-exactness.md`
 is the reasoning and the baseline; this is the state of the work and what to do
 next.
 
+## Done
+
+**2026-09-07: every fixture is exact on every exact surface.** Of 42, none puts a
+corner of a plane, cylinder, cone, sphere or torus face off the surface that face
+is written on. The three that still measure anything are B-spline faces, and each
+is inside the tessellation band its own fit published - which is what a fitted
+surface is entitled to and the most any mesh can say:
+
+    step-band-family            7.44e-02   against a published band of 0.2077
+    step-extrude-text-counter   4.27e-09   noise, as the baseline recorded
+    step-extrude-text           4.24e-09   noise
+
+The eight coupons the baseline listed are all resolved. What follows is how, and
+the rest of this document is the record of getting there.
+
 ## The one sentence
 
 A corner of an analytic face should lie on the surface that face is written on;
@@ -72,7 +87,7 @@ face's own corners are from the surface it is on. **Done is 0 to within 1e-9.**
     step-bored-cone           8.01e-14         done
     step-bored-cylinder       7.99e-14         done
     step-declare-grid-scad    3.79e-12         done, fixture derived and updated
-    step-band-family          7.44e-02         cylinder done (1.64e-09), sweep not
+    step-band-family          7.44e-02         done - bspline only, inside its band
     step-cut-cone             4.45e-13         done, its two triple points placed
     step-exact-trim           3.55e-15         done, 32 triple points placed
     py-step-declare-grid      1.86e-13         done, and the flat bottom kept
