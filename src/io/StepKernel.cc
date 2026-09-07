@@ -318,6 +318,145 @@ std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
   return out;
 }
 
+/*! A quadric written implicitly: the value of f at a point, and its gradient.
+ *
+ * f is zero on the surface, and the gradient points off it, which is all a
+ * Newton step needs. Distances are not wanted here and are not returned - f is
+ * the square of a radius, not a length.
+ */
+bool quadricImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad)
+{
+  if (const auto *sph = dynamic_cast<const SphereSurface *>(surface)) {
+    const Vector3d rel = p - sph->refpt;
+    f = rel.squaredNorm() - sph->r * sph->r;
+    grad = 2 * rel;
+    return true;
+  }
+  const auto *cyl = dynamic_cast<const CylinderSurface *>(surface);
+  const auto *cone = dynamic_cast<const ConeSurface *>(surface);
+  if (cyl == nullptr && cone == nullptr) return false;
+  const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
+  const Vector3d rel = p - (cyl != nullptr ? cyl->refpt : cone->refpt);
+  const double along = rel.dot(axis);
+  const Vector3d perp = rel - axis * along;
+  const double slope = cone != nullptr ? cone->slope : 0.0;
+  const double want = (cyl != nullptr ? cyl->r : cone->r) + slope * along;
+  f = perp.squaredNorm() - want * want;
+  grad = 2 * perp - 2 * want * slope * axis;
+  return true;
+}
+
+/*! Pull a point onto both surfaces at once.
+ *
+ * Two Newton equations in the two directions that matter - along each surface's
+ * own gradient - and nowhere else, so the point slides along the intersection
+ * rather than away down it. Fails where the two are tangent, which is where the
+ * 2x2 goes singular and where there is no honest answer anyway.
+ */
+bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol)
+{
+  for (int step = 0; step < 24; step++) {
+    double fa = 0, fb = 0;
+    Vector3d ga, gb;
+    if (!quadricImplicit(a, p, fa, ga) || !quadricImplicit(b, p, fb, gb)) return false;
+    const double aa = ga.dot(ga), ab = ga.dot(gb), bb = gb.dot(gb);
+    const double det = aa * bb - ab * ab;
+    if (fabs(det) < 1e-18 * std::max(1.0, aa * bb)) return false;  // tangent, or worse
+    const double alpha = (-fa * bb + fb * ab) / det;
+    const double beta = (-fb * aa + fa * ab) / det;
+    const Vector3d delta = ga * alpha + gb * beta;
+    p += delta;
+    if (delta.norm() <= tol) return true;
+  }
+  return false;
+}
+
+/*! The arc of the curve where two declared quadrics cross, between two points
+ *  already on it, as the control points of a Bezier.
+ *
+ * The curve two quadrics meet along is a quartic in general - two cylinders of
+ * unequal radius crossing is the everyday case - and ISO 10303 has no entity for
+ * it. OpenCASCADE's own export of such a solid writes a degree-7 B-spline of
+ * some thirty control points, so approximating is not a shortcut here: it is
+ * what the format offers. What matters is that the approximation is of the
+ * *true* curve rather than of the mesh, that it is held to a stated tolerance,
+ * and that both faces derive it from the same two declarations and so agree on
+ * it exactly - which is what keeps the shell closed without either face knowing
+ * what the other did.
+ *
+ * The degree is raised until the fit is inside `tol` rather than fixed, because
+ * how much of the curve one mesh edge spans is not something this can know: a
+ * cubic is enough over most of a bore's opening and nowhere near it where the
+ * two surfaces run nearly tangent and the curve turns hard. Measured on
+ * step-bored-cylinder, a cubic leaves the surfaces by 3.4e-05 - three hundred
+ * times better than the chords it replaces, and still not exact.
+ */
+double intersectionArcError(const Surface *a, const Surface *b, const std::vector<Vector3d>& ctrl);
+
+bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, const Vector3d& p1,
+                     double tol, std::vector<Vector3d>& ctrl)
+{
+  const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
+  for (int degree = 3; degree <= 9; degree++) {
+    // Sample the true curve at the Bezier's own parameters, by pulling the
+    // chord's point at each onto both surfaces.
+    std::vector<Vector3d> on_curve(degree + 1);
+    bool ok = true;
+    on_curve[0] = p0;
+    on_curve[degree] = p1;
+    for (int i = 1; i < degree && ok; i++) {
+      Vector3d q = p0 + (p1 - p0) * (double(i) / degree);
+      ok = projectOntoBoth(a, b, q, 1e-14 * scale);
+      on_curve[i] = q;
+    }
+    if (!ok) return false;
+
+    // Interpolate them: solve the Bernstein collocation system for the control
+    // points. Small and dense, and well conditioned at these degrees.
+    Eigen::MatrixXd m(degree + 1, degree + 1);
+    Eigen::MatrixXd rhs(degree + 1, 3);
+    for (int i = 0; i <= degree; i++) {
+      const double t = double(i) / degree;
+      double binom = 1;
+      for (int j = 0; j <= degree; j++) {
+        m(i, j) = binom * pow(t, j) * pow(1 - t, degree - j);
+        binom = binom * (degree - j) / (j + 1);
+      }
+      rhs.row(i) = on_curve[i].transpose();
+    }
+    const Eigen::MatrixXd solved = m.colPivHouseholderQr().solve(rhs);
+    ctrl.assign(degree + 1, Vector3d::Zero());
+    for (int j = 0; j <= degree; j++) ctrl[j] = solved.row(j).transpose();
+    if (intersectionArcError(a, b, ctrl) <= tol) return true;
+  }
+  return false;
+}
+
+/*! How far a fitted arc leaves the two surfaces it is supposed to run along. */
+double intersectionArcError(const Surface *a, const Surface *b, const std::vector<Vector3d>& ctrl)
+{
+  const int degree = int(ctrl.size()) - 1;
+  double worst = 0;
+  for (int k = 1; k < 4 * degree; k++) {
+    const double t = double(k) / (4 * degree);
+    Vector3d p = Vector3d::Zero();
+    double binom = 1;
+    for (int j = 0; j <= degree; j++) {
+      p += ctrl[j] * (binom * pow(t, j) * pow(1 - t, degree - j));
+      binom = binom * (degree - j) / (j + 1);
+    }
+    for (const Surface *s : {a, b}) {
+      double f = 0;
+      Vector3d g;
+      if (!quadricImplicit(s, p, f, g)) return std::numeric_limits<double>::infinity();
+      const double gn = g.norm();
+      if (gn < 1e-12) return std::numeric_limits<double>::infinity();
+      worst = std::max(worst, fabs(f) / gn);  // the Newton distance to the surface
+    }
+  }
+  return worst;
+}
+
 /*! The ellipse a plane cuts from a cylinder or a cone.
  *
  * `a` is the semi-axis along `major`, and is the longer of the two - which is
@@ -464,7 +603,8 @@ bool surfaceAxis(const Surface *surface, Vector3d& axis)
 }
 
 void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
-                  const std::vector<CutPlane>& planes, BoundaryCycle& cycle)
+                  const std::vector<CutPlane>& planes, BoundaryCycle& cycle,
+                  const std::set<std::pair<int, int>>& spoken_for)
 {
   cycle.sections.clear();
   Vector3d axis;
@@ -487,6 +627,12 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
   }
   std::vector<int> plane_of(n, -1);
   for (std::size_t e = 0; e < n; e++) {
+    // An edge already spoken for by a better curve is not offered a section. The
+    // curve where this surface crosses another declared one lies on *both* of
+    // them; a plane section lies on this one only, so wherever both are
+    // available the crossing curve is the truer answer and takes the edge.
+    const int eu = cycle.verts[e], ev = cycle.verts[(e + 1) % n];
+    if (spoken_for.count({std::min(eu, ev), std::max(eu, ev)}) != 0) continue;
     for (std::size_t p = 0; p < planes.size(); p++) {
       if (scale[p] <= 0) continue;
       const double tol = 1e-9 * scale[p];
@@ -504,7 +650,13 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
   // spanning two neighbours could be handed to neither.
   std::vector<char> taken_edge(n, 0);
   for (std::size_t e = 0; e < n; e++) {
-    if (plane_of[e] < 0) continue;
+    // The fitted fallback below has to be told as well, or it takes back what
+    // the crossing curve was given.
+    const int eu = cycle.verts[e], ev = cycle.verts[(e + 1) % n];
+    if (spoken_for.count({std::min(eu, ev), std::max(eu, ev)}) != 0) taken_edge[e] = 1;
+  }
+  for (std::size_t e = 0; e < n; e++) {
+    if (plane_of[e] < 0 || taken_edge[e]) continue;
     const std::size_t prev = (e + n - 1) % n;
     if (plane_of[prev] == plane_of[e] && cycle.owner[prev] == cycle.owner[e] && e > 0) continue;
     std::size_t count = 1;
@@ -546,12 +698,12 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
   }
 }
 
-std::map<std::size_t, BoundaryCycle> boundaryCycles(const AnalyticFeatures::Patch& patch,
-                                                    const std::vector<Vector3d>& vertices,
-                                                    const std::vector<std::vector<int>>& loops,
-                                                    const std::vector<char>& loop_valid,
-                                                    const std::vector<char>& taken,
-                                                    const std::vector<CutPlane>& planes)
+/*! A patch's boundary cycles and who is across each edge, with no curves decided
+ *  yet - which is what the crossing-curve search needs, since that runs first. */
+std::map<std::size_t, BoundaryCycle> rawBoundaryCycles(const AnalyticFeatures::Patch& patch,
+                                                       const std::vector<std::vector<int>>& loops,
+                                                       const std::vector<char>& loop_valid,
+                                                       const std::vector<char>& taken)
 {
   std::map<std::size_t, BoundaryCycle> out;
   for (const auto& run : patch.runs) {
@@ -572,9 +724,21 @@ std::map<std::size_t, BoundaryCycle> boundaryCycles(const AnalyticFeatures::Patc
       cycle.owner.push_back(who);
     }
   }
+  return out;
+}
+
+std::map<std::size_t, BoundaryCycle> boundaryCycles(const AnalyticFeatures::Patch& patch,
+                                                    const std::vector<Vector3d>& vertices,
+                                                    const std::vector<std::vector<int>>& loops,
+                                                    const std::vector<char>& loop_valid,
+                                                    const std::vector<char>& taken,
+                                                    const std::vector<CutPlane>& planes,
+                                                    const std::set<std::pair<int, int>>& spoken_for)
+{
+  std::map<std::size_t, BoundaryCycle> out = rawBoundaryCycles(patch, loops, loop_valid, taken);
   for (auto& entry : out) {
     BoundaryCycle& cycle = entry.second;
-    findSections(patch.surface.get(), vertices, planes, cycle);
+    findSections(patch.surface.get(), vertices, planes, cycle, spoken_for);
     // Move the seam onto an edge no section covers, so the writer meets each
     // section whole. Cutting at a section's own start is not enough: freeing one
     // that way pushes the next across the new seam wherever two meet end to end,
@@ -598,7 +762,7 @@ std::map<std::size_t, BoundaryCycle> boundaryCycles(const AnalyticFeatures::Patc
     const long roll = long((free_edge + 1) % n);
     std::rotate(cycle.verts.begin(), cycle.verts.begin() + roll, cycle.verts.end());
     std::rotate(cycle.owner.begin(), cycle.owner.begin() + roll, cycle.owner.end());
-    findSections(patch.surface.get(), vertices, planes, cycle);
+    findSections(patch.surface.get(), vertices, planes, cycle, spoken_for);
   }
   return out;
 }
@@ -1025,6 +1189,14 @@ void StepKernel::build_tri_body(
   // exact rather than merely close, so it is preferred wherever it agrees with
   // the face at hand.
   std::vector<std::pair<Vector3d, Vector3d>> declared_planes;  // point, unit normal
+  // Edges that lie on the curve where two declared quadrics cross, and which two
+  // they are. Both faces derive the arc from the same pair of declarations, so
+  // they agree on it exactly and the shell closes without either having to know
+  // what the other did - which is what makes a curve taken from declarations
+  // different in kind from one fitted to the mesh.
+  std::map<std::pair<int, int>, std::pair<const Surface *, const Surface *>> crossing_edges;
+  std::set<std::pair<int, int>> crossing_keys;  // the same, as the sections' skip set
+  double crossing_fit = 0;                      // the worst any of those arcs leaves either surface
   // Deciding which plane sections get written, over a given set of faces. This
   // is a function rather than a step because it has to be asked **twice**, on
   // two different meshes: once while it is being settled which faces are
@@ -1496,7 +1668,7 @@ void StepKernel::build_tri_body(
           return false;
         }
         for (const auto& entry : boundaryCycles(patch, vertices, loops, loop_valid, taken,
-                                                section_planes[patch.surface.get()])) {
+                                                section_planes[patch.surface.get()], crossing_keys)) {
           const BoundaryCycle& cycle = entry.second;
           const std::size_t n = cycle.verts.size();
           if (n < 3) continue;
@@ -1521,6 +1693,10 @@ void StepKernel::build_tri_body(
           };
           for (std::size_t i = 0; i < n; i++) {
             if (covered[i]) continue;
+            // An edge on the curve where this surface crosses another declared
+            // one is written as that curve, so it is not asked to be a chord.
+            const int u = cycle.verts[i], v = cycle.verts[(i + 1) % n];
+            if (crossing_edges.count({std::min(u, v), std::max(u, v)}) != 0) continue;
             const Vector3d a = vertices[cycle.verts[i]] - origin;
             const Vector3d b = vertices[cycle.verts[(i + 1) % n]] - origin;
             const Vector3d along = b - a;
@@ -1600,13 +1776,77 @@ void StepKernel::build_tri_body(
             if (!have) list.push_back(cp);
           }
         }
+        // Which faces meet along each boundary edge, so that an edge on two
+        // declared quadrics can be recognised from either side and written the
+        // same way from both.
+        std::map<std::pair<int, int>, std::vector<const Surface *>> along;
+        for (const auto *patch : standing) {
+          for (const auto& entry : rawBoundaryCycles(*patch, loops, loop_valid, taken)) {
+            const std::vector<int>& verts = entry.second.verts;
+            const std::size_t n = verts.size();
+            for (std::size_t i = 0; i < n; i++) {
+              const int u = verts[i], v = verts[(i + 1) % n];
+              along[{std::min(u, v), std::max(u, v)}].push_back(patch->surface.get());
+            }
+          }
+        }
+        crossing_edges.clear();
+        double worst_arc = 0;
+        for (const auto& entry : along) {
+          if (entry.second.size() != 2) continue;
+          const Surface *a = entry.second[0], *b = entry.second[1];
+          if (a == b) continue;
+          const Vector3d& p0 = vertices[entry.first.first];
+          const Vector3d& p1 = vertices[entry.first.second];
+          const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
+          // Both ends have to be on both surfaces already. Where a boolean made
+          // the vertex that is exactly what it is - the two makers crossing -
+          // and where it is not, no arc of theirs belongs here.
+          bool on = true;
+          for (const Surface *s : {a, b}) {
+            for (const Vector3d *p : {&p0, &p1}) {
+              double f = 0;
+              Vector3d g;
+              if (!quadricImplicit(s, *p, f, g) || g.norm() < 1e-12 ||
+                  fabs(f) / g.norm() > 1e-9 * scale) {
+                on = false;
+              }
+            }
+          }
+          if (!on) continue;
+          std::vector<Vector3d> ctrl;
+          // The same 1e-7 the exact tier holds every other boundary to.
+          if (!intersectionArc(a, b, p0, p1, 1e-7, ctrl)) continue;
+          // Where the crossing curve is *planar* it is a conic, and a conic has
+          // an entity of its own: the plane-section pass writes it exactly,
+          // where this would write a fitted B-spline through it. Two equal
+          // cylinders crossing meet in a pair of true ellipses, and taking them
+          // here would be trading an exact curve for an approximation of the
+          // same curve. Planarity is the whole test, and it is a property of the
+          // two surfaces rather than of anything this pass chose.
+          Vector3d centroid = Vector3d::Zero();
+          for (const auto& c : ctrl) centroid += c;
+          centroid /= double(ctrl.size());
+          Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+          for (const auto& c : ctrl) cov += (c - centroid) * (c - centroid).transpose();
+          const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
+          // The smallest eigenvalue is the sum of squared distances to the best
+          // plane, so its root over the count is the RMS off it.
+          const double flat = sqrt(std::max(0.0, es.eigenvalues()(0)) / double(ctrl.size()));
+          if (flat <= 1e-9 * scale) continue;
+          worst_arc = std::max(worst_arc, intersectionArcError(a, b, ctrl));
+          crossing_fit = std::max(crossing_fit, worst_arc);
+          crossing_edges.emplace(entry.first, std::make_pair(a, b));
+        }
+        crossing_keys.clear();
+        for (const auto& e : crossing_edges) crossing_keys.insert(e.first);
         // A section is written where both its faces will write it. A planar face
         // across it is not a claimant - it never asks for a curve - so it counts
         // as the second, and is handed the same edge when the faces are written.
         std::map<std::set<int>, int> claims;
         for (const auto *patch : standing) {
           for (const auto& entry : boundaryCycles(*patch, vertices, loops, loop_valid, taken,
-                                                  section_planes[patch->surface.get()])) {
+                                                  section_planes[patch->surface.get()], crossing_keys)) {
             const BoundaryCycle& cycle = entry.second;
             const std::size_t n = cycle.verts.size();
             for (const auto& bs : cycle.sections) {
@@ -2986,6 +3226,8 @@ void StepKernel::build_tri_body(
   std::map<std::set<int>, EdgeCurve *> section_edges;
   std::set<std::set<int>> section_subs;  // sections already handed to a planar face
   int sections_declared = 0, sections_fitted = 0;
+  std::map<std::pair<int, int>, EdgeCurve *> crossing_curves;
+  int crossing_written = 0;
   auto conic_placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
     return new Axis2Placement(entities, new Direction(entities, dir), new Direction(entities, towards),
                               new Point(entities, origin));
@@ -2997,8 +3239,8 @@ void StepKernel::build_tri_body(
     const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
     const Vector3d base = cyl != nullptr ? cyl->refpt : cone->refpt;
 
-    const std::map<std::size_t, BoundaryCycle> boundary =
-      boundaryCycles(patch, vertices, loops, loop_valid, taken, section_planes[patch.surface.get()]);
+    const std::map<std::size_t, BoundaryCycle> boundary = boundaryCycles(
+      patch, vertices, loops, loop_valid, taken, section_planes[patch.surface.get()], crossing_keys);
     if (boundary.empty()) continue;
 
     // The reference direction is a radius through the first boundary vertex that
@@ -3166,8 +3408,32 @@ void StepKernel::build_tri_body(
         }
         const int a = cycle[i], b = cycle[(i + 1) % n];
         bool dir = true;
-        EdgeCurve *edge =
-          get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+        EdgeCurve *edge = nullptr;
+        const std::pair<int, int> key{std::min(a, b), std::max(a, b)};
+        const auto crossing = crossing_edges.find(key);
+        if (crossing != crossing_edges.end()) {
+          const auto found = crossing_curves.find(key);
+          if (found != crossing_curves.end()) {
+            edge = found->second;
+            dir = edge->vert1 == get_vertex(a);
+          } else {
+            std::vector<Vector3d> ctrl;
+            const Vector3d& p0 = vertices[key.first];
+            const Vector3d& p1 = vertices[key.second];
+            if (intersectionArc(crossing->second.first, crossing->second.second, p0, p1, 1e-7, ctrl)) {
+              std::vector<Point *> cp;
+              for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
+              auto curve = new BSplineCurve(entities, "", cp);
+              edge = new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second), curve, true);
+              crossing_curves.emplace(key, edge);
+              crossing_written++;
+              dir = edge->vert1 == get_vertex(a);
+            }
+          }
+        }
+        if (edge == nullptr) {
+          edge = get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+        }
         loop.push_back(new OrientedEdge(entities, edge, dir));
         face_edges_here.push_back(edge);
         i++;
@@ -3482,6 +3748,12 @@ void StepKernel::build_tri_body(
   if (arcs_promoted > 0 || arcs_declined > 0) {
     LOG("STEP export: %1$d edge%2$s written as an arc on the surface it bounds, %3$d left straight",
         arcs_promoted, arcs_promoted == 1 ? "" : "s", arcs_declined);
+  }
+  if (crossing_written > 0) {
+    LOG(
+      "STEP export: %1$d edge%2$s written as the curve where two declared surfaces cross, "
+      "fitted to within %3$.2e of both - a chord and a plane section each lie on only one",
+      crossing_written, crossing_written == 1 ? "" : "s", crossing_fit);
   }
   if (sections_declared + sections_fitted > 0) {
     // Where each section's plane came from, because it is the difference

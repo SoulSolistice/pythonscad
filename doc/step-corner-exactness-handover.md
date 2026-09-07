@@ -6,6 +6,14 @@ next.
 
 ## Done
 
+**2026-09-07, last: the trim can be the curve where two surfaces cross.** Roadmap
+item 4's general case - two quadrics meeting in a quartic that ISO 10303 has no
+entity for - is done for the approximation tier. `step-bored-cylinder`'s volume,
+derived independently as an elliptic integral, reads **5298.405620** against
+**5298.405619**: two parts in 1e13, on the coupon this document called
+"inherently an approximation". See "the crossing curve" below. An exact conic
+still wins where there is one, and planarity is the test.
+
 **2026-09-07, later still: the cone's section, the planar neighbour, and a
 straight-edge test that only knew cylinders.** Every model in the suite that
 refused a quadric for its own boundary now writes it - `step-cut-cone`,
@@ -767,6 +775,74 @@ vertex touched, every loop still closed - moves the computed apex off the face's
 corner, and the *only* complaint is the edge-count rule. The relaxation is
 carrying its weight.
 
+## The crossing curve: a trim that lies on both surfaces
+
+A plane section lies exactly on the surface it is a section of, and only on that
+one. Where the boundary is the curve two *surfaces* cross along, a section is
+still the wrong curve - it is exact on one side and wrong on the other by
+whatever the two disagree by. On `step-bored-cylinder` that was measured at
+0.00992: the arcs sit on the wall to 1e-15 and leave the bore by up to a
+hundredth.
+
+What replaces them is the curve itself. Two quadrics meet in a quartic in
+general - two cylinders of unequal radius crossing is the everyday case - and ISO
+10303 has no entity for one. OpenCASCADE's own export of such a solid writes a
+degree-7 B_SPLINE_CURVE_WITH_KNOTS of some thirty control points, so
+approximating is not a shortcut here: it is what the format offers. Three things
+make it honest rather than a fudge:
+
+- it approximates the **true curve**, found from the two *declarations* by
+  Newton, not the mesh's polyline;
+- it is held to a **stated tolerance** - the same 1e-7 the exact tier holds every
+  other boundary to - by raising the Bezier's degree until the fit meets it,
+  because how much of the curve one mesh edge spans is not something the exporter
+  can know in advance. A cubic leaves the surfaces by 3.4e-05 on this coupon:
+  three hundred times better than the chords it replaces, and still not exact;
+- **both faces derive it from the same two declarations**, so they agree on it
+  exactly without either having to know what the other did. That is the joint
+  decision the plane sections needed a claim count for, obtained here for
+  nothing - and it is the same argument for declarations that the section planes
+  made, one step further along.
+
+### What it is worth
+
+`step-bored-cylinder`'s approximation export, whose volume is derived
+independently as an elliptic integral:
+
+    derived                       5298.405619
+    chords                        5301.57      (short by 3.16)
+    plane sections                5298.921138  (over by 0.5155)
+    the crossing curve            5298.405620  (over by 1e-06)
+
+Two parts in 1e13. The coupon that opens this document's roadmap as "the general
+case at its smallest, and inherently an approximation" now exports as the exact
+solid.
+
+### An exact conic beats a fitted curve, and planarity is the test
+
+Two *equal* cylinders crossing meet in a pair of true ellipses, and ELLIPSE is an
+entity. Taking those edges as fitted B-splines would trade an exact curve for an
+approximation of the same curve, which is what the first version did to
+`step-cylinder-cross` - all eight of its ellipse arcs became B-splines.
+
+The discriminator is planarity, and it is a property of the two surfaces rather
+than of anything the exporter chose: fit the arc, take the smallest eigenvalue of
+its control points' covariance, and if the arc is flat to 1e-9 leave it to the
+plane-section pass. Flat means conic, and a conic has an entity of its own.
+
+So the boundary of an analytic face is now decided in four tiers, most exact
+first: a conic that lies on both surfaces; the fitted curve where they cross; a
+plane section, exact on one; and a chord, exact at its ends only.
+
+### Where it does not fire, and why that is right
+
+The **exact tier** of `step-bored-cylinder` writes no crossing curves, because
+its corner placement does not run, so its junction vertices are up to 0.0189 off
+the second surface and no arc through them is on both. The curve is only
+available where the corners are already on it - which is exactly the condition
+the placement pass exists to create, and the two passes are worth reading
+together.
+
 ## Measured 2026-09-07: what the remaining refusals were blocked on
 
 **Superseded the same day by the section above** - all five of these now write
@@ -900,6 +976,11 @@ comparison in this session.
 - **A fan triangle needs its own plane, not the polygon's.** Getting this wrong
   made the whole triangulation look worthless - fourteen faces for three parts
   in a thousand - when it was one line and the fixture goes fully exact.
+- **Do not let an approximation displace an exact entity.** The first crossing
+  curve took `step-cylinder-cross`'s eight true ELLIPSEs and wrote them as fitted
+  B-splines - the same curve, less exactly, and no longer recognisable as a
+  conic. Anything that fits a curve needs to ask first whether the curve has a
+  name.
 - **The mesh moves between recognition and writing.** The corner placement runs
   after the pass that decides which faces are analytic and before the pass that
   writes them, so any decision taken on vertex *positions* has to be taken twice

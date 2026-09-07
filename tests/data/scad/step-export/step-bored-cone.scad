@@ -44,16 +44,17 @@
 // APPROX: approximation found nothing left to fit
 // ROUNDTRIP-APPROX: Cone=6 Cylinder=2 Plane=2
 //
-// Sixteen elliptical arcs survive into the approximation export. It is stated
-// and deliberately not explained: with the taper written as six cone faces and
-// the bore as two cylinders, neither surface is the faceted one any more, so the
-// planes doing the cutting are neither the model's nor a simple count of the
-// tessellation, and the tilt test that would bound them - a plane cuts a cone in
-// a closed section only while `|n . axis| > sin(alpha)`, which 28 of the bore's
-// 32 facet planes satisfy on this taper - does not predict sixteen. Working out
-// what does is a job for the day this number moves; guessing at one now would be
-// inventing it, which is what doc/step-export-testing.md is about.
-// EDGES-APPROX: Ellipse=16
+// In the approximation tier the opening is neither chords nor plane sections: it
+// is the curve itself. A cone and a cylinder crossing meet in a quartic, which
+// ISO 10303 has no entity for, so it is written as a Bezier fitted to the true
+// curve found from the two *declarations* - held to 1e-7, and derived identically
+// by both faces because both start from the same two declarations.
+// APPROX: 80 edges written as the curve where two declared surfaces cross
+// EDGES-APPROX: BSplineCurve=80
+//
+// Eighty ties two report lines together: the provenance pass finds exactly 80
+// junction vertices owned by two surfaces, the bore opens on the taper in two
+// closed loops, and a closed loop through n vertices has n edges.
 //
 // Cone=6 is also the assertion that guards the membership test. A facet that
 // spans a hole in a surface has every corner on that surface and no interior on
@@ -70,13 +71,13 @@
 // 2*sqrt(R(z)^2 - x^2) over the bore's disc gives 984.757269, leaving
 // 5382.203842.
 //
-// The tolerance is for the boundary rather than the surface. Every face is now
-// the exact quadric, so the wall contributes nothing: what is left is that the
-// bore's mouth is bounded by chords drawn inside the true curve, so slightly
-// less is bored away than should be, and the export reads 5385.453 - a surplus
-// of 3.2 where the faceted export was 10 short. Boring at r=4.1 instead would
-// move this by 50, which is what the window has to stay inside.
-// VOLUME-APPROX: 5382.203842 +/- 12.0
+// And there is nothing left for a window to cover. Every face is the exact
+// quadric and the bore's mouth is the quartic, so the export reads 5382.205081
+// against the derived 5382.203842 - over by 0.00124, where it used to be over by
+// 3.2 with the mouth bounded by chords. That is 2.3e-07 relative, inside the
+// default 1e-6 the harness applies when no window is given, so the +/- 12.0 goes
+// and the assertion becomes four times stricter than the thing it is measuring.
+// VOLUME-APPROX: 5382.203842
 $fn = 32;
 difference() {
 	cylinder(r1 = 12, r2 = 8, h = 20);

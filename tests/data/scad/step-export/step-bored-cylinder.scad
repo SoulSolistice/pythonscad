@@ -66,12 +66,19 @@
 // APPROX: approximation found nothing left to fit
 // ROUNDTRIP-APPROX: Cylinder=8 Plane=2
 //
-// And there the ellipse count is derived rather than measured. The bore is a
-// 32-gon and the approximation tier claims the whole opening, so every one of
-// its 32 facet planes cuts the wall in an ellipse and every one of them is used.
-// The exact tier writes 20 of the same 32 - the ones bounding a region it will
-// write at all - which is a count of what it claims, not of the model.
-// EDGES-APPROX: Ellipse=32
+// And in the approximation tier the opening is neither chords nor sections any
+// more: it is the curve itself. Once the corner placement has put the junction
+// vertices on both cylinders, every edge between two of them is an arc of the
+// quartic where the two cross, and the exporter writes that - a Bezier fitted to
+// the true curve found from the two *declarations*, held to 1e-7, and derived
+// identically by both faces because both start from the same two declarations.
+// APPROX: 80 edges written as the curve where two declared surfaces cross
+// EDGES-APPROX: BSplineCurve=80
+//
+// Eighty is the model's, and it ties two report lines together: the provenance
+// pass finds exactly 80 junction vertices owned by two surfaces, the bore opens
+// on the wall in two closed loops, and a closed loop through n vertices has n
+// edges. One curve per junction edge.
 //
 // Why this is allowed to be approximate, measured rather than asserted. Where a
 // ruling of the bore met a facet of the wall the vertex is exactly on the true
@@ -89,31 +96,33 @@
 // from its own primitives and measure it, says 5298.405182 - agreement to 8e-8,
 // which is what says the figure is right rather than merely repeatable.
 //
-// The tolerance is for the boundary, not the surface. Every face here is the
-// exact cylinder, and since the boundary segments that run around one at a
-// constant height are written as arcs of it, the outer wall is now bounded
-// exactly: its rim is the true circle rather than a 32-gon inscribed in it.
-// What is left is the bore's opening, and it is no longer chords: the wall's 32
-// facet planes each cut the bore in an ellipse, so the opening is a chain of 32
-// elliptical arcs, every one of them exactly on the bore. The quartic still has
-// no entity to be written as - the chain is inscribed in it, at the wall's own
-// sagitta of 10*(1-cos(pi/32)) = 0.0482 - so the bore still removes slightly too
-// little, but the solid now reads 5298.92 against the derived 5298.41: short by
-// 0.52 where it was short by 3.16.
+// And there is nothing left for the tolerance to cover. Every face is the exact
+// cylinder, every boundary segment around one at constant height is an arc of
+// it, and the opening is the quartic. The approximation export measures
 //
-// The bound on that is the bore's own tessellation. A chord of a 32-gon on r=4
-// lies at most 4*(1-cos(pi/32)) = 0.0193 inside the true circle, and the bore's
-// faces cover about 460 square units, so no more than 460*0.0193/2 = 4.4 can be
-// lost this way. Five is the bound rounded up. It is a bound and not a
-// measurement, so it stays where it is now that the deficit has fallen well
-// inside it; what locks in the improvement is EDGES-APPROX above, which says the
-// opening is arcs. And it is still far too tight to hide a wrong radius: boring
-// at r=4.1 instead moves this by 25.
+//     derived                       5298.405619
+//     chords                        5301.57       short by 3.16
+//     plane sections on one surface 5298.921138   over by 0.5155
+//     the curve where they cross    5298.405620   over by 1e-06
+//
+// Two parts in 1e13, on a solid whose trim curve ISO 10303 has no entity for.
+// The quartic is still approximated - a Bezier through it, degree raised until
+// the fit is inside 1e-7 - but it approximates the *true* curve rather than the
+// mesh, which is the whole of the difference.
+//
+// So the window comes off. It used to be +/- 5.0, bounded by the bore's own
+// tessellation - a chord of a 32-gon on r=4 lies at most 4*(1-cos(pi/32)) =
+// 0.0193 inside the true circle, over about 460 square units of bore, so no more
+// than 4.4 could be lost that way. None of that applies to a trim which is the
+// curve. What is left is the default 1e-6 relative, 0.0053, and the export is
+// inside it by four thousand times.
 //
 // The deficit used to read 1.87 rather than 3.16, which was the smaller number
 // for the worse reason - the outer rim was inscribed too, and its error had the
-// opposite sign and very nearly cancelled the bore's.
-// VOLUME-APPROX: 5298.405619 +/- 5.0
+// opposite sign and very nearly cancelled the bore's. That is the reason a
+// volume window is a poor way to lock in a boundary and EDGES-APPROX is a good
+// one: two errors of opposite sign look like accuracy.
+// VOLUME-APPROX: 5298.405619
 $fn = 32;
 difference() {
 	cylinder(r = 10, h = 20);
