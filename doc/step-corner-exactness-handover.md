@@ -1056,6 +1056,25 @@ item 3, plus what the section above records as still open.
 3. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
    suite that noticed the chorded trim; every census figure was identical before
    and after. Any fixture whose model has a closed-form volume should state it.
+4. **`sphere()` exports with its poles flattened**, found while measuring which
+   entities still rest on the mesh and not chased there. `$fn=32; sphere(r=5)`
+   comes back as `Plane 2, Sphere 1` - two planar polar caps at z = +/-4.9759 -
+   and measures **523.580594** where the ideal is `4/3 pi 125` = **523.5988**.
+   The difference is not noise, it is the wrong solid: a sphere less two caps of
+   height `5 - 4.9759 = 0.0241` is **523.5806**, which matches to six figures.
+   The cause is the tessellation, not the recogniser: OpenSCAD's sphere mesh has
+   a horizontal facet ring at each pole instead of converging to a point, and
+   the exporter writes it faithfully - the spherical face is on the true declared
+   sphere and the caps are the mesh's artefact preserved. Faithful to the mesh,
+   wrong about the model, which declared a whole sphere. A closed spherical face
+   is bounded by its two seams, which is the shape `check_cylindrical_faces`
+   already describes for a periodic face. **The volume is the check that
+   matters** - a face census cannot tell a sphere from a sphere with its poles
+   cut off, since both read as `Sphere 1` plus some planes.
+5. **The twist.** `linear_extrude`'s walls are the last thing its parameters
+   determine that is not declared - see "declaring the planes, and what each
+   extrude parameter does with them" for why `slices` and `$fn` are not the
+   obstacle and `GridSurface` is the mechanism.
 
 Then lid10, which is set aside deliberately and is the specimen for judging
 blast radius, not a development target. It needs
