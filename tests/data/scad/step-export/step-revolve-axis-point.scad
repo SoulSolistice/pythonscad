@@ -12,11 +12,19 @@
 // The regression this guards is not subtle once it is measured: on a profile
 // like a wine glass's the same defect took the export from 42 faces to 2616.
 //
-// Nothing is declared here - rotate_extrude declares the rims of a sloped
-// segment, and a segment that reaches the axis has only one rim - so this is
-// the faceted path throughout, which is the point. It asserts the mesh, not the
-// recognition.
-// EXPECT: no analytic surfaces were declared
+// No *curved* surface is declared here - rotate_extrude declares the rims of a
+// sloped segment, and a segment that reaches the axis has only one rim - so this
+// is the faceted path throughout, which is the point. It asserts the mesh, not
+// the recognition.
+// EXPECT: 0 analytic surfaces available (0 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+//
+// One plane, and it is the model's: of the profile triangle's three edges, the
+// one from [0,0] to [10,0] lies at a single height and sweeps a flat disc, the
+// one from [0,20] back to [0,0] is the axis itself and sweeps nothing, and the
+// sloped one is the cone this fixture is about. A full turn has no end caps. So
+// exactly one plane is declared, and the disc is the face written on it.
+// EXPECT: and 1 declared plane
+// EXPECT: 1 planar face written on a plane the model declared
 //
 // Thirty-two facets of wall and one base, and nothing else: no sliver, no
 // duplicate, no second fan. Any degenerate facet at the apex shows up here as a

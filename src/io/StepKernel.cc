@@ -3568,6 +3568,7 @@ void StepKernel::build_tri_body(
   // Build the loops, their edges and the carrier planes.
   std::vector<FaceBound *> face_bounds(face_cnt, nullptr);
   std::vector<Plane *> planes(face_cnt, nullptr);
+  int planes_declared = 0;
   std::vector<std::vector<EdgeCurve *>> loop_edges(face_cnt);
 
   for (std::size_t i = 0; i < face_cnt; i++) {
@@ -3620,9 +3621,37 @@ void StepKernel::build_tri_body(
         loop_edges[i].push_back(edge_curve);
       }
 
-    // create the plane. The reference direction has to lie inside the plane, so
-    // project the longest edge onto it instead of using it as it comes.
-    const Vector3d& norm = loop_normals[i];
+    // create the plane. Where the model declared one that this face lies in,
+    // that is the plane: a declaration cannot drift, and a fit to mesh vertices
+    // moves with the tessellation, with whatever a boolean left behind, and with
+    // every vertex a later pass touches. The face's own vertices are unchanged
+    // either way - the declaration is only accepted when every one of them is
+    // already in it, so this replaces the *coefficients* and nothing else.
+    Vector3d norm = loop_normals[i];
+    Vector3d on_plane = vertices[loop[0]];
+    {
+      double extent = 0;
+      for (int j = 0; j < n; j++) {
+        extent = std::max(extent, (vertices[loop[j]] - on_plane).norm());
+      }
+      const double tol = std::max(1e-12, 1e-9 * std::max(1.0, extent));
+      for (const auto& declared : declared_planes) {
+        if (fabs(fabs(declared.second.dot(norm)) - 1.0) > 1e-9) continue;
+        bool holds = true;
+        for (int j = 0; holds && j < n; j++) {
+          holds = fabs((vertices[loop[j]] - declared.first).dot(declared.second)) <= tol;
+        }
+        if (!holds) continue;
+        // Keep the mesh's sense: a declaration says which plane, not which way
+        // the face looks out of it.
+        norm = declared.second.dot(norm) > 0 ? declared.second : Vector3d(-declared.second);
+        on_plane = declared.first + norm * (vertices[loop[0]] - declared.first).dot(norm);
+        // Per face, not per loop: a face with a hole in it computes a plane for
+        // its inner bound too, and counting those says a ring was written twice.
+        if (!loop_is_hole[i]) planes_declared++;
+        break;
+      }
+    }
     Vector3d ref(0, 0, 0);
     double ref_len = 0;
     for (int j = 0; j < n; j++) {
@@ -3636,7 +3665,7 @@ void StepKernel::build_tri_body(
     if (ref.norm() < 1e-12) ref = AnalyticFeatures::perpendicular(norm);
     else ref.normalize();
 
-    auto plane_point = new Point(entities, vertices[loop[0]]);
+    auto plane_point = new Point(entities, on_plane);
     auto plane_dir_1 = new Direction(entities, norm);
     auto plane_dir_2 = new Direction(entities, ref);
     auto plane_axis = new Axis2Placement(entities, plane_dir_1, plane_dir_2, plane_point);
@@ -3644,6 +3673,13 @@ void StepKernel::build_tri_body(
 
     auto edge_loop = new EdgeLoop(entities, oriented_edges);
     face_bounds[i] = new FaceBound(entities, edge_loop, true, !loop_is_hole[i]);
+  }
+
+  if (planes_declared > 0) {
+    LOG(
+      "STEP export: %1$d planar face%2$s written on a plane the model declared rather than one "
+      "fitted to its own corners",
+      planes_declared, planes_declared == 1 ? "" : "s");
   }
 
   // The fans for the polygons the corner placement bent.

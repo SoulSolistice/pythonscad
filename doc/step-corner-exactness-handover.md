@@ -775,6 +775,92 @@ vertex touched, every loop still closed - moves the computed apex off the face's
 corner, and the *only* complaint is the edge-count rule. The relaxation is
 carrying its weight.
 
+## Declaring the planes, and what each extrude parameter does with them
+
+Asked which entities still rest on the mesh, the answer split in two: curved
+geometry written as facets, and *flat* geometry written from a fit rather than
+from a declaration. The second is the larger population and the easier fix.
+
+Before this, **only `cube()` and `cylinder()` declared planes.** Every other flat
+face - every extrude cap, every straight extrude wall, every revolved annulus -
+was written on a plane fitted to its own corners. That plane is exact as a plane,
+so nothing in the suite complained; what it is not is *stable*, and the cost was
+measured this session: on `step-band-family` 180 plane sections were agreed
+before the corner placement and none after, every one of them on a fitted facet
+plane.
+
+Three things landed:
+
+- `linear_extrude` declares its two caps always, and a plane per straight profile
+  edge where the sweep keeps them parallel;
+- `rotate_extrude` declares the flat annulus under any profile edge at constant
+  height, and the two end faces of a partial sweep;
+- the exporter *uses* a declared plane when writing a planar face, in preference
+  to fitting one - accepted only when every one of the face's own corners is
+  already in it, so this replaces the coefficients and moves nothing.
+
+Measured, and each probe declares exactly what it uses:
+
+    cube                     6 declared,  6 faces on them
+    linear_extrude(square)   6            6
+    linear_extrude(circle)   2            2   (the wall is the cylinder)
+    linear_extrude(twist)    2            2   (caps only, walls refused)
+    linear_extrude(offset)   6            6
+    text                    17           17
+    rotate_extrude          2            2
+    rotate_extrude(120 deg)  4            4   (two annuli, two end faces)
+    lid10                   41           27
+
+### Which parameter does what
+
+Every parameter of a `linear_extrude` is on the node and reachable where the
+declarations are made. What each one costs:
+
+| parameter | effect on the declaration |
+| --- | --- |
+| `height`, `v` | the sweep vector. An oblique `v` refuses the *cylinder* - an oblique cylinder is a real surface but not a CYLINDRICAL_SURFACE - and costs the caps and straight walls nothing |
+| `center` | folded into the base height; nothing to refuse |
+| `convexity` | a rendering hint, no geometry |
+| `scale` uniform | cylinder becomes a cone; a straight wall stays planar, because A'B' = s*AB is parallel to AB |
+| `scale` uneven | refuses the curved claim, and refuses a wall unless the edge runs along x or y - which are exactly the edges an uneven scale leaves parallel |
+| `$fn` | never read. The declarations come from the arc and Bezier records and from the profile's straight edges, so they do not move with the tessellation - which is the point of them |
+| `slices` | **never read.** It only says how finely the twist is tessellated |
+| `twist` | **the one real gap.** Caps still declared; everything else refused |
+
+A twist is not undeclarable in principle, and this is worth stating because the
+parameters do determine it completely. A straight profile edge under a
+continuous twist sweeps a ruled helicoidal surface, which ISO 10303 has no
+primitive for - but the `GridSurface` channel already in this codebase writes
+exactly that case, as a B-spline through a grid of stations, and a twisted
+extrusion can compute its stations exactly from `height`, `v`, `twist` and
+`scale` without reference to `slices`. It would land in the approximation tier
+for the same reason `declare_grid` does: OpenSCAD's mesh for a twisted extrude is
+the `slices` polyline, so the declared smooth surface and the mesh differ by the
+slice sagitta, and only the approximation tier is allowed to spend that.
+
+### The fixtures that had to move, and whether that was circular
+
+Three fixtures asserted `no analytic surfaces were declared`, which is the whole
+surface list being empty. Planes now populate it, so all three failed, and
+rewriting an assertion because your own change broke it is exactly the shape of
+circular validation. It was checked rather than argued:
+
+- the rewritten line, `0 analytic surfaces available (0 cylindrical, 0 spherical,
+  0 toroidal, 0 Bezier)`, is narrower but still names the defect class these
+  fixtures exist for - a wrong *curved* claim;
+- **mutation checked**: letting `declareExtrudedCylinders` through under a twist,
+  which is that defect exactly, makes the rewritten line fail;
+- the exhaustive census - `ROUNDTRIP: Plane=2152` with no Cylinder, Cone, Sphere,
+  Torus or BSplineSurface beside it - was never touched and is the real guard;
+- and the part that *was* weakened, the plane channel, is pinned again wherever
+  the number is derivable: `step-concave` states 8 because its profile is a
+  hexagon and an extrusion has two caps, `step-revolve-axis-point` states 1
+  because one of its three profile edges lies at constant height, the second is
+  the axis and the third is the cone. `step-extrude-refusals` is left unpinned
+  and says why: its third body is an ellipse whose arc record was dropped, so
+  what it declares is one plane per tessellation chord and the count is the
+  mesher's, not the model's.
+
 ## The crossing curve: a trim that lies on both surfaces
 
 A plane section lies exactly on the surface it is a section of, and only on that

@@ -452,6 +452,119 @@ void declareExtrudedPatches(const LinearExtrudeNode& node, const Polygon2d& prof
   }
 }
 
+/*! The planes a straight extrusion sweeps: its two caps, and each straight wall.
+ *
+ * A plane is exact whether it is declared or fitted, so this is not about
+ * accuracy - it is about the coefficients staying put. A plane fitted to mesh
+ * vertices moves with the tessellation, with whatever a boolean left behind, and
+ * with any later pass that touches a vertex; the declared one cannot move at
+ * all, and anything derived from it inherits that.
+ *
+ * **The caps are always planar.** Every station of a linear extrusion is the
+ * profile scaled and rotated *within its own plane* and then translated, so the
+ * first and last lie in two parallel planes whatever `v`, `scale`, `twist` or
+ * `center` do. Only a degenerate top - scaled to nothing - has no face there.
+ *
+ * **A straight wall is planar unless something turns it.** The wall over a
+ * straight profile edge AB is the ruled surface between AB and its image A'B',
+ * and it is planar exactly when those two are parallel:
+ *
+ *   - a twist rotates the image, so A'B' is AB turned and the two are skew;
+ *   - an uneven scale sends AB to (sx*u1, sy*u2), parallel to u = (u1, u2) only
+ *     when the edge already runs along x or y - so an uneven scale is refused
+ *     except for those edges, which are exactly the ones it leaves alone;
+ *   - a uniform scale and any `v`, oblique included, keep them parallel, because
+ *     A'B' = s*AB and the translation is common to both ends.
+ *
+ * A chord of a recorded arc or Bezier is *not* a straight edge, whatever the
+ * outline says: it is the tessellation's chord, its plane moves with `$fn`, and
+ * declaring it would put a tessellation artefact on a channel whose whole point
+ * is that a declaration does not move. The arcs are tested exactly - both ends
+ * at the recorded radius from the recorded centre - and the Beziers by their
+ * control points' bounding box, which errs towards declaring nothing.
+ */
+void declareExtrudedPlanes(const LinearExtrudeNode& node, const Polygon2d& profile,
+                           const Vector3d& height, const Vector3d& base, PolySet& polyset)
+{
+#ifdef ENABLE_PYTHON
+  if (node.profile_func != nullptr || node.twist_func != nullptr) return;
+#endif
+  const Transform3d tr = profile.getTransform3d();
+  const Eigen::Matrix3d linear = tr.linear();
+  const Vector3d ex = linear * Vector3d(1., 0., 0.);
+  const Vector3d ey = linear * Vector3d(0., 1., 0.);
+  const Vector3d normal = ex.cross(ey);
+  if (normal.norm() < 1e-12) return;
+  const Vector3d unit_normal = normal.normalized();
+  const Vector2d top_scale(node.scale_x, node.scale_y);
+  if (!top_scale.allFinite()) return;
+
+  // The two caps.
+  addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(base, unit_normal));
+  if (top_scale[0] != 0. || top_scale[1] != 0.) {
+    addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(base + height, unit_normal));
+  }
+
+  if (node.twist != 0) return;
+  const bool even_scale = node.scale_x == node.scale_y;
+
+  auto on_a_curve = [&](const Vector2d& p, const Vector2d& q) {
+    for (const auto& arc : profile.arcs) {
+      if (arc.r <= 0) continue;
+      // Loose on purpose. This asks whether two points are on a recorded circle,
+      // and a straight edge's ends are nowhere near one, so the discriminator is
+      // enormous and the tolerance is free. It has to be: a profile that has been
+      // through Clipper is snapped to its decimal grid, and at 1e-9 the arcs of
+      // an offset() matched nothing at all - so every chord of them was declared
+      // a straight wall, thirty planes for six faces.
+      const double tol = 1e-6 * std::max(1.0, arc.r);
+      if (fabs((p - Vector2d(arc.centre)).norm() - arc.r) > tol) continue;
+      if (fabs((q - Vector2d(arc.centre)).norm() - arc.r) > tol) continue;
+      return true;
+    }
+    for (const auto& bez : profile.beziers) {
+      Vector2d lo = Vector2d(bez.ctrl[0]), hi = lo;
+      for (int i = 1; i <= bez.degree; i++) {
+        lo = lo.cwiseMin(Vector2d(bez.ctrl[i]));
+        hi = hi.cwiseMax(Vector2d(bez.ctrl[i]));
+      }
+      const double tol = 1e-9 * std::max(1.0, (hi - lo).norm());
+      const Vector2d slack(tol, tol);
+      if ((p.array() >= (lo - slack).array()).all() && (p.array() <= (hi + slack).array()).all() &&
+          (q.array() >= (lo - slack).array()).all() && (q.array() <= (hi + slack).array()).all()) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Untransformed, because the arcs and Beziers this is tested against are: they
+  // are recorded in the profile's own 2D frame and the transform is applied
+  // below, where the wall is built. Comparing a transformed vertex against an
+  // untransformed centre finds no arc at all, and every chord of one is then
+  // declared a straight wall - which is how a rounded square came to declare
+  // thirty planes for six faces.
+  for (const auto& outline : profile.untransformedOutlines()) {
+    const std::size_t n = outline.vertices.size();
+    if (n < 2) continue;
+    for (std::size_t i = 0; i < n; i++) {
+      const Vector2d a = outline.vertices[i];
+      const Vector2d b = outline.vertices[(i + 1) % n];
+      if ((b - a).norm() < 1e-12) continue;
+      if (on_a_curve(a, b)) continue;
+      // An uneven scale keeps only the edges it does not shear.
+      if (!even_scale && fabs(b[0] - a[0]) > 1e-12 && fabs(b[1] - a[1]) > 1e-12) continue;
+      const Vector3d p = tr * Vector3d(a[0], a[1], 0.) + base;
+      const Vector3d q = tr * Vector3d(b[0], b[1], 0.) + base;
+      const Vector3d up =
+        tr * Vector3d(a[0] * top_scale[0], a[1] * top_scale[1], 0.) + base + height - p;
+      const Vector3d wall = (q - p).cross(up);
+      if (wall.norm() < 1e-12) continue;
+      addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(p, Vector3d(wall.normalized())));
+    }
+  }
+}
+
 }  // namespace
 
 std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Polygon2d& poly)
@@ -644,6 +757,7 @@ std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Po
   // transform, so the frame is the same either way.
   declareExtrudedCylinders(node, poly, h2 - h1, h1, *result);
   declareExtrudedPatches(node, poly, h2 - h1, h1, *result);
+  declareExtrudedPlanes(node, poly, h2 - h1, h1, *result);
   return result;
 }
 

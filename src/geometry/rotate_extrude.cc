@@ -196,11 +196,33 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
       const Vector2d& a = profile[i];
       const Vector2d& b = profile[(i + 1) % n];
       // An edge at one height sweeps a flat annulus, and one touching the axis
-      // sweeps a disc or an apex. Neither is a wall.
-      if (fabs(a[1] - b[1]) < eps) continue;
+      // sweeps a disc or an apex. Neither is a wall - but the annulus is a
+      // *plane*, exactly, at the height the profile puts it, and saying so is
+      // worth as much as saying which cylinder a wall is on. A plane fitted to
+      // the mesh instead moves with the tessellation and with whatever a boolean
+      // leaves behind; this one is the model's own number.
+      if (fabs(a[1] - b[1]) < eps) {
+        if (fabs(a[0] - b[0]) > eps) {
+          addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(
+                                               Vector3d(0, 0, a[1] + node.offset_y), Vector3d(0, 0, 1)));
+        }
+        continue;
+      }
       if (a[0] <= eps || b[0] <= eps) continue;
       declare(a);
       if (fabs(a[0] - b[0]) > eps) declare(b);
+    }
+  }
+
+  // The two faces a partial sweep is closed with. Each is the profile's own
+  // plane, standing at one end of the arc and containing the axis, so its normal
+  // is perpendicular to that plane and the axis both. A full turn closes on
+  // itself and has neither.
+  if (fabs(node.angle) < 360 - 1e-9) {
+    for (const double at : {node.start, node.start + node.angle}) {
+      const double rad = at * G_PI / 180.0;
+      addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(
+                                           Vector3d(0, 0, 0), Vector3d(-sin(rad), cos(rad), 0)));
     }
   }
 

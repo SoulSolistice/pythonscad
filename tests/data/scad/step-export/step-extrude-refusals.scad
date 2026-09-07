@@ -24,10 +24,23 @@
 //
 // The bodies are set apart so each is its own shell and a stray declaration
 // cannot be absorbed by a neighbour. What is asserted is the *availability*
-// line: nothing reaches the exporter at all, which is stronger than nothing
-// being written and is the property that actually broke.
+// line: no curved surface reaches the exporter at all, which is stronger than
+// nothing being written and is the property that actually broke.
 //
-// EXPECT: no analytic surfaces were declared
+// The four zeros are the assertion, and they say it more exactly than "nothing
+// was declared" used to. Planes *are* declared here - a linear extrusion's two
+// caps are planar whatever its twist, scale or v do, because every station is
+// the profile moved within its own plane - and so are the walls over any
+// genuinely straight profile edge. None of that is a claim about a curved
+// surface, and the count below is what says none was made.
+// EXPECT: 0 analytic surfaces available (0 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+//
+// The plane channel is deliberately *not* pinned here, unlike in step-concave
+// where the number falls out of the profile. The third body is an ellipse whose
+// arc record was dropped on the way in, so what it declares is one plane per
+// tessellation chord and the count is the mesher's, not the model's. Asserting
+// it would be capture. The census below is what guards this fixture, and it is
+// exhaustive.
 //
 // The census is exhaustive, and for a refusal fixture that is the whole point:
 // the assertion is not the number 2152, which is the mesher's business and was
