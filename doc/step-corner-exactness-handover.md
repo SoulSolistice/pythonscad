@@ -6,6 +6,16 @@ next.
 
 ## Done
 
+**2026-09-07, later: the trim of a quadric can be the curve it is.** Where a
+boundary runs across a cylinder in a plane it is written as the ELLIPSE it is,
+rather than as the mesh's chords, and the exact tier no longer refuses the face
+for it. `step-cylinder-cross` - the Steinmetz coupon, committed before the code
+with its volume deliberately unasserted - now exports as eight cylindrical faces
+and one solid, and OpenCASCADE measures it at 5333.333262 against the exact
+16*r^3/3 = 5333.33333. The suite is 44/44 and no other fixture's expectations
+moved. See "the curve trim" below, and read the joint-decision part before
+changing anything: getting it wrong opens the shell.
+
 **2026-09-07: every fixture is exact on every exact surface.** Of 42, none puts a
 corner of a plane, cylinder, cone, sphere or torus face off the surface that face
 is written on. The three that still measure anything are B-spline faces, and each
@@ -510,6 +520,89 @@ would let the exporter write a cap as a declared face rather than recognise it,
 and would give a corner on two planes a triple point to be placed at. Neither is
 needed for exactness today.
 
+## The curve trim: a plane section written as the conic it is
+
+The trim boundary of a quadric face was always the mesh's polyline, and the
+exact tier refused any face whose boundary left its own surface - which is every
+face cut by a boolean, because a chord of a curve is not on the curve. That
+refusal was correct and it was also the last thing standing between this
+exporter and an analytic body.
+
+A boundary edge can now be honest about a curved surface three ways rather than
+two: along the axis (a line), round it at constant height (an arc), or **across
+it in a plane** (a conic). A plane section of a cylinder is an ellipse, exact,
+and writable as one.
+
+**The mesh does not hand the section over.** `Patch::Run` splits a boundary
+wherever the neighbouring face changes, so one ellipse arrives as thirty-three
+runs of a single edge each. `coplanarStretches()` finds them by walking the
+boundary cycle instead, and it walks it **as a circle**: grow a plane from every
+vertex, take the longest, consume its edges, repeat. Two earlier versions
+scanned left to right from index 0 and both were wrong for the same reason - a
+cycle has no first vertex of its own, so a stretch straddling that arbitrary
+seam is reported as two shorter ones, and the neighbouring face, whose seam is
+elsewhere, then disagrees about where the curve begins. Two faces that disagree
+cannot share an edge.
+
+Three specific traps, each of which cost a build:
+
+- **Seeking "where the boundary turns" to find a starting point does not work.**
+  Every triple along an ellipse is non-collinear, so that lands in the middle of
+  an arc. Seek where the *plane* changes.
+- **Cutting the cycle at a wrapping stretch's own start is not enough.** It
+  frees that stretch and pushes the next one across the new seam, whenever the
+  two meet end to end - which is exactly how two ellipse arcs meet at a
+  Steinmetz pinch. The seam has to land on an edge **no stretch covers**.
+- **The closing edge is a real edge.** Building a cycle from runs and then
+  iterating `i + 1 < n` silently exempts the edge from the last vertex to the
+  first from the boundary test.
+
+### The joint decision, which is the whole of the difficulty
+
+An ellipse one face writes and its neighbour does not is a hole in the shell.
+`step-bored-cylinder`'s approximation tier proved it: twelve edges used by one
+face, an invalid export, on a change that had left every other fixture alone.
+
+So a section is written only where it turns up **twice** among the faces still
+standing - `section_curves`, keyed by the set of mesh vertices the stretch runs
+through, which both sides arrive at identically because the search is
+seam-independent.
+
+That makes the two decisions circular: a face may be writable only because a
+section covers its chords, and the section is only available while that face
+stands. They are settled together, by dropping whatever the last round refused
+and asking again. Refusals only grow, so it terminates.
+
+### The fixture, and why it is the one that could not be faked
+
+`step-cylinder-cross` - two equal cylinders crossing at right angles, the
+Steinmetz solid. It was committed *before* the code, stating what the export
+should be and deliberately leaving the volume unasserted, because asserting the
+5320.49 the exporter then produced would have pinned the defect in place.
+
+Everything about it is derived from the model: the planes `z = y` and `z = -y`,
+the ellipse semi-axes `r` and `r*sqrt(2)`, the surviving region
+`|z| <= r*|sin theta|` and hence eight faces, and each face's three edges - two
+elliptical arcs meeting at the pinch plus one ruling.
+
+**Three edges, not four**, is the shape the validator did not know. Its floor of
+four for a face of revolution is right for the reason it gives - a rim runs at
+constant height and a ruling at constant angle, so in the surface's own
+(angle, height) rectangle every side is axis aligned and two of them never meet.
+A plane section is not axis aligned: it climbs as it goes round, so two of them
+cross, and where they do the region closes to a point on its own. Same for "a
+partial face needs two distinct end edges": one ruling is the whole of the ends
+when the other end is a pinch. Both rules were widened to name that shape, and
+both still require the pinch to be really there - two elliptical arcs sharing a
+vertex.
+
+And the figure none of the census lines can fake: the Steinmetz volume is
+exactly `16*r^3/3 = 5333.33333`, no pi in it. OpenCASCADE measures the exported
+solid at **5333.333262**, 1.3e-8 relative. With the chorded trim the same export
+measured 5320.49 - 0.24 per cent low. **Nothing else in the fixture's census
+moved when the trim was fixed except the surface names.** The volume is the only
+line that knew the difference, which is the argument for `VOLUME:` in general.
+
 ## The immediate task
 
 ~~Update the three fixtures~~ - done for `step-declare-grid-scad`, and refused
@@ -530,13 +623,25 @@ table above.
 
 ## What to do after that
 
-**`step-band-family` is the next real work.** Its planes are exact and its
-cylinders and sweep are not, at 7e-02 to 9e-02, with 704 two-owner corners that
-*are* being moved. So the corners that stray there are not the corners being
-placed. Find out which they are before writing any code - that single
-measurement decides everything after it.
+**Superseded on 2026-09-07.** `step-band-family` and `step-exact-trim` are both
+done; the suite is 44/44. What the curve trim leaves open, in the order it
+should be taken:
 
-Then `step-exact-trim`, which has not been looked at.
+1. **The trim fires only where a quadric meets a quadric.** Across the whole
+   suite the only model where a plane section is agreed on both sides is
+   `step-cylinder-cross`. Everywhere else the face across the ellipse is a
+   *planar* one written from the mesh, which writes chords, so the section is
+   not agreed and both sides stay chorded. Teaching a planar face to accept an
+   elliptical edge is the next real gain, and it is where the fixtures that
+   still carry a chorded trim would move.
+2. **A cone is not covered.** A plane cuts a cone in an ellipse, a parabola or a
+   hyperbola depending on the tilt, and only the first of those closes;
+   `coplanarStretches` is called for cylinders only. The tilt test that decides
+   which is a few lines, but a fixture with a hand-derived answer has to come
+   first - `step-cylinder-cross` is the model for what that looks like.
+3. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
+   suite that noticed the chorded trim; every census figure was identical before
+   and after. Any fixture whose model has a closed-form volume should state it.
 
 Then lid10, which is set aside deliberately and is the specimen for judging
 blast radius, not a development target. It needs
@@ -576,6 +681,18 @@ comparison in this session.
 - **A fan triangle needs its own plane, not the polygon's.** Getting this wrong
   made the whole triangulation look worthless - fourteen faces for three parts
   in a thousand - when it was one line and the fixture goes fully exact.
+- **An analytic curve on a trimmed face is a joint decision, not a local one.**
+  The two faces meeting along it must write the *same* curve or the shell opens,
+  and the failure is silent in the exporter and loud only in
+  `validatestep.py` - "12 edge(s) used by only one face". Anything found by
+  walking a boundary cycle must therefore be found the same way from either
+  side, so nothing in that search may depend on where the cycle starts: not the
+  scan order, not the tie-break, and not the tolerance (the flatness tolerance
+  here is scaled by the cycle's bounding box for exactly that reason).
+- **A boundary cycle's closing edge is easy to lose.** Cycles built from
+  `Patch::Run` by dropping each run's last vertex are closed, so a
+  `for (i; i + 1 < n; i++)` walk exempts the edge from the last vertex back to
+  the first - which quietly excuses one chord per cycle from the boundary test.
 - **`quick.sh` pipes the build through `tail`**, so grepping its output for
   `FAILED` misses real failures. Use `berr.sh`, which keeps 30 lines.
 

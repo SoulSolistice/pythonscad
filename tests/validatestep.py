@@ -1013,12 +1013,31 @@ def check_cylindrical_faces(entities, problems):
 
         oriented = loop.refs()
         # Four is the floor for a face of revolution - two rims and two ends, or
-        # two rims and a seam used twice - with one exception, and it is a whole
-        # face shape rather than a special case: a fillet's corner is an octant
-        # of a sphere, bounded by three great circle arcs meeting at right
-        # angles. It has three edges because its fourth side is the pole, where
-        # the patch that drew it is degenerate. The arcs are checked below.
-        min_edges = 3 if surface.name == "SPHERICAL_SURFACE" else 4
+        # two rims and a seam used twice - and the reason is that a rim runs at
+        # constant height and a ruling at constant angle, so in the surface's own
+        # (angle, height) rectangle every side is axis aligned and no two of them
+        # meet except at a corner shared with a third. Two exceptions, and both
+        # are whole face shapes rather than special cases:
+        #
+        # A fillet's corner is an octant of a sphere, bounded by three great
+        # circle arcs meeting at right angles. It has three edges because its
+        # fourth side is the pole, where the patch that drew it is degenerate.
+        #
+        # A plane section of a cylinder which is neither perpendicular to the
+        # axis nor parallel to it is an ellipse, and it climbs in height as it
+        # goes round: it is not axis aligned in that rectangle, so two of them
+        # can cross. Where they do, the region between them closes to a point and
+        # what is left is a curvilinear triangle - two elliptical arcs and one
+        # ruling. Two equal cylinders crossing at right angles make eight of
+        # those and nothing else.
+        #
+        # The arcs are checked below in either case.
+        has_ellipse = False
+        for oid in oriented:
+            geom = _edge_geometry(entities, oid)
+            if geom is not None and geom.name == "ELLIPSE":
+                has_ellipse = True
+        min_edges = 3 if surface.name == "SPHERICAL_SURFACE" or has_ellipse else 4
         if len(oriented) < min_edges:
             problems.append(
                 "#%d: %s face has %d edges, expected at least %d"
@@ -1229,7 +1248,24 @@ def check_cylindrical_faces(entities, problems):
                         for _, geom, _ends in circles
                     )
                 )
-                if not great:
+                # The other exception is the pinch, and it is the same shape the
+                # edge count above already allows. "Two end edges" holds because
+                # a rim runs at constant height, so two rims never meet and the
+                # region between them has to be closed off at both ends. Two
+                # *plane sections* of a cylinder do meet - each climbs as it goes
+                # round - and where they cross the region closes to a point on
+                # its own. One ruling is then the whole of the ends. The test is
+                # that the crossing is really there: two elliptical arcs sharing
+                # a vertex, which is the pinch.
+                pinch = False
+                if surface.name == "CYLINDRICAL_SURFACE" and len(line_edges) == 1:
+                    seen = {}
+                    for oid, _geom, ends in ellipses:
+                        for vid in ends:
+                            if seen.get(vid, oid) != oid:
+                                pinch = True
+                            seen[vid] = oid
+                if not great and not pinch:
                     problems.append(
                         "#%d: a partial %s face needs two distinct end edges, found %d"
                         % (face.id, surface.name, len(line_edges))
