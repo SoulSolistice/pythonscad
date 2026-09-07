@@ -73,7 +73,15 @@
 // the true curve found from the two *declarations*, held to 1e-7, and derived
 // identically by both faces because both start from the same two declarations.
 // APPROX: 80 edges written as the curve where two declared surfaces cross
+// APPROX: 80 of those carry a pcurve on each of the two surfaces
 // EDGES-APPROX: BSplineCurve=80
+//
+// The pcurves are asserted because nothing else here would notice them. The 3D
+// curve is definitive, so a reader takes it and ignores them, and a pcurve that
+// is wrong leaves the face count, the shell, the round trip and the volume all
+// exactly as they are. validatestep.py checks each one against the 3D curve it
+// belongs to - see check_surface_curves - and this line checks they were written
+// at all.
 //
 // Eighty is the model's, and it ties two report lines together: the provenance
 // pass finds exactly 80 junction vertices owned by two surfaces, the bore opens

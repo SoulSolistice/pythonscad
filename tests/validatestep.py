@@ -924,6 +924,102 @@ def _face_reaches_cone_apex(entities, surface, face_edge_ids):
     return False
 
 
+def _bezier(points, t):
+    """A Bezier of any dimension at t, from its control points."""
+    degree = len(points) - 1
+    out = [0.0] * len(points[0])
+    binom = 1.0
+    for j in range(degree + 1):
+        weight = binom * (t ** j) * ((1 - t) ** (degree - j))
+        for k in range(len(out)):
+            out[k] += points[j][k] * weight
+        binom = binom * (degree - j) / (j + 1)
+    return out
+
+
+def check_surface_curves(entities, problems):
+    """A SURFACE_CURVE's pcurves must be the same curve as its 3D one.
+
+    This is the check that the pcurve machinery cannot do without. The 3D curve
+    is written .CURVE_3D., which makes it definitive, so a reader takes it and
+    ignores the pcurves - and a pcurve that is wrong, or off by a rotation
+    because it was written against another face's reference direction, changes
+    nothing a face count, a shell check or a volume would notice. It is invisible
+    until some other kernel prefers the parameter space, which is the one place
+    it cannot be debugged.
+
+    So the two are compared directly: walk the 2D curve, put each (u, v) through
+    the basis surface's own parametrisation, and ask whether the point that comes
+    out is where the 3D curve is at the same parameter."""
+    for ent in entities.values():
+        if ent.name != "SURFACE_CURVE":
+            continue
+        refs = ent.refs()
+        if not refs:
+            continue
+        curve = entities.get(refs[0])
+        if curve is None or curve.name != "B_SPLINE_CURVE_WITH_KNOTS":
+            continue  # a line or an arc, whose pcurve is checked by its own rules
+        space = [_vec3(entities, r, "CARTESIAN_POINT") for r in curve.refs()]
+        if any(p is None for p in space):
+            continue
+        for pid in refs[1:]:
+            pcurve = entities.get(pid)
+            if pcurve is None or pcurve.name != "PCURVE" or len(pcurve.refs()) < 2:
+                continue
+            surface = entities.get(pcurve.refs()[0])
+            rep = entities.get(pcurve.refs()[1])
+            if surface is None or rep is None or not rep.refs():
+                problems.append("#%d: PCURVE is missing its surface or its curve" % pcurve.id)
+                continue
+            flat_curve = entities.get(rep.refs()[0])
+            if flat_curve is None or flat_curve.name != "B_SPLINE_CURVE_WITH_KNOTS":
+                continue
+            flat = []
+            for r in flat_curve.refs():
+                point = entities.get(r)
+                if point is not None and point.name == "CARTESIAN_POINT":
+                    flat.append(point.floats())
+            if len(flat) != len(space) or any(len(f) != 2 for f in flat):
+                problems.append(
+                    "#%d: PCURVE has %d control points where its 3D curve has %d"
+                    % (pcurve.id, len(flat), len(space))
+                )
+                continue
+            placement = _placement(entities, surface.refs()[0]) if surface.refs() else None
+            numbers = surface.floats()
+            if placement is None or not numbers:
+                problems.append("#%d: PCURVE's surface has no usable placement" % pcurve.id)
+                continue
+            origin, axis, ref = placement
+            other = [
+                axis[(i + 1) % 3] * ref[(i + 2) % 3] - axis[(i + 2) % 3] * ref[(i + 1) % 3]
+                for i in range(3)
+            ]
+            radius = numbers[0]
+            half = numbers[1] if surface.name == "CONICAL_SURFACE" and len(numbers) > 1 else 0.0
+            if surface.name not in ("CYLINDRICAL_SURFACE", "CONICAL_SURFACE"):
+                continue  # only the two this exporter writes a fitted pcurve on
+            worst = 0.0
+            for k in range(1, 8):
+                t = k / 8.0
+                u, v = _bezier(flat, t)
+                at = radius + v * math.tan(half)
+                mapped = [
+                    origin[i] + at * (math.cos(u) * ref[i] + math.sin(u) * other[i]) + v * axis[i]
+                    for i in range(3)
+                ]
+                spot = _bezier(space, t)
+                worst = max(
+                    worst, math.sqrt(sum((mapped[i] - spot[i]) ** 2 for i in range(3)))
+                )
+            if worst > 1e-6 * max(1.0, radius):
+                problems.append(
+                    "#%d: PCURVE runs %g from the 3D curve it belongs to - the two say different "
+                    "things about where the edge is" % (pcurve.id, worst)
+                )
+
+
 def check_cylindrical_faces(entities, problems):
     """A CYLINDRICAL_SURFACE or CONICAL_SURFACE face has one of exactly two shapes.
 
@@ -1705,6 +1801,7 @@ def validateSTEP(filename):
         check_hole_nesting(entities, problems)
         check_bound_enclosure(entities, problems)
         check_cylindrical_faces(entities, problems)
+        check_surface_curves(entities, problems)
         check_bspline_faces(entities, problems)
         check_shells(entities, problems)
         check_shell_volumes(entities, problems)

@@ -834,6 +834,39 @@ So the boundary of an analytic face is now decided in four tiers, most exact
 first: a conic that lies on both surfaces; the fitted curve where they cross; a
 plane section, exact on one; and a chord, exact at its ends only.
 
+### The pcurves, and the check without which they are decoration
+
+A curve on two surfaces should *say* it is on them, and STEP's word for that is
+SURFACE_CURVE with a PCURVE on each. Each pcurve is a Bezier in that surface's
+own (u, v), fitted through the parameter images of the very points the 3D curve
+was fitted through, so the two agree at the collocation parameters by
+construction. The parameter has to be unwrapped along the samples: a surface of
+revolution's u wraps, and a curve stepping over the seam must keep counting.
+
+Two things make this easy to get silently wrong, and both are why
+`check_surface_curves` exists in validatestep.py:
+
+- The 3D curve is written `.CURVE_3D.`, which makes it definitive. A reader takes
+  it and ignores the pcurves, so a pcurve that is wrong changes nothing a face
+  count, a shell check, a round trip or a volume would notice. It is invisible
+  until some other kernel prefers the parameter space - which is the one place it
+  cannot be debugged.
+- The reference direction is chosen from **each face's own boundary**, so two
+  faces on one cylinder do not share a parameter origin. A pcurve written against
+  the wrong face's placement is off by a rotation and looks entirely reasonable.
+
+So the check walks each 2D curve, puts every (u, v) through the basis surface's
+own parametrisation, and asks whether the point that comes out is where the 3D
+curve is at the same parameter. Measured agreement on `step-bored-cylinder`:
+6.6e-08, which is the curve's own fit tolerance and not more. Mutation checked -
+perturbing one pcurve control point by 1e-3 in u, touching nothing else, produces
+exactly one complaint.
+
+The sweep's own pcurves, which are Line2d on a B-spline surface, are not covered
+by this: mapping through a B-spline surface's parametrisation is a bigger piece
+than mapping through a quadric's, and it is worth doing next time that path
+moves.
+
 ### Where it does not fire, and why that is right
 
 The **exact tier** of `step-bored-cylinder` writes no crossing curves, because

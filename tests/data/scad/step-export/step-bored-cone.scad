@@ -50,6 +50,7 @@
 // curve found from the two *declarations* - held to 1e-7, and derived identically
 // by both faces because both start from the same two declarations.
 // APPROX: 80 edges written as the curve where two declared surfaces cross
+// APPROX: 80 of those carry a pcurve on each of the two surfaces
 // EDGES-APPROX: BSplineCurve=80
 //
 // Eighty ties two report lines together: the provenance pass finds exactly 80

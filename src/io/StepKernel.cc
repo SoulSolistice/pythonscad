@@ -3227,6 +3227,20 @@ void StepKernel::build_tri_body(
   std::set<std::set<int>> section_subs;  // sections already handed to a planar face
   int sections_declared = 0, sections_fitted = 0;
   std::map<std::pair<int, int>, EdgeCurve *> crossing_curves;
+  /*! One face's view of a crossing edge: the surface entity it wrote and the
+   *  placement that entity carries, which is what a PCURVE's parameters mean.
+   *
+   * Recorded per face rather than per surface because the reference direction is
+   * chosen from each face's own boundary, so two faces on one cylinder do not
+   * share a parameter origin and a pcurve written against the wrong one is off
+   * by a rotation.
+   */
+  struct CrossingSide {
+    SurfaceType *surface = nullptr;
+    Vector3d base, axis, ref;
+    double slope = 0;  // a cone's, in its written direction; zero for a cylinder
+  };
+  std::map<std::pair<int, int>, std::vector<CrossingSide>> crossing_sides;
   int crossing_written = 0;
   auto conic_placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
     return new Axis2Placement(entities, new Direction(entities, dir), new Direction(entities, towards),
@@ -3430,6 +3444,17 @@ void StepKernel::build_tri_body(
               dir = edge->vert1 == get_vertex(a);
             }
           }
+          if (edge != nullptr) {
+            // What this face's parameters mean, kept until the other face has
+            // written its own and both pcurves can be built.
+            CrossingSide side;
+            side.surface = surface;
+            side.base = base;
+            side.axis = cone != nullptr && cone->slope < 0 ? Vector3d(-axis) : axis;
+            side.ref = ref;
+            side.slope = cone != nullptr ? fabs(cone->slope) : 0.0;
+            crossing_sides[key].push_back(side);
+          }
         }
         if (edge == nullptr) {
           edge = get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
@@ -3459,6 +3484,85 @@ void StepKernel::build_tri_body(
 
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
     face_edges_extra.push_back(face_edges_here);
+  }
+
+  // Say where each crossing curve runs across the two surfaces it lies on, now
+  // that both faces have been written and their placements are known.
+  //
+  // The 3D curve stays definitive - .CURVE_3D., as it is everywhere else here -
+  // so a reader that ignores the pcurves sees the file it saw before. What they
+  // add is that a curve on two surfaces is *said* to be on them: STEP calls that
+  // a SURFACE_CURVE, and a kernel that would otherwise re-project a B-spline
+  // onto a quadric and decide for itself is told the answer instead.
+  int pcurved = 0;
+  for (const auto& entry : crossing_curves) {
+    const auto sides = crossing_sides.find(entry.first);
+    if (sides == crossing_sides.end() || sides->second.size() != 2) continue;
+    auto *bez = dynamic_cast<BSplineCurve *>(entry.second->round);
+    if (bez == nullptr || bez->pts.size() < 2) continue;
+    const int degree = int(bez->pts.size()) - 1;
+
+    // The curve at its own collocation parameters, which are the points it was
+    // fitted through, so the pcurve and the 3D curve agree there exactly.
+    std::vector<Vector3d> on_curve(degree + 1);
+    for (int i = 0; i <= degree; i++) {
+      const double t = double(i) / degree;
+      Vector3d p = Vector3d::Zero();
+      double binom = 1;
+      for (int j = 0; j <= degree; j++) {
+        p += bez->pts[j]->pt * (binom * pow(t, j) * pow(1 - t, degree - j));
+        binom = binom * (degree - j) / (j + 1);
+      }
+      on_curve[i] = p;
+    }
+
+    Eigen::MatrixXd m(degree + 1, degree + 1);
+    for (int i = 0; i <= degree; i++) {
+      const double t = double(i) / degree;
+      double binom = 1;
+      for (int j = 0; j <= degree; j++) {
+        m(i, j) = binom * pow(t, j) * pow(1 - t, degree - j);
+        binom = binom * (degree - j) / (j + 1);
+      }
+    }
+    const Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(m);
+
+    std::vector<PCurve *> on_both;
+    for (const CrossingSide& side : sides->second) {
+      const Vector3d ref2 = side.axis.cross(side.ref);
+      Eigen::MatrixXd rhs(degree + 1, 2);
+      double previous = 0;
+      for (int i = 0; i <= degree; i++) {
+        const Vector3d rel = on_curve[i] - side.base;
+        double u = atan2(rel.dot(ref2), rel.dot(side.ref));
+        // A surface of revolution's parameter wraps, and a curve that steps over
+        // the seam has to keep counting rather than jump a turn.
+        if (i > 0) {
+          while (u - previous > M_PI) u -= 2 * M_PI;
+          while (u - previous < -M_PI) u += 2 * M_PI;
+        }
+        previous = u;
+        rhs(i, 0) = u;
+        rhs(i, 1) = rel.dot(side.axis);
+      }
+      const Eigen::MatrixXd solved = qr.solve(rhs);
+      std::vector<Point2d *> cp;
+      for (int j = 0; j <= degree; j++) {
+        cp.push_back(new Point2d(entities, solved(j, 0), solved(j, 1)));
+      }
+      if (param_context == nullptr) param_context = new ParametricContext(entities);
+      auto rep =
+        new DefinitionalRepresentation(entities, new BSplineCurve2d(entities, cp), param_context);
+      on_both.push_back(new PCurve(entities, side.surface, rep));
+    }
+    entry.second->round = new SurfaceCurve(entities, bez, on_both);
+    pcurved++;
+  }
+  if (pcurved > 0) {
+    LOG(
+      "STEP export: %1$d of those carr%2$s a pcurve on each of the two surfaces, so the curve "
+      "is written as lying on them rather than left to be projected back",
+      pcurved, pcurved == 1 ? "ies" : "y");
   }
 
   // Build the loops, their edges and the carrier planes.

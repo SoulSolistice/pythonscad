@@ -1237,10 +1237,39 @@ public:
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
   };
 
+  /*! A parameter-space curve, as the control points of a Bezier.
+   *
+   * The same shape as BSplineCurve and for the same reason - degree is one less
+   * than the control point count, and the only knots are the two ends at full
+   * multiplicity - but its points are (u, v) on a surface rather than (x, y, z)
+   * in space. It exists because the curve where two quadrics cross is not a line
+   * in either surface's parameters, and a PCURVE has to say what it actually is.
+   */
+  class BSplineCurve2d : public Entity
+  {
+  public:
+    BSplineCurve2d(std::vector<Entity *>& ent_list, std::vector<Point2d *> pts_in) : Entity(ent_list)
+    {
+      pts = std::move(pts_in);
+    }
+    virtual ~BSplineCurve2d() {}
+    virtual void serialize(std::ostream& stream_in)
+    {
+      const int degree = int(pts.size()) - 1;
+      stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << degree << ",(";
+      for (std::size_t i = 0; i < pts.size(); i++) stream_in << (i ? ",#" : "#") << pts[i]->id;
+      stream_in << "),.UNSPECIFIED.,.F.,.F.,(" << degree + 1 << "," << degree + 1
+                << "),(0.,1.),.UNSPECIFIED.);\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
+
+    std::vector<Point2d *> pts;
+  };
+
   class DefinitionalRepresentation : public Entity
   {
   public:
-    DefinitionalRepresentation(std::vector<Entity *>& ent_list, Line2d *curve_in,
+    DefinitionalRepresentation(std::vector<Entity *>& ent_list, Entity *curve_in,
                                ParametricContext *context_in)
       : Entity(ent_list)
     {
@@ -1255,7 +1284,7 @@ public:
     }
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
 
-    Line2d *curve = nullptr;
+    Entity *curve = nullptr;
     ParametricContext *context = nullptr;
   };
 
