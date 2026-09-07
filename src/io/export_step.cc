@@ -434,7 +434,8 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   std::size_t junctions = 0, single = 0, pair = 0, many = 0, unowned = 0;
   std::size_t guess_wrong = 0, guess_right = 0, on_edge = 0;
   double worst_travel = 0, worst_within = 0, band_used = 0;
-  std::size_t within_bound = 0;
+  std::size_t within_bound = 0, on_exact_only = 0;
+  double worst_exact_only = 0;
   for (std::size_t v = 0; v < ps.vertices.size(); v++) {
     if (ids_at[v].size() < 2) continue;
     junctions++;
@@ -528,6 +529,52 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
                                            : std::make_pair(candidates[0], candidates[1]));
         }
       }
+      // Where the two do not cross transversally the projection does not
+      // converge, and the corner used to be left where the mesh put it. On
+      // step-band-family that is 418 of 704 corners, every one of them sitting
+      // on a bore facet's chord plane, 20(1 - cos(pi/32)) = 0.0963 inside the
+      // cylinder it is written on - the whole of that fixture's remaining stray.
+      //
+      // The two owners are not worth the same, though, and the failure is the
+      // fit's. A declared quadric states where its surface is; the sweep was
+      // interpolated through the model's stations and publishes a band saying
+      // how well. So when the pair will not converge and exactly one of them is
+      // exact, the corner goes on the exact one alone, and the fit only has to
+      // agree to within the band it declared. Measured on step-band-family, the
+      // sweep crosses the bore at a median 15.85 degrees where the projection
+      // fails against 42.70 where it succeeds, which is the whole difference
+      // between the two populations.
+      if (!(ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-6)) {
+        const auto *a_fit = dynamic_cast<const GridSurface *>(a);
+        const auto *b_fit = dynamic_cast<const GridSurface *>(b);
+        const Surface *exact =
+          a_fit != nullptr ? (b_fit != nullptr ? nullptr : b) : (b_fit != nullptr ? a : nullptr);
+        const GridSurface *fit = a_fit != nullptr ? a_fit : b_fit;
+        Vector3d q;
+        if (exact != nullptr && fit != nullptr && closestOnSurface(exact, ps.vertices[v], q)) {
+          Vector3d qf;
+          const bool got = closestOnSurface(fit, q, qf);
+          const double off_fit = got ? (qf - q).norm() : -1;
+          const double travel = (q - ps.vertices[v]).norm();
+          // The fit may only veto a corner it has a claim on. Measured on
+          // step-band-family, 259 of the 262 this refused were *already* off
+          // the sweep before any move, by up to 0.3962 against its band of
+          // 0.2077: they sit on the wall where the ridge's base meets it, which
+          // is the wall's surface and not the sweep's. Refusing them left the
+          // corner on a chord plane 0.0963 inside the cylinder it is written
+          // on, to satisfy a surface it was never on.
+          Vector3d qb0;
+          const double before =
+            closestOnSurface(fit, ps.vertices[v], qb0) ? (qb0 - ps.vertices[v]).norm() : -1;
+          const bool fit_had_a_claim = before >= 0 && before <= fit->membershipTolerance();
+          const bool fit_agrees = got && off_fit <= fit->membershipTolerance();
+          if (got && (fit_agrees || !fit_had_a_claim) && travel <= reach[v]) {
+            on_exact_only++;
+            worst_exact_only = std::max(worst_exact_only, (q - ps.vertices[v]).norm());
+            if (out_moves != nullptr) out_moves->emplace(int(v), q);
+          }
+        }
+      }
       if (ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-6) {
         on_edge++;
         const double travel = (p - ps.vertices[v]).norm();
@@ -575,6 +622,12 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       "STEP export: where provenance names one owner, nearest-surface agrees for %1$d and picks "
       "a different surface for %2$d",
       int(guess_right), int(guess_wrong));
+  }
+  if (on_exact_only > 0) {
+    LOG(
+      "STEP export: %1$d corners whose two owners do not cross transversally are placed on the "
+      "exact one of them, moving at most %2$.4f, the fit agreeing within its own band",
+      int(on_exact_only), worst_exact_only);
   }
   if (pair > 0 && band_used > 0) {
     LOG(

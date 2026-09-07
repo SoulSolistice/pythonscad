@@ -72,7 +72,7 @@ face's own corners are from the surface it is on. **Done is 0 to within 1e-9.**
     step-bored-cone           8.01e-14         done
     step-bored-cylinder       7.99e-14         done
     step-declare-grid-scad    3.79e-12         done, fixture derived and updated
-    step-band-family          8.89e-02         planes done, cyl and sweep not
+    step-band-family          7.44e-02         cylinder done (1.64e-09), sweep not
     step-cut-cone             4.45e-13         done, its two triple points placed
     step-exact-trim           3.55e-15         done, 32 triple points placed
     py-step-declare-grid      1.86e-13         done, and the flat bottom kept
@@ -299,6 +299,55 @@ three.
 The work is to ask the recogniser the question it already answers - is this
 planar face a member of that surface - rather than to re-derive it in
 `build_tri_body`.
+
+## step-band-family: the cylinder half, and what the other half costs
+
+Its 704 junction corners are the two-owner kind, the bore cylinder and the
+declared sweep. 286 reach the curve where the two cross; the other 418 do not,
+because the two meet at a median 15.85 degrees there against 42.70 where the
+projection converges, and alternating projection wants a transversal crossing.
+
+**Where they were left is not neutral.** Every one of the 235 corners that stray
+sits on a bore facet's chord plane, exactly 20(1 - cos(pi/32)) = 0.0963 inside
+the cylinder it is written on. Placed on the exact owner alone - the fit only
+having to agree within the band it published - the cylinder goes exact:
+
+    cylinder   8.89e-02  ->  1.64e-09
+    plane      exact, unchanged
+    bspline    7.18e-02  ->  7.44e-02   unchanged in substance
+    faces      193       ->  361
+
+**The fit may only veto a corner it has a claim on**, and getting that wrong is
+what made the first attempt place 92 corners instead of 351. Requiring the sweep
+to agree after the move refused 262, and **259 of those were already off the
+sweep before any move**, by up to 0.3962 against its band of 0.2077 - they sit
+where the ridge's base meets the wall, which is the wall's surface and not the
+sweep's. A surface with no claim on a corner was vetoing its placement on the
+surface it is actually on.
+
+### What the +87% faces is, and why it is not the placement's fault
+
+The bent faces are bore facets, fanned because a moved corner takes them out of
+plane. They are bent because they are still *planes*: the report says
+
+    1 smooth region left faceted, 169 facets in all, area 898.9,
+      band 0.0847 (typical 0.0526), worst dihedral 10.6 degrees
+
+10.6 degrees is the 32-gon's own angular step, so that region is the bore, and
+the model declared the cylinder it lies on. Claimed, those 169 facets would be
+analytic faces, which do not mind where their corners are, and the placement
+would cost no faces at all. The face count is the price of an unclaimed
+declaration, not of the corner work. A guard that skipped corners no analytic
+face uses was written and measured: it dropped **zero** of them, so the fans are
+not idle - it is the claim that is short.
+
+### What is left
+
+The sweep's own corners still stray at 7.44e-02. They are corners the sweep's
+face uses that are not on the sweep - the same 259 that were never on it. That
+is not a placement to be fixed but a claim that reaches past its surface, or the
+boundary work in doc/step-corner-exactness.md item 3. **band-family is not
+done**; half of it is, and the half that is left is a different question.
 
 ## Triple points, and the threshold that wants replacing
 
