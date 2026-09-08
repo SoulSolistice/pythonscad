@@ -1518,6 +1518,52 @@ and into its wall is the model. `step-declare-grid.py` sweeps a profile of
 it is the case the fixture exists for, a sweep fused onto a wall rather than
 standing alone.
 
+### Every fault in the kit is on a file with a swept surface
+
+Noticed by eye on the run of 2026-09-08 and then counted, because it decides
+whether the crossing curve is worth finishing:
+
+```text
+analytic files with a B-spline surface : 11, of which faulty 5
+analytic files without one             : 13, of which faulty 0
+```
+
+Not one quadric-only coupon reports a fault. That includes every coupon added or
+reworked recently and every one that has ever been suspected: c06 the standing
+14% outlier, c13's pcurve-less ellipse, c15 and c16 carrying 80 SURFACE_CURVEs
+each, c17's closed shell of nothing but trimmed quadrics, c04's sphere closed on
+itself. All clean.
+
+The eleven that do carry one split further, and the split is informative:
+
+| coupon | B-spline surfaces | faulty | what they are |
+| --- | --- | --- | --- |
+| c09 fillet refusals | 24 | no | rational patches, bounded by their own net |
+| c10 bspline text | 32 | no | extruded glyphs, no other declared surface to meet |
+| c12 approximated | 4 | no | fitted sweeps standing alone |
+| f01, f03, f05 | 1 each | no | a declared sweep on a wall, tessellations aligned |
+| **f02, f04** | 1 each | **yes** | the same, tessellations not aligned |
+| **c11 swept grid** | 2 | **yes** | a declared sweep fused to a declared cylinder |
+| **r01, r02** | 2 each | **yes** | real parts, sweeps meeting walls |
+
+So it is not "has a B-spline" - c10 has thirty-two of them and is clean. It is a
+declared sweep *meeting another declared surface*, which is exactly the
+population the crossing curve exists for, and within that population it is the
+pairs whose tessellations do not divide into one another.
+
+That is correlation and it is worth saying so: a sweep meeting a wall is also the
+most intricate geometry in the kit, and complexity alone would put it at the top
+of any fault list. What lifts it above coincidence is that the mechanism was
+found independently - the slivers at the crossing, the chorded boundary, the
+0.0609 mm of slack - and that the band family's clean and faulty members split
+along the alignment the same mechanism predicts.
+
+It also sharpens what the crossing curve has to be judged on. It made 210 edges
+exact and moved the strict-tolerance slack by nothing; whether it moves *these
+five files* in SOLIDWORKS is a different question and the one that matters, and
+it has not been asked yet, because the change as first written opens the shell -
+420 edges used by one face - and was reverted before it could be.
+
 ### The band family across tessellation, and it is not the band
 
 The run of 2026-09-08 has all five members, which is the first time the question
