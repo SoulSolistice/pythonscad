@@ -1139,7 +1139,50 @@ intersection curve both landed on 2026-09-07. What is left:
    them directly would be a tier above it rather than a replacement for it, and
    on this evidence it is the one worth adding.
 
-1. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
+1. **What else stands on the same sand, surveyed 2026-09-08.** Two projection
+   defects in `GridSurface` cost a week between them, so the question worth
+   asking is where else a declaration is answered by a search rather than by
+   arithmetic. The channel divides cleanly:
+
+   **Closed form, nothing to go wrong.** `PlaneSurface`, `CylinderSurface`,
+   `ConeSurface`, `SphereSurface`, `TorusSurface` - each `pointMember` is an
+   algebraic test with no iteration in it - and now `SweepSurface`, whose
+   membership is an inversion. These need no tessellation band and cannot land
+   in the wrong basin.
+
+   **Answered by a projection.** Two left:
+
+   - `GridSurface`, which is what `declare_grid` still builds. Both defects are
+     fixed and it is sound as far as it is measured, but it remains an
+     interpolation of stations with a band that has to be trusted, and it is
+     the right declaration only where there is genuinely no closed form.
+   - `BezierPatchSurface`, which every fillet is. It has **the same unguarded
+     step** - `h.fullPivLu().solve(-g)`, clamped to the patch and accepted
+     without asking whether it improved. What saves it is the shape of the
+     search around that step: it restarts from a 5x5 grid of twenty-five points
+     and keeps the best answer of all of them, so one descent wandering off
+     costs a start rather than the result. `GridSurface` had a single start,
+     which is exactly why the same bug was fatal there and is not here.
+
+     Not a defect on the evidence - the fillet coupons are clean in SOLIDWORKS
+     and c07 matches its derived volume to 1.4e-8 - but it is the same
+     arithmetic standing on a wider base, and adding the descent guard to it
+     would cost nothing. Worth doing before some future patch shape narrows the
+     base.
+
+   **Approximate by construction, and correctly gated.** `fitCylinder`,
+   `fitCone`, `fitRevolved`, `gridFromRegion`, `quadricOfPatch` - the whole
+   approximation tier. These *are* fits and are honest about it: they are
+   refused without `--enable=step-approximate-surfaces`, they report the band
+   they spent, and nothing here suggests they should be exact. They are sand by
+   design, and the design says so.
+
+   The rule the survey suggests: a declaration should answer membership by
+   arithmetic, and where it cannot, it should say which tier it is in. Five of
+   the eight surfaces already do; the sixth now does; the seventh is defensible;
+   the eighth is a fit and admits it.
+
+2. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
    suite that noticed the chorded trim; every census figure was identical before
    and after. Any fixture whose model has a closed-form volume should state it.
    `step-approximate-turned` gained one on 2026-09-08 and it is a fair example
@@ -1147,7 +1190,7 @@ intersection curve both landed on 2026-09-07. What is left:
    and a surface report, and every one of them was satisfied by a ball whose
    poles were flat. Its volume is `pi*h*(r1^2+r1*r2+r2^2)/3 + (4/3)*pi*R^3` from
    the model's own literals - the two solids are disjoint, so they add.
-2. ~~**`sphere()` exports with its poles flattened**~~ - **done, 2026-09-08.**
+3. ~~**`sphere()` exports with its poles flattened**~~ - **done, 2026-09-08.**
    `$fn=32; sphere(r=5)` came back as `Plane 2, Sphere 1`, two planar polar caps
    at z = +/-4.9759, measuring **523.580594** against `4/3 pi 125` =
    **523.5988**; a sphere less two caps of height 0.0241 is **523.5806**, which
@@ -1186,7 +1229,7 @@ intersection curve both landed on 2026-09-07. What is left:
    sphere is not `(4/3)pi r^3`"), argued for in prose, and confirmed by
    OpenCASCADE to six figures. Every check was downstream of the same mistaken
    premise. That entry is now a warning rather than an example.
-3. **c11's faults are the chorded boundary, and the sweep needs 0.0609 mm of
+4. **c11's faults are the chorded boundary, and the sweep needs 0.0609 mm of
    slack to close.** Chased to the end on 2026-09-08 and written up as five
    whys in `step-interop-validation.md`; four of the five were refuted. The
    answer is that `step-occt-strict.py` fails 7 of 11 faces at 1e-6, because a
@@ -1276,7 +1319,7 @@ intersection curve both landed on 2026-09-07. What is left:
      is a signal available before any fault count. `step-interop-solidworks.ps1`
      times nothing; one Stopwatch around `LoadFile4` and a column would have it.
 
-4. **c06 imports cleanly and comes in inside out.** Noticed by eye on
+5. **c06 imports cleanly and comes in inside out.** Noticed by eye on
    2026-09-08: SOLIDWORKS reports no fault at all on `c06-partial-torus`, and
    its inner fillet is *concave* where the model has it convex. That sits
    beside the 14% volume shortfall this coupon has always had, and a fillet
@@ -1284,7 +1327,7 @@ intersection curve both landed on 2026-09-07. What is left:
    taking together rather than separately, and worth taking once there is an
    import with no faulty faces to compare against.
 
-5. ~~**A swept face is one face with creases inside it**~~ - **tried and
+6. ~~**A swept face is one face with creases inside it**~~ - **tried and
    refuted, 2026-09-08.** The reasoning was that a polyline profile creases a
    face in its interior where a B-rep wants an edge, and that is true: a coupon
    isolating it goes from one fault and a 0.13% volume error to no fault and an
@@ -1297,12 +1340,12 @@ intersection curve both landed on 2026-09-07. What is left:
    kernel preferring a wrong file. And a face SOLIDWORKS reports no fault on can
    still be measured 0.17% wrong, so "faults=0" is necessary and not sufficient.
 
-6. **The twist.** `linear_extrude`'s walls are the last thing its parameters
+7. **The twist.** `linear_extrude`'s walls are the last thing its parameters
    determine that is not declared - see "declaring the planes, and what each
    extrude parameter does with them" for why `slices` and `$fn` are not the
    obstacle and `GridSurface` is the mechanism.
 
-7. **What still rests on the mesh**, measured 2026-09-08 and not yet acted on.
+8. **What still rests on the mesh**, measured 2026-09-08 and not yet acted on.
    Curved geometry with no declaration at all: `minkowski()` declares nothing
    (a rounded cube exports as 142 planes); `hull()` declares its inputs but not
    the blend it creates, so a hull of two spheres arrives as 28 recognised cones;
