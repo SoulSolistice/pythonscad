@@ -1618,6 +1618,45 @@ An earlier version of this section read the split as tessellation alignment -
 The refusal rule explains it mechanically and predicts it, and the alignment
 story predicts nothing.
 
+**The discriminator is the taper, and a control proves it.** Looking at f05 in
+SOLIDWORKS the refusals seem to alternate - one strip written as a surface, the
+next left faceted, then another written - which should be impossible on a helix
+whose every turn is the same shape. It is impossible, and the premise is wrong:
+the turns are *not* the same shape. `step-band-family.scad` tapers the ridge in
+and out,
+
+```text
+f = max(0, min(1, t/0.2, (1 - t)/0.2))
+```
+
+so the profile grows over the first fifth of the sweep, holds, and shrinks over
+the last fifth, with corners in `f` at t = 0.2 and 0.8. Asking the exporter
+where its refusals fall settles it - at fn 96, by tenth of the sweep:
+
+```text
+refused:  60  12   0   0   0   0   0   0   0  55
+claimed: 149  96  97  97  97  97  98  96  96 149
+```
+
+Every one of the 127 refusals is in the two ramps. Not one facet is refused
+anywhere in the constant middle.
+
+The control is the same model with `f = 1` and nothing else changed:
+
+| $fn | tapered, facets refused | untapered, facets refused |
+| --- | --- | --- |
+| 32 | 0 | 0 |
+| 64 | 0 | 0 |
+| 96 | 127 | **0** |
+
+A helical sweep of constant profile is claimed whole at every tessellation
+tried. So the refusal rule is not firing on the helix, on the tessellation, or
+on the wall it is fused to - it fires on the profile *changing shape*, where a
+cubic through the stations cannot follow a piecewise linear taper through its
+corners. That is worth knowing before reading anything else the band family
+says, because it means four of that family's five rows are measuring a taper
+rather than a band.
+
 The volume disagreement does not shrink with tessellation either: 0.52, 0.04,
 0.14, -0.23, 0.07 per cent, no trend and a sign change in the middle. Refining
 the mesh does not walk SOLIDWORKS towards OpenCASCADE.
