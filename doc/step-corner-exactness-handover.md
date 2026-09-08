@@ -1,52 +1,161 @@
 # Corner exactness: handover
 
-Written 2026-09-06, at the end of a long session. `doc/step-corner-exactness.md`
-is the reasoning and the baseline; this is the state of the work and what to do
-next.
+Started 2026-09-06 as a note on corner exactness. The work has since widened past
+that - the boundary a face is trimmed to, and what the model is allowed to state
+about its own surfaces, turned out to be the same problem seen from two ends - so
+the file name is now narrower than the contents. It stays because four places in
+the code cite it. `doc/step-corner-exactness.md` is the reasoning and the
+baseline; `doc/step-export-testing.md` is the fixture doctrine and is not
+optional reading.
 
-## Done
+## Read this first
 
-**2026-09-07, last: the trim can be the curve where two surfaces cross.** Roadmap
-item 4's general case - two quadrics meeting in a quartic that ISO 10303 has no
-entity for - is done for the approximation tier. `step-bored-cylinder`'s volume,
-derived independently as an elliptic integral, reads **5298.405620** against
-**5298.405619**: two parts in 1e13, on the coupon this document called
-"inherently an approximation". See "the crossing curve" below. An exact conic
-still wins where there is one, and planarity is the test.
+**Branch `claude/step-corner-fixtures-iwpzh3`, green.** Verify before changing
+anything, and again after:
 
-**2026-09-07, later still: the cone's section, the planar neighbour, and a
-straight-edge test that only knew cylinders.** Every model in the suite that
-refused a quadric for its own boundary now writes it - `step-cut-cone`,
-`step-bored-cone`, `step-bored-cylinder`, `step-declare-grid-scad` and the three
-`step-declare-grid` Python fixtures, 76 regions between them. Two of those three
-changes were the ones planned; the third was a bug the widening uncovered, and it
-was worth more than either. `step-cut-cone`'s approximation export now measures
-1661.646504 against a hand-integrated 1661.646512. See "the cone's section, the
-planar neighbour, and the two meshes" below - and read the two-meshes part before
-touching any of it.
+    ctest --test-dir build -R step        # 44 tests, all passing 2026-09-08
 
-**2026-09-07, later: the trim of a quadric can be the curve it is.** Where a
-boundary runs across a cylinder in a plane it is written as the ELLIPSE it is,
-rather than as the mesh's chords, and the exact tier no longer refuses the face
-for it. `step-cylinder-cross` - the Steinmetz coupon, committed before the code
-with its volume deliberately unasserted - now exports as eight cylindrical faces
-and one solid, and OpenCASCADE measures it at 5333.333262 against the exact
-16*r^3/3 = 5333.33333. The suite is 44/44 and no other fixture's expectations
-moved. See "the curve trim" below, and read the joint-decision part before
-changing anything: getting it wrong opens the shell.
+Two things that make that number a lie if they are missing:
 
-**2026-09-07: every fixture is exact on every exact surface.** Of 42, none puts a
-corner of a plane, cylinder, cone, sphere or torus face off the surface that face
-is written on. The three that still measure anything are B-spline faces, and each
-is inside the tessellation band its own fit published - which is what a fitted
-surface is entitled to and the most any mesh can say:
+- `pip install cadquery-ocp==7.8.1.1.post1`. `steproundtrip.py` needs
+  `TopTools_IndexedMapOfShape`, which `cadquery-ocp` 8.0 no longer exposes, so
+  it **skips in silence** and the suite goes green with the round trip never run.
+  Whole classes of failure are invisible without it.
+- lid10 is the blast-radius specimen and is *not* in the suite. It needs
+  `-p examples/step_test/lid10.json -P "New set 1"`; without those you get the
+  default component and every number is incomparable.
 
-    step-band-family            7.44e-02   against a published band of 0.2077
-    step-extrude-text-counter   4.27e-09   noise, as the baseline recorded
-    step-extrude-text           4.24e-09   noise
+### What an analytic face's boundary is now
 
-The eight coupons the baseline listed are all resolved. What follows is how, and
-the rest of this document is the record of getting there.
+This is the central thing that changed, and it is worth having before reading
+anything else. A trimmed quadric's boundary edge is written as the most exact
+thing available, in this order:
+
+1. **A conic lying on both surfaces.** Two equal cylinders crossing meet in a
+   pair of true ellipses; ELLIPSE is an entity, and it wins.
+2. **The curve where two declared surfaces cross**, where that curve is not
+   planar - two cylinders of unequal radius meet in a quartic ISO 10303 has no
+   entity for. Found from the two *declarations* by Newton, fitted by a Bezier
+   whose degree is raised until it is inside 1e-7 of both, and written as a
+   SURFACE_CURVE with a PCURVE on each surface.
+3. **A plane section**, exact on the face's own surface and on no other. Only
+   written where the face across it writes the same one.
+4. **An arc**, where the edge runs round the axis at constant height.
+5. **A chord**, exact at its two ends and nowhere between. In the exact tier a
+   face bounded by one is refused.
+
+A straight edge counts as exact when its **midpoint** is on the surface, which is
+the general form of "along the axis": a line meets a quadric twice unless it lies
+in it, so a third point on the surface means every point is. That one line is
+what lets a cone's rulings, which converge on its apex, stop being counted as
+chords.
+
+### Where the code is
+
+All of the boundary machinery is in one anonymous namespace at the top of
+`src/io/StepKernel.cc`, deliberately, because the three passes that ask about a
+boundary have to get the same answer:
+
+| what | where |
+| --- | --- |
+| the implicit form of a quadric, and Newton onto two at once | `quadricImplicit`, `projectOntoBoth` |
+| the arc where two declared surfaces cross, and how far it misses | `intersectionArc`, `intersectionArcError` |
+| the ellipse a plane cuts from a cylinder or cone, and when it closes | `planeSectionEllipse`, `sectionTiltFloor` |
+| a patch's boundary cycles, and the sections found on them | `rawBoundaryCycles`, `findSections`, `boundaryCycles` |
+| which sections both faces agree to write | `decide_sections`, a `std::function` inside `build_tri_body` **called twice** - see the two-meshes section |
+
+Elsewhere: `buildPatch` in `src/geometry/AnalyticFeatures.cc` now records
+`run.loop`, the face across each boundary run, which it computed anyway to split
+the runs. The declarations are `declareExtrudedCylinders`, `declareExtrudedPatches`
+and `declareExtrudedPlanes` in `src/geometry/linear_extrude.cc`, and
+`declareSurfacesOfRevolution` in `src/geometry/rotate_extrude.cc`. On the test
+side, `check_surface_curves` and `_face_reaches_cone_apex` in
+`tests/validatestep.py` are new, and `EDGES-APPROX:` joined the directive set in
+`tests/stepexportsanitytest.py`.
+
+### The two rules that govern changes here
+
+Both were violated once each in the session that wrote this, caught, and are
+recorded because they are easy to violate again.
+
+- **Derived, not captured.** An expectation must be worked out from the model,
+  not read off a run. Where a figure genuinely cannot be derived, say so in the
+  fixture and state it anyway - `step-cylinder-cross` does that for its lobe
+  halving. A *plausible* reason is worse than none: a line here claimed sixteen
+  ellipses survived "because the tilt test excludes the rest", and the tilt test
+  admits twenty-eight of the thirty-two.
+- **No circular validation.** Never relax a check because your own change broke
+  it. Every relaxation must name evidence the *file* has to show, never a claim
+  the exporter makes about itself - the first draft of the three-edge rule
+  triggered on the file merely containing an ELLIPSE, so the check and the thing
+  checked agreed by construction. Mutation-check every relaxation: reintroduce
+  the defect it exists to catch and watch it fail.
+
+## What landed, in order
+
+The first six are 2026-09-06; everything from 7 on is 2026-09-07. There is one
+more between 6 and 7 that is worth knowing about -
+`feat(export): place a corner on its exact owner when the two will not converge`,
+which is what the "how the disc was found" section below ends in.
+
+1. `feat(export): ask the model who made a facet before measuring where it lies`
+   - provenance gates the quadric claim; 490/142/86 tests spared, no output change
+2. `fix(export): take the interior allowance from the surface, not from the neighbours`
+   - `bandOf` measured the mesh's flatness, which corner placement invalidates
+3. `feat(export): put a junction corner on the curve its two owners cross along`
+   - placement after recognition, where an analytic face does not mind
+4. `fix(export): gate the corner placement, and stop it turning a face over`
+5. `feat(export): place a corner a declared surface shares with one plane of the mesh`
+6. `feat(export): fan out a planar polygon the corner placement would bend`
+7. `feat(export): finish band-family, and run the approximation tier on every fixture`
+   - 32 of 43 fixtures had never exported the approximation tier at all
+8. `test(export): a fixture whose trim curve has a closed form`
+   - `step-cylinder-cross`, the Steinmetz coupon, committed *before* the code and
+     with its volume deliberately unasserted
+9. `feat(export): trim a quadric to the ellipse it is cut by, not to its chords`
+   - the plane section, and the joint decision that keeps the shell closed
+10. `feat(export): a cone's plane section, the planar face across it, and rulings
+    that converge` - and the midpoint test, which was the unplanned one and worth
+    more than either
+11. `feat(export): trim two quadrics to the curve where they actually cross`
+    + `feat(export): say a crossing curve lies on both surfaces, with a pcurve on each`
+12. `feat(export): declare the planes an extrude sweeps, and write faces on them`
+
+### The numbers worth carrying
+
+Each is a volume derived from the model, measured by a kernel that never saw the
+arithmetic:
+
+    step-cylinder-cross   16 r^3/3             5333.33333    5333.333262  exact tier
+    step-cut-cone         a z-slice integral   1661.646512   1661.646504  approximation
+    step-bored-cylinder   an elliptic integral 5298.405619   5298.405620  approximation
+    step-bored-cone       likewise             5382.203842   5382.205081  approximation
+
+The tier matters. The three approximation figures need the corner placement to
+have run, which puts the junction vertices on both surfaces and is what makes the
+crossing curve available at all; the exact tier of those three has no such
+placement, keeps its plane sections, and measures further out. The bottom two are
+the coupons this document once called "inherently an approximation".
+
+### Parked experiments
+
+All measured, all rejected, reasons in their commit messages. None is a candidate
+to land as it stands:
+
+| branch | what it holds |
+| --- | --- |
+| `claude/step-corner-ownership` | corner placement before `mergeTriangles`; destroys the merge, 12-62x the faces |
+| `claude/step-sweep-boundary-snap` | projecting a sweep's corners onto the sweep; takes them off the other surface |
+| `claude/step-sweep-cone-guard` | refusing a cone that meets a sweep only in chords; empirical, no fixture |
+| `claude/step-sweep-vertex-exactness` | refusing a sweep corner past a quarter of its band; the quarter is chosen |
+| `claude/step-corner-split` | the first triangulation, superseded by what landed |
+
+---
+
+**Everything below is the record of how it was arrived at**, oldest first within
+each topic. It is kept because the measurements in it are expensive and several
+of the dead ends look attractive on a second reading. Where a section has been
+overtaken, it says so at its head.
 
 ## The sweep's last stray: diagnosed, and four ways of fixing it that do not work
 
@@ -125,65 +234,6 @@ losing no surface - there is nothing wrong with the surface. The blocker is
 computing it where the two are **near-tangent**, which is precisely where the
 strays are: alternating projection reaches 99 of 129, at a median move of 0.054
 and a max of 0.362.
-
-## The one sentence
-
-A corner of an analytic face should lie on the surface that face is written on;
-where a boolean made it, it belongs on the curve where its two makers cross.
-Four of the eight affected fixtures now do; two more read as though they do and
-have had a flat face shattered instead, which is the next thing to fix.
-
-## Where the tree is
-
-Branch **`claude/step-apex-fan`**, and it is *not* green: **five tests fail**,
-two of them the usual `ipython-smoke` / `repl-smoke` that cannot pass from the
-build tree (run them against `build/staging/pythonscad.com` directly - see
-CLAUDE.md). The other three are the immediate task below.
-
-    2689  export-step-sanitytest_step-declare-grid-scad
-    2712  export-step-py-sanitytest_step-declare-grid-strip
-    2713  export-step-py-sanitytest_step-declare-grid
-
-They fail because the corner placement now fans a bent polygon into triangles,
-which changes their face counts. **This is expected and the fix is not to
-regenerate them.** See "the immediate task".
-
-**Superseded on 2026-09-06.** Only one of the three was a face count to derive.
-`step-declare-grid-scad` is done - `Plane=8` becomes `Plane=22`, derived in the
-fixture from the two tessellations that meet at the junction - and it needed a
-code fix first, because its export was not merely different but *invalid*. The
-two Python fixtures are still red and **must not be brought green by taking the
-number the exporter now prints**; see "the disc, and why the Python pair is
-still red" below.
-
-One trap for anyone measuring on Linux: `steproundtrip.py` needs
-`TopTools_IndexedMapOfShape`, which `cadquery-ocp` 8.0 no longer exposes, so it
-**skips silently** and the whole suite goes green with the round trip never run.
-`pip install cadquery-ocp==7.8.1.1.post1` restores it. Two of the three failures
-above are invisible without it.
-
-Other branches, all measured and all parked with their reasons in the commit
-messages - none is a candidate to land as it stands:
-
-| branch | what it holds |
-| --- | --- |
-| `claude/step-corner-ownership` | corner placement before `mergeTriangles`; destroys the merge, 12-62x the faces |
-| `claude/step-sweep-boundary-snap` | projecting a sweep's corners onto the sweep; takes them off the other surface |
-| `claude/step-sweep-cone-guard` | refusing a cone that meets a sweep only in chords; empirical, no fixture |
-| `claude/step-sweep-vertex-exactness` | refusing a sweep corner past a quarter of its band; the quarter is chosen |
-| `claude/step-corner-split` | the first triangulation, superseded by what landed |
-
-## What landed, in order
-
-1. `feat(export): ask the model who made a facet before measuring where it lies`
-   - provenance gates the quadric claim; 490/142/86 tests spared, no output change
-2. `fix(export): take the interior allowance from the surface, not from the neighbours`
-   - `bandOf` measured the mesh's flatness, which corner placement invalidates
-3. `feat(export): put a junction corner on the curve its two owners cross along`
-   - placement after recognition, where an analytic face does not mind
-4. `fix(export): gate the corner placement, and stop it turning a face over`
-5. `feat(export): place a corner a declared surface shares with one plane of the mesh`
-6. `feat(export): fan out a planar polygon the corner placement would bend`
 
 ## The measure, and where each fixture stands
 
@@ -523,11 +573,14 @@ placed at all; that is now done, so the way is clear.
 Still worth knowing, but **no longer blocking the corner work** - the test above
 needs none of it:
 
-- ~~**There is no plane declaration at all.**~~ Superseded: `PlaneSurface` is in
-  `Surface.h`, `cube()` declares its six face planes and `cylinder()` both caps.
-  What is still missing is coverage - `linear_extrude` declares neither its walls
-  nor its caps, and on lid10 provenance maps only **14 of 25** declared surfaces
-  onto an original at all.
+- ~~**There is no plane declaration at all.**~~ Done, twice over: `PlaneSurface`
+  is in `Surface.h`; `cube()` and `cylinder()` declare their planes, and so now
+  do `linear_extrude` (both caps always, plus a plane per straight wall) and
+  `rotate_extrude` (the flat annuli, and a partial sweep's two end faces). The
+  exporter writes a planar face on a declared plane in preference to fitting one.
+  See "declaring the planes, and what each extrude parameter does with them".
+  What is still missing is *provenance* coverage: on lid10 only **14 of 25**
+  declared surfaces are mapped onto an original at all.
 - **A straight cylinder declares one rim, not two.** For `r1 == r2` only one
   `CylinderSurface` is pushed, at `z1`, and `addSurfaceUnique` would fold a
   second one into it anyway since coaxial cylinders of equal radius count as the
@@ -537,10 +590,10 @@ needs none of it:
   `ArcCurve` is dead outside `import_step.cc`. `StepKernel` says as much with
   `(void)curves;`.
 
-What would buy something is the *reverse* of the corner work: a declared plane
-would let the exporter write a cap as a declared face rather than recognise it,
-and would give a corner on two planes a triple point to be placed at. Neither is
-needed for exactness today.
+The first of those - a declared plane letting the exporter write a cap as a
+declared face rather than recognise it - is what landed on 2026-09-07. The
+second, giving a corner on two planes a triple point to be placed at, has not
+been tried and is still available.
 
 ## The curve trim: a plane section written as the conic it is
 
@@ -1011,52 +1064,28 @@ touched by the above:
 - **28 edges written as an arc, 28 left straight**, so half the arc candidates
   are still chords.
 
-## The immediate task
+## What "derived, not captured" actually costs
 
-~~Update the three fixtures~~ - done for `step-declare-grid-scad`, and refused
-for the other two with the measurement above. What it took, as a worked example
-of what "derived, not captured" costs: `Plane=8` to `Plane=22` is four pieces of
-bore facet fanned into eighteen triangles, and the fixture states which four
-(where the ridge crosses the bore), why each has 6 or 7 corners (a facet spans
-11.25 degrees, the ridge's stations are 16.875 apart and each span carries one
-diagonal), and why the other four planes do not move (their corners are already
-on the cylinder at r = 20 exactly). The number itself took a minute; the
-paragraph took the afternoon, and it is the paragraph that would have caught the
-disc.
+Kept as the worked example, because the cost is the point and it is easy to
+underestimate. `step-declare-grid-scad`'s `Plane=8` becoming `Plane=22` is four
+pieces of bore facet fanned into eighteen triangles, and the fixture states which
+four (where the ridge crosses the bore), why each has 6 or 7 corners (a facet
+spans 11.25 degrees, the ridge's stations are 16.875 apart and each span carries
+one diagonal), and why the other four planes do not move (their corners are
+already on the cylinder at r = 20 exactly).
 
-**Next, and it is what unblocks the Python pair:** ask the recogniser whether a
-planar face is a member of the surface a corner is being placed on, and refuse
-the move where it is not. The deciding measurement is already taken - see the
-table above.
+The number itself took a minute. The paragraph took the afternoon, and it is the
+paragraph that would have caught the disc.
 
-## What to do after that
+## What to do next
 
-**Superseded on 2026-09-07.** `step-band-family` and `step-exact-trim` are both
-done; the suite is 44/44. What the curve trim leaves open, in the order it
-should be taken:
+Items 1 and 2 of the old list are done - the cone's plane section and the general
+intersection curve both landed on 2026-09-07. What is left:
 
-**Superseded 2026-09-07: items 1 and 2 are done.** What is left of this list is
-item 3, plus what the section above records as still open.
-
-1. ~~**The cone's plane section, and the planar face that carries it - one piece
-   of work, not two.**~~ `coplanarStretches` is called for cylinders only, and a
-   section is only written where a quadric stands on both sides. Measured
-   together (see "what the remaining refusals are actually blocked on"), the pair
-   takes `step-cut-cone` from four refused regions to none, and neither half does
-   anything on its own. A plane cuts a cone in an ellipse, a parabola or a
-   hyperbola depending on the tilt and only the first closes, so the tilt test is
-   part of it. A fixture with a hand-derived answer comes first -
-   `step-cylinder-cross` is the model for what that looks like.
-2. **The general intersection curve**, which is where the other 76 refused
-   regions are and where the work stops being small. Two cylinders of *unequal*
-   radius meet in a quartic; `SURFACE_CURVE` with a pcurve on each surface is
-   what carries it. `step-bored-cylinder` is the coupon and its removed volume
-   has a closed form in complete elliptic integrals, so the `VOLUME:` check
-   survives the move to a curve with no elementary parametrisation.
-3. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
+1. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
    suite that noticed the chorded trim; every census figure was identical before
    and after. Any fixture whose model has a closed-form volume should state it.
-4. **`sphere()` exports with its poles flattened**, found while measuring which
+2. **`sphere()` exports with its poles flattened**, found while measuring which
    entities still rest on the mesh and not chased there. `$fn=32; sphere(r=5)`
    comes back as `Plane 2, Sphere 1` - two planar polar caps at z = +/-4.9759 -
    and measures **523.580594** where the ideal is `4/3 pi 125` = **523.5988**.
@@ -1071,16 +1100,27 @@ item 3, plus what the section above records as still open.
    already describes for a periodic face. **The volume is the check that
    matters** - a face census cannot tell a sphere from a sphere with its poles
    cut off, since both read as `Sphere 1` plus some planes.
-5. **The twist.** `linear_extrude`'s walls are the last thing its parameters
+3. **The twist.** `linear_extrude`'s walls are the last thing its parameters
    determine that is not declared - see "declaring the planes, and what each
    extrude parameter does with them" for why `slices` and `$fn` are not the
    obstacle and `GridSurface` is the mechanism.
 
-Then lid10, which is set aside deliberately and is the specimen for judging
-blast radius, not a development target. It needs
-`-p examples/step_test/lid10.json -P "New set 1"`; without it you get the
-default component and every number is incomparable. That cost a whole
-comparison in this session.
+4. **What still rests on the mesh**, measured 2026-09-08 and not yet acted on.
+   Curved geometry with no declaration at all: `minkowski()` declares nothing
+   (a rounded cube exports as 142 planes); `hull()` declares its inputs but not
+   the blend it creates, so a hull of two spheres arrives as 28 recognised cones;
+   `import()`, `surface()` and `projection()` have nothing to declare. Each of
+   those is analytically known from its operands - a minkowski with a sphere is
+   planes, cylinders and spheres - so the question worth asking of each is what
+   the operands' declarations imply about the result.
+
+Then lid10, the blast-radius specimen rather than a development target. It needs
+`-p examples/step_test/lid10.json -P "New set 1"`; without it you get the default
+component and every number is incomparable. Its current state: 40 trimmed
+quadrics written and 1 region refused, 27 planar faces on declared planes of 41
+declared, and one pre-existing complaint that is **not** this work - a PLANE face
+with a corner 2.2623e-06 off it, which the plain faceted export with the analytic
+pass switched off reports identically.
 
 ## Traps, all paid for once
 
@@ -1152,6 +1192,26 @@ comparison in this session.
   `Patch::Run` by dropping each run's last vertex are closed, so a
   `for (i; i + 1 < n; i++)` walk exempts the edge from the last vertex back to
   the first - which quietly excuses one chord per cycle from the boundary test.
+- **A hint is recorded in the profile's own frame; the outlines may not be.**
+  `Polygon2d::outlines()` returns *transformed* vertices when a 3D transform is
+  pending, while its `arcs` and `beziers` are untransformed. Comparing a
+  transformed vertex against an untransformed centre finds no arc at all - and
+  the code that was excluding chords of arcs then excluded nothing, so a rounded
+  square declared thirty planes for six faces. Use `untransformedOutlines()`.
+- **A profile that has been through Clipper is snapped to its decimal grid.**
+  `CLIPPER2_MAX_DECIMAL_PRECISION=8`, so a vertex that should be exactly on a
+  recorded arc is within about 1e-8 of it and no closer. A test asking "are these
+  two points on this circle" can afford to be loose - a straight edge's ends are
+  nowhere near one, so the discriminator is enormous - and at 1e-9 it matched
+  nothing.
+- **Rewriting a fixture assertion your own change broke is the other circular
+  validation**, and it looks more innocent than relaxing a validator rule. Three
+  fixtures here asserted "no analytic surfaces were declared" and planes began to
+  be declared. The narrowing was defensible - the fixtures are about a wrong
+  *curved* claim - but "defensible" is not the test: reintroduce the defect the
+  fixture exists to catch and confirm the *rewritten* line fails. Then look at
+  what the rewrite stopped constraining and pin it again wherever the number is
+  derivable, and say plainly where it is not.
 - **`quick.sh` pipes the build through `tail`**, so grepping its output for
   `FAILED` misses real failures. Use `berr.sh`, which keeps 30 lines.
 
