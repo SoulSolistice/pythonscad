@@ -1381,6 +1381,24 @@ and on the boundary of a curved face that already stands up to 0.0609 mm off
 where it should be, it is where a kernel runs out of room. The slivers come from
 the boolean, upstream of everything here; the slack is ours.
 
+**Where the slivers come from, one level further down.** Two tessellations meet
+at r = 19.2 and they do not align: the ridge has 60 stations every 9.1525
+degrees, the cylinder 96 facets every 3.75, and 9.1525/3.75 = 2.4407, so station
+positions drift against facet boundaries and occasionally land very close to
+one. Multiply that angular gap by the radius and it predicts the sliver:
+
+| ridge station | gap to nearest facet boundary | predicted arc | measured edge |
+| --- | --- | --- | --- |
+| 34 at 311.186 deg | 0.0636 deg | 0.021299 mm | 0.021267 at theta 311.2 |
+| 25 at 228.814 deg | 0.0636 deg | 0.021299 mm | 0.021267 at theta 228.8 |
+| 9 at 82.373 deg | 0.1271 deg | 0.042598 mm | 0.042535 at theta 82.4 |
+| 50 at 97.627 deg | 0.1271 deg | 0.042598 mm | 0.042535 at theta 97.6 |
+
+The chord is slightly shorter than the arc, which is the whole of the
+disagreement. **It does not explain the two shortest**, 0.006470 at theta 172.5
+and 7.5, which sit exactly on facet boundaries with no station near them - so
+that is a second family and an open branch, not a closed one.
+
 That points at two different fixes and they are not alternatives - the first is
 upstream of this exporter, and the second is the band family's open question:
 
