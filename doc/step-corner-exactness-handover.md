@@ -1082,6 +1082,45 @@ paragraph that would have caught the disc.
 Items 1 and 2 of the old list are done - the cone's plane section and the general
 intersection curve both landed on 2026-09-07. What is left:
 
+0. **Half of a declared sweep is never claimed, and it is not the geometry.**
+   Found 2026-09-08 on `step-band-family` and more basic than anything else on
+   this list - it is upstream of the crossing curve, the slack, and the faults.
+
+   The untapered control - the same model with `f = 1`, which is the *easier*
+   shape - recognises **less** than the tapered one: two of the profile's four
+   spans against three. Per span, at fn 96:
+
+       original profile   span0 lower flank 640   span1 crest 320   span2 upper 0
+       rotated  profile   span0 crest       320   span1 upper   0   span3 lower 0
+
+   The mesh is symmetric - 640 planar faces face up the ridge and 640 face down,
+   counted in the faceted export - so the upper flank is exposed and simply not
+   claimed. `whole` requires every corner of a facet to pass
+   `GridSurface::pointMember`, and the upper flank's corners are failing it.
+
+   Three explanations tried and refuted, each by a control:
+
+   - **the triangulation's diagonal**, which is the same direction for every
+     quad and so asymmetric against a rising helix. Flipping it changes nothing:
+     640/320/0 either way.
+   - **neighbouring turns**, the ridge being 8 wide on a 9.6 rise so a point on
+     one flank is 1.6 from the next turn and might project onto it. Widening the
+     pitch to leave a 24 mm gap changes nothing: still 0.
+   - **the flank's own shape**, refuted by rotating the profile: the *same*
+     lower flank is claimed whole as span 0 and not at all as span 3.
+
+   The rotation carries a confound worth stating - it also moves the buried back
+   span into the middle, so the exposed run wraps the seam - and that is itself
+   the lead. Both orderings fail to cover their exposed run, and the ordering
+   whose run crosses the profile's seam collapses furthest: 960 facets claimed
+   becomes 320 for a solid that has not changed.
+
+   So the claim covers about half of what is exposed, and how much depends on
+   where the profile's seam falls relative to it. Worth settling before any more
+   is spent on boundary curves: there is no point making the boundary of a face
+   exact while half the surface it should bound is still being written as
+   facets.
+
 1. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
    suite that noticed the chorded trim; every census figure was identical before
    and after. Any fixture whose model has a closed-form volume should state it.
