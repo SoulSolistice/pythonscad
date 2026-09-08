@@ -504,12 +504,28 @@ bool BezierPatchSurface::project(const Vector3d& pt, double& u, double& v) const
         h(1, 1) += 1e-12;
         const Vector2d step = h.fullPivLu().solve(-g);
         if (!step.allFinite()) break;
-        const double nu = std::min(1.0, std::max(0.0, cu + step[0]));
-        const double nv = std::min(1.0, std::max(0.0, cv + step[1]));
-        const bool done = fabs(nu - cu) < 1e-14 && fabs(nv - cv) < 1e-14;
-        cu = nu;
-        cv = nv;
-        if (done) break;
+        // Every step has to improve the distance, for the reason spelled out in
+        // GridSurface::project: this matrix goes near singular where the two
+        // parameter directions run nearly parallel, and the step it then asks
+        // for lands somewhere else on the patch, where the iteration settles
+        // quite happily. The twenty-five starts around this loop make that cost
+        // a start rather than the answer, which is why it has never been a
+        // defect here - but a start spent is a start not searching, and the
+        // guard is two lines.
+        const double here = r.squaredNorm();
+        bool stepped = false;
+        double shrink = 1.0;
+        for (int back = 0; back < 6; back++, shrink *= 0.5) {
+          const double nu = std::min(1.0, std::max(0.0, cu + step[0] * shrink));
+          const double nv = std::min(1.0, std::max(0.0, cv + step[1] * shrink));
+          if ((evaluate(nu, nv) - pt).squaredNorm() >= here) continue;
+          const bool done = fabs(nu - cu) < 1e-14 && fabs(nv - cv) < 1e-14;
+          cu = nu;
+          cv = nv;
+          stepped = !done;
+          break;
+        }
+        if (!stepped) break;
       }
       const double d = (evaluate(cu, cv) - pt).norm();
       if (best < 0 || d < best) {
