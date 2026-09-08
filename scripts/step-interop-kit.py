@@ -48,8 +48,18 @@ COUPONS = [
      "CONICAL_SURFACE",
      "Half-angle and apex placement; a cone degenerates at its apex."),
     ("c04-sphere", "tests/data/scad/step-export/step-sphere.scad",
-     "SPHERICAL_SURFACE, whole",
-     "Both poles are parametric singularities."),
+     "one SPHERICAL_SURFACE closed on itself, TWO edges, no PLANE",
+     "Riskier than it was, and riskier than c07. Since 2026-09-08 a whole "
+     "sphere is written closed at its poles rather than capped with two discs, "
+     "so the face has no rim at all: one bound, one seam meridian used once in "
+     "either direction, and the two poles are VERTEX_POINTs where the surface "
+     "is degenerate. That is a **two** edge face, where c07's octants are three "
+     "and the note there already says foreign importers routinely reject or "
+     "silently repair a 3-edge face. OpenCASCADE writes the same solid as a "
+     "VERTEX_LOOP with no edges at all and reads ours back as one Sphere with "
+     "two degenerate edges; whether SOLIDWORKS sews it is the question. The "
+     "faceted control is the same ball as 482 planes, so a solid there and a "
+     "surface body here isolates it to the closure."),
     ("c05-torus", "tests/data/scad/step-export/step-torus.scad",
      "TOROIDAL_SURFACE, whole",
      "Two closed seams and no rim."),
@@ -92,15 +102,33 @@ COUPONS = [
      "came from a declaration rather than from two matching rims. c03 covers a "
      "cone standing alone; this covers the joint."),
     ("c15-bored-cylinder", "tests/data/scad/step-export/step-bored-cylinder.scad",
-     "CYLINDRICAL_SURFACE bounded entirely by LINE, with holes",
+     "CYLINDRICAL_SURFACE with holes, and 80 SURFACE_CURVE / 160 PCURVE",
      "Structurally new: every other quadric face here is bounded by circles and "
      "arcs, and this one is bounded by the mesh's own polyline because its trim "
      "is a quartic no STEP curve can state. It may also carry more than one "
      "FACE_BOUND - a quadric with a hole in it - which some importers only "
-     "expect on a PLANE."),
+     "expect on a PLANE. "
+     "Since the trim work of 2026-09-07 this is also the kit's carrier for a "
+     "genuinely new entity class: every crossing curve is written as a "
+     "SURFACE_CURVE with a PCURVE on each of the two surfaces it lies on, 80 "
+     "and 160 of them here. c13's ELLIPSE is written with no pcurve at all, so "
+     "this is the opposite bet - that a reader prefers being told the "
+     "parameterisation - and no commercial reader has seen either."),
     ("c16-bored-cone", "tests/data/scad/step-export/step-bored-cone.scad",
-     "CONICAL_SURFACE and CYLINDRICAL_SURFACE, both polyline-bounded",
-     "As c15 on a taper, so the bore's own trim runs on a cone."),
+     "as c15 on a taper: 80 SURFACE_CURVE / 160 PCURVE, on a cone",
+     "As c15 on a taper, so the bore's own trim runs on a cone - and the "
+     "pcurve of a curve on a cone is the one whose parameterisation is easiest "
+     "to get wrong, because the radius varies along the axis."),
+    ("c17-cylinder-cross", "tests/data/scad/step-export/step-cylinder-cross.scad",
+     "8 CYLINDRICAL_SURFACE, 8 ELLIPSE, 4 LINE, no PLANE at all",
+     "Two equal cylinders crossing at right angles, trimmed to the curve where "
+     "they actually cross. Three things here are new to a commercial reader at "
+     "once: a closed shell containing no planar face whatsoever, faces bounded "
+     "by ELLIPSE *arcs* rather than whole conics, and a region that pinches to "
+     "a point at theta = 0 and 180 - so those faces carry three edges, with the "
+     "fourth side closing on itself. It is also the one coupon whose correct "
+     "volume is known in closed form, the Steinmetz 16*r^3/3 = 5333.33333, so "
+     "what SOLIDWORKS makes of it can be measured and not merely counted."),
     ("r01-lid10", "examples/step_test/lid10.scad",
      "real part: cylinders, cones, circles",
      "A real model, and the one whose committed export was finding F1."),
@@ -239,6 +267,16 @@ def main():
     args = ap.parse_args()
     only = re.compile(args.only) if args.only else None
 
+    # Resolve the binary before handing it to subprocess. Every export runs with
+    # cwd=ROOT, and on Windows CreateProcess resolves a relative executable
+    # against the *parent's* directory rather than that one - so the usage this
+    # script documents, `--binary build/staging/pythonscad.exe`, dies with
+    # "cannot find the file specified" from anywhere but the repository root,
+    # and says nothing about which file it could not find.
+    binary = args.binary if os.path.isabs(args.binary) else os.path.abspath(args.binary)
+    if not os.path.exists(binary):
+        sys.exit("no such binary: %s" % binary)
+
     outdir = args.outdir if os.path.isabs(args.outdir) else os.path.join(ROOT, args.outdir)
     os.makedirs(outdir, exist_ok=True)
 
@@ -254,7 +292,7 @@ def main():
             continue
         for mode in ("analytic", "faceted"):
             target = os.path.join(outdir, "%s-%s.stp" % (name, mode))
-            rc, err = export(args.binary, srcpath, target,
+            rc, err = export(binary, srcpath, target,
                              analytic=(mode == "analytic"),
                              approx=(name in APPROX), extra=extra)
             band = band_of(err)

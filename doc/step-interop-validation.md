@@ -1184,6 +1184,92 @@ made with. Until then what is safe to say is the part that reproduces - both
 reference parts now import as solids with no gaps, where they were surface
 bodies - and that is the stronger claim anyway.
 
+## Run 2026-09-08: the closed sphere, and c17
+
+All 24 coupons, 48 files, after the sphere closure landed. `-ImportSettings` was
+recorded as `as-configured-2026-09-08-unverified`: SOLIDWORKS' Tools > Options >
+Import could not be read from the automation, so this run is **not** comparable
+with the `do-not-knit` runs above on any absolute number. What it is comparable
+on is each coupon against its own faceted control, which sees the same settings
+in the same session, and against arithmetic, which sees no settings at all.
+
+**Every file imports as a solid. Findings: 0.** As always that is the weakest
+thing here - `c06` has passed it every time while being 14% wrong - so the row
+that matters is the derived one.
+
+### The nine coupons with a closed form
+
+The only rows that can say an export is *right* rather than self-consistent.
+
+| coupon | derived | OpenCASCADE | SOLIDWORKS | SW vs derived |
+| --- | --- | --- | --- | --- |
+| c01 cylinder | 6283.185307 | 6283.185307 | 6283.185300 | 1.1e-9 |
+| c03 cone | 3183.480556 | 3183.480556 | 3183.480600 | 1.4e-8 |
+| **c04 sphere** | **4188.790205** | **4188.790205** | **4188.790200** | **1.2e-9** |
+| c05 torus | 1776.528792 | 1776.528792 | 1776.528800 | 4.5e-9 |
+| c06 partial torus | 11154.933565 | 11154.933573 | 9575.796900 | **-14.16%** |
+| c07 fillet quadrics | 975.587014 | 975.587014 | 975.587000 | 1.4e-8 |
+| c13 oblique trim | 4824.927830 | 4824.915473 | 4824.800300 | -2.6e-5 |
+| c14 declared cone | 3962.595534 | 3962.595534 | 3962.595500 | 8.6e-9 |
+| **c17 cylinder cross** | **5333.333330** | 5333.333262 | 5333.363200 | **+5.6e-6** |
+
+`c06` is unchanged and still the standing outlier: the model's arithmetic and
+OpenCASCADE agree to 1e-9 and SOLIDWORKS dissents by 14%, with zero faults
+reported. Nothing in this work touched it.
+
+### c04: the sphere, closed at its poles
+
+The coupon that this run existed for, and it is the cleanest row in the table.
+
+- **One face in, one face out.** SOLIDWORKS reads the file as a single face and
+  repairs nothing. Every other quadric coupon here is knitted on import - c15,
+  c16 and c17 all arrive with fewer faces than the file has - so a coupon that
+  comes back with exactly the topology it was written with is the exception.
+- **Two derived quantities, not one.** Volume `(4/3)pi r^3` = 4188.7902 and area
+  `4 pi r^2` = 1256.6371, both matched to the digit. Area was not asked for and
+  is the better check of the two: a solid can hit a volume by luck of
+  compensating errors, and hitting both leaves nowhere for a flattened pole to
+  hide. The faceted control measures 4121.9898 and 1246.5840 - 1.6% and 0.8%
+  low, which is the inscribed polyhedron and exactly what the caps used to cost.
+- **The round trip keeps it a sphere.** `kept`, volume identical to ten figures.
+  The census moves `Sphere 1 -> 2`, which is SOLIDWORKS re-seaming a closed
+  periodic face into two on the way out rather than any loss: it accepts a
+  sphere closed on itself but does not write one itself. OpenCASCADE does the
+  same thing in reverse, writing a `VERTEX_LOOP` with no edges at all. Three
+  kernels, three spellings of the same solid.
+
+The worry going in was the opposite result. The face has **two** edges - one
+seam meridian used once in either direction - where c07's octants have three,
+and the note on c07 has said since the kit was written that "foreign importers
+routinely reject or silently repair a 3-edge face". Two is further out than
+three, and it was fine.
+
+### c17: new coupon, and the one number SOLIDWORKS is loose on
+
+Two equal cylinders trimmed to the curve where they cross - a closed shell with
+no planar face anywhere, bounded by ELLIPSE arcs, with faces that pinch to a
+point. It imports as a solid, round-trips `kept`, and its volume is the
+Steinmetz `16 r^3/3`, so it can be measured rather than counted.
+
+OpenCASCADE reads it 1.3e-8 from the exact value. SOLIDWORKS reads it 5.6e-6
+away - four hundred times further, though still 0.03 in 5333. **It is not the
+file**: the same file is read essentially exactly by the other kernel, and both
+kernels agree on the faceted control. It is SOLIDWORKS integrating over
+ellipse-arc-bounded quadrics, and it is worth having written down before some
+future run reads 5333.3632 as a defect and goes looking for one on our side.
+
+### What is unchanged and still open
+
+- `c06-partial-torus`, above.
+- `c11-swept-grid`, SOLIDWORKS 13.55% below OpenCASCADE, no closed form to
+  adjudicate between them.
+- **`r01-lid10-analytic` round-trips to something that is not a solid at all**,
+  and whose volume "exceeds its own bounding box" - every Cone, Cylinder and
+  Plane gone from what SOLIDWORKS wrote back. `r02-bayonet-analytic` loses 7
+  cylinders and gains 2.4% of volume. Both are pre-existing, both are on the
+  reference parts rather than the coupons, and neither is touched by this work.
+- The band family still degrades to splines on the way back out at every `$fn`.
+
 ## The ladder, and why half a fix is worse than none
 
 The snap of §26 in `doc/step-export-status.md` regressed the bayonet from **1
