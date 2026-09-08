@@ -169,6 +169,31 @@ APPROX = {"c11-swept-grid", "c12-approximated", "c15-bored-cylinder",
           "c16-bored-cone", "r01-lid10", "r02-bayonet"}
 APPROX |= {"f%02d-band-fn%03d" % (i + 1, fn) for i, fn in enumerate(BAND_FAMILY)}
 
+# What the analytic export's face count has to be, where that number follows
+# from the model rather than from a run.
+#
+# The kit has always printed the count and never checked it, so a coupon whose
+# claim quietly changed looked identical to one that had not - and the first
+# thing to notice was a CAD system, twenty minutes and a licence later. These
+# are the cheap half of that: they cost one export each and they fail in the
+# terminal.
+#
+# Derived, and only where derivable. A count captured from a run locks in
+# whatever the exporter did last, which is the circularity doc/step-export-
+# testing.py exists to prevent; a coupon absent from this table simply reports
+# its count as before. Adding one means working the number out from the model
+# and writing the reason beside it.
+EXPECT_FACES = {
+    "c04-sphere": (1, "a sphere closed on itself is bounded by its seam alone: one "
+                      "face, and no plane anywhere"),
+    "c05-torus": (1, "a complete torus is closed in both directions, so it is one "
+                     "face bounded by its own two seams"),
+    "c07-fillet-quadrics": (26, "a filleted cube is 6 planes, 12 edge cylinders and "
+                                "8 corner sphere octants"),
+    "c17-cylinder-cross": (8, "each cylinder keeps two 180 degree lobes and each lobe "
+                              "is written as two faces; no cap survives"),
+}
+
 CENSUS_KINDS = [
     "PLANE", "CYLINDRICAL_SURFACE", "CONICAL_SURFACE", "SPHERICAL_SURFACE",
     "TOROIDAL_SURFACE", "B_SPLINE_SURFACE_WITH_KNOTS",
@@ -281,6 +306,7 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     rows = []
+    face_mismatch = []
     for entry in COUPONS:
         name, src, exercises, risk = entry[:4]
         if only and not only.search(name):
@@ -303,9 +329,16 @@ def main():
                 continue
             ok = validate(target)
             c = census(target)
+            faces = c.get("ADVANCED_FACE", 0)
+            note = "validator ok" if ok else "VALIDATOR FAILED"
+            want = EXPECT_FACES.get(name) if mode == "analytic" else None
+            if want is not None and faces != want[0]:
+                note = "FACES %d, EXPECTED %d - %s" % (faces, want[0], want[1])
+                face_mismatch.append("%s: %d faces, expected %d (%s)"
+                                     % (name, faces, want[0], want[1]))
             print("%-4s %-22s %-8s %5d faces  %s" % (
-                "ok" if ok else "BAD", name, mode, c.get("ADVANCED_FACE", 0),
-                "validator ok" if ok else "VALIDATOR FAILED"))
+                "ok" if ok and (want is None or faces == want[0]) else "BAD",
+                name, mode, faces, note))
             rows.append({
                 "coupon": name,
                 "mode": mode,
@@ -347,6 +380,19 @@ def main():
         w.writerows(rows)
     print("\nkit: %d files in %s" % (len(rows), outdir))
     print("checklist: %s  (the cad_* columns are yours to fill in)" % csvpath)
+    if face_mismatch:
+        print("")
+        print("the claim is not what these coupons say it should be:")
+        for line in face_mismatch:
+            print("  " + line)
+        print("")
+        print("Either the export changed or the expectation is wrong, and the second is")
+        print("worth considering first. Nothing past this point is worth running until")
+        print("it is settled: a CAD system will happily import the wrong solid.")
+        return 1
+    checked = sum(1 for r in rows
+                  if r["mode"] == "analytic" and r["coupon"] in EXPECT_FACES)
+    print("face count as derived on %d of %d coupons" % (checked, len(COUPONS)))
     return 0
 
 
