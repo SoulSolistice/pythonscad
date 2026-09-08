@@ -1149,21 +1149,42 @@ intersection curve both landed on 2026-09-07. What is left:
    written is item 5, a chord: a SURFACE_CURVE over a `LINE` carrying **one**
    pcurve, on the B-spline only. The tier the exact machinery refuses a face for.
 
-   The reason it lands there is a single gate. The crossing search is
-   quadric-to-quadric - "the arc of the curve where two declared **quadrics**
-   cross" - and `StepKernel.cc` excludes a sweep from being the other party
-   outright:
+   **It is not one gate, and the first write-up of this said it was.** The
+   `dynamic_cast<const GridSurface *>` in `StepKernel.cc` is in the *corner
+   placement*, not the crossing search. The crossing search is barred from
+   sweeps architecturally: it runs inside `decide_sections`, over the patches
+   `recogniseQuadricPatches` returned, and that recogniser only ever produces
+   cylinders and cones. A sweep is recognised separately by
+   `recogniseGridPatches` and written by a separate emitter. The two never meet.
 
-       if (dynamic_cast<const GridSurface *>(other.get()) != nullptr) continue;
+   Scoped on 2026-09-08 by making the change and measuring that it did nothing.
+   The solver itself generalises cleanly - `projectOntoBoth` and
+   `intersectionArcError` need only a value and a gradient per surface, and
+   `closestOnSurface` already handles a `GridSurface`, so the distance to the
+   nearest point with the unit vector along it is the same linearisation. That
+   part was written, built, and changed the export by not one entity, because
+   nothing ever hands it a sweep.
 
-   So the 0.0609 mm of slack is not the price of a sweep being hard. It is the
-   price of a crossing both of whose surfaces are declared being written as
-   chords because one of them is not a quadric. Extending the crossing curve to
-   a declared sweep against a declared quadric is the targeted fix, and it is a
-   far better bet than anything tried on 2026-09-08: it would put the boundary
-   exactly on both faces, which is what the slack is paying for, and the slivers
-   would stop mattering because a chord's length only matters when the chord is
-   the geometry.
+   What it actually takes, in order:
+
+   1. the value/gradient generalisation above, which is small and was proven
+      inert on its own;
+   2. grid patches admitted to the `along` map so a sweep-against-quadric edge
+      is seen from both sides;
+   3. **the grid emitter taught the edge ladder the quadric emitter already
+      has** - crossing curve, then plane section, then arc, then chord. This is
+      the real work: `quadric_faces` carries about a hundred and fifty lines of
+      it and `grid_faces` carries none.
+
+   Steps 2 and 3 are not separable. A crossing curve taken by the cylinder's
+   face while the sweep's face still writes a chord gives the two faces
+   different geometry for one edge, and the shell comes apart - so this lands
+   whole or not at all.
+
+   Worth doing anyway: it would put the boundary exactly on both faces, which is
+   what the 0.0609 mm is paying for, and it would make the sliver lengths stop
+   mattering, because a chord's length only matters while the chord is the
+   geometry.
 
    Three things fell out of it worth acting on:
 
