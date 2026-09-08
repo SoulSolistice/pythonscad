@@ -1082,44 +1082,62 @@ paragraph that would have caught the disc.
 Items 1 and 2 of the old list are done - the cone's plane section and the general
 intersection curve both landed on 2026-09-07. What is left:
 
-0. **Half of a declared sweep is never claimed, and it is not the geometry.**
-   Found 2026-09-08 on `step-band-family` and more basic than anything else on
-   this list - it is upstream of the crossing curve, the slack, and the faults.
+0. ~~**Half of a declared sweep is never claimed**~~ - **found and fixed,
+   2026-09-08**, in two commits against `GridSurface::project`. Left here
+   because what it says about the declaration channel is the part worth keeping.
 
-   The untapered control - the same model with `f = 1`, which is the *easier*
-   shape - recognises **less** than the tapered one: two of the profile's four
-   spans against three. Per span, at fn 96:
+   The symptom: the untapered band-family control - the *easier* shape -
+   recognised two of its profile's four spans where the tapered one managed
+   three. The upper flank, 640 exposed facets by the faceted export's own count,
+   was written as facets throughout.
 
-       original profile   span0 lower flank 640   span1 crest 320   span2 upper 0
-       rotated  profile   span0 crest       320   span1 upper   0   span3 lower 0
+   The cause, in one measured line: a vertex at `r = 20.0000` where the boolean
+   cut the ridge against the bore projected to `v = 0.7602` and landed on the
+   *buried back span* at `r = 20.3000`, 0.3000 away on a band of 0.0483, when
+   the upper flank it lies on is at `v = 0.717` and zero away.
 
-   The mesh is symmetric - 640 planar faces face up the ridge and 640 face down,
-   counted in the faceted export - so the upper flank is exposed and simply not
-   claimed. `whole` requires every corner of a facet to pass
-   `GridSurface::pointMember`, and the upper flank's corners are failing it.
+   Two defects, both in the projection, both now fixed:
 
-   Three explanations tried and refuted, each by a control:
+   - Gauss-Newton took whatever step the normal equation asked for. Near a
+     singular Jacobian that step is enormous and lands elsewhere on the sweep.
+     Of 44959 projections, 1038 came out worse than the coarse sample they
+     started from - worst 3.90 mm to 11.90 mm on a ridge 2 mm deep. Now every
+     step has to improve, by backtracking, and none does.
+   - The coarse sample took `vspans()*2` points across v, putting one exactly on
+     every span boundary. A profile is a polyline, so every boundary is a corner
+     where the v derivative does not exist and the finite difference straddles
+     it. Now it takes four per span at their quarter points and never a
+     boundary.
 
-   - **the triangulation's diagonal**, which is the same direction for every
-     quad and so asymmetric against a rising helix. Flipping it changes nothing:
-     640/320/0 either way.
-   - **neighbouring turns**, the ridge being 8 wide on a 9.6 rise so a point on
-     one flank is 1.6 from the next turn and might project onto it. Widening the
-     pitch to leave a 24 mm gap changes nothing: still 0.
-   - **the flank's own shape**, refuted by rotating the profile: the *same*
-     lower flank is claimed whole as span 0 and not at all as span 3.
+   The claim on that model goes from 960 facets whole and 963 cut to 1826 and
+   192. Suite green, `step-declare-grid` unchanged, derived screw sweep
+   unchanged.
 
-   The rotation carries a confound worth stating - it also moves the buried back
-   span into the middle, so the exposed run wraps the seam - and that is itself
-   the lead. Both orderings fail to cover their exposed run, and the ordering
-   whose run crosses the profile's seam collapses furthest: 960 facets claimed
-   becomes 320 for a solid that has not changed.
+   **What it says about the channel, which is not fixed.** The question this
+   raises is why a numerical projection is in the path at all. `declare_grid`
+   does not hand over a closed mathematical form: it hands over a *grid of
+   points* and a flag saying the profile loops. `GridSurface` then interpolates
+   those stations - a cubic along the sweep, a polyline across the profile - and
+   every membership test afterwards is a Gauss-Newton projection onto that
+   interpolant. The tessellation band, the local minima, the corner that broke
+   this: all of them are properties of the interpolation and none of them is a
+   property of the model.
 
-   So the claim covers about half of what is exposed, and how much depends on
-   where the profile's seam falls relative to it. Worth settling before any more
-   is spent on boundary curves: there is no point making the boundary of a face
-   exact while half the surface it should bound is still being written as
-   facets.
+   A declaration carrying the profile and the path as *curves* would not have
+   them. Membership on a screw sweep is an inversion, not a search - unwrap the
+   angle, subtract the station height, ask whether the remainder is inside the
+   profile - and it is exact, with no band to trust and no basin to fall into
+   the wrong side of. The profile's corners would be known rather than
+   discovered, and the STEP surface could be written from the true form instead
+   of from a fitted net.
+
+   `declare_grid` earns its place where there is no closed form, which is its
+   stated rationale and still true of a general polyhedron. But it is the
+   weakest tier of the declaration channel and it is currently the only one a
+   sweep has - `step-band-family.scad` computes an exact profile and an exact
+   helix, emits a polyhedron, and throws both away. A `declare_sweep` taking
+   them directly would be a tier above it rather than a replacement for it, and
+   on this evidence it is the one worth adding.
 
 1. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
    suite that noticed the chorded trim; every census figure was identical before
