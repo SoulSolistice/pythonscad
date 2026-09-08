@@ -1292,7 +1292,124 @@ declared one of them faulty. It matters because the two need opposite responses 
 c06 is geometry to fix, c11 is a face shape to make palatable - and because a
 crosscheck row alone cannot tell them apart. Only the round trip can.
 
-### What SOLIDWORKS objects to on c11, and it is ours
+### c11, chased to the end: five whys, four of them wrong
+
+Written up in full because four of the five steps were refuted, and the
+refutations cost more than the answer did. The section that follows this one is
+what the first pass concluded; it is wrong, and it is left standing with this
+correction above it because the way it was wrong is the instructive part.
+
+**Observation.** `-FaultDetail` names the entities rather than counting them,
+and c11 has two *different* faults, not one:
+
+| entity | kind | code | where |
+| --- | --- | --- | --- |
+| face 1 | bspline | 30 | the sweep |
+| face 3 | plane, area 1156 | 13 | z = 0, the base cap |
+| edge 454 | curve | 13 | (17.0300, 8.7376, 0) |
+
+The first pass saw only the bspline row and built a fix for it. The plane was
+there all along.
+
+**Why 1 - is the code 13 edge degenerate in our file?** No. c11-analytic has
+**zero** edges whose two vertices coincide and **zero** locations carrying more
+than one of its 763 vertices. The shortest edge in the file is 0.0065 mm.
+
+That also refutes what this document says two sections down - that code 13 is
+"exactly how this exporter bounds a face closed round the axis: one seam, used
+once in either direction". There is no such edge in this file. The conclusion
+drawn from it, "it is the seam representation rather than the surfaces", does
+not follow for c11.
+
+**Why 2 - does SOLIDWORKS merge sub-tolerance vertices and make one itself?**
+No. The faulty edge is ours, #761, matched to SOLIDWORKS' reported centre to
+four decimals, and it is **0.231 mm** long. A *shorter* edge on the same face,
+0.200 mm, is not flagged. Length is not the discriminator.
+
+**Why 3 - is it the new SURFACE_CURVE trim entity?** Partly: #761 bounds the
+sweep and the base plane, and is written as a `SURFACE_CURVE` over a `LINE` with
+a `PCURVE` on the B-spline. `validatestep.py` checks a pcurve against its 3D
+curve only on cylinders and cones - "only the two this exporter writes a fitted
+pcurve on" - so a pcurve on a B-spline or a plane is checked by nothing here.
+That gap is real and worth closing whatever the cause turns out to be.
+
+**Why 4 - is it that the curve carries one pcurve where it should carry two?**
+No. 522 of the file's 581 `SURFACE_CURVE`s carry exactly one pcurve on a
+B-spline, and 59 carry two. The faulty edge is one of the 522. One flagged out
+of 522 identical in that respect is not a discriminator.
+
+**Why 5 - does the shell hold together at a tolerance we choose?** No, and this
+is the answer. `step-occt-strict.py` resets every subshape to 1e-6 and asks
+again:
+
+```text
+file                          granted     bad faces    bad edges
+c11-swept-grid-analytic.stp   0.060891    7/11         0/1544
+c11-swept-grid-faceted.stp    0.000000    0/534        0/2710
+```
+
+The analytic file only closes because OpenCASCADE widened its tolerances by up
+to **0.0609 mm** on the way in. Seven of its eleven faces do not hold without
+that slack; the faceted control needs none. That is not a new defect - it is the
+chorded boundary the band family was built to measure: a fitted face is bounded
+by the mesh's own polyline, so it sags off its own surface by up to a station's
+sagitta, and 0.0609 is that sagitta. SOLIDWORKS is sewing a shell whose faces
+stand that far apart, and both fault codes are downstream of it.
+
+So c11 belongs with the band family and not with the tangent-break story below.
+
+### The fix that was built for the wrong cause, and what it measured
+
+Worth keeping because two of its measurements are useful and one is a trap.
+
+The first diagnosis was the profile's creases: a sweep's profile is a polyline -
+c11's is a trapezoid turning 116.6, 63.4, 63.4, 116.6 degrees - so the four
+spans meet at three tangent breaks *inside* one face, where a B-rep puts a
+sharp edge between two faces. That reasoning is sound as far as it goes, and a
+coupon built to isolate it confirms the mechanism. The same 2x2x10 tube, volume
+exactly 40 by construction:
+
+| written as | SOLIDWORKS faults | SOLIDWORKS volume |
+| --- | --- | --- |
+| one face, creases inside | 1, code 30 | 39.9479 |
+| one face per span, one surface each | **0** | **40.0000** |
+| one face per span, all on one surface | 0 | 39.9306 |
+
+Two things there are worth carrying:
+
+- **A face SOLIDWORKS does not complain about can still be measured wrongly.**
+  The third row reports no fault and is 0.17% out. "faults=0" is necessary and
+  nowhere near sufficient, which is the same lesson c06 taught with a 14% error
+  and a clean report.
+- **The volume error appears with the fault.** Row one is both faulty and wrong,
+  which is how a flagged face and a wrong mass property come as a pair.
+
+On the real c11 the fix did not work. Per-span faces still report codes 13/30 -
+because, as Why 5 says, the cause was never the creases - and SOLIDWORKS' volume
+got *worse*, 13478 against 14401.
+
+And the variant that restricts each face's surface to its own span, which is the
+row that measured exactly on the coupon, is **wrong on real geometry**. A
+standalone ridge is a screw sweep, and in cylindrical coordinates the Jacobian
+is r and does not depend on z, so the pitch drops out and Pappus applies
+exactly: `turns * 2pi * A * (R + dc)` = **480.940136** for A = 2.56 and a
+centroid radius of 19.9333.
+
+| written as | OpenCASCADE | vs derived |
+| --- | --- | --- |
+| per-span faces, full surface | 480.939221 | 1.9e-6 |
+| per-span faces, restricted surface | 520.216397 | **+8.2%** |
+
+The restricted variant is the one SOLIDWORKS liked best on the real part -
+16660.53 against a 14401.26 that everything else agreed was wrong - and it is
+8.2% out on the only version of this shape whose volume can be derived. It is
+the cleanest example this project has produced of the rule at the top of this
+document: **a kernel preferring a file is not evidence the file is right.**
+Without the derivable ridge it would have shipped.
+
+All of it was reverted.
+
+### What the first pass concluded, which Why 1 above refutes
 
 Reported at import: 1 fault, 2 faulty faces, 1 faulty edge, codes 13 and 30 -
 `swEdgeVerticesTouch` and `swTopolNotG1Continuous`. The sweep face is the one a

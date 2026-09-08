@@ -1129,32 +1129,56 @@ intersection curve both landed on 2026-09-07. What is left:
    sphere is not `(4/3)pi r^3`"), argued for in prose, and confirmed by
    OpenCASCADE to six figures. Every check was downstream of the same mistaken
    premise. That entry is now a warning rather than an example.
-3. **A swept face is one face with creases inside it, and SOLIDWORKS objects.**
-   Found on the 2026-09-08 interop run, on `c11-swept-grid`. The declared sweep
-   is written as a single B-spline face, degree 1 across the profile, so the
-   profile's four spans meet at three tangent breaks *inside* the face; and
-   because the profile is closed, its two v-boundaries are the same curve in
-   space while the surface is spelled `v_closed = .F.`. SOLIDWORKS flags the
-   whole ridge and reports `swEdgeVerticesTouch` and `swTopolNotG1Continuous` -
-   the two codes those two properties would produce.
+3. **c11's faults are the chorded boundary, and the sweep needs 0.0609 mm of
+   slack to close.** Chased to the end on 2026-09-08 and written up as five
+   whys in `step-interop-validation.md`; four of the five were refuted. The
+   answer is that `step-occt-strict.py` fails 7 of 11 faces at 1e-6, because a
+   fitted face is bounded by the mesh's own polyline and sags off its own
+   surface by a station's sagitta. It belongs with the band family, not with
+   the tangent-break story.
 
-   The body survives - OpenCASCADE measures SOLIDWORKS' rewrite at 16663.29
-   against our 16658.03 - but the reported volume does not, coming back 13.5%
-   low over a face the kernel will not integrate. See "c11 is not c06" in
-   `step-interop-validation.md`; c06 loses the geometry itself and this does
-   not, so they need opposite fixes.
+   Three things fell out of it worth acting on:
 
-   The fix is to emit one face per profile span, each G1 in its interior with
-   real edges at the corners. That removes the coincident seam for free. It
-   wants a fixture asserting the face count per span before any of it, and the
-   interop run is the only thing that will confirm it.
+   - **`validatestep.py` checks a pcurve against its 3D curve only on cylinders
+     and cones.** A pcurve on a B-spline or a plane is checked by nothing. c11
+     writes 581 `SURFACE_CURVE`s, all of them on B-splines. That gap should be
+     closed whatever the cause of the faults.
+   - **The `-FaultDetail` TSV should be read before any theory is formed.** It
+     names entity, kind and location; the count alone hid the fact that c11 has
+     two unrelated faults, one on the sweep and one on a planar cap, and a whole
+     fix was built for the wrong one of them.
+   - **Import *time* is a diagnostic and is not recorded.** A file SOLIDWORKS is
+     happy with opens in seconds and one it has to work at takes minutes, which
+     is a signal available before any fault count. `step-interop-solidworks.ps1`
+     times nothing; one Stopwatch around `LoadFile4` and a column would have it.
 
-4. **The twist.** `linear_extrude`'s walls are the last thing its parameters
+4. **c06 imports cleanly and comes in inside out.** Noticed by eye on
+   2026-09-08: SOLIDWORKS reports no fault at all on `c06-partial-torus`, and
+   its inner fillet is *concave* where the model has it convex. That sits
+   beside the 14% volume shortfall this coupon has always had, and a fillet
+   turned the wrong way would explain a deficit of roughly that shape. Worth
+   taking together rather than separately, and worth taking once there is an
+   import with no faulty faces to compare against.
+
+5. ~~**A swept face is one face with creases inside it**~~ - **tried and
+   refuted, 2026-09-08.** The reasoning was that a polyline profile creases a
+   face in its interior where a B-rep wants an edge, and that is true: a coupon
+   isolating it goes from one fault and a 0.13% volume error to no fault and an
+   exact volume when split per span. On the real c11 it changed nothing - still
+   codes 13/30 - because the cause is item 3, not this.
+
+   Keep two results from it. Restricting each face's surface to its own span
+   measured *exactly* on the coupon and is **8.2% wrong** on a derivable ridge,
+   while being the variant SOLIDWORKS liked best: the sharpest instance yet of a
+   kernel preferring a wrong file. And a face SOLIDWORKS reports no fault on can
+   still be measured 0.17% wrong, so "faults=0" is necessary and not sufficient.
+
+6. **The twist.** `linear_extrude`'s walls are the last thing its parameters
    determine that is not declared - see "declaring the planes, and what each
    extrude parameter does with them" for why `slices` and `$fn` are not the
    obstacle and `GridSurface` is the mechanism.
 
-5. **What still rests on the mesh**, measured 2026-09-08 and not yet acted on.
+7. **What still rests on the mesh**, measured 2026-09-08 and not yet acted on.
    Curved geometry with no declaration at all: `minkowski()` declares nothing
    (a rounded cube exports as 142 planes); `hull()` declares its inputs but not
    the blend it creates, so a hull of two spheres arrives as 28 recognised cones;
