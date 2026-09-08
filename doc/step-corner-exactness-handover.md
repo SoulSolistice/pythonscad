@@ -13,7 +13,12 @@ optional reading.
 **Branch `claude/step-corner-fixtures-iwpzh3`, green.** Verify before changing
 anything, and again after:
 
-    ctest --test-dir build -R step        # 44 tests, all passing 2026-09-08
+    ctest --test-dir build -R step        # 50 tests, all passing 2026-09-08
+
+Run it under the machine's own locale. `LC_ALL=C` was used here for a while to
+get past a decimal-comma problem that is now fixed in `export_step.cc`, and it
+breaks five UTF-8 filename tests of its own - neither locale is a blanket
+answer, and the exporter no longer needs one.
 
 Two things that make that number a lie if they are missing:
 
@@ -24,6 +29,130 @@ Two things that make that number a lie if they are missing:
 - lid10 is the blast-radius specimen and is *not* in the suite. It needs
   `-p examples/step_test/lid10.json -P "New set 1"`; without those you get the
   default component and every number is incomparable.
+
+## Session of 2026-09-08, and what it changed
+
+A day that began on a sphere and ended two levels below it. Six commits of code,
+and the reason to read this before the list below is that most of the day was
+spent on things that turned out to be symptoms.
+
+**What landed.**
+
+- `sphere()` closes at its poles. It was exported as a spherical face beside two
+  planar caps - the mesh's, not the model's - and measured 0.0035% short. It is
+  now one face bounded by its seam meridian, and SOLIDWORKS reads it at
+  `(4/3)pi r^3` and `4 pi r^2` to the digit.
+- `export_step.cc` holds `LC_ALL`'s numeric part at `"C"` for the export. Every
+  other exporter did; STEP did not, so on a German machine three fixtures failed
+  on a decimal comma while their numbers agreed exactly.
+- `GridSurface::project` descends. It took whatever step the normal equation
+  asked for: 1038 of 44959 projections came out *worse* than their own coarse
+  start, the worst 3.90 mm to 11.90 mm on a 2 mm ridge.
+- `GridSurface::project` starts inside a span. It sampled `v` at span
+  boundaries, which on a polyline profile are corners where the derivative does
+  not exist, so the descent stalled there. Fixing it took the band family's
+  claim from 960 facets to 1826 and recovered the upper flank of every sweep.
+- `BezierPatchSurface::project` is guarded the same way. Never a defect there,
+  because twenty-five restarts hid it, but the same arithmetic.
+- `declare_sweep`, a profile carried along a helix declared as the *shape*.
+  Membership is an inversion rather than a search: exact, no band.
+
+**Two things that were tried, measured, and reverted.** Both are written up
+where they were measured, and both are worth reading before proposing them
+again:
+
+- *Splitting a sweep into one face per profile span.* The creases are real - the
+  profile is a trapezoid - and a coupon confirms the mechanism. On the real
+  model it changed nothing, because the cause was elsewhere. The variant that
+  restricted each face's surface to its own span measured **exactly** on the
+  coupon and was **8.2% wrong** on a derivable ridge, while being the variant
+  SOLIDWORKS graded best. The cleanest instance this project has produced of a
+  kernel preferring a wrong file.
+- *Extending the crossing curve to declared sweeps.* All three steps built. 210
+  exact crossing curves moved the granted slack by **nothing**, because a
+  crossing curve fixes only the edges that are a crossing and one chorded edge
+  is enough to fail a face. It also opened the shell - 420 edges used once -
+  because `along` is built from `rawBoundaryCycles` while the grid emitter walks
+  `patch.runs`.
+
+**What the measurements say now.** Codes 13 and 30 - the two that prompted both
+of those attempts - are **gone from both real parts** after the projection
+fixes. Recognition improved by four to forty times across the band family. The
+fault *count* is unchanged at six files, which is the point: it is the wrong
+number to read alone.
+
+### Method, learned the hard way
+
+Five whys with the branches written down before measuring, and each link checked
+against something that is not the thing under test. On `c11` four of five links
+were refuted, including one this repository had had in its own documentation
+since 2026-09-02. The first impression - a tangent break - was real, mechanically
+confirmed on a coupon, and not the cause.
+
+Three habits that paid, and one that cost:
+
+- **Read `-FaultDetail` before forming a theory.** The count alone hid that c11
+  has two unrelated faults, one on a sweep and one on a planar cap, and a whole
+  fix was built for the wrong one.
+- **Report what was recognised beside any fault count.** `faults=0` over a sweep
+  that is half faceted is a much weaker result than it looks, and this document
+  reported one as though it were not. `scripts/step-interop-kit.py` now checks
+  the analytic face count against a derived expectation for four coupons and
+  stops if it moves.
+- **A control that removes one variable beats any amount of reasoning.** The
+  standalone ridge - the same sweep with no wall to cut it - located the sweep
+  defect in one run by claiming all four spans where the fused one claimed two.
+- **The cost:** the short edges were measured early, the answer "none below
+  1e-3" was taken, and the distribution was not looked at. It was the
+  distribution that mattered.
+
+### Where to start next, in order
+
+1. **Code 17 is now the only fault code in the kit that stands alone**, on f02,
+   f04 and both real parts. It has never been diagnosed. Everything the
+   5-why method needs is in place: `-FaultDetail` names the entity, the
+   standalone-ridge control isolates the boolean, and the derived screw-sweep
+   volume `turns * 2pi * A * (R + dc)` adjudicates. That is the next thread.
+2. **`declare_sweep` is landed but nothing in the suite uses it.** It needs a
+   fixture of its own with derived expectations - the screw sweep's volume is a
+   closed form, so this is one of the few sweeps whose `VOLUME:` can be stated -
+   and `step-band-family.scad` computes an exact profile and helix before
+   throwing both away, so it is the obvious first caller.
+3. **The crossing curve, revisited.** Worth reopening now and not before: the
+   slack it was meant to pay off is the *boundary* of a face, and until this
+   week half the surface inside that boundary was missing. With the sweeps
+   recognised, the measurement means something it did not mean then. Land it on
+   its own merits - 210 edges made exact is a result - and judge it on whether
+   it moves code 17, not on the slack.
+4. **`c06` imports clean and inside out.** Noticed by eye: no faults, and the
+   inner fillet concave where the model has it convex, beside a 14% volume
+   deficit a turned fillet would explain.
+5. **Import time is a diagnostic the driver does not record.** A file SOLIDWORKS
+   is happy with opens in seconds; one it has to work at takes minutes. One
+   Stopwatch around `LoadFile4` and a column.
+
+### A prompt to start the next session with
+
+> Read `doc/step-corner-exactness-handover.md`, then
+> `doc/step-interop-validation.md` from "Run 2026-09-08b" onwards, then
+> `doc/step-export-testing.md`. The branch is green; verify with
+> `ctest --test-dir build -R step` before changing anything, and run it under
+> the machine's own locale rather than `LC_ALL=C`, which breaks the UTF-8
+> filename tests.
+>
+> Take item 1: diagnose SOLIDWORKS fault code 17, which after the projection
+> fixes of 2026-09-08 is the only code left standing alone in the coupon kit -
+> on `f02-band-fn032`, `f04-band-fn064`, `r01-lid10` and `r02-bayonet`.
+>
+> Work it as five whys with the branches named before each measurement, and
+> record the refuted ones - four of the five links in the last such chase were
+> wrong, and the refutations were worth more than the answer. Every expectation
+> must be derived from the model and never captured from a run; the derived
+> screw-sweep volume is `turns * 2pi * A * (R + dc)` and the standalone ridge in
+> the handover is the control that removes the boolean. Read `-FaultDetail`
+> before forming a theory, and report how much of each sweep was recognised
+> beside any fault count, because `faults=0` over a half-faceted sweep has been
+> mistaken for success in this file before.
 
 ### What an analytic face's boundary is now
 
