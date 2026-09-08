@@ -345,17 +345,17 @@ public:
    * only the facets a boolean never touched - 63 of 300 on a ridge cut at its
    * base - while the other 237 still lie on this surface and only lost their
    * original corners. */
-  [[nodiscard]] Vector3d evaluate(double u, double v) const;
+  [[nodiscard]] virtual Vector3d evaluate(double u, double v) const;
 
   /*! Closest point on the swept surface, by Newton from a coarse sample.
    *
    * Returns false when it does not converge, which the caller must treat as
    * "not on this surface" rather than as an answer. */
-  bool project(const Vector3d& pt, double& u, double& v) const;
+  virtual bool project(const Vector3d& pt, double& u, double& v) const;
 
   /*! Whether `pt` lies on the swept surface, as opposed to being one of the
    * points it was declared with. `tol` is absolute. */
-  [[nodiscard]] bool onSurface(const Vector3d& pt, double tol) const;
+  [[nodiscard]] virtual bool onSurface(const Vector3d& pt, double tol) const;
 
   /*! How far the swept surface departs from the facets that approximate it.
    *
@@ -412,6 +412,10 @@ public:
   bool closed_v = false;
   std::vector<Vector3d> net;
 
+protected:
+  /*! How many spans the profile has across it. See vspans() below. */
+  [[nodiscard]] int vspansCount() const { return vspans(); }
+
 private:
   /*! Positions rounded to a grid, so membership is a lookup rather than a scan
    * over every declared point for every vertex of the mesh. Rebuilt whenever
@@ -435,4 +439,65 @@ private:
   std::vector<Vector3d> poles;  // rows * cols, parallel to net
   double band = 0;              // see tessellationBand()
   int operator==(const Surface& other) override { return 0; }
+};
+
+/*! A profile swept along a helix, declared as the shape rather than as points.
+ *
+ * The one declaration on this channel that needs no projection to answer
+ * anything. `GridSurface` carries a grid of *stations*, interpolates them, and
+ * answers membership by Gauss-Newton onto that interpolant - so a tessellation
+ * band has to be trusted, a coarse sample has to find the right basin, and a
+ * profile corner is a place where the derivative does not exist. Each of those
+ * has cost a defect: a projection landing 11.9 mm from a 2 mm ridge, and half a
+ * sweep written as facets because the descent stalled on a corner.
+ *
+ * None of it is a property of the model. A profile swept along a helix has a
+ * closed form, and membership in it is an *inversion*: take the point's angle
+ * about the axis, work out which turn it belongs to, subtract that station's
+ * height, and ask whether what is left lies on the profile. Exact, O(profile),
+ * no tolerance beyond the one the caller states, and no basin to fall the wrong
+ * side of.
+ *
+ * It derives from GridSurface so that everything downstream - the recogniser,
+ * the emitter, `splineForm` - keeps working unchanged. The inherited net is a
+ * *rendering* of this surface for those consumers, sampled from the closed form
+ * rather than handed in; the declaration is the closed form, and the overrides
+ * below are what membership actually asks.
+ *
+ * The profile is closed and constant along the sweep. One that changes shape -
+ * `step-band-family` tapers its ridge in and out - is a different declaration
+ * and is not this one. */
+class SweepSurface : public GridSurface
+{
+public:
+  SweepSurface(const Vector3d& origin, const Vector3d& axis, const Vector3d& ref, double radius,
+               double pitch, double turns, std::vector<Vector2d> profile_in, int stations_in);
+
+  /*! Build one, or say why the arguments do not describe a sweep. Both front
+   * ends validate here, for the reason `GridSurface::fromRows` does. */
+  static std::shared_ptr<SweepSurface> make(const Vector3d& origin, const Vector3d& axis,
+                                            const Vector3d& ref, double radius, double pitch,
+                                            double turns, const std::vector<Vector2d>& profile_in,
+                                            int stations_in, std::string& why);
+
+  int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
+  [[nodiscard]] Vector3d evaluate(double u, double v) const override;
+  bool project(const Vector3d& pt, double& u, double& v) const override;
+  [[nodiscard]] bool onSurface(const Vector3d& pt, double tol) const override;
+  [[nodiscard]] std::shared_ptr<Surface> clone() const override;
+  bool transform(const Transform3d& mat) override;
+  [[nodiscard]] bool sameAs(const Surface& other) const override;
+
+  /*! Where the point sits in the sweep: how far along, and where in the profile
+   * plane belonging to that station. The whole of the exactness is here - a
+   * point is on the surface exactly when (`dr`, `dz`) is on the profile. */
+  void localCoords(const Vector3d& pt, double& t, double& dr, double& dz) const;
+
+  /*! Distance from (dr, dz) to the closed profile, and where along it. */
+  [[nodiscard]] double profileDistance(double dr, double dz, double *at = nullptr) const;
+
+  double radius = 0, pitch = 0, turns = 0;
+  Vector3d ref;  // where theta is measured from; unit, perpendicular to normdir
+  std::vector<Vector2d> profile;
+  int stations = 0;
 };

@@ -1106,3 +1106,248 @@ bool GridSurface::sameAs(const Surface& other) const
   }
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// SweepSurface: a profile carried along a helix, declared as the shape itself.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/*! The stations a sweep is rendered at, for the consumers that want a grid.
+ *
+ * Only the *written* surface depends on this. Membership does not, which is the
+ * whole point of the class, so this number is a rendering choice and not a
+ * tolerance anybody has to trust. */
+int sweepStations(double turns, int asked)
+{
+  const int least = std::max(8, int(std::ceil(fabs(turns) * 8)));
+  return std::max(least, asked);
+}
+
+/*! The sampled net, so the inherited GridSurface has something to interpolate. */
+std::vector<Vector3d> sweepNet(const Vector3d& origin, const Vector3d& axis, const Vector3d& ref,
+                               double radius, double pitch, double turns,
+                               const std::vector<Vector2d>& profile, int stations)
+{
+  const Vector3d other = axis.cross(ref);
+  std::vector<Vector3d> net;
+  net.reserve(std::size_t(stations) * profile.size());
+  for (int i = 0; i < stations; i++) {
+    const double t = stations > 1 ? double(i) / (stations - 1) : 0.0;
+    const double theta = 2 * M_PI * turns * t;
+    const double z = pitch * turns * t;
+    const Vector3d radial = ref * cos(theta) + other * sin(theta);
+    for (const auto& p : profile) {
+      net.push_back(origin + radial * (radius + p[0]) + axis * (z + p[1]));
+    }
+  }
+  return net;
+}
+
+/*! The reference direction, squared up against the axis. */
+Vector3d sweepRef(const Vector3d& axis, const Vector3d& ref)
+{
+  const Vector3d a = axis.normalized();
+  return (ref - a * ref.dot(a)).normalized();
+}
+
+}  // namespace
+
+SweepSurface::SweepSurface(const Vector3d& origin, const Vector3d& axis, const Vector3d& ref_in,
+                           double radius_in, double pitch_in, double turns_in,
+                           std::vector<Vector2d> profile_in, int stations_in)
+  : GridSurface(sweepStations(turns_in, stations_in), int(profile_in.size()),
+                sweepNet(origin, axis.normalized(), sweepRef(axis, ref_in), radius_in, pitch_in,
+                         turns_in, profile_in, sweepStations(turns_in, stations_in)),
+                true),
+    radius(radius_in),
+    pitch(pitch_in),
+    turns(turns_in),
+    profile(std::move(profile_in)),
+    stations(sweepStations(turns_in, stations_in))
+{
+  refpt = origin;
+  normdir = axis.normalized();
+  ref = sweepRef(axis, ref_in);
+}
+
+std::shared_ptr<SweepSurface> SweepSurface::make(const Vector3d& origin, const Vector3d& axis,
+                                                 const Vector3d& ref_in, double radius, double pitch,
+                                                 double turns, const std::vector<Vector2d>& profile_in,
+                                                 int stations_in, std::string& why)
+{
+  if (axis.norm() < 1e-12) {
+    why = "declare_sweep: the axis has no direction";
+    return nullptr;
+  }
+  const Vector3d a = axis.normalized();
+  const Vector3d r = ref_in - a * ref_in.dot(a);
+  if (r.norm() < 1e-9) {
+    why =
+      "declare_sweep: the reference direction is parallel to the axis, so there is no angle "
+      "for the profile to be measured from";
+    return nullptr;
+  }
+  if (profile_in.size() < 3) {
+    why = "declare_sweep: a closed profile needs at least three points, got " +
+          std::to_string(profile_in.size());
+    return nullptr;
+  }
+  if (!std::isfinite(radius) || !std::isfinite(pitch) || !std::isfinite(turns) || turns == 0) {
+    why = "declare_sweep: radius, pitch and turns have to be finite, and turns cannot be zero";
+    return nullptr;
+  }
+  for (std::size_t i = 0; i < profile_in.size(); i++) {
+    if (!std::isfinite(profile_in[i][0]) || !std::isfinite(profile_in[i][1])) {
+      why = "declare_sweep: profile point " + std::to_string(i) + " is not two finite numbers";
+      return nullptr;
+    }
+    // A repeated point leaves a zero length segment, which has no direction, and
+    // the distance to the profile would be ill defined at that corner.
+    const Vector2d& b = profile_in[(i + 1) % profile_in.size()];
+    if ((profile_in[i] - b).norm() < 1e-12) {
+      why = "declare_sweep: profile points " + std::to_string(i) + " and " +
+            std::to_string((i + 1) % profile_in.size()) + " are the same point";
+      return nullptr;
+    }
+  }
+  return std::make_shared<SweepSurface>(origin, a, r, radius, pitch, turns, profile_in, stations_in);
+}
+
+void SweepSurface::localCoords(const Vector3d& pt, double& t, double& dr, double& dz) const
+{
+  const Vector3d rel = pt - refpt;
+  const double along = rel.dot(normdir);
+  const Vector3d radial = rel - normdir * along;
+  const Vector3d other = normdir.cross(ref);
+  const double theta = atan2(radial.dot(other), radial.dot(ref));  // (-pi, pi]
+  const double frac = theta / (2 * M_PI);
+  // Which turn the point belongs to. A helix passes over the same angle once
+  // per turn, so the angle alone does not say; the station whose height is
+  // nearest does, and rounding picks it in one step rather than by searching.
+  const double k = pitch != 0 ? std::round(along / pitch - frac) : 0.0;
+  const double turn = frac + k;
+  t = turns != 0 ? turn / turns : 0.0;
+  dr = radial.norm() - radius;
+  dz = along - turn * pitch;
+}
+
+double SweepSurface::profileDistance(double dr, double dz, double *at) const
+{
+  const std::size_t n = profile.size();
+  double best = std::numeric_limits<double>::infinity();
+  double best_at = 0;
+  const Vector2d q(dr, dz);
+  for (std::size_t i = 0; i < n; i++) {
+    const Vector2d& a = profile[i];
+    const Vector2d& b = profile[(i + 1) % n];
+    const Vector2d e = b - a;
+    const double len2 = e.squaredNorm();
+    double s = len2 > 0 ? (q - a).dot(e) / len2 : 0.0;
+    s = std::clamp(s, 0.0, 1.0);
+    const double d = (a + e * s - q).norm();
+    if (d < best) {
+      best = d;
+      best_at = (double(i) + s) / double(n);
+    }
+  }
+  if (at != nullptr) *at = best_at;
+  return best;
+}
+
+Vector3d SweepSurface::evaluate(double u, double v) const
+{
+  u = std::clamp(u, 0.0, 1.0);
+  v = std::clamp(v, 0.0, 1.0);
+  const std::size_t n = profile.size();
+  const double s = v * double(n);
+  std::size_t i = std::size_t(s);
+  if (i >= n) i = n - 1;
+  const double f = s - double(i);
+  const Vector2d p = profile[i] + (profile[(i + 1) % n] - profile[i]) * f;
+  const double theta = 2 * M_PI * turns * u;
+  const double z = pitch * turns * u;
+  const Vector3d other = normdir.cross(ref);
+  const Vector3d radial = ref * cos(theta) + other * sin(theta);
+  return refpt + radial * (radius + p[0]) + normdir * (z + p[1]);
+}
+
+bool SweepSurface::project(const Vector3d& pt, double& u, double& v) const
+{
+  // An inversion, not a search: no coarse sample, no descent, nothing to
+  // converge and no basin to land in the wrong one of.
+  double t = 0, dr = 0, dz = 0;
+  localCoords(pt, t, dr, dz);
+  double at = 0;
+  profileDistance(dr, dz, &at);
+  u = std::clamp(t, 0.0, 1.0);
+  v = at;
+  return true;
+}
+
+bool SweepSurface::onSurface(const Vector3d& pt, double tol) const
+{
+  double t = 0, dr = 0, dz = 0;
+  localCoords(pt, t, dr, dz);
+  // Past either end of the sweep the surface is simply not there. The allowance
+  // is stated in the sweep's own parameter, so it means the same distance
+  // whatever the sweep's length.
+  const double per_turn = std::max(1e-9, hypot(2 * M_PI * radius, pitch));
+  const double slack = turns != 0 ? tol / (fabs(turns) * per_turn) : 0.0;
+  if (t < -slack || t > 1 + slack) return false;
+  return profileDistance(dr, dz) <= tol;
+}
+
+int SweepSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
+{
+  // No lookup of declared points and no tessellation band. The closed form
+  // answers this outright, and the only tolerance is the one the caller is
+  // entitled to state about its own mesh.
+  return onSurface(pt, membershipTolerance()) ? 1 : 0;
+}
+
+std::shared_ptr<Surface> SweepSurface::clone() const
+{
+  return std::make_shared<SweepSurface>(refpt, normdir, ref, radius, pitch, turns, profile, stations);
+}
+
+bool SweepSurface::transform(const Transform3d& mat)
+{
+  // A sweep survives a rigid motion with a uniform scale and nothing else. Any
+  // other map turns its circular path into an ellipse, which this form cannot
+  // state, and refusing is what the caller needs - see Surface::transform.
+  const Eigen::Matrix3d m = mat.linear();
+  const Eigen::Matrix3d mtm = m.transpose() * m;
+  const double scale2 = mtm(0, 0);
+  if (scale2 < 1e-18) return false;
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 3; j++) {
+      const double want = i == j ? scale2 : 0.0;
+      if (fabs(mtm(i, j) - want) > 1e-9 * scale2) return false;
+    }
+  }
+  const double scale = sqrt(scale2);
+  std::vector<Vector2d> moved = profile;
+  for (auto& q : moved) q *= scale;
+  *this = SweepSurface(mat * refpt, (m * normdir).normalized(), (m * ref).normalized(), radius * scale,
+                       pitch * scale, turns, moved, stations);
+  return true;
+}
+
+bool SweepSurface::sameAs(const Surface& other) const
+{
+  const auto *o = dynamic_cast<const SweepSurface *>(&other);
+  if (o == nullptr) return false;
+  if (profile.size() != o->profile.size()) return false;
+  if ((refpt - o->refpt).norm() > 1e-9) return false;
+  if ((normdir - o->normdir).norm() > 1e-9) return false;
+  if ((ref - o->ref).norm() > 1e-9) return false;
+  if (fabs(radius - o->radius) > 1e-9 || fabs(pitch - o->pitch) > 1e-9 ||
+      fabs(turns - o->turns) > 1e-9) {
+    return false;
+  }
+  for (std::size_t i = 0; i < profile.size(); i++) {
+    if ((profile[i] - o->profile[i]).norm() > 1e-9) return false;
+  }
+  return true;
+}

@@ -142,6 +142,8 @@ PyObject *python_declare_cylinder(PyObject *self, PyObject *args, PyObject *kwar
 PyObject *python_declare_grid(PyObject *self, PyObject *args, PyObject *kwargs);
 PyObject *python_oo_declare_cylinder(PyObject *obj, PyObject *args, PyObject *kwargs);
 PyObject *python_oo_declare_grid(PyObject *obj, PyObject *args, PyObject *kwargs);
+PyObject *python_declare_sweep(PyObject *self, PyObject *args, PyObject *kwargs);
+PyObject *python_oo_declare_sweep(PyObject *obj, PyObject *args, PyObject *kwargs);
 PyObject *python_declare_sphere(PyObject *self, PyObject *args, PyObject *kwargs);
 PyObject *python_oo_declare_sphere(PyObject *obj, PyObject *args, PyObject *kwargs);
 PyObject *python_declare_cone(PyObject *self, PyObject *args, PyObject *kwargs);

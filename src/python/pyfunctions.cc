@@ -1004,6 +1004,17 @@ PyMethodDef PyOpenSCADFunctions[] = {
   {"declare_torus", (PyCFunction)python_declare_torus, METH_VARARGS | METH_KEYWORDS,
    "Declare that part of an object was meant to be a torus.\n"
    "declare_torus(obj, r_major=10, r_minor=3, center=[0, 0, 0], axis=[0, 0, 1])"},
+  {"declare_sweep", (PyCFunction)python_declare_sweep, METH_VARARGS | METH_KEYWORDS,
+   "Declare a closed profile carried along a helix, as the shape rather than\n"
+   "as points. declare_grid hands over the stations a generator emitted, and\n"
+   "every membership test afterwards is a projection onto an interpolation of\n"
+   "them - which needs a tolerance and can land in the wrong place. A sweep\n"
+   "has a closed form, so membership is an inversion instead: exact, with no\n"
+   "band to trust. Use it wherever the model knows its profile and its helix,\n"
+   "and keep declare_grid for a sweep that has neither.\n"
+   "profile is a list of (dr, dz) pairs measured from radius, on the axis.\n"
+   "declare_sweep(obj, profile=[[0.6,-1.2],[-1,-0.4],[-1,0.4],[0.6,1.2]],\n"
+   "              radius=20, pitch=6, turns=1.5, origin=[0,0,0], axis=[0,0,1])"},
   {"declare_grid", (PyCFunction)python_declare_grid, METH_VARARGS | METH_KEYWORDS,
    "Declare the ordered grid of points a generator swept, for geometry no\n"
    "primitive can name - a helical thread, a cam ramp, anything built with\n"
@@ -1023,56 +1034,59 @@ PyMethodDef PyOpenSCADMethods[] = {
     OO_METHOD_ENTRY(front, "Front Object") OO_METHOD_ENTRY(up, "Up Object") OO_METHOD_ENTRY(
       down, "Lower Object")
 
-      OO_METHOD_ENTRY(union, "Union Object") OO_METHOD_ENTRY(difference, "Difference Object")
-        OO_METHOD_ENTRY(intersection, "Intersection Object")
+      OO_METHOD_ENTRY(union, "Union Object") OO_METHOD_ENTRY(
+        difference, "Difference Object") OO_METHOD_ENTRY(intersection, "Intersection Object")
 
-          OO_METHOD_ENTRY(rotx, "Rotx Object") OO_METHOD_ENTRY(roty, "Roty Object") OO_METHOD_ENTRY(
-            rotz, "Rotz Object")
+        OO_METHOD_ENTRY(rotx, "Rotx Object") OO_METHOD_ENTRY(roty, "Roty Object") OO_METHOD_ENTRY(
+          rotz, "Rotz Object")
 
-            OO_METHOD_ENTRY(scale, "Scale Object") OO_METHOD_ENTRY(mirror, "Mirror Object")
-              OO_METHOD_ENTRY(multmatrix, "Multmatrix Object") OO_METHOD_ENTRY(
-                divmatrix, "Divmatrix Object") OO_METHOD_ENTRY(offset, "Offset Object")
+          OO_METHOD_ENTRY(scale, "Scale Object") OO_METHOD_ENTRY(mirror, "Mirror Object")
+            OO_METHOD_ENTRY(multmatrix, "Multmatrix Object") OO_METHOD_ENTRY(
+              divmatrix, "Divmatrix Object") OO_METHOD_ENTRY(offset, "Offset Object")
 #if defined(ENABLE_EXPERIMENTAL) && defined(ENABLE_CGAL)
-                OO_METHOD_ENTRY(roof, "Roof Object")
+              OO_METHOD_ENTRY(roof, "Roof Object")
 #endif
-                  OO_METHOD_ENTRY(color, "Color Object") OO_METHOD_ENTRY(
-                    separate, "Split into separate Objects") OO_METHOD_ENTRY(export, "Export Object")
+                OO_METHOD_ENTRY(color, "Color Object") OO_METHOD_ENTRY(
+                  separate, "Split into separate Objects") OO_METHOD_ENTRY(export, "Export Object")
 
-                    OO_METHOD_ENTRY(linear_extrude, "Linear_extrude Object")
-                      OO_METHOD_ENTRY(rotate_extrude, "Rotate_extrude Object") OO_METHOD_ENTRY(
-                        path_extrude, "Path_extrude Object") OO_METHOD_ENTRY(resize, "Resize Object")
+                  OO_METHOD_ENTRY(linear_extrude, "Linear_extrude Object") OO_METHOD_ENTRY(
+                    rotate_extrude, "Rotate_extrude Object") OO_METHOD_ENTRY(path_extrude,
+                                                                             "Path_extrude Object")
+                    OO_METHOD_ENTRY(resize, "Resize Object")
 
-                        OO_METHOD_ENTRY(explode, "Explode a solid with a vector") OO_METHOD_ENTRY(
-                          mesh, "Mesh Object") OO_METHOD_ENTRY(inside, "check if given point is inside")
-                          OO_METHOD_ENTRY(bbox, "Evaluate Bound Box of object")
-                            OO_METHOD_ENTRY(faces, "Create Faces list") OO_METHOD_ENTRY(
-                              children, "Return Tupple from solid children")
-                              OO_METHOD_ENTRY(edges, "Create Edges list") OO_METHOD_ENTRY(
-                                oversample, "Oversample Object") OO_METHOD_ENTRY(debug,
-                                                                                 "Debug Object Faces")
-                                OO_METHOD_ENTRY(repair, "Make solid watertight") OO_METHOD_ENTRY(
-                                  fillet, "Fillet Object") OO_METHOD_ENTRY(align,
-                                                                           "Align Object to another")
+                      OO_METHOD_ENTRY(explode, "Explode a solid with a vector") OO_METHOD_ENTRY(
+                        mesh,
+                        "Mesh Object") OO_METHOD_ENTRY(inside, "check if given point is inside")
+                        OO_METHOD_ENTRY(bbox, "Evaluate Bound Box of object") OO_METHOD_ENTRY(
+                          faces, "Create Faces list")
+                          OO_METHOD_ENTRY(children, "Return Tupple from solid children") OO_METHOD_ENTRY(
+                            edges, "Create Edges list") OO_METHOD_ENTRY(oversample, "Oversample Object")
+                            OO_METHOD_ENTRY(debug, "Debug Object Faces") OO_METHOD_ENTRY(
+                              repair,
+                              "Make solid watertight") OO_METHOD_ENTRY(fillet, "Fillet Object")
+                              OO_METHOD_ENTRY(align, "Align Object to another")
 
-                                  OO_METHOD_ENTRY(highlight, "Highlight Object")
-                                    OO_METHOD_ENTRY(background, "Background Object") OO_METHOD_ENTRY(
-                                      only, "Only Object") OO_METHOD_ENTRY(show, "Show Object")
-                                      OO_METHOD_ENTRY(projection, "Projection Object")
-                                        OO_METHOD_ENTRY(pull, "Pull Obejct apart") OO_METHOD_ENTRY(
-                                          wrap,
-                                          "Wrap Object around Cylinder") OO_METHOD_ENTRY(render,
-                                                                                         "Render Object")
-                                          OO_METHOD_ENTRY(clone, "Clone Object") OO_METHOD_ENTRY(
-                                            hasattr, "Check if an attribute exists")
-                                            OO_METHOD_ENTRY(setattr, "Sets an attribute on a solid")
-                                              OO_METHOD_ENTRY(getattr, "Gets an attribute from a solid")
-                                                OO_METHOD_ENTRY(_repr_mimebundle_,
-                                                                "Jupyter display hook")
-                                                  OO_METHOD_ENTRY(dict, "return all dictionary")
-                                                    OO_METHOD_ENTRY(declare_cylinder,
-                                                                    "Declare a cylindrical surface")
-                                                      OO_METHOD_ENTRY(declare_grid,
-                                                                      "Declare a swept point grid")
+                                OO_METHOD_ENTRY(highlight, "Highlight Object") OO_METHOD_ENTRY(
+                                  background,
+                                  "Background Object") OO_METHOD_ENTRY(only, "Only Object")
+                                  OO_METHOD_ENTRY(show, "Show Object") OO_METHOD_ENTRY(
+                                    projection,
+                                    "Projection Object") OO_METHOD_ENTRY(pull, "Pull Obejct apart")
+                                    OO_METHOD_ENTRY(wrap, "Wrap Object around Cylinder")
+                                      OO_METHOD_ENTRY(render, "Render Object")
+                                        OO_METHOD_ENTRY(clone, "Clone Object") OO_METHOD_ENTRY(
+                                          hasattr, "Check if an attribute exists")
+                                          OO_METHOD_ENTRY(setattr, "Sets an attribute on a solid")
+                                            OO_METHOD_ENTRY(getattr, "Gets an attribute from a solid")
+                                              OO_METHOD_ENTRY(_repr_mimebundle_, "Jupyter display hook")
+                                                OO_METHOD_ENTRY(dict, "return all dictionary")
+                                                  OO_METHOD_ENTRY(declare_cylinder,
+                                                                  "Declare a cylindrical surface")
+                                                    OO_METHOD_ENTRY(declare_grid,
+                                                                    "Declare a swept point grid")
+                                                      OO_METHOD_ENTRY(
+                                                        declare_sweep,
+                                                        "Declare a profile swept along a helix")
                                                         OO_METHOD_ENTRY(declare_sphere,
                                                                         "Declare a spherical surface")
                                                           OO_METHOD_ENTRY(declare_torus,

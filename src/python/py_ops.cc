@@ -530,6 +530,94 @@ static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int c
   return python_declare_core(obj, std::move(surface));
 }
 
+static PyObject *python_declare_sweep_core(PyObject *obj, PyObject *profile, double radius, double pitch,
+                                           double turns, PyObject *origin, PyObject *axis, PyObject *ref,
+                                           int stations)
+{
+  // As with declare_grid, only the extraction is language specific; what makes
+  // the arguments a sweep is decided in SweepSurface::make, so both front ends
+  // reject the same declarations for the same reasons.
+  if (profile == nullptr || !PySequence_Check(profile) || PyUnicode_Check(profile)) {
+    PyErr_SetString(PyExc_TypeError, "declare_sweep: profile must be a sequence of (dr, dz) pairs");
+    return nullptr;
+  }
+  const Py_ssize_t n = PySequence_Size(profile);
+  std::vector<Vector2d> pts;
+  pts.reserve(n < 0 ? 0 : std::size_t(n));
+  for (Py_ssize_t i = 0; i < n; i++) {
+    auto item = py_owned(PySequence_GetItem(profile, i));
+    double a = 0, b = 0;
+    double unused_z = 0, unused_w = 0;
+    if (item.get() == nullptr ||
+        python_vectorval(item.get(), 2, 2, &a, &b, &unused_z, &unused_w, nullptr)) {
+      PyErr_Format(PyExc_TypeError, "declare_sweep: profile point %zd must be two numbers", i);
+      return nullptr;
+    }
+    pts.emplace_back(a, b);
+  }
+
+  Vector3d o(0, 0, 0), ax(0, 0, 1), rf(1, 0, 0);
+  if (origin != nullptr && origin != Py_None) {
+    double x = 0, y = 0, z = 0;
+    if (python_vectorval(origin, 3, 3, &x, &y, &z)) {
+      PyErr_SetString(PyExc_TypeError, "declare_sweep: origin must be three numbers");
+      return nullptr;
+    }
+    o = Vector3d(x, y, z);
+  }
+  if (axis != nullptr && axis != Py_None) {
+    double x = 0, y = 0, z = 0;
+    if (python_vectorval(axis, 3, 3, &x, &y, &z)) {
+      PyErr_SetString(PyExc_TypeError, "declare_sweep: axis must be three numbers");
+      return nullptr;
+    }
+    ax = Vector3d(x, y, z);
+  }
+  if (ref != nullptr && ref != Py_None) {
+    double x = 0, y = 0, z = 0;
+    if (python_vectorval(ref, 3, 3, &x, &y, &z)) {
+      PyErr_SetString(PyExc_TypeError, "declare_sweep: ref must be three numbers");
+      return nullptr;
+    }
+    rf = Vector3d(x, y, z);
+  }
+
+  std::string why;
+  auto surface = SweepSurface::make(o, ax, rf, radius, pitch, turns, pts, stations, why);
+  if (surface == nullptr) {
+    PyErr_SetString(PyExc_TypeError, why.c_str());
+    return nullptr;
+  }
+  return python_declare_core(obj, std::move(surface));
+}
+
+PyObject *python_declare_sweep(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"obj",    "profile", "radius", "pitch",    "turns",
+                    "origin", "axis",    "ref",    "stations", nullptr};
+  PyObject *obj = nullptr, *profile = nullptr, *origin = nullptr, *axis = nullptr, *ref = nullptr;
+  double radius = 0, pitch = 0, turns = 0;
+  int stations = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOddd|OOOi", kwlist, &obj, &profile, &radius, &pitch,
+                                   &turns, &origin, &axis, &ref, &stations)) {
+    return nullptr;
+  }
+  return python_declare_sweep_core(obj, profile, radius, pitch, turns, origin, axis, ref, stations);
+}
+
+PyObject *python_oo_declare_sweep(PyObject *obj, PyObject *args, PyObject *kwargs)
+{
+  char *kwlist[] = {"profile", "radius", "pitch", "turns", "origin", "axis", "ref", "stations", nullptr};
+  PyObject *profile = nullptr, *origin = nullptr, *axis = nullptr, *ref = nullptr;
+  double radius = 0, pitch = 0, turns = 0;
+  int stations = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oddd|OOOi", kwlist, &profile, &radius, &pitch, &turns,
+                                   &origin, &axis, &ref, &stations)) {
+    return nullptr;
+  }
+  return python_declare_sweep_core(obj, profile, radius, pitch, turns, origin, axis, ref, stations);
+}
+
 PyObject *python_declare_grid(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   char *kwlist[] = {"obj", "points", "closed", nullptr};
