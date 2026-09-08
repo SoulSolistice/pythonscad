@@ -1585,21 +1585,47 @@ the analytic surfaces alone.
 
 The faults are not monotonic in the band. fn 32 and fn 64 carry two faulty faces
 each; fn 24, 48 and 96 carry none. A finer tessellation is not safer and a
-coarser one is not worse - 96 is clean and 64 is not. What 24, 48 and 96 have in
-common is that they are multiples of 24 and the other two are not, which is the
-sliver mechanism recorded above wearing a different hat: where the two
-tessellations divide into one another the crossings land on shared vertices, and
-where they do not they land arbitrarily close to them.
+coarser one is not worse - 96 is clean and 64 is not.
 
-And the volume disagreement does not shrink with tessellation either: 0.52,
-0.04, 0.14, -0.23, 0.07 per cent, with no trend and a sign change in the middle.
-Refining the mesh does not walk SOLIDWORKS towards OpenCASCADE.
+**And the clean ones are clean because less was attempted.** Opening f05 in
+SOLIDWORKS shows it: the sweep is fault-free and part of it is still a sawtooth
+of flat facets. Counting what each member refused puts it beyond doubt:
+
+| fn | facets left faceted | faulty faces |
+| --- | --- | --- |
+| 24 | 11 | 0 |
+| 32 | **0** | **2** |
+| 48 | 40 | 0 |
+| 64 | **0** | **2** |
+| 96 | 127 | 0 |
+
+Every member that refused some facets is fault-free, and both members that
+refused none are faulty. The refusal is the rule that drops a facet whose corner
+is further off the fit than four times the amount the claim is typically off -
+at fn 96, four times 0.0024, catching 127 of them by up to 0.0180. Where that
+rule fires it removes exactly the geometry SOLIDWORKS would have objected to;
+where the stray distribution has no such outlier, at fn 32 and 64, the marginal
+facets are claimed and the objection follows.
+
+So `faults=0` is being *bought* here, with faces left faceted, and a fault count
+compared across the family without that column beside it says the opposite of
+what it appears to. It is the same lesson as c06 from the other end: there, a
+clean report over wrong geometry; here, a clean report over geometry that was
+never attempted.
+
+An earlier version of this section read the split as tessellation alignment -
+24, 48 and 96 being multiples of 24 and the other two not. That was numerology.
+The refusal rule explains it mechanically and predicts it, and the alignment
+story predicts nothing.
+
+The volume disagreement does not shrink with tessellation either: 0.52, 0.04,
+0.14, -0.23, 0.07 per cent, no trend and a sign change in the middle. Refining
+the mesh does not walk SOLIDWORKS towards OpenCASCADE.
 
 So "up to what tessellation band does this importer sew" has an answer, and it
-is that the band is not the variable. Alignment between the two tessellations
-is a better candidate, and it is testable: the prediction is that a sweep whose
-station count divides the wall's `$fn` is clean and one that does not is not,
-independent of how fine either is.
+is that the band is not the variable. What the family actually measures is the
+outlier refusal, and the honest reading of its five rows is that this exporter
+keeps SOLIDWORKS happy by declining to write the facets it is least sure of.
 
 ## The ladder, and why half a fix is worse than none
 
