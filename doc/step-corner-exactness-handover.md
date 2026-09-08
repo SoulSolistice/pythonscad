@@ -1137,6 +1137,34 @@ intersection curve both landed on 2026-09-07. What is left:
    surface by a station's sagitta. It belongs with the band family, not with
    the tangent-break story.
 
+   **And it is a declared crossing written as a chord.** The sliver vertices are
+   not points any generator emitted - they sit 0.2000 mm from the nearest ridge
+   station - but they lie at `r = 19.200000000000`, on the declared cylinder to
+   between 0 and 3.55e-15. So they are exactly where two *declared* surfaces
+   cross: `cylinder(r=19.2)` and the `declare_grid()` sweep.
+
+   That is item 2 of "what a boundary can be" at the top of this document - the
+   curve where two declared surfaces cross, found from the two declarations by
+   Newton and written as a SURFACE_CURVE with a PCURVE on each. What is actually
+   written is item 5, a chord: a SURFACE_CURVE over a `LINE` carrying **one**
+   pcurve, on the B-spline only. The tier the exact machinery refuses a face for.
+
+   The reason it lands there is a single gate. The crossing search is
+   quadric-to-quadric - "the arc of the curve where two declared **quadrics**
+   cross" - and `StepKernel.cc` excludes a sweep from being the other party
+   outright:
+
+       if (dynamic_cast<const GridSurface *>(other.get()) != nullptr) continue;
+
+   So the 0.0609 mm of slack is not the price of a sweep being hard. It is the
+   price of a crossing both of whose surfaces are declared being written as
+   chords because one of them is not a quadric. Extending the crossing curve to
+   a declared sweep against a declared quadric is the targeted fix, and it is a
+   far better bet than anything tried on 2026-09-08: it would put the boundary
+   exactly on both faces, which is what the slack is paying for, and the slivers
+   would stop mattering because a chord's length only matters when the chord is
+   the geometry.
+
    Three things fell out of it worth acting on:
 
    - **`validatestep.py` checks a pcurve against its 3D curve only on cylinders
