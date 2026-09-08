@@ -913,11 +913,18 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
   double best = std::numeric_limits<double>::infinity();
   double bu = 0, bv = 0;
   const int usamples = std::max(rows * 2, 8);
-  const int vsamples = std::max(vspans() * 2, 2);
+  // Four samples inside each span, at its quarter points, and never on a span
+  // boundary. A profile is a polyline, so every boundary is a corner where the
+  // v derivative does not exist; sampling one and starting the descent there
+  // gives a finite difference straddling the corner, which points nowhere
+  // useful, and the iteration stops on the spot. Landing inside a span instead
+  // means the piece being descended is smooth, which is what Gauss-Newton
+  // needs.
+  const int vsamples = std::max(vspans() * 4, 4);
   for (int i = 0; i <= usamples; i++) {
     const double su = double(i) / usamples;
-    for (int j = 0; j <= vsamples; j++) {
-      const double sv = double(j) / vsamples;
+    for (int j = 0; j < vsamples; j++) {
+      const double sv = (double(j) + 0.5) / vsamples;
       const double d = (evaluate(su, sv) - pt).squaredNorm();
       if (d < best) {
         best = d;
