@@ -1261,14 +1261,69 @@ future run reads 5333.3632 as a defect and goes looking for one on our side.
 ### What is unchanged and still open
 
 - `c06-partial-torus`, above.
-- `c11-swept-grid`, SOLIDWORKS 13.55% below OpenCASCADE, no closed form to
-  adjudicate between them.
+- `c11-swept-grid`, and it is **not** the same failure as c06 - see below.
 - **`r01-lid10-analytic` round-trips to something that is not a solid at all**,
   and whose volume "exceeds its own bounding box" - every Cone, Cylinder and
   Plane gone from what SOLIDWORKS wrote back. `r02-bayonet-analytic` loses 7
   cylinders and gains 2.4% of volume. Both are pre-existing, both are on the
   reference parts rather than the coupons, and neither is touched by this work.
 - The band family still degrades to splines on the way back out at every `$fn`.
+
+### c11 is not c06: a wrong number over an intact body
+
+Both coupons have been recorded the same way - "SOLIDWORKS disagrees with
+OpenCASCADE by 13-14%" - and the round trip separates them. Read the last column
+against the second:
+
+| coupon | OCCT, our file | SOLIDWORKS reports | OCCT, SOLIDWORKS' rewrite |
+| --- | --- | --- | --- |
+| c06 partial torus | 11154.933573 | 9575.796900 | **9575.796869** |
+| c11 swept grid | 16658.031755 | 14401.261100 | **16663.289647** |
+
+`c06` writes back the solid it reported: OpenCASCADE measures SOLIDWORKS' own
+export at 9575.7969, the same 14% short. The geometry is genuinely destroyed on
+import, which is what the sections above concluded and it stands.
+
+`c11` does not. SOLIDWORKS reports 14401.26 and then exports a body that
+OpenCASCADE measures at 16663.29 - our own 16658.03 to 0.03%. **The body is
+intact; the reported volume is wrong.** That is consistent with the face being
+flagged: mass properties are integrated over the faces, and SOLIDWORKS has
+declared one of them faulty. It matters because the two need opposite responses -
+c06 is geometry to fix, c11 is a face shape to make palatable - and because a
+crosscheck row alone cannot tell them apart. Only the round trip can.
+
+### What SOLIDWORKS objects to on c11, and it is ours
+
+Reported at import: 1 fault, 2 faulty faces, 1 faulty edge, codes 13 and 30 -
+`swEdgeVerticesTouch` and `swTopolNotG1Continuous`. The sweep face is the one a
+user sees highlighted, which is the whole helical ridge in one piece.
+
+Two structural properties of that face would produce exactly those two codes:
+
+- **Its seam columns coincide.** All 60 rows of the control net have their first
+  and last control point identical - `(20.6, 0, -1.2)` for row 0 - while the
+  surface is written `v_closed = .F.`. The profile is declared closed, so the
+  tube is spelled as an open rectangle whose two v-boundaries are the same curve
+  in space. An edge there has both vertices in one place: `swEdgeVerticesTouch`.
+- **Its interior is creased.** Degree 1 across v with knot multiplicities
+  `(2,1,1,1,2)` is a polyline, so the four profile spans meet at three tangent
+  breaks *inside a single face*. Most kernels expect a face to be G1 in its
+  interior and creases to be edges between faces: `swTopolNotG1Continuous`.
+
+The match between the two properties and the two codes is strong but it is an
+inference, not a proof - nothing here made SOLIDWORKS name the entity. What
+would settle it is splitting the sweep into one face per profile span, each G1
+inside and each bounded by real edges at the corners, and re-importing. That is
+also the fix if the inference is right, and it removes the coincident seam for
+free, because no face then spans more than one profile span.
+
+Worth noting what this is *not*: the ridge protruding below the cylinder's base
+and into its wall is the model. `step-declare-grid.py` sweeps a profile of
+`dr` -1.0..+0.6 about `R = 20` from `z = -1.2` to `10.2`, over a cylinder of
+`r = 19.2, h = 14`, and the union keeps the overhang. A part whose ridge starts
+1.2 below the base and 0.2 inside the wall is the coupon behaving as written -
+it is the case the fixture exists for, a sweep fused onto a wall rather than
+standing alone.
 
 ## The ladder, and why half a fix is worse than none
 

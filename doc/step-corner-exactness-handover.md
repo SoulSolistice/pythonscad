@@ -1129,12 +1129,32 @@ intersection curve both landed on 2026-09-07. What is left:
    sphere is not `(4/3)pi r^3`"), argued for in prose, and confirmed by
    OpenCASCADE to six figures. Every check was downstream of the same mistaken
    premise. That entry is now a warning rather than an example.
-3. **The twist.** `linear_extrude`'s walls are the last thing its parameters
+3. **A swept face is one face with creases inside it, and SOLIDWORKS objects.**
+   Found on the 2026-09-08 interop run, on `c11-swept-grid`. The declared sweep
+   is written as a single B-spline face, degree 1 across the profile, so the
+   profile's four spans meet at three tangent breaks *inside* the face; and
+   because the profile is closed, its two v-boundaries are the same curve in
+   space while the surface is spelled `v_closed = .F.`. SOLIDWORKS flags the
+   whole ridge and reports `swEdgeVerticesTouch` and `swTopolNotG1Continuous` -
+   the two codes those two properties would produce.
+
+   The body survives - OpenCASCADE measures SOLIDWORKS' rewrite at 16663.29
+   against our 16658.03 - but the reported volume does not, coming back 13.5%
+   low over a face the kernel will not integrate. See "c11 is not c06" in
+   `step-interop-validation.md`; c06 loses the geometry itself and this does
+   not, so they need opposite fixes.
+
+   The fix is to emit one face per profile span, each G1 in its interior with
+   real edges at the corners. That removes the coincident seam for free. It
+   wants a fixture asserting the face count per span before any of it, and the
+   interop run is the only thing that will confirm it.
+
+4. **The twist.** `linear_extrude`'s walls are the last thing its parameters
    determine that is not declared - see "declaring the planes, and what each
    extrude parameter does with them" for why `slices` and `$fn` are not the
    obstacle and `GridSurface` is the mechanism.
 
-4. **What still rests on the mesh**, measured 2026-09-08 and not yet acted on.
+5. **What still rests on the mesh**, measured 2026-09-08 and not yet acted on.
    Curved geometry with no declaration at all: `minkowski()` declares nothing
    (a rounded cube exports as 142 planes); `hull()` declares its inputs but not
    the blend it creates, so a hull of two spheres arrives as 28 recognised cones;
