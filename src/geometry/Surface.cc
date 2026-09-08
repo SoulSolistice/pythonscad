@@ -928,7 +928,23 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
   }
   // Then Gauss-Newton on the squared distance, by finite differences: the
   // surface is piecewise polynomial and this only has to converge locally.
+  //
+  // Every step has to *improve* the distance, and that is not a refinement of
+  // the method but the whole of its correctness here. Gauss-Newton on a swept
+  // surface is solving a normal equation whose matrix goes near singular
+  // wherever the two parameter directions run nearly parallel - along a crest,
+  // at a profile corner - and the step it then asks for is enormous. Taken on
+  // trust it lands somewhere else entirely on the sweep, and the iteration
+  // settles there quite happily.
+  //
+  // Measured on step-band-family at $fn 96 before this guard: of 44959
+  // projections, 1038 came out *worse* than the coarse sample they started
+  // from, the worst going from 3.90 mm to 11.90 mm on a ridge 2 mm deep. Those
+  // are the points a boolean made along the wall, and they are exactly the ones
+  // a declared sweep needs to recognise - so half of the sweep was left
+  // faceted, on a surface it lies on to the width of a line.
   const double h = 1e-6;
+  double best_d = (evaluate(bu, bv) - pt).squaredNorm();
   for (int iter = 0; iter < 24; iter++) {
     const Vector3d r = evaluate(bu, bv) - pt;
     const Vector3d du =
@@ -940,12 +956,25 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
     const Eigen::Vector2d rhs(-r.dot(du), -r.dot(dv));
     if (fabs(jtj.determinant()) < 1e-20) break;
     const Eigen::Vector2d step = jtj.inverse() * rhs;
-    const double nu = std::clamp(bu + step[0], 0.0, 1.0);
-    const double nv = std::clamp(bv + step[1], 0.0, 1.0);
-    const bool settled = fabs(nu - bu) < 1e-12 && fabs(nv - bv) < 1e-12;
-    bu = nu;
-    bv = nv;
-    if (settled) break;
+    // Backtrack until the step is an improvement, and give up rather than take
+    // it if none of the halvings is. Eight halvings takes a step to 1/256 of
+    // itself, well below the parameter spacing of any grid this exporter sees.
+    bool moved = false;
+    double scale = 1.0;
+    for (int back = 0; back < 8; back++, scale *= 0.5) {
+      const double nu = std::clamp(bu + step[0] * scale, 0.0, 1.0);
+      const double nv = std::clamp(bv + step[1] * scale, 0.0, 1.0);
+      const double nd = (evaluate(nu, nv) - pt).squaredNorm();
+      if (nd < best_d) {
+        const bool settled = fabs(nu - bu) < 1e-12 && fabs(nv - bv) < 1e-12;
+        bu = nu;
+        bv = nv;
+        best_d = nd;
+        moved = !settled;
+        break;
+      }
+    }
+    if (!moved) break;
   }
   u = bu;
   v = bv;
