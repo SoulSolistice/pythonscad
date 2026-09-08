@@ -1358,6 +1358,37 @@ stand that far apart, and both fault codes are downstream of it.
 
 So c11 belongs with the band family and not with the tangent-break story below.
 
+**Where the slack is spent, seen by eye first.** Opening the imported part and
+looking along the sweep's boundary shows the vertices bunching in places -
+clusters of near-coincident points with a visible kink, against an otherwise
+even spacing. They are real, and measuring them says where:
+
+```text
+                edges  shortest   median    <0.01mm  <0.05mm  strict 1e-6  SW faults
+analytic          772  0.006470   1.2125          2       18   7/11 bad           1
+faceted control  1355  0.006474   1.2580          2       19   0/534 bad          0
+```
+
+Every one of the twenty shortest edges sits at **r = 19.200 exactly** - the
+cylinder's own radius - in mirror pairs about the ridge's mid-height, which is
+where the helical ridge's boundary crosses the wall. The median edge is 1.21 mm,
+so these are twenty to a hundred and ninety times shorter than their neighbours.
+
+They are **not the exporter's**. The faceted control carries the same slivers to
+six decimals and imports with no fault at all. What separates the two files is
+what the slivers bound: between two planar facets a 0.0065 mm edge is harmless,
+and on the boundary of a curved face that already stands up to 0.0609 mm off
+where it should be, it is where a kernel runs out of room. The slivers come from
+the boolean, upstream of everything here; the slack is ours.
+
+That points at two different fixes and they are not alternatives - the first is
+upstream of this exporter, and the second is the band family's open question:
+
+- fewer slivers out of the boolean, which is not this code's to give; or
+- an analytic face whose boundary does not need a tenth of a millimetre of
+  slack to close, which is what "up to what tessellation band does this importer
+  sew" has been asking all along.
+
 ### The fix that was built for the wrong cause, and what it measured
 
 Worth keeping because two of its measurements are useful and one is a trap.
