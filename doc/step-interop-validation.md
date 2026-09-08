@@ -1518,6 +1518,43 @@ and into its wall is the model. `step-declare-grid.py` sweeps a profile of
 it is the case the fixture exists for, a sweep fused onto a wall rather than
 standing alone.
 
+### The band family across tessellation, and it is not the band
+
+The run of 2026-09-08 has all five members, which is the first time the question
+the family was built for has been asked of SOLIDWORKS end to end.
+
+| coupon | faces | faults | OpenCASCADE | SOLIDWORKS | diff | round trip |
+| --- | --- | --- | --- | --- | --- | --- |
+| f01 fn 24 analytic | 149 | 0 | 19549.523161 | 19650.658400 | +0.52% | degraded-to-spline |
+| f02 fn 32 analytic | 366 | **2, code 17** | 19575.511046 | 19582.583800 | +0.04% | degraded-to-spline |
+| f03 fn 48 analytic | 313 | 0 | 19521.523850 | 19548.050300 | +0.14% | degraded-to-spline |
+| f04 fn 64 analytic | 362 | **2, code 17** | 19545.492757 | 19501.081800 | -0.23% | degraded-to-spline |
+| f05 fn 96 analytic | 662 | 0 | 19507.342752 | 19520.925500 | +0.07% | degraded-to-spline |
+
+Every faceted control agrees with OpenCASCADE to 1e-7 or better at every
+tessellation, so the calibration holds throughout and the rows above are about
+the analytic surfaces alone.
+
+**Two things, and neither is what the family was expecting.**
+
+The faults are not monotonic in the band. fn 32 and fn 64 carry two faulty faces
+each; fn 24, 48 and 96 carry none. A finer tessellation is not safer and a
+coarser one is not worse - 96 is clean and 64 is not. What 24, 48 and 96 have in
+common is that they are multiples of 24 and the other two are not, which is the
+sliver mechanism recorded above wearing a different hat: where the two
+tessellations divide into one another the crossings land on shared vertices, and
+where they do not they land arbitrarily close to them.
+
+And the volume disagreement does not shrink with tessellation either: 0.52,
+0.04, 0.14, -0.23, 0.07 per cent, with no trend and a sign change in the middle.
+Refining the mesh does not walk SOLIDWORKS towards OpenCASCADE.
+
+So "up to what tessellation band does this importer sew" has an answer, and it
+is that the band is not the variable. Alignment between the two tessellations
+is a better candidate, and it is testable: the prediction is that a sweep whose
+station count divides the wall's `$fn` is clean and one that does not is not,
+independent of how fine either is.
+
 ## The ladder, and why half a fix is worse than none
 
 The snap of §26 in `doc/step-export-status.md` regressed the bayonet from **1
