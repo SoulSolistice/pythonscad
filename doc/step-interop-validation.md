@@ -1730,6 +1730,41 @@ is that the band is not the variable. What the family actually measures is the
 outlier refusal, and the honest reading of its five rows is that this exporter
 keeps SOLIDWORKS happy by declining to write the facets it is least sure of.
 
+## Run 2026-09-08b: after the two projection fixes
+
+The same 48 files, same session settings, after `GridSurface::project` was made
+to descend and to start inside a span rather than on a profile corner. Only the
+rows that moved:
+
+| coupon, analytic | faces before | faults | faces after | faults |
+| --- | --- | --- | --- | --- |
+| f01 band fn 24 | 149 | 0 | **17** | 0 |
+| f02 band fn 32 | 366 | 2, code 17 | **9** | 2, code 17 |
+| f03 band fn 48 | 313 | 0 | **49** | 0 |
+| f04 band fn 64 | 362 | 2, code 17 | **39** | 2, code 17 |
+| f05 band fn 96 | 662 | 0 | **153** | 0 |
+| r01 lid10 | 1088 | 1, codes 7/13/21/30 | **797** | 1, codes **7/17/21** |
+| r02 bayonet | 359 | 1, codes 7/13/21/30 | **68** | 1, codes **7/17/21** |
+
+Two things, and the second is the one that matters.
+
+**Recognition improves by a lot.** A coupon's face count as SOLIDWORKS reads it
+is a fair measure of how much was written as surface rather than as facets, and
+the band family falls by between four and forty times. The bayonet goes from 359
+faces to 68. That is the upper flank of every sweep in the kit, which was being
+left faceted because a projection stalled on a profile corner.
+
+**Codes 13 and 30 are gone from both real parts.** `swEdgeVerticesTouch` and
+`swTopolNotG1Continuous` are the two this document spent a day on - the pair
+that prompted the crossing-curve work and the face-splitting attempt, neither of
+which moved them. Recognising the missing half of each sweep did. What is left
+on the real parts is 7/17/21, and 17 is now the only code anywhere in the kit
+that a coupon carries alone.
+
+The fault *count* is unchanged at six files, which is why it is the wrong number
+to read on its own - the same six files, carrying different faults over a
+markedly better solid.
+
 ## The ladder, and why half a fix is worse than none
 
 The snap of §26 in `doc/step-export-status.md` regressed the bayonet from **1
