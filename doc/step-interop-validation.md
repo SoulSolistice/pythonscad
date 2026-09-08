@@ -1374,12 +1374,39 @@ cylinder's own radius - in mirror pairs about the ridge's mid-height, which is
 where the helical ridge's boundary crosses the wall. The median edge is 1.21 mm,
 so these are twenty to a hundred and ninety times shorter than their neighbours.
 
-They are **not the exporter's**. The faceted control carries the same slivers to
-six decimals and imports with no fault at all. What separates the two files is
+The faceted control carries the same slivers to six decimals and imports with no
+fault at all, so the *sampling* is the boolean's. What separates the two files is
 what the slivers bound: between two planar facets a 0.0065 mm edge is harmless,
 and on the boundary of a curved face that already stands up to 0.0609 mm off
-where it should be, it is where a kernel runs out of room. The slivers come from
-the boolean, upstream of everything here; the slack is ours.
+where it should be, it is where a kernel runs out of room.
+
+**But the declaration does reach these vertices, and that is the sharper point.**
+A flat 96-gon facet spans r from 19.1897 at its middle to 19.2 at its own
+vertices, so a genuine mesh-to-mesh intersection point lands *inside* 19.2. In
+the faceted control it does:
+
+```text
+                  sliver length   endpoint radii
+faceted  control     0.006474     19.199789616 , 19.200000000
+         analytic    0.006470     19.200000000 , 19.200000000
+faceted  control     0.021310     19.199314583 , 19.200000000
+         analytic    0.021267     19.200000000 , 19.200000000
+```
+
+Every sliver in the control has one endpoint on a cylinder tessellation vertex
+and one 2.1e-04 to 6.9e-04 *inside* the circle. In the analytic export both are
+on r = 19.2 to 3.55e-15. The corner placement has already moved them onto the
+declared cylinder - this is the "corners moved where two declared owners cross"
+line in the report doing exactly its job.
+
+So the declaration is not missing. It corrects **where each vertex sits** and it
+does not touch **how many there are**: the sliver survives the move almost
+unchanged, 0.021310 becoming 0.021267. Positions come from the declarations;
+the sampling still comes from two tessellations intersecting. That is precisely
+what item 2 of "what a boundary can be" would settle, because a crossing curve
+derived from both declarations replaces the whole polyline and makes the vertex
+count irrelevant - and it is what a chord cannot do however exactly its two ends
+are placed.
 
 **Where the slivers come from, one level further down.** Two tessellations meet
 at r = 19.2 and they do not align: the ridge has 60 stations every 9.1525
