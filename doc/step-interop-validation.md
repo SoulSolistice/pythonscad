@@ -1657,6 +1657,36 @@ corners. That is worth knowing before reading anything else the band family
 says, because it means four of that family's five rows are measuring a taper
 rather than a band.
 
+**And SOLIDWORKS on the control, which corrects the paragraph above it.** Both
+variants at three tessellations, analytic and faceted, in one session:
+
+| model | facets refused | faulty faces | codes |
+| --- | --- | --- | --- |
+| tapered, fn 32 | 0 | 2 | 17 |
+| tapered, fn 64 | 0 | 2 | 17 |
+| tapered, fn 96 | 127 | 0 | - |
+| untapered, fn 32 | 0 | 2 | **13/30**, 16 faulty edges |
+| untapered, fn 64 | 0 | **0** | - |
+| untapered, fn 96 | 0 | **0** | - |
+
+Every faceted control in the set is clean, so the calibration holds throughout.
+
+The untapered models at fn 64 and 96 refuse **nothing** and are **clean**. That
+refutes the reading two paragraphs up, that `faults=0` was being bought by
+leaving facets out: here it is had for nothing. Within the tapered family the
+anti-correlation between refusals and faults was perfect and it was not causal -
+the refusals and the faults are both symptoms of the taper, and removing the
+taper removes the faults at fn 64 while leaving nothing refused.
+
+What the taper costs is therefore sharper than "it makes the exporter refuse
+facets". It is a fault source in SOLIDWORKS in its own right: code 17 at fn 32
+and 64, gone at fn 64 the moment the profile is made constant.
+
+fn 32 is the one that does not clear. It trades code 17 for **13/30 with sixteen
+faulty edges** - c11's signature, and the only rise in edge faults anywhere in
+this document. A sweep of constant profile at a coarse tessellation is its own
+case and is not explained here.
+
 The volume disagreement does not shrink with tessellation either: 0.52, 0.04,
 0.14, -0.23, 0.07 per cent, no trend and a sign change in the middle. Refining
 the mesh does not walk SOLIDWORKS towards OpenCASCADE.
