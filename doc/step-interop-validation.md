@@ -1657,6 +1657,40 @@ corners. That is worth knowing before reading anything else the band family
 says, because it means four of that family's five rows are measuring a taper
 rather than a band.
 
+**Count what was recognised, not what was refused.** Opening the untapered
+control shows only about half its sweep written as a surface and the rest a
+sawtooth of facets - on a model whose report says nothing was left faceted. Both
+statements are true, and the column used above was the wrong one. A facet leaves
+the claim two ways: refused as an outlier, which is what "left faceted" counts,
+and **cut across it** by the boolean, which is not counted there at all and is
+much the larger of the two.
+
+| model | claims whole | cut across it | left faceted | of the sweep written | faulty faces |
+| --- | --- | --- | --- | --- | --- |
+| tapered fn 32 | 367 | 285 | 0 | **56.3%** | 2, code 17 |
+| tapered fn 64 | 727 | 571 | 0 | **56.0%** | 2, code 17 |
+| tapered fn 96 | 1100 | 848 | 127 | 49.9% | 0 |
+| untapered fn 32 | 321 | 323 | 0 | 49.8% | 2, code 13/30 |
+| untapered fn 64 | 639 | 642 | 0 | 49.9% | 0 |
+| untapered fn 96 | 960 | 963 | 0 | 49.9% | 0 |
+
+Half of this ridge is inside the wall it is fused to - the profile's outer span
+sits past the bore radius - so the union cuts it there and about half the sweep's
+facets are cut ones. That much is structural and not a defect. What matters is
+that it is **half in every variant**, so "how much was recognised" is a column
+that has to be read beside any fault count: `faults=0` over a sweep that is half
+faceted is a much weaker result than it looks, and this document reported one.
+
+Read that way the six rows say something the refusal column could not. **The two
+faulty code-17 rows are the two that claimed more than half**, 56.3% and 56.0%;
+every row at 49.9% is clean of code 17, including the tapered fn 96 which the
+outlier refusal pulled down from 56% to 49.9%. The taper pushes the claim past
+what this exporter can support and the refusal, where it fires, pulls it back.
+
+The exception is untapered fn 32, which claims 49.8% and is faulty anyway - with
+codes 13/30 and sixteen faulty edges rather than code 17. A different failure at
+a different place, as its codes say, and unexplained.
+
 **And SOLIDWORKS on the control, which corrects the paragraph above it.** Both
 variants at three tessellations, analytic and faceted, in one session:
 
