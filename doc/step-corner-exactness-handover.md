@@ -1165,10 +1165,10 @@ intersection curve both landed on 2026-09-07. What is left:
      which is exactly why the same bug was fatal there and is not here.
 
      Not a defect on the evidence - the fillet coupons are clean in SOLIDWORKS
-     and c07 matches its derived volume to 1.4e-8 - but it is the same
-     arithmetic standing on a wider base, and adding the descent guard to it
-     would cost nothing. Worth doing before some future patch shape narrows the
-     base.
+     and c07 matches its derived volume to 1.4e-8 - but a wider base is not a
+     sound one, and a start spent wandering is a start not searching. **Guarded
+     on 2026-09-08** the same way, and nothing moved: c07 still 975.587014 over
+     26 faces, c08 still 740.753648, the same 1.1 to 1.9 seconds per coupon.
 
    **Approximate by construction, and correctly gated.** `fitCylinder`,
    `fitCone`, `fitRevolved`, `gridFromRegion`, `quadricOfPatch` - the whole
@@ -1178,9 +1178,13 @@ intersection curve both landed on 2026-09-07. What is left:
    design, and the design says so.
 
    The rule the survey suggests: a declaration should answer membership by
-   arithmetic, and where it cannot, it should say which tier it is in. Five of
-   the eight surfaces already do; the sixth now does; the seventh is defensible;
-   the eighth is a fit and admits it.
+   arithmetic, and where it cannot, it should say which tier it is in. Six of
+   the seven surfaces now do it by arithmetic, the seventh is a guarded search
+   over a wide base, and the fitting tier is a fit that admits it.
+
+   The one measurement worth keeping from all of it: an unguarded Gauss-Newton
+   step is not a rounding question. It moved a point 11.9 mm on a 2 mm feature,
+   and it did so silently, in a routine whose name promises the opposite.
 
 2. **`VOLUME:` deserves to be on more fixtures.** It is the only line in this
    suite that noticed the chorded trim; every census figure was identical before
