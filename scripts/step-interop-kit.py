@@ -228,6 +228,17 @@ def parameter_set(source):
 
 BAND_RE = re.compile(r"tessellation band of ([0-9.]+)")
 
+# How much of a declared sweep was actually written as a surface.
+#
+# "faults=0" over a sweep that is half faceted is a much weaker result than it
+# looks, and doc/step-interop-validation.md has recorded one as though it were
+# not - twice, once each way. A facet leaves the claim two ways: refused as an
+# outlier, and *cut across* by the boolean, and the second is much the larger.
+# So the kit records both numbers beside every file, and any fault count read
+# out of the CAD system has this column to be read against.
+CLAIM_RE = re.compile(r"sweep claims (\d+) facets whole, (\d+) cut across it")
+SPANS_RE = re.compile(r"facets lie over (\d+) of the profile's (\d+) spans")
+
 
 def band_of(stderr):
     """The tessellation band the exporter reported, which is the model's own.
@@ -245,6 +256,21 @@ def band_of(stderr):
     return max(bands) if bands else 0.0
 
 
+def claim_of(stderr):
+    """Facets the declared sweeps claimed whole, cut across, and as a share.
+
+    Summed over every declared sweep in the model, because a model may declare
+    more than one and the question - how much of what was declared came out as
+    surface - is about the model rather than about any single declaration.
+    """
+    pairs = [(int(a), int(b)) for a, b in CLAIM_RE.findall(stderr or "")]
+    whole = sum(a for a, _ in pairs)
+    cut = sum(b for _, b in pairs)
+    spans = SPANS_RE.findall(stderr or "")
+    covered = "; ".join("%s/%s" % (a, b) for a, b in spans)
+    return whole, cut, covered
+
+
 def export(binary, source, target, analytic, approx, extra=()):
     args = [binary, source, "-o", target, "--trust-python"]
     args += parameter_set(source)
@@ -254,7 +280,13 @@ def export(binary, source, target, analytic, approx, extra=()):
         if approx:
             args.append("--enable=step-approximate-surfaces")
     proc = subprocess.run(args, capture_output=True, text=True, cwd=ROOT)
-    return proc.returncode, (proc.stderr or "")
+    # Both streams, not just stderr. The exporter's report - the tessellation
+    # band, the sweep's claim, everything band_of() and claim_of() read - comes
+    # out on *stdout*, so reading stderr alone silently reports nothing: the
+    # `band` column has been 0.000000 for every file of every kit ever
+    # generated, and nothing noticed because a zero there reads as "no declared
+    # sweep in this coupon" for the twenty coupons that have none.
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
 def _unused():  # pragma: no cover
@@ -336,9 +368,12 @@ def main():
                 note = "FACES %d, EXPECTED %d - %s" % (faces, want[0], want[1])
                 face_mismatch.append("%s: %d faces, expected %d (%s)"
                                      % (name, faces, want[0], want[1]))
-            print("%-4s %-22s %-8s %5d faces  %s" % (
+            whole, cut, spans = claim_of(err)
+            claim = ("  sweep claims %d whole + %d cut = %.1f%% whole"
+                     % (whole, cut, 100.0 * whole / (whole + cut))) if whole + cut else ""
+            print("%-4s %-22s %-8s %5d faces  %s%s" % (
                 "ok" if ok and (want is None or faces == want[0]) else "BAD",
-                name, mode, faces, note))
+                name, mode, faces, note, claim))
             rows.append({
                 "coupon": name,
                 "mode": mode,
@@ -348,6 +383,12 @@ def main():
                 "validator": "ok" if ok else "FAILED",
                 # What this file is entitled to be off by. See band_of().
                 "band": "%.6f" % band,
+                # How much of the declaration reached the file. See claim_of().
+                "sweep_whole": whole,
+                "sweep_cut": cut,
+                "sweep_pct_whole": ("%.1f" % (100.0 * whole / (whole + cut))
+                                    if whole + cut else ""),
+                "sweep_spans": spans,
                 "faces": c.get("ADVANCED_FACE", 0),
                 "shells": c.get("CLOSED_SHELL", 0),
                 "plane": c.get("PLANE", 0),

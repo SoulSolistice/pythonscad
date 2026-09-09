@@ -62,14 +62,38 @@
   is the entire point of the analytic path, and no script answers it for a user.
 
 .NOTES
-  Two things about driving SOLIDWORKS from PowerShell, both learned the hard way:
+  Three things about driving SOLIDWORKS from PowerShell, all learned the hard way:
 
   1. It must already be running, started by hand. COM-activating it from a script
      yields a process that never finishes starting: every call returns
      TYPE_E_ELEMENTNOTFOUND for as long as you wait. A licence acquired in the
      user's own interactive session is what brings the API up.
 
-  2. The work has to happen in compiled C#, not in PowerShell. PowerShell binds
+  2. Do NOT kill this script while an import is in flight. On 2026-09-08 a
+     coupon hung SOLIDWORKS on its Open Progress dialog - idle, half an hour,
+     no CPU - and killing the driver took SOLIDWORKS with it: an access
+     violation in mfc140u.dll, twice, once on each attempt. Wait it out, or
+     accept losing the session and have the *user* start SOLIDWORKS again from
+     the desktop. Relaunching it with Start-Process does not do: that instance
+     attaches, answers RevisionNumber, reads its preferences, imports one file
+     and then deadlocks with its main window disabled and no dialog visible,
+     which is note 1 above biting from a different direction.
+
+     If you need a run that survives one bad file, invoke this script once per
+     file - -Only takes a regex - so a hang costs one import rather than the
+     whole kit.
+
+     -FaultDetail is the riskier half and it is separable. It re-imports every
+     file a *second* time, and on 2026-09-08 SOLIDWORKS died in the middle of
+     that pass with nothing killed and nobody touching it - the TSV ends in
+     "Der RPC-Server ist nicht verfuegbar" and the event log has the same
+     mfc140u.dll access violation. The main pass already reports faults,
+     faulty faces and faulty edges per file; only the *identity* of the
+     entities needs the second one. So take the counts first, then re-run with
+     -FaultDetail and -Only over the handful of files whose counts were not
+     zero.
+
+  3. The work has to happen in compiled C#, not in PowerShell. PowerShell binds
      COM late, through IDispatch, and SOLIDWORKS 2026 answers GetIDsOfNames with
      TYPE_E_ELEMENTNOTFOUND for every name - including RevisionNumber - even
      though QueryInterface for ISldWorks succeeds. Early binding against
@@ -181,6 +205,60 @@ public class SwKitRunner
         object o = Marshal.GetActiveObject("SldWorks.Application");
         _sw = (ISldWorks)o;
         return _sw.RevisionNumber();
+    }
+
+    // What Tools > Options > Import was actually set to, read from SOLIDWORKS
+    // rather than typed in by whoever started the run.
+    //
+    // -ImportSettings is a label and nothing checks it, which is the point of
+    // the parameter - but a label is only as good as the person writing it, and
+    // doc/step-interop-validation.md carries a whole run recorded as
+    // "as-configured-2026-09-08-unverified" and therefore comparable with
+    // nothing. These preferences are readable through the same API the rest of
+    // this file uses, so there is no reason for that to happen twice. The label
+    // stays: it says what the operator *meant*, and this says what was set.
+    //
+    // Knit is the one that decides whether a shell becomes a solid, and
+    // AnalyticalConversion is the one that decides whether SOLIDWORKS re-reads
+    // our B-splines as quadrics of its own - so a run that moves either of them
+    // is not comparable with one that did not, however it was labelled.
+    public static string Preferences()
+    {
+        var p = new List<string>();
+        Tog(p, "solid+surface", (int)swUserPreferenceToggle_e.swImportNeutral_SolidandSurface);
+        Tog(p, "free-curves", (int)swUserPreferenceToggle_e.swImportNeutral_FreeCurvesAndPoints);
+        Tog(p, "run-diagnostics", (int)swUserPreferenceToggle_e.swImportNeutralRunDiagnostics);
+        Tog(p, "analytical-conversion", (int)swUserPreferenceToggle_e.swImportNeutralAnalyticalConversion);
+        Tog(p, "attributes", (int)swUserPreferenceToggle_e.swImportNeutral_AttributesAndProperties);
+        Tog(p, "step-config-data", (int)swUserPreferenceToggle_e.swImportStepConfigData);
+        Tog(p, "multibody-as-parts", (int)swUserPreferenceToggle_e.swImportMultBodyAsPartData);
+        Int(p, "knit", (int)swUserPreferenceIntegerValue_e.swImportNeutral_KnitOption,
+            new string[] { "form-solids", "do-not-knit" });
+        Int(p, "units", (int)swUserPreferenceIntegerValue_e.swImportNeutralUnits,
+            new string[] { "file-units", "template-units" });
+        Int(p, "assembly-mapping", (int)swUserPreferenceIntegerValue_e.swImportNeutralAssemblyStructureMapping,
+            new string[] { "default", "multiple-parts", "multibody-part" });
+        Int(p, "check-and-repair", (int)swUserPreferenceIntegerValue_e.swImportCheckAndRepair, null);
+        Int(p, "custom-tolerance", (int)swUserPreferenceIntegerValue_e.swUseCustomizedImportTolerance, null);
+        return string.Join(" ", p.ToArray());
+    }
+
+    static void Tog(List<string> p, string name, int id)
+    {
+        try { p.Add(name + "=" + (_sw.GetUserPreferenceToggle(id) ? "on" : "off")); }
+        catch { p.Add(name + "=?"); }
+    }
+
+    static void Int(List<string> p, string name, int id, string[] names)
+    {
+        try
+        {
+            int v = _sw.GetUserPreferenceIntegerValue(id);
+            p.Add(name + "=" + (names != null && v >= 0 && v < names.Length
+                                ? names[v]
+                                : v.ToString(CultureInfo.InvariantCulture)));
+        }
+        catch { p.Add(name + "=?"); }
     }
 
     // One CSV-ish record per file: file,opened,errors,warnings,body_type,
@@ -515,6 +593,9 @@ catch {
            "window, then run this again. (" + $_.Exception.GetBaseException().Message + ")")
 }
 Write-Host ("attached to SOLIDWORKS revision " + $revision)
+$prefs = [SwKitRunner]::Preferences()
+Write-Host ("import options as set:      " + $prefs)
+Write-Host ("import options as labelled: " + $ImportSettings)
 [SwKitRunner]::SaveBack = [bool]$RoundTrip
 [SwKitRunner]::MaxWalkFaces = $MaxWalkFaces
 if ($RoundTrip) { Write-Host "round trip: each coupon will be saved back as <coupon>_SW.STEP" }
@@ -530,6 +611,7 @@ foreach ($f in $files) {
         body_type = $p[4]; solid_bodies = $p[5]; surface_bodies = $p[6]
         faces = $p[7]; volume_mm3 = $p[8]; area_mm2 = $p[9]; note = $p[10]
         import_settings = $ImportSettings
+        import_options = $prefs
     }
     $rows += $row
     if ($row.opened -eq 'yes') {
