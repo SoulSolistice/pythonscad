@@ -1905,3 +1905,827 @@ green. What found it was the per-entity fault dump, the round-trip comparator,
 the three-way volume cross-check and the strict re-check at a tolerance we
 choose - four instruments built in one session, three of which contradicted a
 conclusion the fourth had suggested. That is the point of having more than one.
+
+## Code 17, chased as five whys: the population is right, the trigger is not
+
+Run 2026-09-08c. `swFaceBadEdge` was the only code left standing alone in the
+kit after the projection fixes - on `f02-band-fn032`, `f04-band-fn064` and both
+real parts - and it had never been diagnosed. This is that chase, branches
+written down before each measurement and the refuted ones kept, because on the
+c11 chase four of five links were wrong and the refutations were the part worth
+having.
+
+**Read "What SOLIDWORKS actually said" at the end before acting on any of
+this.** The chain below is measured end to end on our own files and it is
+wrong at its last link. Six predictions were put to SOLIDWORKS: two held, four
+failed, and three separate coupons carry the sliver this section blames -
+one of them **bit for bit identical** to f02's - and import without a fault.
+What survives is the *population*: `-FaultDetail`, read fresh at last, names
+the faulty faces on f02 and f04 as the swept B-spline and the bore cylinder,
+which is exactly the pair this chase converged on. What does not survive is the
+trigger.
+
+### The enum, read out of the installed SOLIDWORKS rather than remembered
+
+`swFaultEntityErrorCode_e`, reflected out of
+`api/redist/SolidWorks.Interop.swconst.dll`:
+
+```text
+ 7 swEdgeVertexNotLie      11 swEdgeSpcurveOutOfTol   13 swEdgeVerticesTouch
+15 swEdgeBadWire           16 swFaceBadVertex         17 swFaceBadEdge
+18 swFaceBadEdgeOrder      20 swFaceBadLoops          21 swFaceSelfIntersecting
+24 swFaceFaceInconsistency 30 swTopolNotG1Continuous  35 swTopolMissingGeometry
+36 swEdgeTouchEdge
+```
+
+The neighbours do most of Why 1's work before anything is measured. SOLIDWORKS
+has a **separate** code for a bad vertex, a bad edge *order*, bad loops, a
+pcurve out of tolerance and a wire that does not close. So 17 is what is left
+when an edge is individually well formed, correctly ordered, inside a closed
+wire, with a pcurve that agrees - and is still not acceptable **to the face**.
+That is a relation between an edge and a face, not a property of either.
+
+That also corrects a line in this document's own trap list: it calls "codes 13,
+21 and 30 informational, 7 and 17 structural". 21 is `swFaceSelfIntersecting`,
+which is not an informational code by any reading.
+
+### The observation the model makes before any file is opened
+
+`step-band-family.scad` fixes everything but `FN`. The ridge takes
+`steps = max(24, round(FN*turns))` stations over `turns*360` degrees, and the
+wall is an `FN`-gon, so:
+
+```text
+turns = height/pitch = 40/12 = 10/3
+ridge angular step = 360*turns/steps = 1200/steps
+wall  facet  step  = 360/FN
+
+FN   steps   ridge step   facet step   FN*turns   aligned
+24     80     15.000000    15.000000     80        yes
+32    107     11.214953    11.250000    106.67     NO
+48    160      7.500000     7.500000    160        yes
+64    213      5.633803     5.625000    213.33     NO
+96    320      3.750000     3.750000    320        yes
+```
+
+`FN*10/3` is an integer exactly when 3 divides `FN`. **The three clean members
+of the family are the three multiples of three and the two faulty ones are the
+two that are not.** That is arithmetic out of the model, and it is the pattern
+the whys have to explain.
+
+### Why 1 - why is the face flagged at all?
+
+Branches, written first:
+
+| | branch | verdict |
+| --- | --- | --- |
+| 1a | an edge of its loop does not lie on its surface | **alive** |
+| 1b | an edge of its loop is a sliver | **alive** |
+| 1c | the loop does not close | **refuted** |
+| 1d | the pcurve disagrees with the 3D curve | **refuted as the discriminator** |
+| 1e | a vertex is off its edge | **refuted as the discriminator** |
+
+`scripts/step-diagnostics/face-bad-edge.py` measures all five per face, in the
+same units and to the same precision as `-FaultDetail`, so the two lists can be
+joined. On the band family:
+
+```text
+wire closure gap        0.000000 on every face of every member
+vertex off its edge     1.02 on f01, 0.25 on f03, 0.058 on f05 - the three
+                        SOLIDWORKS calls CLEAN - and 4e-15 on f02 and f04
+edge off its surface    0.19 / 0.10 / 0.047 / 0.032 / 0.012, falling with FN
+shortest edge           0.61 / 0.00092 / 0.31 / 0.00125 / 0.13
+```
+
+1c dies outright. 1e dies as a *discriminator* and leaves a finding behind: the
+vertex-off-edge measure is large exactly on the three clean members and zero on
+the two faulty ones, which is the wrong way round for a cause. What it is
+instead is written up under "the ellipse nobody is on" below.
+
+1d needs a warning attached, because getting it wrong here is easy and looks
+like a clean result. Asking OpenCASCADE for an edge's pcurve on a face returns
+a *projected* one when the file stores none, so the pcurve column then equals
+the off-surface column by construction; and calling `BRep_Tool::CurveOnSurface`
+with the C++ signature raises a `TypeError` in OCP, which - caught - reads
+exactly like "this edge has no pcurve". The first run of this instrument
+reported **100% of face-edge uses have no pcurve** and a flawless `pcurve` of
+0.000000 for every file in the kit. Both were the instrument. The file's own
+census settles it without a kernel: f01 writes 320 `PCURVE`s against 788
+face-edge uses, so 41% carry one and the rest do not.
+
+Read the right way - **against** the off-surface distance, since a projected
+pcurve realises the minimum by construction - the column does say one thing,
+and on the band family it says nothing at all: `pcurve` equals `offsurf` on
+every face of every member, so no written pcurve there is worse than a
+projection would be. On **lid10** it is not silent. Face 117, the sweep's
+B-spline, reads `offsurf 0.124719` and `pcurve 0.124719`; face 133, a B-spline
+of 7.5 mm2 at `(78.60, 8.47, 1.24)`, reads `offsurf 0.121868` and **`pcurve
+1.083242`** beside a vertex 1.0125 off its edge. A written pcurve a millimetre
+from its own 3D curve is code 11's quantity, `swEdgeSpcurveOutOfTol`, and lid10
+does not report code 11 - so either SOLIDWORKS repairs it or that face is one
+of the ones it does report. It is a separate thread from code 17 and it is the
+gap the c11 chase already named: `validatestep.py` checks a pcurve against its
+3D curve only on cylinders and cones, and this one is on a B-spline.
+
+### Why 2 - which of 1a and 1b separates clean from faulty?
+
+Branches: 2a the off-surface distance, 2b the shortest edge, 2c both.
+
+**2a is refuted, and it is the branch that looked most likely.** f01 is
+*clean* and its edges stand further off their faces than any other member's -
+0.186 against f02's 0.101. Order the five by off-surface distance and the
+faulty ones are second and fourth. A chord that sags off its own face is real,
+and by itself it is not what SOLIDWORKS is objecting to.
+
+**2b separates them exactly, and it is a cliff rather than a threshold.** The
+twelve shortest edges of each member, closed edges dropped, straight out of the
+STEP text with no kernel in the path:
+
+```text
+fn 24   0.61382 0.61382 0.61512 0.61512 0.61512 0.61512 ...
+fn 32   0.00092 0.01156 0.01275 0.01300 0.02027 0.02028 ...
+fn 48   0.30758 0.30758 0.30822 0.30822 0.30822 0.30822 ...
+fn 64   0.00125 0.00186 0.00332 0.00338 0.00391 0.00422 ...
+fn 96   0.12567 0.12567 0.12567 0.12567 0.15388 0.15388 ...
+```
+
+Three orders of magnitude apart with nothing in between. The aligned members'
+shortest edge is 0.126 to 0.614 mm; the misaligned members' is 0.0009 to
+0.0012 mm and each has a tail below 0.01.
+
+**2c is what survives, and the arithmetic says so.** Neither quantity works
+alone - f01 has the worst sag and no fault, and the *faceted controls* carry
+the same slivers and no fault. Their ratio does:
+
+| coupon | shortest edge | worst edge off its face | ratio | SOLIDWORKS |
+| --- | --- | --- | --- | --- |
+| f01 band fn 24 | 0.613817 | 0.186228 | **3.30** | clean |
+| f02 band fn 32 | 0.000916 | 0.101451 | **0.0090** | 2 faults, code 17 |
+| f03 band fn 48 | 0.307579 | 0.047264 | **6.51** | clean |
+| f04 band fn 64 | 0.001251 | 0.031953 | **0.039** | 2 faults, code 17 |
+| f05 band fn 96 | 0.125675 | 0.011691 | **10.75** | clean |
+| r01 lid10 | 0.001106 | 0.124719 | **0.0089** | 1 fault, codes 7/17/21 |
+| r02 bayonet | 0.002348 | 0.124719 | **0.0188** | 1 fault, codes 7/17/21 |
+
+Every file SOLIDWORKS accepts has its shortest edge **longer** than the worst
+distance any edge sits off its own face. Every file it flags has one shorter,
+by one to two orders of magnitude. Seven files, no overlap, and the two real
+parts fall on the right side of a line drawn from the coupons alone.
+
+### Why 3 - why is a sliver fatal here and not in the control?
+
+Branch 3a: the sliver is the analytic export's. **Refuted, and it is the
+cleanest refutation in this chase.** The faceted controls carry the same edges:
+
+```text
+analytic  fn 32  0.000916      fn 64  0.001251, 12 edges under 1e-2
+faceted   fn 32  0.000938      fn 64  0.001251, 12 edges under 1e-2
+```
+
+and every faceted control in the family imports clean. The slivers are the
+boolean's, they are in both exports to five decimals, and between two planar
+facets they are harmless.
+
+Branch 3b: it is the pair. That leaves a 2x2 with all four cells occupied:
+
+| | no sliver | a sliver |
+| --- | --- | --- |
+| **tight boundary** (faceted control, edges exactly on their planes) | clean | **clean** |
+| **loose boundary** (analytic, edges up to 0.1 off their face) | **clean** (f01/f03/f05) | **code 17** (f02/f04) |
+
+Only the conjunction fails, and each single factor has its own control showing
+it is not sufficient.
+
+The mechanism that fits is the one this document already established one level
+up, in "the answer: it is the mixture": SOLIDWORKS takes a face's tolerance
+from its boundary. A face whose edges stand 0.1 mm off it is granted about
+0.1 mm. An edge 0.0009 mm long is then **a hundred times shorter than the
+tolerance of the face it bounds**: inside that face's own tolerance its two
+vertices are one point, so it is not an edge of that face. That is
+`swFaceBadEdge` and not `swEdgeVerticesTouch`, which is the right reading of
+the code - the edge is well formed in itself, and unusable by that face.
+
+It also predicts a count, and that is the cheapest thing left to check. A
+sliver is shared by exactly two faces, f02 has exactly one sliver, and the two
+faces whose shortest edge it is are the sweep's B-spline and one bore cylinder.
+The run of 2026-09-08b reports **2 faults** on f02 without saying which
+entities; `-FaultDetail` names them, and if they are not that B-spline and that
+cylinder this paragraph is wrong.
+
+### Why 4 - why does the misalignment produce a sliver?
+
+Two tessellations that do not divide into one another. Where the ridge's
+station angle drifts past a wall facet boundary, the boolean cuts a fragment
+whose width is that angular gap times the radius. Predicted from the two steps
+alone and compared with the file, on fn 64 (drift 5.633803 - 5.625 =
+0.008803 degrees per station):
+
+| station | angle | gap to the facet boundary | predicted arc | measured edge |
+| --- | --- | --- | --- | --- |
+| 1 | 5.6338 | 0.008803 deg | 0.003073 | 0.003384 at theta 5.629 |
+| 2 | 11.2676 | 0.017606 deg | 0.006146 | 0.006611 at theta 11.259 |
+| 3 | 16.9014 | 0.026409 deg | 0.009219 | 0.009752 at theta 16.888 |
+
+Twelve such edges, every one at r = 20.0000 - the bore's own radius - and none
+anywhere else. This is c11's finding on a second model: "station positions
+drift against facet boundaries and occasionally land very close to one."
+
+### Why 5 - is the misalignment the cause, or is FN?
+
+The five members differ in `FN`, and `FN` also sets the sag, so the family
+alone cannot separate "the tessellations do not divide" from "this particular
+tessellation". The two are confounded and no amount of reading the table fixes
+it.
+
+**So change the pitch instead.** `turns = height/pitch`, so at `pitch = 10`,
+`turns = 4` and `FN*turns` is an integer for every `FN` divisible by 4 - fn 32
+and fn 64 become aligned with `FN` untouched. At `pitch = 12.5`, `turns = 3.2`
+and fn 24 becomes misaligned. Three coupons, the intervention running in both
+directions:
+
+| coupon | FN | pitch | aligned | shortest edge | worst off face | ratio |
+| --- | --- | --- | --- | --- | --- | --- |
+| f02 as shipped | 32 | 12 | no | 0.000916 | 0.101451 | 0.0090 |
+| **same, pitch 10** | 32 | **10** | **yes** | **0.458656** | 0.107506 | **4.27** |
+| f04 as shipped | 64 | 12 | no | 0.001251 | 0.031953 | 0.039 |
+| **same, pitch 10** | 64 | **10** | **yes** | **0.229961** | 0.027389 | **8.40** |
+| f01 as shipped | 24 | 12 | yes | 0.613817 | 0.186228 | 3.30 |
+| **same, pitch 12.5** | 24 | **12.5** | **no** | **0.000791** | 0.170216 | **0.0047** |
+
+The sliver follows the alignment and not `FN`, in both directions, with `FN`
+held fixed. The sag barely moves - 0.101 to 0.108, 0.032 to 0.027, 0.186 to
+0.170 - which is what says the intervention changed the thing it was aimed at
+and not the other one.
+
+**So the chain the measurements suggested was:** the model asks for a station
+count incommensurate with the wall's facet count -> the boolean cuts fragments
+a thousandth of a millimetre wide -> the exporter keeps them as edges, and
+places their ends exactly on the declared cylinder -> those edges bound an
+analytic face whose own boundary is a chorded polyline standing up to 0.1 mm
+off it -> SOLIDWORKS gives that face a tolerance from its boundary, inside
+which the sliver is not an edge -> `swFaceBadEdge`.
+
+**The first three links hold and the last two do not.** The sliver is real and
+its length is predicted by the two tessellation steps; but a file carrying an
+identical sliver on an identical pair of faces imports clean, so the step from
+"there is a sliver on a loose face" to "SOLIDWORKS objects" is not there. See
+"What SOLIDWORKS actually said" below, which is the end of this chase and
+overrules the reading in this section.
+
+### What this chase refuted, gathered in one place
+
+- **"The taper is a fault source in its own right"** - recorded on 2026-09-08
+  from tapered fn 32/64 faulty and untapered fn 64/96 clean. The untapered
+  models carry the *same* slivers at exactly the same tessellations: 0.000916
+  at fn 32 and 0.001244 at fn 64, against 0.612 to 0.154 at fn 24/48/96. The
+  taper changes the sag, not the sliver, and the earlier pairing had the taper
+  varied only at the two tessellations where alignment also changed.
+- **"Faults follow the size of the sag."** f01 has the largest sag in the
+  family and no fault.
+- **"Faults follow the share of the sweep that was claimed."** After the
+  projection fixes every wall variant claims 90.4-90.5% of the sweep's facets
+  whole, flat across `FN` and across the taper, and the faulty and clean
+  members are indistinguishable on it. The 56.3% / 49.9% split that reading was
+  built on is pre-fix and no longer exists.
+- **"The wire does not close" and "a vertex is off its edge."** Zero and
+  backwards respectively.
+- **"The sliver is the analytic export's."** It is in the faceted control to
+  five decimals.
+
+### The controls, and what each one cost
+
+**The standalone ridge is not a usable control, and finding that out is the
+result.** The handover names it as the control that removes the boolean, and it
+does - but a sweep closed around its own profile is written as a periodic face
+cut into 2 to 5 pieces, which is a different topology from the strip the coupon
+writes, so it changes more than the one variable. SOLIDWORKS reads
+`w0t0-fn024-analytic` as a solid of 4 faces, **volume 0.0000**, three faults on
+two faces and 38 faulty edges, all code 35 `swTopolMissingGeometry`; and it
+**hangs** on `w0t0-fn032-analytic`, sitting on an Open Progress dialog with no
+CPU for half an hour. Neither is code 17 and neither is comparable with the
+coupon. The wall variants with the taper switched off are the control that
+removes one variable, and that is what the table above uses.
+
+**What the standalone did buy is the only derivable volume in this family.**
+Untapered, Pappus is exact - in cylindrical coordinates the Jacobian is `r` and
+the helix is a shear in `z`, so the pitch drops out:
+
+```text
+A  = (rootWidth + crestWidth)/2 * (back + ridgeDepth) = 12.65
+dc = back - (back+ridgeDepth)*(rootWidth+2*crestWidth)/(3*(rootWidth+crestWidth))
+   = -0.675757575758
+V  = turns * 2pi * A * (radius + dc) = 5119.783734
+```
+
+and the polyhedron the model emits is a second derived number, by the
+divergence theorem over its own face list - not the same solid, because a chord
+under-fills the arc it spans. OpenCASCADE has neither arithmetic:
+
+| fn | faceted export vs derived mesh | analytic export vs derived smooth |
+| --- | --- | --- |
+| 24 | 5054.197607, **7.0e-15** | 5119.746187, -7.3e-06 |
+| 32 | 5081.666441, **7.2e-16** | 5119.767485, -3.2e-06 |
+| 48 | 5101.492658, **7.3e-15** | 5123.822239, **+7.9e-04** |
+| 64 | 5108.767933, **6.8e-15** | 5123.833084, **+7.9e-04** |
+| 96 | 5114.284022, **-6.2e-15** | 5122.297102, **+4.9e-04** |
+
+The faceted column is a calibration and it is exact. The analytic column is a
+finding and it is open: the sweep is right to five parts per million at fn 24
+and 32 and **wrong by eight parts in ten thousand at fn 48, 64 and 96, getting
+worse as the mesh gets finer**, which is the wrong direction for everything.
+It goes with the outlier refusal firing on a degenerate threshold there - the
+report reads "further off the fit than four times the 0.0000 this claim is
+typically off, by up to 0.0000" - and with the sweep being cut into 4, 4, 18,
+40 and 82 faces at the five tessellations. Not chased here.
+
+### Two findings the controls turned up on the way
+
+**A face on the bore, bounded at the outer wall.** In
+`w1t0-fn024-analytic` - wall, no taper, fn 24 - four faces are written on the
+bore cylinder `r = 20` and have vertices at `r = 23`, which is the outside of
+the wall. Their edges are **3.000000 mm** off the surface they claim, exactly
+the wall thickness. SOLIDWORKS refuses the file: `LoadFile4` returns null with
+`swFileLoadError_e 1`. This is not code 17 and not a sliver; it is a face whose
+claimed surface does not contain its own boundary by the whole thickness of the
+part, and it appears in one cell of the factorial and nowhere else.
+
+**The ellipse nobody is on.** The three *clean* band members write plane
+sections as `ELLIPSE`s - 8, 40 and 144 of them - and their end vertices are not
+on them. On f01, vertex `#5420` at `(-2.38819, 19.68559, 38.01818)` is
+**1.024797 mm** from the ellipse of edge `#5421` and **0.792669 mm** from the
+ellipse of edge `#5430`. Computed from the file's own entities by arithmetic,
+with no kernel: the ellipse is `a = 120.511759, b = 20.000000`. A plane cutting a
+cylinder of radius `r` at `theta` to its axis gives semi-axes `r` and
+`r/sin theta`, so `sin theta = 20/120.512` puts this plane **9.6 degrees off
+the axis** - a glancing cut - and on a section that eccentric a small error in
+the plane's orientation becomes a large error along the curve. f02 writes no
+ellipse at all and has no such vertex. SOLIDWORKS calls all three clean, and
+with `check-and-repair` on that may mean it repairs them rather than that they
+are right. Worth its own thread: it is `sectionTiltFloor`'s question, asked
+from the other end.
+
+### The run that did not happen, and why
+
+Two things that have to be said plainly.
+
+**The import settings are now read out of SOLIDWORKS rather than typed in.**
+`-ImportSettings` is a label and nothing checks it, which is the point of the
+parameter - but this document carries a whole run recorded as
+`as-configured-2026-09-08-unverified` and therefore comparable with nothing.
+The preferences are readable through the same API as everything else, and
+`step-interop-solidworks.ps1` now prints and records them:
+
+```text
+solid+surface=on free-curves=off run-diagnostics=on analytical-conversion=off
+attributes=on step-config-data=off multibody-as-parts=off knit=do-not-knit
+units=file-units assembly-mapping=default check-and-repair=1 custom-tolerance=0
+```
+
+`knit=do-not-knit` is the same setting as the runs of 2026-09-02, so those runs
+and the unverified one of 2026-09-08 are comparable after all.
+`analytical-conversion=off` is worth noticing for its own sake: SOLIDWORKS is
+not being asked to re-recognise our B-splines as quadrics.
+
+**SOLIDWORKS crashed twice, and both crashes were this session's doing.** The
+first import of the standalone ridge hung; killing the driver while
+`LoadFile4` was in flight took SOLIDWORKS with it, an access violation in
+`mfc140u.dll` both times. After the second crash the relaunched instance
+deadlocked on the first file - driver and SOLIDWORKS both idle, the main window
+disabled with no dialog visible - and killing that driver crashed it again. So:
+
+> **Do not kill this driver while an import is in flight.** Wait for it, or
+> restart SOLIDWORKS afterwards from the desktop before trusting anything. An
+> instance launched by `Start-Process` rather than by the user gets as far as
+> attaching, reading its preferences and importing one file, and then wedges;
+> the script's own NOTES say the licence has to be acquired in the user's
+> interactive session, and that turns out to cover relaunching as well.
+
+What that costs this chase is the last rung of the ladder, and it is worth
+saying exactly which rung. Every number above is measured - on our own files,
+by arithmetic and by OpenCASCADE - and the link from those numbers to
+SOLIDWORKS' verdict rests on the run of **2026-09-08b**, on coupons re-exported
+from the same commit. The predictions the chase makes have **not** been
+put to SOLIDWORKS:
+
+| coupon | ratio | predicted |
+| --- | --- | --- |
+| w1t0 fn 032, fn 064 (no taper) | 0.0119, 0.0654 | **code 17** - which refutes the taper reading outright |
+| w1t0 fn 048, fn 096 (no taper) | 9.22, 18.48 | clean |
+| p10 fn 032, p10 fn 064 (pitch 10) | 4.27, 8.40 | **clean**, where the shipped pitch is faulty |
+| p125 fn 024 (pitch 12.5) | 0.0047 | **code 17**, where the shipped pitch is clean |
+
+Those four rows are the experiment. `build/` is not committed, so regenerate
+the coupons from `scripts/step-diagnostics/band-family-controls.scad` - it is
+`step-band-family.scad` with `WALL`, `TAPER`, `PITCH` and `RUNOUT` added, and
+identical to it at the defaults:
+
+```bash
+B=$PWD/build/staging/pythonscad.com
+M=scripts/step-diagnostics/band-family-controls.scad
+for spec in "32 12" "32 10" "64 12" "64 10" "24 12" "24 12.5"; do
+  set -- $spec
+  for mode in analytic faceted; do
+    fl=""
+    [ $mode = analytic ] && fl="--enable=step-analytic-surfaces --enable=step-approximate-surfaces"
+    $B $M -D FN=$1 -D PITCH=$2 -D TAPER=1 -D WALL=1 -o build/interop-pitch/fn$1-p$2-$mode.stp $fl
+  done
+done
+```
+
+Then one invocation of the driver per directory, never killed mid-import:
+
+```bash
+powershell -ExecutionPolicy Bypass \
+  -File scripts/step-interop-solidworks.ps1 \
+  -KitDir build/interop-pitch \
+  -ImportSettings read-back-from-solidworks \
+  -OutCsv build/interop-pitch/sw.csv \
+  -FaultDetail build/interop-pitch/faults.tsv
+```
+
+and check the ratio itself first, which needs no CAD system at all:
+
+```bash
+python scripts/step-diagnostics/edge-lengths.py  build/interop-pitch/*-analytic.stp
+python scripts/step-diagnostics/face-bad-edge.py build/interop-pitch/*-analytic.stp
+```
+
+### Recognition, beside every fault count
+
+`faults=0` over a half-claimed sweep has been read as success in this file
+before, so: after the projection fixes every wall variant of the band family
+claims **90.4 to 90.5%** of its sweep's facets whole, and the figure does not
+move with `FN` or with the taper.
+
+| coupon | claims whole | cut across it | % whole | spans covered | faces |
+| --- | --- | --- | --- | --- | --- |
+| fn 24 tapered | 454 | 48 | 90.4% | 3 of 4 | 20 |
+| fn 32 tapered | 607 | 64 | 90.5% | 3 of 4 | 12 |
+| fn 48 tapered | 910 | 96 | 90.5% | 3 of 4 | 52 |
+| fn 64 tapered | 1212 | 128 | 90.4% | 3 of 4 | 42 |
+| fn 96 tapered | 1822 | 192 | 90.5% | 3 of 4 | 156 |
+| fn 24 untapered | 458 | 48 | 90.5% | 3 of 4 | 14 |
+| fn 32 untapered | 611 | 64 | 90.5% | 3 of 4 | 14 |
+| fn 48 untapered | 914 | 96 | 90.5% | 3 of 4 | 14 |
+| fn 64 untapered | 1216 | 128 | 90.5% | 3 of 4 | 14 |
+| fn 96 untapered | 1826 | 192 | 90.5% | 3 of 4 | 14 |
+
+The pre-fix table two sections up reads 56.3% and 49.9% for the same models,
+and the reading built on it - that the faulty rows were the ones that claimed
+more than half - does not survive the fix that made every row claim ninety.
+
+`step-interop-kit.py` now records those two numbers per file, which is where
+they belong. Adding the column turned up why it had to be added by hand every
+time: **the kit read the exporter's report off stderr, and the report comes out
+on stdout.** So `band` - "what this file is entitled to be off by", the column
+this document's own reasoning about tessellation slack rests on - has been
+`0.000000` for every file of every kit ever generated, on this branch and on
+the one before it. Nothing noticed, because twenty of the twenty-four coupons
+declare no sweep at all and a zero there reads as "nothing to report". It reads
+0.2077 for f02 and 0.0807 for f04 now.
+
+One column there is worth a thread of its own: **three of the profile's four
+spans**, in every single variant. The fourth is the one buried inside the wall,
+which the union cuts away, so it is structural rather than a defect - but it
+means a quarter of the declared surface is never claimed and no line in the
+report says so in those terms.
+
+### The pitch intervention, put to SOLIDWORKS: two held and one did not
+
+Run 2026-09-08d, same session settings read back out of SOLIDWORKS. Body-level
+`Check3` plus the per-entity walk, on the three intervention coupons and their
+faceted controls:
+
+| coupon | FN | pitch | aligned | our ratio | predicted | **SOLIDWORKS** |
+| --- | --- | --- | --- | --- | --- | --- |
+| p10 fn 032 | 32 | 10 | yes | 4.29 | clean | **clean**, 47 faces, 0 faults |
+| p10 fn 064 | 64 | 10 | yes | 8.40 | clean | **clean**, 77 faces, 0 faults |
+| **p125 fn 024** | 24 | **12.5** | **no** | **0.0049** | **code 17** | **clean**, 7 faces, 0 faults |
+
+All three faceted controls clean, as always.
+
+**The two forward predictions held and the reverse one failed**, and the failure
+is the more informative half. `p125-fn024` was built to *create* the defect on
+a coupon that did not have it - fn 24 at pitch 12.5 grows exactly one sliver,
+0.000791 mm, on the sweep's own B-spline face, whose boundary stands 0.160 mm
+off it - which is a lower ratio than either faulty member of the shipped
+family. SOLIDWORKS reads it without complaint.
+
+So **the ratio is necessary and not sufficient**, on the evidence available.
+Every faulty file has one below 1; not every file below 1 is faulty. Comparing
+it with the shipped `f02`, whose numbers it nearly matches:
+
+| | shortest edge | its face's boundary error | ratio | faces written / read | SOLIDWORKS |
+| --- | --- | --- | --- | --- | --- |
+| f02 fn 32 pitch 12 | 0.000916 | 0.101451 | 0.0090 | 12 / 9 | 2 faults, code 17 |
+| p125 fn 24 pitch 12.5 | 0.000791 | 0.160248 | 0.0049 | 11 / 7 | 0 faults |
+
+Both have exactly one sliver, both on the sweep's B-spline, both at the bore.
+Whatever separates them is not in these columns.
+
+**One thing to fix before reading any more into it: the file-level ratio was
+computed from two different faces.** The shortest edge in a file and the worst
+edge-off-its-surface in that file need not be on the same face, and on
+`p125-fn024` they are not - 0.000791 is on the B-spline and 0.170216 on a
+cylinder. Per face it makes no difference to this result (the B-spline's own
+ratio is 0.0049, still the lowest in the set and still clean), but the
+file-level figures in the table above this one are a mixture and should be read
+as per-face from here on. `face-bad-edge.py` reports per face; only the summary
+line mixed them.
+
+### The positive control, and it fired
+
+Three clean rows from a session in which nothing was ever shown to be faulty
+would be worth nothing: a silent instrument and a set of good files look the
+same. So `f02-band-fn032-analytic.stp` - re-exported from this commit, the same
+file the ratio table above measures - was imported into the same SOLIDWORKS,
+same settings, and it reads:
+
+```text
+f02-band-fn032-analytic.stp   solid  9 faces  vol 19555.2696  err 0
+                              faults=2 gaps=0 faultyfaces=2 faultyedges=0 codes=17
+```
+
+**Two faulty faces, code 17**, reproducing the run of 2026-09-08b exactly on a
+freshly exported file. So the instrument works, the coupon still carries the
+defect, and `p125-fn024` coming back clean with a *lower* ratio is a real
+refutation rather than an artefact of a quiet session.
+
+Two faulty faces is also the count the mechanism predicts: f02 has exactly one
+sliver and it is shared by exactly two faces - the sweep's B-spline and one bore
+cylinder, whose per-face ratios are 0.0090 and 0.0096. `-FaultDetail` would say
+whether those are the two, and it has still not been run.
+
+**What separates f02 from p125-fn024 is therefore the open question**, and the
+two are alike in every column measured so far:
+
+| | shortest edge | its face's boundary error | ratio | the other face's ratio | faces written / read | SOLIDWORKS |
+| --- | --- | --- | --- | --- | --- | --- |
+| f02, fn 32, pitch 12 | 0.000916 | 0.101451 | 0.0090 | 0.0096 | 12 / 9 | **2 faults, code 17** |
+| p125, fn 24, pitch 12.5 | 0.000791 | 0.160248 | 0.0049 | 0.0056 | 11 / 7 | **0 faults** |
+
+One sliver each, on the sweep's B-spline against a bore cylinder, at r = 20,
+with the lower ratio on the clean one. Whatever the discriminator is, it is not
+in this table.
+
+### The instability, and what it is not
+
+Three attributions were made for this during the session and two of them were
+wrong. What the evidence actually supports, in order of how well:
+
+**Three crashes, all `mfc140u.dll` `0xC0000005`, at 18:48, 19:03 and 23:21.**
+The first two followed immediately on killing the driver while `LoadFile4` was
+in flight, so *do not do that* stands. The third came with nothing killed and
+nobody touching it, during the `-FaultDetail` pass - which re-imports every
+file a second time.
+
+**"The `-FaultDetail` pass is the part that falls over" is one crash, not a
+rule.** The run of 2026-09-02 did 48 files with the same flag and survived.
+Taking the counts first and re-running with `-FaultDetail -Only` over the few
+faulty files is cheap prudence, not a diagnosis.
+
+**"These files hang SOLIDWORKS" is refuted.** `f02-band-fn032-analytic` stalled
+one run - main window disabled, no dialog anywhere in the process, driver and
+SOLIDWORKS both at hundredths of a second of CPU per half minute - and then
+imported cleanly **twice in a row** afterwards. A stall that does not reproduce
+on the same file is not a property of the file.
+
+**"My edit to the driver caused it" is refuted, by A/B.** The `Preferences()`
+readout added this session only calls getters, but that is an argument and not
+a measurement. Run against `f02`, the pristine driver from HEAD and the
+modified one give byte-identical results - `solid, 9 faces, vol 19555.2696,
+faults=2 faultyfaces=2 faultyedges=0 codes=17` - and neither stalls.
+
+So what is left is an **intermittent stall of unknown cause**, on a tool that
+has run whole 48-file suites without one. Worth saying plainly rather than
+attaching to the nearest available change: three sessions of this document have
+now recorded a SOLIDWORKS behaviour and named a cause for it on a single
+observation, and two of those causes were wrong within the hour.
+
+## What SOLIDWORKS actually said, and it is four refutations out of six
+
+Run 2026-09-09, one session, settings read back out of the application:
+`knit=do-not-knit analytical-conversion=off run-diagnostics=on
+check-and-repair=1`. Six pre-registered predictions, a positive control, and
+`-FaultDetail` read fresh at last.
+
+### The positive control first
+
+| file | body | faces | volume | SOLIDWORKS |
+| --- | --- | --- | --- | --- |
+| f02-band-fn032-analytic | solid | 9 | 19555.2696 | **faults=2 faultyfaces=2 faultyedges=0 codes=17** |
+| f04-band-fn064-analytic | solid | 39 | 19511.5976 | **faults=2 faultyfaces=2 faultyedges=0 codes=17** |
+
+Both reproduce the run of 2026-09-08b exactly, on files re-exported from this
+commit, so the instrument fires and the coupons still carry the defect. Every
+"clean" below is therefore a real clean.
+
+### `-FaultDetail`, which is the one thing worth keeping
+
+```text
+file                       entity   kind      area_mm2      centre_mm              codes
+f02-band-fn032-analytic    face 1   bspline   1027.844725   0.0298;0.0882;17.3483  17/17
+f02-band-fn032-analytic    face 4   cylinder  2098.714282   0.1454;0.0000;20.0000  17/17
+f04-band-fn064-analytic    face 2   bspline   1019.021056   0.0748;0.0634;21.9361  17/17
+f04-band-fn064-analytic    face 4   cylinder  2094.822070   0.0267;0.1369;20.0000  17/17
+```
+
+**Two faces on each part, and they are the sweep and the bore**: the declared
+swept surface, and the cylinder it was cut against. Not a planar facet, not an
+end cap, not an edge - `faultyedges=0` on both. Two code-17 records on each
+face rather than one.
+
+The areas say what SOLIDWORKS did with our file on the way in. We write nine
+separate faces on the bore cylinder, totalling about 2100 mm2; SOLIDWORKS
+reports **one** faulty cylinder of 2098.71, so it knitted all nine into a single
+face and then objected to it. We write one B-spline of 3212.31; the faulty
+B-spline is 1027.84, about a third of it. The faces SOLIDWORKS is complaining
+about are not the faces we wrote, which is worth remembering before matching
+any of our per-face numbers to them.
+
+That is the population this chase converged on, named by SOLIDWORKS for the
+first time, and it is the part that stands.
+
+### The six predictions
+
+| coupon | what it varies | our ratio | predicted | **SOLIDWORKS** |
+| --- | --- | --- | --- | --- |
+| p10-fn032 | fn 32 made aligned by pitch | 4.29 | clean | **clean** |
+| p10-fn064 | fn 64 made aligned by pitch | 8.40 | clean | **clean** |
+| p125-fn024 | fn 24 made misaligned by pitch | 0.0049 | code 17 | **clean** |
+| w1t0-fn032 | fn 32, taper removed | 0.0119 | code 17 | **clean** |
+| w1t0-fn064 | fn 64, taper removed | 0.0654 | code 17 | **clean** |
+| w1t0-fn048, fn096 | aligned, taper removed | 9.2, 18.5 | clean | **clean** |
+
+**Two held and four failed**, and the four that failed all failed the same way:
+a coupon carrying the sliver, with a ratio far below 1, imports without a
+fault.
+
+### The refutation, at its sharpest
+
+`f02` and `w1t0-fn032` are the same model at the same tessellation with the
+taper switched off, and their slivers are the same edge:
+
+| | shortest edge | radii of its two ends | dz | z | SOLIDWORKS |
+| --- | --- | --- | --- | --- | --- |
+| f02, tapered | **0.000916** | 20.000000000 / 20.000000000 | 0.000070 | 10.226 | **2 faults, code 17** |
+| w1t0-fn032, untapered | **0.000916** | 20.000000000 / 20.000000000 | 0.000070 | 10.226 | **clean** |
+
+Same length to six decimals, same two radii to nine, same height, on the same
+pair of faces - a swept B-spline against a bore cylinder, ratios 0.0090/0.0096
+against 0.0146/0.0119. One is faulty and one is not.
+
+So **the sliver is not the trigger**, and neither is the ratio built on it. The
+sliver is real, it is the boolean's, its length is predicted to about 5% by the
+two tessellation steps, and the faceted controls carry it and import clean -
+all of that stands. What does not stand is the step from there to code 17.
+
+### What is left standing, and what to measure next
+
+**The taper is the surviving correlate and it is not sufficient either.** Every
+code-17 file in this family is tapered; every untapered one is clean, including
+the two carrying slivers. But `p125-fn024` is tapered, misaligned, carries a
+sliver, has the worst ratio in the whole set - and is clean. So "tapered" is
+necessary among these seven and not sufficient.
+
+The cheapest experiment that would localise it is a **series in the taper**
+rather than a switch: walk the run-out at fn 32 with everything else held.
+**That was run the same day and the taper fell too** - the verdict alternates,
+clean at run-out 0, faulty at 0.05, clean at 0.10, faulty at 0.20 and 0.40,
+reproducibly. See "The taper series" below, which is the end of this thread.
+
+### The other coupon, and it is a different defect entirely
+
+`w1t0-fn024-analytic` - the file with four faces written on the bore `r = 20`
+whose vertices lie at `r = 23` - now has SOLIDWORKS' own verdict, and it is not
+code 17:
+
+```text
+w1t0-fn024-analytic   face 2  cylinder  2669.999700  0.0000;-8.2500;11.8534  16 x10
+w1t0-fn024-analytic   face 7  plane       18.919215  0.0000;0.0000;40.0000   21 x5
+w1t0-fn024-analytic   face 8  plane       18.919215  0.0000;-8.2500;0.0000   21 x5
+```
+
+**16 is `swFaceBadVertex`, ten times on one cylinder** - which is exactly a face
+whose vertices are not on it, and ours are three millimetres off - and **21 is
+`swFaceSelfIntersecting`, five times on each of two 18.9 mm2 planes**. It
+imports as a solid and measures 10401.67 against the other untapered variants'
+20359, so it is **half the part**. A separate defect, cleanly named, and the
+more serious of the two.
+
+### The method note
+
+Six links were proposed in this chase and four were refuted, three of them by
+this one run. That is the same ratio as the c11 chase and it is the reason the
+branches are written down first: had the ratio been landed as a fix on the
+strength of five coupons and an intervention that worked in two directions out
+of three, it would have shipped, and the counterexample - a bit-identical sliver
+importing clean - would have been found by somebody else, later, on a real part.
+
+## The taper series: the last correlate falls, and nothing we measure is left
+
+Run 2026-09-09b. The taper was the only correlate of code 17 still standing
+after the previous run, so it was turned from a switch into a series. The
+model writes its run-out as the literal `0.2` in
+`f = min(1, t/0.2, (1-t)/0.2)`; `band-family-controls.scad` now takes it as
+`RUNOUT`, and everything else - `FN = 32`, the wall, pitch 12 - is held.
+
+Making that parameter did not change the coupon: with `RUNOUT = 0.2` the export
+has the same 11641 entities as the shipped fixture and the multisets of every
+`DIRECTION`, `CARTESIAN_POINT` and `VECTOR` are identical, so the only
+differences are entity numbers. SOLIDWORKS agrees, reading `t020` and `f02` as
+the same 9 faces and the same volume to four decimals.
+
+### What was written down before the import
+
+| coupon | run-out | our faces | planes | ellipses | shortest edge | worst off face | ratio | vtxoff |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| t000 | 0 | 14 | 6 | 0 | 0.000916 | 0.077246 | 0.0119 | 0 |
+| t005 | 0.05 | 22 | 14 | 11 | 0.000938 | 0.123065 | 0.0076 | 0.594007 |
+| t010 | 0.10 | 24 | 16 | 13 | 0.000938 | 0.114951 | 0.0082 | 0.765296 |
+| t020 | 0.20 | 12 | 4 | 0 | 0.000916 | 0.101451 | 0.0090 | 0 |
+| t040 | 0.40 | 13 | 4 | 0 | 0.005670 | 0.095707 | 0.0592 | 0 |
+
+Four outcomes were written out in advance, with what each would mean. No ratio
+prediction was offered: the ratio had been refuted the day before and the
+column is carried here only so it can be seen not to work again.
+
+### What SOLIDWORKS said
+
+| coupon | run-out | SOLIDWORKS faces | volume | verdict |
+| --- | --- | --- | --- | --- |
+| **f02, the positive control** | 0.20 | 9 | 19555.2696 | **2 faults, 2 faulty faces, code 17** |
+| t000 | 0 | 9 | 20359.1572 | clean |
+| t005 | **0.05** | 17 | 20240.1607 | **2 faults, 2 faulty faces, code 17** |
+| t010 | **0.10** | 19 | 20010.1570 | clean |
+| t020 | 0.20 | 9 | 19555.2696 | **2 faults, 2 faulty faces, code 17** |
+| t040 | 0.40 | 12 | 18735.6381 | **3 faults, 2 faulty faces, code 17** |
+| t000, t040 faceted controls | | 709, 703 | | clean |
+
+**Clean, faulty, clean, faulty, faulty.** It is not a threshold and it is not
+monotone in the run-out.
+
+**And it repeats.** Both surprising cells were re-imported twice more in the
+same session under different file names, so nothing could be cached by name:
+
+```text
+r1-t005          17 faces  vol 20240.1607  faults=2 faultyfaces=2 codes=17
+r2-t010          19 faces  vol 20010.1570  faults=0
+r3-t005-again    17 faces  vol 20240.1607  faults=2 faultyfaces=2 codes=17
+r4-t010-again    19 faces  vol 20010.1570  faults=0
+```
+
+Deterministic. The alternation is a property of the files, not of the session.
+
+### So the taper is a passenger too, and nothing measured separates them
+
+Put the verdict beside every column and no column orders it:
+
+| column | faulty (t005, t020, t040) | clean (t000, t010) | separates? |
+| --- | --- | --- | --- |
+| run-out | 0.05, 0.20, 0.40 | 0, 0.10 | no - not monotone |
+| shortest edge | 0.000938, 0.000916, 0.005670 | 0.000916, 0.000938 | no - identical values on both sides |
+| worst edge off its face | 0.1231, 0.1015, 0.0957 | 0.0772, 0.1150 | no - clean value sits inside the faulty range |
+| the ratio | 0.0076, 0.0090, 0.0592 | 0.0119, 0.0082 | no - and reversed |
+| faces we write | 22, 12, 13 | 14, 24 | no |
+| faces SOLIDWORKS reads | 17, 9, 12 | 9, 19 | no |
+| planes | 14, 4, 4 | 6, 16 | no |
+| ELLIPSEs | 11, 0, 0 | 0, 13 | no |
+| vertex off its edge | 0.594, 0, 0 | 0, 0.765 | no |
+| volume | 20240, 19555, 18736 | 20359, 20010 | no - monotone in run-out, which the verdict is not |
+
+Five files that differ in one number, three faulty and two clean, and **not one
+quantity this project can measure on its own output tells them apart.** That
+was written down in advance as the worst of the four possible outcomes and the
+most informative, and it is the one that happened.
+
+### What that leaves
+
+Everything about the *population* still holds and it is the whole of what this
+chase has established: on every faulty file the fault is `faultyfaces=2,
+faultyedges=0`, and where `-FaultDetail` has been read it is the swept B-spline
+and the bore cylinder - and the cylinder SOLIDWORKS objects to is one it made
+itself by knitting nine of ours together.
+
+That is now the only place left to look, and it is a change of instrument
+rather than of theory. Every measurement in this document is taken on the file
+we write; the faulty faces are faces that do not exist until SOLIDWORKS has
+knitted it. The next measurements are therefore about the import rather than
+the export:
+
+1. **`-FaultDetail` on the whole taper series**, faulty and clean alike, so the
+   clean files' corresponding faces can be measured too rather than only the
+   flagged ones. Five files, one pass.
+2. **Round-trip the series** with `-RoundTrip` and read what SOLIDWORKS wrote
+   back with `scripts/step-interop-sw-roundtrip.py`. That is the only way to
+   see the knitted faces as geometry rather than as an area and a centre, and
+   it has separated two coupons before - it is what showed c11 keeps its body
+   and loses its number where c06 loses both.
+3. **Ask whether knitting is the variable at all**, by importing one faulty
+   coupon with `knit=form-solids` against `knit=do-not-knit`. That is a
+   settings change and therefore the user's to make, but it is one toggle and
+   it would say whether the faulty face survives being knitted differently.
+
+Until one of those lands, the honest statement is the one at the top of this
+section: the population is known, the trigger is not, and six of the mechanisms
+proposed for it have been refuted by measurement.

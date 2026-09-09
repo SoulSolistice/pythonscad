@@ -13,7 +13,16 @@ optional reading.
 **Branch `claude/step-corner-fixtures-iwpzh3`, green.** Verify before changing
 anything, and again after:
 
-    ctest --test-dir build -R step        # 50 tests, all passing 2026-09-08
+    ctest --test-dir build -R 'export-step-|mutations'   # 50 tests, all
+                                                        # passing 2026-09-09
+
+**Use that regex, not `-R step`.** `-R step` matches 45 of the 50 and drops the
+two that matter most: `bspline-check-mutations` and
+`closed-sphere-check-mutations` are the mutation guards - the tests that prove
+the other tests would fail if the defect came back - and a run without them is
+exactly the "green suite that never ran the check" this file warns about twice
+elsewhere. (Three of the other five, the `*_arg-permutations`, are caught by
+`mutations` only as a substring; harmless, and cheap.)
 
 Run it under the machine's own locale. `LC_ALL=C` was used here for a while to
 get past a decimal-comma problem that is now fixed in `export_step.cc`, and it
@@ -29,6 +38,100 @@ Two things that make that number a lie if they are missing:
 - lid10 is the blast-radius specimen and is *not* in the suite. It needs
   `-p examples/step_test/lid10.json -P "New set 1"`; without those you get the
   default component and every number is incomparable.
+
+## Session of 2026-09-08/09: code 17's population found, its trigger refuted
+
+No exporter change. The whole session is a diagnosis, written up in
+`doc/step-interop-validation.md` in three sections: **"Code 17, chased as five
+whys"**, then **"What SOLIDWORKS actually said"**, then **"The taper series"**.
+Read them backwards if you are short of time - each overrules a good deal of
+the one before it, and the last is where the thread currently stands.
+
+**What stands.** `-FaultDetail`, read fresh, names the faulty faces on f02 and
+f04 for the first time: on each part exactly **two faces, the swept B-spline
+and the bore cylinder**, two code-17 records apiece, `faultyedges=0`. Not a
+planar facet, not a cap, not an edge. That is the pair the whole chase
+converged on, and it is now named rather than inferred.
+
+Note what the areas say: we write nine faces on the bore and SOLIDWORKS reports
+one faulty cylinder of 2098.71 mm2, so it knitted all nine and then objected to
+the result. The face it complains about is not a face we wrote.
+
+**What was refuted, and it is most of the chase.** Six predictions went to
+SOLIDWORKS; two held and four failed. The mechanism the failures kill:
+
+- **the sliver is not the trigger.** `f02` and `w1t0-fn032` are the same model
+  at the same tessellation with only the taper switched off, and their shortest
+  edges are the *same edge* - 0.000916 mm, both ends at r = 20.000000000,
+  dz 0.000070, z 10.226, on the same B-spline/cylinder pair. f02 is faulty,
+  w1t0-fn032 is clean.
+- **the ratio built on it is not the trigger either.** Three counterexamples,
+  and `p125-fn024` has the worst ratio in the set (0.0049) and imports clean.
+
+**What still holds under the refutation.** The slivers themselves are real,
+they are the boolean's - the faceted controls carry them to five decimals and
+import clean - and their lengths are predicted to about 5% by the two
+tessellation steps of the model, `1200/steps` against `360/FN`, which are equal
+exactly when 3 divides FN. That arithmetic is sound; it just does not reach
+SOLIDWORKS' verdict.
+
+**The taper was the last correlate standing, and it fell the same day.**
+`RUNOUT` is now a parameter of `band-family-controls.scad`, and walking it at
+fn 32 with everything else held gives **clean at 0, faulty at 0.05, clean at
+0.10, faulty at 0.20 and 0.40** - not a threshold, not monotone, and
+reproducible: both surprising cells were re-imported twice under different file
+names and gave the same answer.
+
+**So nothing measurable on our side separates them.** Five files differing in
+one number, three faulty and two clean, and every column - shortest edge, worst
+edge off its face, their ratio, faces written, faces read, planes, ellipses,
+vertex-off-edge, volume - either fails to order them or orders them backwards.
+That outcome was written down in advance as the worst of four and the most
+informative.
+
+**Next, and it is a change of instrument rather than of theory.** Every number
+in this document is taken on the file we write; the faulty faces do not exist
+until SOLIDWORKS has knitted it - the cylinder it objects to is nine of ours
+merged. So: `-FaultDetail` over the whole taper series, clean files included,
+so the clean ones' corresponding faces can be measured too; then `-RoundTrip`
+and `scripts/step-interop-sw-roundtrip.py`, which is the only way to see a
+knitted face as geometry; and one toggle of `knit=form-solids` against
+`knit=do-not-knit` on a faulty coupon, which is the user's to make and would
+say whether knitting is the variable at all.
+
+**Three findings on the way, none of them code 17.**
+
+- **`w1t0-fn024-analytic` is half the part.** Four faces written on the bore
+  `r = 20` have vertices at `r = 23`; SOLIDWORKS reports code **16**
+  `swFaceBadVertex` ten times on one cylinder and code **21**
+  `swFaceSelfIntersecting` five times on each of two 18.9 mm2 planes, and
+  measures 10401.67 where its siblings measure 20359. The more serious defect
+  of the two, and separately actionable.
+- **An ELLIPSE whose own end vertex is 1.02 mm off it**, on f01 - one of the
+  *clean* members - computed from the file's entities with no kernel. The
+  section is 9.6 degrees off the cylinder's axis, and at that eccentricity a
+  small error in the plane becomes a large one along the curve.
+- **The `band` column of every interop kit has always been `0.000000`**: the
+  kit read the exporter's report off stderr and the report comes out on stdout.
+  Fixed, with two new columns recording how much of each sweep was claimed
+  whole and how much the boolean cut across.
+
+**The analytic standalone ridge gets worse as the mesh gets finer**: 7e-6 from
+its derived Pappus volume at fn 24 and 32, and 8e-4 at fn 48, 64 and 96. Open.
+
+**And the tooling.** The driver now **reads Tools > Options > Import out of
+SOLIDWORKS** rather than trusting the `-ImportSettings` label, which
+retrospectively rescues the run recorded as
+`as-configured-2026-09-08-unverified`: the setting is `knit=do-not-knit`, the
+same as 2026-09-02, so they are comparable after all. Two new instruments,
+`face-bad-edge.py` and `edge-lengths.py`, are under `scripts/step-diagnostics/`.
+
+Do not kill the driver mid-import - it crashed SOLIDWORKS twice - and take
+`-FaultDetail` as a separate pass over the faulty files only. A third crash
+came during that pass with nothing killed, and one file stalled once and then
+imported cleanly twice, so the instability is intermittent and unexplained;
+naming a cause for it on one observation was wrong twice in this session
+alone.
 
 ## Session of 2026-09-08, and what it changed
 
@@ -108,11 +211,29 @@ Three habits that paid, and one that cost:
 
 ### Where to start next, in order
 
-1. **Code 17 is now the only fault code in the kit that stands alone**, on f02,
-   f04 and both real parts. It has never been diagnosed. Everything the
-   5-why method needs is in place: `-FaultDetail` names the entity, the
-   standalone-ridge control isolates the boolean, and the derived screw-sweep
-   volume `turns * 2pi * A * (R + dc)` adjudicates. That is the next thread.
+1. ~~**Code 17 is the only fault code in the kit that stands alone**~~ -
+   **population found, trigger refuted six ways, 2026-09-09.** SOLIDWORKS names
+   the faulty faces as the swept B-spline and the bore cylinder, two code-17
+   records each, `faultyedges=0` - and the cylinder is one it made itself by
+   knitting nine of ours. Everything proposed as the *trigger* is dead: the
+   sliver (a bit-identical one imports clean), the ratio built on it (three
+   counterexamples), and the taper (the run-out series alternates).
+
+   The next step is a change of instrument, because every measurement so far is
+   on the file we write and the faulty faces do not exist until SOLIDWORKS has
+   knitted it:
+
+   - `-FaultDetail` over the whole taper series in `build/interop-taper`,
+     **including the clean files**, so the clean ones' corresponding faces can
+     be measured rather than only the flagged ones;
+   - `-RoundTrip`, then `scripts/step-interop-sw-roundtrip.py` - the only way to
+     see a knitted face as geometry, and it separated c11 from c06 once before;
+   - one toggle of `knit=form-solids` against `knit=do-not-knit` on a faulty
+     coupon. That is a settings change and therefore the user's to make.
+
+   Positive control in the same session, every time:
+   `f02-band-fn032-analytic.stp` must read `faults=2 faultyfaces=2 codes=17`.
+
 2. **`declare_sweep` is landed but nothing in the suite uses it.** It needs a
    fixture of its own with derived expectations - the screw sweep's volume is a
    closed form, so this is one of the few sweeps whose `VOLUME:` can be stated -
@@ -136,23 +257,27 @@ Three habits that paid, and one that cost:
 > Read `doc/step-corner-exactness-handover.md`, then
 > `doc/step-interop-validation.md` from "Run 2026-09-08b" onwards, then
 > `doc/step-export-testing.md`. The branch is green; verify with
-> `ctest --test-dir build -R step` before changing anything, and run it under
-> the machine's own locale rather than `LC_ALL=C`, which breaks the UTF-8
-> filename tests.
+> `ctest --test-dir build -R 'export-step-|mutations'` before changing
+> anything. Not `-R step`: it drops the two mutation guards. Run it under the
+> machine's own locale rather than `LC_ALL=C`, which breaks the UTF-8 filename
+> tests.
 >
-> Take item 1: diagnose SOLIDWORKS fault code 17, which after the projection
-> fixes of 2026-09-08 is the only code left standing alone in the coupon kit -
-> on `f02-band-fn032`, `f04-band-fn064`, `r01-lid10` and `r02-bayonet`.
+> Take item 1. Code 17's *population* is settled - `-FaultDetail` names the
+> swept B-spline and the bore cylinder on every faulty coupon - and every
+> proposed *trigger* is refuted: the sliver, the ratio built on it, and the
+> taper. The taper series alternates, reproducibly, and no quantity measurable
+> on our own output separates the three faulty files from the two clean ones.
 >
-> Work it as five whys with the branches named before each measurement, and
-> record the refuted ones - four of the five links in the last such chase were
-> wrong, and the refutations were worth more than the answer. Every expectation
-> must be derived from the model and never captured from a run; the derived
-> screw-sweep volume is `turns * 2pi * A * (R + dc)` and the standalone ridge in
-> the handover is the control that removes the boolean. Read `-FaultDetail`
-> before forming a theory, and report how much of each sweep was recognised
-> beside any fault count, because `faults=0` over a half-faceted sweep has been
-> mistaken for success in this file before.
+> So stop measuring the file we write and measure the import: `-FaultDetail`
+> over the whole taper series including the clean members, then `-RoundTrip`
+> and `scripts/step-interop-sw-roundtrip.py`. The faulty cylinder is nine of
+> our faces knitted into one, and it does not exist until SOLIDWORKS makes it.
+>
+> Start SOLIDWORKS **by hand**, never kill the driver mid-import, and put
+> `f02-band-fn032-analytic.stp` in every run as the positive control - it must
+> read `faults=2 faultyfaces=2 codes=17`, or a page of clean rows means
+> nothing. Report how much of each sweep was recognised beside any fault count;
+> the kit records it now, in `sweep_whole` / `sweep_cut` / `sweep_pct_whole`.
 
 ### What an analytic face's boundary is now
 
@@ -1585,12 +1710,54 @@ pass switched off reports identically.
   fixture exists to catch and confirm the *rewritten* line fails. Then look at
   what the rewrite stopped constraining and pin it again wherever the number is
   derivable, and say plainly where it is not.
+- **A column that reads zero is not a column that read nothing.** The interop
+  kit's `band` - the number every argument here about tessellation slack rests
+  on - has been `0.000000` for every file of every kit ever generated, because
+  the kit read the exporter's report off stderr and the report comes out on
+  stdout. Twenty of the twenty-four coupons declare no sweep, so a zero looked
+  like the right answer. Before leaning on a column, make it report something
+  non-zero on a file you know should move it.
+- **A caught exception looks exactly like a measured absence.** Calling
+  `BRep_Tool::CurveOnSurface` with the C++ signature raises a `TypeError` in
+  OCP; caught, it reads as "this edge has no pcurve", and a diagnostic then
+  reported 100% pcurve-less files with a flawless pcurve error of zero. The
+  other half of the same trap: OpenCASCADE *builds* a projected pcurve where
+  the file stores none, so the same column then reads exactly the off-surface
+  distance and looks like a second independent confirmation of it.
+- **Do not kill `step-interop-solidworks.ps1` mid-import**, and take
+  `-FaultDetail` in a separate pass over the faulty files only. Twice on
+  2026-09-08 a kill took SOLIDWORKS down with it - `mfc140u.dll`,
+  `0xC0000005` - and relaunching SOLIDWORKS from a script gives an instance
+  that attaches, reads its preferences, imports one file and deadlocks.
+- **Do not name a cause for a SOLIDWORKS stall on one observation.** Three were
+  named in one session and two were refuted within the hour: "these files hang
+  it" (the same file then imported cleanly twice) and "my edit to the driver
+  did it" (pristine and modified give identical results). It is intermittent
+  and unexplained, on a tool that has run whole 48-file suites without one.
+- **A run of clean rows is not a result without a positive control in the same
+  session.** Three intervention coupons came back clean from a session in which
+  no file was ever shown to be faulty, and a session where the instrument is
+  silent looks exactly like a session where the files are good. Import a coupon
+  you *expect* to fail beside them, every time.
+- **The standalone ridge is not a control.** It removes the boolean and
+  changes the topology with it: a sweep closed round its profile is written as
+  a periodic face cut into pieces, SOLIDWORKS reads one as a solid of volume
+  0.0000 with 38 faulty edges, and hangs on another. The wall variant with the
+  taper switched off is the control that moves one variable.
 - **`quick.sh` pipes the build through `tail`**, so grepping its output for
   `FAILED` misses real failures. Use `berr.sh`, which keeps 30 lines.
 
 ## Tools
 
 - `scripts/step-occt-strict.py --kitdir <dir>` - corner-off p95 per file
+- `scripts/step-diagnostics/face-bad-edge.py <file.stp>` - per face, everything
+  SOLIDWORKS has a separate fault code for: an edge off its surface, a pcurve
+  off its 3D curve, a vertex off its edge, the shortest edge, the wire's
+  closure gap. Printed with the face's kind, area and centre in `-FaultDetail`'s
+  own units, so the two lists join. This is the instrument that found code 17.
+- `scripts/step-diagnostics/edge-lengths.py <file.stp>` - the edge-length
+  distribution straight out of the STEP text, closed edges counted separately.
+  No kernel, so no silent repair: what it reports is what was written.
 - `scripts/step-interop-kit.py --binary <abs path to pythonscad.com> --outdir <dir>`
   (the binary path must be absolute, and `.com` not `.exe`)
 - `scripts/step-interop-solidworks.ps1 -KitDir <dir> -ImportSettings "..."` -
