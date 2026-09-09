@@ -2,7 +2,7 @@
 //
 // This is not a pass/fail fixture. It is the model behind a *family* of interop
 // coupons, and it exists because of what the SOLIDWORKS run in
-// doc/step-interop-validation.md could and could not establish.
+// doc/step-export-development.md could and could not establish.
 //
 // It could establish that every small coupon passes and that a real part failed
 // - imported as a surface body rather than a solid, its faces read and then not

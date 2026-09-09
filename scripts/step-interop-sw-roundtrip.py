@@ -8,7 +8,7 @@ with OpenCASCADE and says what changed.
 Why this exists, when the PowerShell driver already records a body type and a
 face count: a body type is a verdict and this is evidence. "SOLIDWORKS made a
 solid" does not say whether it kept the B-spline the coupon is about, and
-`doc/step-interop-validation.md` has already had to record one case where it
+`doc/step-export-development.md` has already had to record one case where it
 made a solid by *healing* the file - reading our faces, discarding what it did
 not like, and sewing the rest. A re-export says exactly which surfaces survived
 that, in the same census the rest of the suite is written in.

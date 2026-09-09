@@ -2,7 +2,7 @@
 lies from each of the two faces it bounds.
 
 This is the measurement that found the defect described in
-doc/step-interop-validation.md: the analytic exporter replaces a run of facets
+doc/step-export-development.md: the analytic exporter replaces a run of facets
 with a cylinder but leaves the mesh's straight polyline boundary in place, so
 the edge is a chord where the surface is an arc. Reported per
 curve-kind-on-surface-kind pair, because that is what makes it legible at a

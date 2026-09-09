@@ -11,7 +11,7 @@ so.
     python3 scripts/step-corner-stray.py build/foo.step [more.step ...]
 
 Beware the p95 on a face with few corners: with nineteen it is the maximum, so
-a single outlier sets it. See doc/step-corner-exactness-handover.md.
+a single outlier sets it. See doc/step-export-development.md.
 """
 import sys, math
 from collections import defaultdict

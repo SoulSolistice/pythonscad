@@ -32,8 +32,8 @@
 //
 // It has not been made relative, and deliberately so: the obvious form,
 // `1e-5 * max(1.0, r)`, is 78 times looser on the bayonet lid than what every
-// measurement in doc/step-export-status.md was taken against, and no fixture in
-// the suite is far enough from unit scale to show whether that is an
+// measurement in doc/step-export-development.md was taken against, and no
+// fixture in the suite is far enough from unit scale to show whether that is an
 // improvement or a new source of wrong surfaces. It wants a large-model fixture
 // and a measurement first, not a change made on the strength of the argument
 // above.

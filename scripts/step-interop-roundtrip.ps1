@@ -3,7 +3,7 @@
   Import a STEP file into SOLIDWORKS and write it straight back out, for comparison.
 
 .DESCRIPTION
-  doc/step-export-status.md says of the fillet coupon that its analytic output is
+  doc/step-export-development.md says of the fillet coupon that its analytic output is
   "entity for entity what SOLIDWORKS writes for the same part". That claim has
   never been checked against SOLIDWORKS - it was reasoned from what the entities
   ought to be. This checks it.

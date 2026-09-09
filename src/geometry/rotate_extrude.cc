@@ -351,7 +351,8 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   // followed from it - the region is not a ring, the cone that a segment
   // reaching the axis sweeps cannot be bounded, and a band whose neighbour
   // stays faceted has to stay faceted too, so a whole stack of bands went with
-  // it. See doc/step-export.md, item 1.
+  // it. See doc/step-export-wip.md, *A revolve that touches its own axis
+  // collapses to nothing*.
   //
   // Welded here rather than skipped later, because the two are not the same: a
   // dropped facet leaves a hole, and a shared index leaves a fan.

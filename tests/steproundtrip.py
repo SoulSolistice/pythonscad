@@ -155,10 +155,19 @@ def worst_tolerance(shape):
     on their surfaces still comes back as one closed solid - it has simply been
     granted the slack it needed.
 
-    That slack is what a stricter importer will not grant. Measured against the
-    SOLIDWORKS run in doc/step-interop-validation.md the correlation is exact:
-    everything it read as a solid needed 0.048 or less, and the one file it read
-    as loose surfaces needed 0.264.
+    What that slack *is* is our own defect seen from the other side: per the OCCT
+    STEP user guide, an edge's tolerance is the maximal deviation between its 3D
+    curve and its pcurves. It is not a kernel being generous, and it is not a
+    correctness measure either - it is *largest* on a lid variant SOLIDWORKS
+    reads happily, because DE_ShapeFixParameters defaults MaxTolerance3d to 1.0.
+
+    It was once read as predicting whether a foreign importer would sew, on a
+    perfect correlation over one part. The band family refuted that: every member
+    imports as a solid, including one needing 0.283 - more than the 0.264 at
+    which the lid failed. See doc/step-export-development.md, *Refuted claims*.
+    What it remains good for is being the only cheap, deterministic, licence-free
+    number that says how far an approximated face's boundary sits from the
+    surface it bounds. TOLERANCE: and TOLERANCE-APPROX: assert it.
 
     Which is also the tessellation band, and that is not a coincidence. Every
     exactly-fitted face this exporter writes is bounded by curves lying on it;

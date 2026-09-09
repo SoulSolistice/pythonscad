@@ -90,8 +90,8 @@
 // 20. So a corner the union put in the middle of a facet - and every corner
 // along the ridge's trim is one - sits 20 - 20*cos(pi/32) = 0.09631 inside the
 // cylinder it is written on. That figure is this fixture's whole defect: it is
-// the 9.63e-02 corner-off p95 recorded in doc/step-corner-exactness.md, to
-// three digits, and nothing else in the model is off by anything like it.
+// the 9.63e-02 corner-off p95 this fixture read before the corner placement
+// landed, to three digits, and nothing else in the model is off by anything like it.
 // Putting such a corner on the cylinder moves it out by that 0.09631 and takes
 // the facet's polygon out of its own plane, so the polygon is fanned into
 // triangles, each carrying the plane its own three corners lie on.

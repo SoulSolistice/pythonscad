@@ -3,7 +3,7 @@
   Import every STEP file of an interop kit into SOLIDWORKS and record what it made of them.
 
 .DESCRIPTION
-  doc/step-interop-validation.md explains why this exists: OpenCASCADE is the only
+  doc/step-export-development.md explains why this exists: OpenCASCADE is the only
   kernel that has ever read this exporter's output, and the failure that started
   the work was seen in SOLIDWORKS. scripts/step-interop-kit.py writes the coupons,
   each one twice - analytic, and faceted as a control.
@@ -32,7 +32,7 @@
                  gated - see -MaxWalkFaces.
 
                  The edge count is the one to read first. Every measurement in
-                 doc/step-interop-validation.md says the defect is edges that do
+                 doc/step-export-development.md says the defect is edges that do
                  not lie on the faces they bound - 254 of 258 on one coupon, by
                  up to 0.196 - and that was measured with OpenCASCADE. This is
                  SOLIDWORKS' own verdict on the same edges, per edge, so the two
@@ -57,7 +57,7 @@
   exactly that.
 
   Check Entity and feature recognition need the UI and stay manual; the procedure
-  is in doc/step-interop-validation.md. Feature recognition on c07-fillet-quadrics
+  is in doc/step-export-development.md. Feature recognition on c07-fillet-quadrics
   is the one worth doing by hand - whether SOLIDWORKS calls a cylinder a cylinder
   is the entire point of the analytic path, and no script answers it for a user.
 
@@ -392,7 +392,7 @@ public class SwKitRunner
 
     // One line per faulty entity: what kind of surface it is, how big, and
     // where. Everything measurable about these files from our side orders them
-    // the opposite way to SOLIDWORKS' verdict - see doc/step-interop-validation.md
+    // the opposite way to SOLIDWORKS' verdict - see doc/step-export-development.md
     // - so the only way left to find the mechanism is to ask which faces it
     // objects to and look at those.
     public static string FaultDetail(string path)

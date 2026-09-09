@@ -1887,8 +1887,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     // which cuts nothing.
     //
     // Those corners are why this matters: a corner 0.2 off the surface is a
-    // vertex of the written face, and doc/step-interop-validation.md records
-    // what a strict reader does with one.
+    // vertex of the written face, and doc/step-export-development.md, *What the
+    // CAD kernels do*, records what a strict reader does with one.
     {
       std::vector<double> ranked;
       for (const double d : stray_of) {
@@ -2223,8 +2223,9 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     //
     // It is fixed anyway, because an absolute value compared against a signed
     // threshold is wrong however it is reached. The next person to follow
-    // doc/step-export.md's *declare first, recognise second* and declare that
-    // cone will need it - and should know what else they will meet. With both
+    // doc/step-export-development.md's *declare first, recognise second* and
+    // declare that cone will need it - and should know what else they will meet.
+    // With both
     // in place the claim on step-bored-cone widens from 32 facets to 52, the
     // trimmed-quadric path bounds them wrongly, and the solid comes out 2.75%
     // under its derived volume: 5234.1 against 5382.2 +/- 12, with a total

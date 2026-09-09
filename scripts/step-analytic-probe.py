@@ -5,7 +5,7 @@ An exported STEP file is a complete description of the merged mesh, so parsing
 one gives the same input `AnalyticFeatures::recogniseSurfacesOfRevolution()`
 sees, with none of the build. That makes this the cheapest way to answer "how
 much of this part could ever become analytic, and which rule is stopping each
-piece that does not" - see doc/step-export.md, *Method notes*.
+piece that does not" - see doc/step-export-development.md.
 
 Run it on a *faceted* export (without `step-analytic-surfaces`). The recogniser is
 replayed here in full, so an analytic export would be measuring the answer
@@ -26,7 +26,7 @@ Four subcommands:
 
 `bands` replays the shipped recogniser, so two of its rules are on by default
 and can be switched off to reproduce the behaviour from before item 0 of
-doc/step-export.md:
+doc/step-export-development.md:
 
   --no-local-axis   take the band's axis from the whole unconstrained walk
                     again, instead of the seed's immediate neighbourhood

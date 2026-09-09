@@ -736,7 +736,7 @@ public:
    * has to be written as a B-spline. That is not emitted here: it is
    * derivable from the 3D curve, and a kernel reading this file recovers it
    * to 2e-6 of the radius, which is inside the mesh's own tessellation band.
-   * See doc/step-export-status.md. */
+   * See doc/step-export-development.md. */
   class Ellipse : public RoundType
   {
   public:

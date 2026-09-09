@@ -26,7 +26,7 @@ sphere octants is a fillet on a non right dihedral, and FilletNode produces a
 non manifold mesh for those today - a hexagonal prism and a sheared cube both
 export as open shells with the analytic path switched off entirely. So there is
 currently no model which both refuses the quadric and exports at all. See
-doc/step-export-status.md.
+doc/step-export-development.md.
 """
 # EXPECT: 20 Bezier patches cover 756 facets
 # EXPECT: 20 of 20 patches are exactly quadrics - 12 cylindrical, 8 spherical

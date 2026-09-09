@@ -179,10 +179,10 @@ APPROX |= {"f%02d-band-fn%03d" % (i + 1, fn) for i, fn in enumerate(BAND_FAMILY)
 # terminal.
 #
 # Derived, and only where derivable. A count captured from a run locks in
-# whatever the exporter did last, which is the circularity doc/step-export-
-# testing.py exists to prevent; a coupon absent from this table simply reports
-# its count as before. Adding one means working the number out from the model
-# and writing the reason beside it.
+# whatever the exporter did last, which is the circularity
+# doc/step-export-development.md exists to prevent; a coupon absent from this
+# table simply reports its count as before. Adding one means working the number
+# out from the model and writing the reason beside it.
 EXPECT_FACES = {
     "c04-sphere": (1, "a sphere closed on itself is bounded by its seam alone: one "
                       "face, and no plane anywhere"),
@@ -359,7 +359,7 @@ def main():
                 "rational": c.get("RATIONAL_B_SPLINE_SURFACE", 0),
                 "circle": c.get("CIRCLE", 0),
                 # Filled in by hand, in the target CAD system. See
-                # doc/step-interop-validation.md for what each one means.
+                # doc/step-export-development.md for what each one means.
                 "cad_body_type": "",
                 "cad_import_errors": "",
                 "cad_faces": "",

@@ -12,7 +12,7 @@ are ordered by SOLIDWORKS as 1, 0 and 83 faulty faces, and **every** geometric
 measure available from our side orders them the other way or not at all: the
 83-fault file has seven times fewer off-surface boundary vertices than the
 1-fault file, no slivers, no off-plane faces, no vertex off its edge, and
-identical topology. See doc/step-interop-validation.md. When nothing you can
+identical topology. See doc/step-export-development.md. When nothing you can
 measure explains a verdict, the next move is to ask the system which entities it
 means rather than to keep proposing mechanisms.
 

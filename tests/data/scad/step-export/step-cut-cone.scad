@@ -71,7 +71,7 @@
 // 9.9645 instead of on the rim at 10. It is not asserted here, because a figure
 // that is neither the ideal solid nor the mesh's is a figure only this
 // exporter's current behaviour explains - which is what
-// doc/step-export-testing.md means by captured. When that placement reaches the
+// doc/step-export-development.md means by captured. When that placement reaches the
 // exact tier the two tiers agree and VOLUME: joins VOLUME-APPROX: above.
 $fn = 32;
 difference() {

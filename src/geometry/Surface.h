@@ -197,10 +197,10 @@ private:
  * cosmetic: the corner placement has to tell a face of the part from a chord of
  * some curved surface's tessellation, and with nothing declared it had to infer
  * that from geometry. The inference works and is measured, but it rests on a
- * threshold - see doc/step-corner-exactness-handover.md, where the closest pair
- * of cases sits at 0.885 against 0.643. A declaration turns it into a lookup,
- * and gives the inference, still needed wherever nothing declares (hull(),
- * minkowski(), an imported mesh), something to be checked against.
+ * threshold - see doc/step-export-development.md, *Corner placement*, where the
+ * closest pair of cases sits at 0.885 against 0.643. A declaration turns it into
+ * a lookup, and gives the inference, still needed wherever nothing declares
+ * (hull(), minkowski(), an imported mesh), something to be checked against.
  *
  * Held as the base class's `refpt` and `normdir` and nothing else, so two
  * records of the same plane anchored at different points are the same surface -
