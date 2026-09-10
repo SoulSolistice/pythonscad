@@ -1237,6 +1237,10 @@ void StepKernel::build_tri_body(
   // exact rather than merely close, so it is preferred wherever it agrees with
   // the face at hand.
   std::vector<std::pair<Vector3d, Vector3d>> declared_planes;  // point, unit normal
+  struct SectionMiss {
+    double tilt, offset;
+  };
+  std::vector<SectionMiss> section_misses;
   // Edges that lie on the curve where two declared quadrics cross, and which two
   // they are. Both faces derive the arc from the same pair of declarations, so
   // they agree on it exactly and the shell closes without either having to know
@@ -1800,6 +1804,7 @@ void StepKernel::build_tri_body(
         // seen the plane from that edge alone, and refused the whole surface for
         // it.
         section_planes.clear();
+        section_misses.clear();
         for (const auto *patch : standing) {
           std::vector<CutPlane>& list = section_planes[patch->surface.get()];
           for (const auto& run : patch->runs) {
@@ -1812,13 +1817,26 @@ void StepKernel::build_tri_body(
             // with the tessellation and with whatever the boolean left behind;
             // the declaration cannot move at all, and the section derived from
             // it is exact rather than merely close.
+            double best_tilt = 9, best_off = 9;
             for (const auto& pl : declared_planes) {
-              if (fabs(fabs(pl.second.dot(cp.normal)) - 1.0) > 1e-6) continue;
-              if (fabs((cp.on_plane - pl.first).dot(pl.second)) > 1e-6) continue;
+              // How near the nearest declaration comes, whether or not it is
+              // taken: a section written on the mesh's own plane is a section
+              // that moves when the corners do, and knowing it missed by 1e-5
+              // rather than by a right angle is the difference between a
+              // tolerance to widen and a plane nobody declared.
+              const double tilt = fabs(fabs(pl.second.dot(cp.normal)) - 1.0);
+              const double off = fabs((cp.on_plane - pl.first).dot(pl.second));
+              if (tilt < best_tilt) best_tilt = tilt;
+              if (tilt <= 1e-6 && off < best_off) best_off = off;
+              if (tilt > 1e-6) continue;
+              if (off > 1e-6) continue;
               cp.normal = cp.normal.dot(pl.second) > 0 ? pl.second : Vector3d(-pl.second);
               cp.on_plane = pl.first;
               cp.declared = true;
               break;
+            }
+            if (!cp.declared) {
+              section_misses.push_back({best_tilt, best_off});
             }
             bool have = false;
             for (const auto& seen : list) {
@@ -4186,6 +4204,23 @@ void StepKernel::build_tri_body(
       "model declared, %4$d on one taken from the mesh",
       sections_declared + sections_fitted, sections_declared + sections_fitted == 1 ? "" : "s",
       sections_declared, sections_fitted);
+    if (!section_misses.empty()) {
+      double tilt = 9, off = 9;
+      std::size_t parallel = 0;
+      for (const auto& m : section_misses) {
+        tilt = std::min(tilt, m.tilt);
+        if (m.tilt <= 1e-6) {
+          parallel++;
+          off = std::min(off, m.offset);
+        }
+      }
+      LOG(
+        "STEP export:    %1$d cut planes took the mesh's own: %2$d are parallel to a declared "
+        "plane, nearest missing its offset by %3$.2e, and the rest tilt from the nearest by "
+        "%4$.2e against the 1e-06 asked for; %5$d planes were declared in all",
+        int(section_misses.size()), int(parallel), off > 8 ? 0.0 : off, tilt,
+        int(declared_planes.size()));
+    }
   }
 
   // A CLOSED_SHELL has to be a single connected shell, so split disconnected
