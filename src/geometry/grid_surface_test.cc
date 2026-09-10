@@ -14,7 +14,9 @@
 #include "geometry/Surface.h"
 
 #include <catch2/catch_all.hpp>
+#include <algorithm>
 #include <cmath>
+#include <string>
 #include <memory>
 #include <vector>
 
@@ -468,4 +470,58 @@ TEST_CASE("a zero-pitch sweep inverts its own points", "[sweepsurface][!shouldfa
   // Three quarters of the way round, on a point the evaluator itself produced.
   const Vector3d generated = ring->evaluate(0.75, 0.0);
   CHECK(ring->onSurface(generated, 1e-6));
+}
+
+// A point the surface produced is a point the surface can find again. That
+// sounds like a tautology and it is not: `project` descends on the *squared*
+// distance, which in double precision stops changing about sqrt(eps) from the
+// minimum, and it takes its Jacobian by central differences at h = 1e-6, whose
+// own error is around eps/h. Both floors sit far above the 1e-7 that
+// `intersectionArc` holds a fitted boundary curve to.
+//
+// This is the measurement behind item 10 A3 of doc/step-export-wip.md: on the
+// band family the crossing arc lies on the *quadric* it bounds to 5.5e-06 and
+// is reported 1.7e-02 off the declared sweep, and that number has to come from
+// somewhere. `evaluate` then `project` is the shortest way to ask whether it is
+// the curve missing the surface or the surface failing to locate itself.
+TEST_CASE("a declared grid can find a point it evaluated itself", "[surface][grid][projection]")
+{
+  // The band family's own ridge, station for station: a trapezoidal profile
+  // swept along 10/3 turns, declared closed. A smooth ramp is not a substitute -
+  // the profile here is a polyline with re-entrant corners and it is the shape
+  // the 1.7e-02 was measured on.
+  const int steps = 107;  // max(24, round(32 * 40/12))
+  const int rows = steps + 1, cols = 4;
+  std::vector<Vector3d> net;
+  for (int i = 0; i <= steps; i++) {
+    const double t = double(i) / steps;
+    const double a = 2 * M_PI * (40.0 / 12.0) * t;
+    const double z = 8.0 / 2 + (40.0 - 8.0) * t;
+    const double f = std::max(0.0, std::min(1.0, std::min(t / 0.2, (1 - t) / 0.2)));
+    const double profile[4][2] = {{0.3, -4.0}, {-2.0 * f, -1.5}, {-2.0 * f, 1.5}, {0.3, 4.0}};
+    for (const auto& pr : profile) {
+      net.emplace_back((20.0 + pr[0]) * cos(a), (20.0 + pr[0]) * sin(a), z + pr[1]);
+    }
+  }
+  GridSurface grid(rows, cols, net, true);
+
+  double worst = 0, worst_u = 0, worst_v = 0;
+  for (int i = 1; i < 20; i++) {
+    for (int j = 1; j < 8; j++) {
+      const double u = double(i) / 20.0, v = double(j) / 8.0;
+      const Vector3d on = grid.evaluate(u, v);
+      double fu = 0, fv = 0;
+      REQUIRE(grid.project(on, fu, fv));
+      const double miss = (grid.evaluate(fu, fv) - on).norm();
+      if (miss > worst) {
+        worst = miss;
+        worst_u = u;
+        worst_v = v;
+      }
+    }
+  }
+  INFO("worst at u=" << worst_u << " v=" << worst_v << " miss=" << worst);
+  // A boundary curve is held to 1e-7 of this surface, so the surface has to be
+  // able to place a point on itself at least that well.
+  CHECK(worst <= 1e-7);
 }

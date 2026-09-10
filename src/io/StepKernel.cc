@@ -329,6 +329,26 @@ using AnalyticFeatures::surfaceImplicit;
 
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 
+// Scratch, read straight after a call: the same worst-case split by whether the
+// surface states where it is algebraically or answers by projecting.
+double g_worst_quadric = 0, g_worst_fitted = 0;
+
+/*! Why a crossing arc came out as it did.
+ *
+ * `intersectionArc` knows how close it got and used to throw the number away,
+ * so a boundary that fell back to chords reported a count and nothing else -
+ * and a count cannot tell a fit that missed by 3.4e-05 from one that missed by
+ * a tenth of a millimetre. These are what turn that into a distribution.
+ */
+struct ArcOutcome {
+  int degree = 0;           //!< the degree that answered, or the highest tried
+  int sampling_failed = 0;  //!< degrees abandoned because a sample would not project
+  double best_error = std::numeric_limits<double>::infinity();  //!< nearest any degree came
+  double on_quadric = 0;      //!< of that, how much was against a surface stated algebraically
+  double on_fitted = 0;       //!< and how much against one that answers by projecting
+  int straddles_crease = -1;  //!< 1 if the arc's ends sit in different profile spans, 0 if not
+};
+
 /*! The arc of the curve where two declared quadrics cross, between two points
  *  already on it, as the control points of a Bezier.
  *
@@ -352,7 +372,7 @@ using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 double intersectionArcError(const Surface *a, const Surface *b, const std::vector<Vector3d>& ctrl);
 
 bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, const Vector3d& p1,
-                     double tol, std::vector<Vector3d>& ctrl)
+                     double tol, std::vector<Vector3d>& ctrl, ArcOutcome *why = nullptr)
 {
   const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
   // The band does NOT belong here, and putting it here was wrong once already.
@@ -365,6 +385,38 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
   // it replaces - measured: identical boundary deviation to seven digits.
   const double solve_tol = 1e-14 * scale;
   const double fit_tol = tol;
+  // A declared sweep's profile is a *polyline*, so the surface is creased along
+  // every profile corner and its v derivative does not exist there. Where the
+  // other surface crosses a crease the intersection curve has a kink, and no
+  // polynomial of any degree follows a kink: raising it only moves the miss
+  // around. So record whether this edge straddles one, because that is the
+  // difference between a fit that wants more degree and one that wants
+  // splitting at the crease.
+  if (why != nullptr) {
+    for (const Surface *sf : {a, b}) {
+      const auto *grid = dynamic_cast<const GridSurface *>(sf);
+      if (grid == nullptr) continue;
+      // Where the creases are is something the surface *states*, in the same
+      // description it hands the STEP writer: `splineForm` returns the v knots
+      // and their multiplicities, and a knot the surface is only C0 across is a
+      // crease by definition. Counting spans from `cols` would be deducing the
+      // same thing from an internal, and getting the answer from the
+      // declaration is the whole method this exporter is built on.
+      int du = 0, dv = 0, nr = 0, nc = 0;
+      std::vector<Vector3d> net;
+      std::vector<double> ku, kv;
+      std::vector<int> mu, mv;
+      if (!grid->splineForm(du, dv, nr, nc, net, ku, mu, kv, mv)) continue;
+      double u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+      if (!grid->project(p0, u0, v0) || !grid->project(p1, u1, v1)) continue;
+      const double lo = std::min(v0, v1), hi = std::max(v0, v1);
+      why->straddles_crease = 0;
+      for (std::size_t k = 0; k < kv.size(); k++) {
+        if (mv[k] < dv) continue;  // still C1 across this one
+        if (kv[k] > lo + 1e-12 && kv[k] < hi - 1e-12) why->straddles_crease = 1;
+      }
+    }
+  }
   for (int degree = 3; degree <= 9; degree++) {
     // Sample the true curve at the Bezier's own parameters, by pulling the
     // chord's point at each onto both surfaces.
@@ -377,7 +429,20 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
       ok = projectOntoBoth(a, b, q, solve_tol);
       on_curve[i] = q;
     }
-    if (!ok) return false;
+    // A degree whose samples will not project is not the end of the fit. The
+    // next degree samples at *different* parameters - degree 3 asks for 1/3 and
+    // 2/3, degree 4 for 1/4, 1/2, 3/4 - so a chord point that lands somewhere
+    // Newton cannot recover from says nothing at all about the one after it.
+    // Returning here instead threw away every remaining degree on the strength
+    // of a single sample, and it is the reason a boundary that had every corner
+    // placed still fell back to chords on 47 edges.
+    if (!ok) {
+      if (why != nullptr) {
+        why->sampling_failed++;
+        why->degree = degree;
+      }
+      continue;
+    }
 
     // Interpolate them: solve the Bernstein collocation system for the control
     // points. Small and dense, and well conditioned at these degrees.
@@ -395,8 +460,18 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
     const Eigen::MatrixXd solved = m.colPivHouseholderQr().solve(rhs);
     ctrl.assign(degree + 1, Vector3d::Zero());
     for (int j = 0; j <= degree; j++) ctrl[j] = solved.row(j).transpose();
-    if (intersectionArcError(a, b, ctrl) <= fit_tol) return true;
+    g_worst_quadric = 0;
+    g_worst_fitted = 0;
+    const double err = intersectionArcError(a, b, ctrl);
+    if (why != nullptr && err < why->best_error) {
+      why->degree = degree;
+      why->best_error = err;
+      why->on_quadric = g_worst_quadric;
+      why->on_fitted = g_worst_fitted;
+    }
+    if (err <= fit_tol) return true;
   }
+  ctrl.clear();
   return false;
 }
 
@@ -420,6 +495,11 @@ double intersectionArcError(const Surface *a, const Surface *b, const std::vecto
       if (!surfaceImplicit(s, p, f, g, &d)) return std::numeric_limits<double>::infinity();
       if (g.norm() < 1e-12) return std::numeric_limits<double>::infinity();
       worst = std::max(worst, d);  // the distance to the surface, not to its tangent plane
+      // Which of the two the arc is failing is not a detail: a quadric answers
+      // by algebra and a grid by projecting, so a large number here may be the
+      // curve missing the surface or the surface failing to locate itself.
+      if (isQuadric(s)) g_worst_quadric = std::max(g_worst_quadric, d);
+      else g_worst_fitted = std::max(g_worst_fitted, d);
     }
   }
   return worst;
@@ -1165,6 +1245,11 @@ void StepKernel::build_tri_body(
   std::map<std::pair<int, int>, std::pair<const Surface *, const Surface *>> crossing_edges;
   std::set<std::pair<int, int>> crossing_keys;  // the same, as the sections' skip set
   double crossing_fit = 0;                      // the worst any of those arcs leaves either surface
+  // What the fitter knew and used to discard. A count of chorded edges cannot
+  // tell a fit that missed by 3.4e-05 from one that missed by a tenth of a
+  // millimetre, and those want different work.
+  std::size_t arc_refused = 0, arc_no_fit = 0, arc_creased = 0, arc_uncreased = 0;
+  std::vector<double> arc_errors, arc_on_quadric, arc_on_fitted;
   // Deciding which plane sections get written, over a given set of faces. This
   // is a function rather than a step because it has to be asked **twice**, on
   // two different meshes: once while it is being settled which faces are
@@ -1798,7 +1883,20 @@ void StepKernel::build_tri_body(
           if (!on) continue;
           std::vector<Vector3d> ctrl;
           // The same 1e-7 the exact tier holds every other boundary to.
-          if (!intersectionArc(a, b, p0, p1, 1e-7, ctrl)) continue;
+          ArcOutcome why;
+          if (!intersectionArc(a, b, p0, p1, 1e-7, ctrl, &why)) {
+            arc_refused++;
+            if (why.degree == 0 || why.best_error == std::numeric_limits<double>::infinity()) {
+              arc_no_fit++;  // no degree ever got as far as a curve to measure
+            } else {
+              arc_errors.push_back(why.best_error);
+              arc_on_quadric.push_back(why.on_quadric);
+              arc_on_fitted.push_back(why.on_fitted);
+              if (why.straddles_crease == 1) arc_creased++;
+              else if (why.straddles_crease == 0) arc_uncreased++;
+            }
+            continue;
+          }
           // Where the crossing curve is *planar* it is a conic, and a conic has
           // an entity of its own: the plane-section pass writes it exactly,
           // where this would write a fitted B-spline through it. Two equal
@@ -4025,6 +4123,27 @@ void StepKernel::build_tri_body(
       "STEP export: %1$d edge%2$s written as the curve where two declared surfaces cross, "
       "fitted to within %3$.2e of both - a chord and a plane section each lie on only one",
       crossing_written, crossing_written == 1 ? "" : "s", crossing_fit);
+  }
+  if (arc_refused > 0) {
+    std::sort(arc_errors.begin(), arc_errors.end());
+    const double lo = arc_errors.empty() ? 0 : arc_errors.front();
+    const double med = arc_errors.empty() ? 0 : arc_errors[arc_errors.size() / 2];
+    const double hi = arc_errors.empty() ? 0 : arc_errors.back();
+    LOG(
+      "EXPORT-WARNING: STEP export: %1$d edge%2$s could not be written as that curve and fell "
+      "back to a chord - %3$d never fitted at any degree, the rest came within "
+      "%4$.2e/%5$.2e/%6$.2e min/med/max of both surfaces against the %7$.0e asked for",
+      int(arc_refused), arc_refused == 1 ? "" : "s", int(arc_no_fit), lo, med, hi, 1e-7);
+    std::sort(arc_on_quadric.begin(), arc_on_quadric.end());
+    std::sort(arc_on_fitted.begin(), arc_on_fitted.end());
+    if (!arc_on_quadric.empty()) {
+      LOG(
+        "STEP export:    of that miss, %1$.2e median is against a surface stated algebraically "
+        "and %2$.2e median against one that answers by projecting",
+        arc_on_quadric[arc_on_quadric.size() / 2], arc_on_fitted[arc_on_fitted.size() / 2]);
+      LOG("STEP export:    %1$d of them run across a crease in the declared profile and %2$d do not",
+          int(arc_creased), int(arc_uncreased));
+    }
   }
   if (sections_declared + sections_fitted > 0) {
     // Where each section's plane came from, because it is the difference

@@ -926,8 +926,21 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
   // as the sweep has turns - a helix passes near itself once a pitch - so a
   // single start finds the wrong one. Sampling at the stations cannot be out by
   // more than a span.
-  double best = std::numeric_limits<double>::infinity();
-  double bu = 0, bv = 0;
+  const int nspans = std::max(1, vspans());
+  // One start per profile span, not one overall. The profile is a polyline, so
+  // the surface is creased between spans and each is a *separate smooth piece*:
+  // a descent inside one cannot walk into another, and the best sample overall
+  // is only ever in one of them. Keeping a start per span is the same thing
+  // BezierPatchSurface::project does for the same reason, and here the spans
+  // come from the declaration rather than from a guess about the shape.
+  //
+  // Measured on the band family's own ridge before this: `project` could not
+  // find a point `evaluate` had just produced on the closing strip - the flat
+  // back of the ridge - missing it by 0.78 mm, because the best coarse sample
+  // lay on a flank and was already a local minimum there. Damping the descent
+  // changed the answer in not one digit; it was never the descent.
+  std::vector<double> best_per(nspans, std::numeric_limits<double>::infinity());
+  std::vector<double> bu_per(nspans, 0.0), bv_per(nspans, 0.0);
   const int usamples = std::max(rows * 2, 8);
   // Four samples inside each span, at its quarter points, and never on a span
   // boundary. A profile is a polyline, so every boundary is a corner where the
@@ -942,10 +955,11 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
     for (int j = 0; j < vsamples; j++) {
       const double sv = (double(j) + 0.5) / vsamples;
       const double d = (evaluate(su, sv) - pt).squaredNorm();
-      if (d < best) {
-        best = d;
-        bu = su;
-        bv = sv;
+      const int span = std::min(nspans - 1, int(sv * nspans));
+      if (d < best_per[span]) {
+        best_per[span] = d;
+        bu_per[span] = su;
+        bv_per[span] = sv;
       }
     }
   }
@@ -966,41 +980,86 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
   // are the points a boolean made along the wall, and they are exactly the ones
   // a declared sweep needs to recognise - so half of the sweep was left
   // faceted, on a surface it lies on to the width of a line.
+  // Damped rather than plain, and that is not a refinement either. Where the
+  // profile collapses - the run-out of a ridge, where the crest returns to the
+  // root and the two parameter directions stop spanning a plane - `jtj` is
+  // singular, and giving up there left the *coarse sample* as the answer.
+  // Measured on the band family's own ridge: `project` could not find a point
+  // `evaluate` had just produced, missing it by 0.78 mm at u = 0.95, which is
+  // half a station and exactly the resolution of that sample grid.
+  //
+  // Levenberg-Marquardt asks the same question with a damping term that makes
+  // the system solvable whatever the Jacobian does: lambda up when a step does
+  // not help, down when it does. At lambda near zero it *is* Gauss-Newton, so
+  // the well-conditioned interior behaves as before; at large lambda the step
+  // becomes a short one down the gradient, which is defined everywhere.
   const double h = 1e-6;
-  double best_d = (evaluate(bu, bv) - pt).squaredNorm();
-  for (int iter = 0; iter < 24; iter++) {
-    const Vector3d r = evaluate(bu, bv) - pt;
-    const Vector3d du =
-      (evaluate(std::min(1.0, bu + h), bv) - evaluate(std::max(0.0, bu - h), bv)) / (2 * h);
-    const Vector3d dv =
-      (evaluate(bu, std::min(1.0, bv + h)) - evaluate(bu, std::max(0.0, bv - h))) / (2 * h);
-    Eigen::Matrix2d jtj;
-    jtj << du.dot(du), du.dot(dv), du.dot(dv), dv.dot(dv);
-    const Eigen::Vector2d rhs(-r.dot(du), -r.dot(dv));
-    if (fabs(jtj.determinant()) < 1e-20) break;
-    const Eigen::Vector2d step = jtj.inverse() * rhs;
-    // Backtrack until the step is an improvement, and give up rather than take
-    // it if none of the halvings is. Eight halvings takes a step to 1/256 of
-    // itself, well below the parameter spacing of any grid this exporter sees.
-    bool moved = false;
-    double scale = 1.0;
-    for (int back = 0; back < 8; back++, scale *= 0.5) {
-      const double nu = std::clamp(bu + step[0] * scale, 0.0, 1.0);
-      const double nv = std::clamp(bv + step[1] * scale, 0.0, 1.0);
-      const double nd = (evaluate(nu, nv) - pt).squaredNorm();
-      if (nd < best_d) {
-        const bool settled = fabs(nu - bu) < 1e-12 && fabs(nv - bv) < 1e-12;
-        bu = nu;
-        bv = nv;
-        best_d = nd;
-        moved = !settled;
-        break;
+  double answer = std::numeric_limits<double>::infinity();
+  double au = 0, av = 0;
+  for (int span = 0; span < nspans; span++) {
+    if (!std::isfinite(best_per[span])) continue;
+    double bu = bu_per[span], bv = bv_per[span];
+    double best_d = best_per[span];
+    double lambda = 1e-9;
+    for (int iter = 0; iter < 64; iter++) {
+      const Vector3d r = evaluate(bu, bv) - pt;
+      const Vector3d du =
+        (evaluate(std::min(1.0, bu + h), bv) - evaluate(std::max(0.0, bu - h), bv)) / (2 * h);
+      // Differenced *within* the span, not across it. At a span boundary the
+      // profile has a corner and the v derivative does not exist; a central
+      // difference straddling one measures the average of two different slopes
+      // and points nowhere useful. Held inside the piece being descended it
+      // measures that piece. Worth 7.8e-07 down to rounding on the band family's
+      // ridge, whose worst case sits exactly on a boundary.
+      const double vlo = double(span) / nspans, vhi = double(span + 1) / nspans;
+      const Vector3d dv = (evaluate(bu, std::min(vhi, bv + h)) - evaluate(bu, std::max(vlo, bv - h))) /
+                          (std::min(vhi, bv + h) - std::max(vlo, bv - h));
+      Eigen::Matrix2d jtj;
+      jtj << du.dot(du), du.dot(dv), du.dot(dv), dv.dot(dv);
+      const Eigen::Vector2d rhs(-r.dot(du), -r.dot(dv));
+      // Every step still has to *improve* the distance, which is the guard this
+      // has always carried: Gauss-Newton on a swept surface asks for enormous
+      // steps wherever the two parameter directions run nearly parallel, and one
+      // taken on trust lands somewhere else entirely on the sweep.
+      bool moved = false;
+      for (int attempt = 0; attempt < 16; attempt++) {
+        Eigen::Matrix2d damped = jtj;
+        damped(0, 0) += lambda * std::max(jtj(0, 0), 1e-30);
+        damped(1, 1) += lambda * std::max(jtj(1, 1), 1e-30);
+        if (!(fabs(damped.determinant()) > 0)) {
+          lambda *= 10;
+          continue;
+        }
+        const Eigen::Vector2d step = damped.inverse() * rhs;
+        if (!step.allFinite()) {
+          lambda *= 10;
+          continue;
+        }
+        const double nu = std::clamp(bu + step[0], 0.0, 1.0);
+        const double nv = std::clamp(bv + step[1], 0.0, 1.0);
+        const double nd = (evaluate(nu, nv) - pt).squaredNorm();
+        if (nd < best_d) {
+          const bool settled = fabs(nu - bu) < 1e-14 && fabs(nv - bv) < 1e-14;
+          bu = nu;
+          bv = nv;
+          best_d = nd;
+          lambda = std::max(lambda * 0.1, 1e-12);
+          moved = !settled;
+          break;
+        }
+        lambda *= 10;
       }
+      if (!moved) break;
     }
-    if (!moved) break;
+    if (best_d < answer) {
+      answer = best_d;
+      au = bu;
+      av = bv;
+    }
   }
-  u = bu;
-  v = bv;
+  if (!std::isfinite(answer)) return false;
+  u = au;
+  v = av;
   return true;
 }
 
