@@ -119,6 +119,26 @@ run("rational, a negative weight",
     RATIONAL.replace("RATIONAL_B_SPLINE_SURFACE(((1.,1.),(" + W + "," + W + "),(1.,1.)))",
                      "RATIONAL_B_SPLINE_SURFACE(((1.,1.),(-" + W + "," + W + "),(1.,1.)))"),
     "rejected")
+# A weight that is positive, counted correctly, and wrong. The control points
+# are untouched, so the curve is still a net edge by every test that existed
+# before this one - and 0.5 in the middle of a three-point rail is a parabola
+# where 0.7071 is a circular arc. External review found this gap on 2026-09-10;
+# the two cases below are the mutation it proposed and its mirror image.
+run("rational, curve weight disagrees with the surface",
+    RATIONAL.replace("RATIONAL_B_SPLINE_CURVE((1.," + W + ",1.))",
+                     "RATIONAL_B_SPLINE_CURVE((1.,0.5,1.))"),
+    "rejected")
+run("rational, surface rail weight disagrees with the curve",
+    RATIONAL.replace("RATIONAL_B_SPLINE_SURFACE(((1.,1.),(" + W + "," + W + "),(1.,1.)))",
+                     "RATIONAL_B_SPLINE_SURFACE(((1.,1.),(0.5," + W + "),(1.,1.)))"),
+    "rejected")
+# ...and the false positive that check has to avoid. A rational curve is
+# unchanged by scaling every weight by one factor, so an exporter may write
+# either set and both describe the same arc.
+run("rational, curve weights uniformly rescaled",
+    RATIONAL.replace("RATIONAL_B_SPLINE_CURVE((1.," + W + ",1.))",
+                     "RATIONAL_B_SPLINE_CURVE((2.,1.41421356237309515,2.))"),
+    "accepted")
 run("rational, surface knots wrong",
     RATIONAL.replace("B_SPLINE_SURFACE_WITH_KNOTS((3,3),(2,2)",
                      "B_SPLINE_SURFACE_WITH_KNOTS((2,2),(2,2)"),

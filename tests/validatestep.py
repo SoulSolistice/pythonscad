@@ -1549,6 +1549,21 @@ def check_cylindrical_faces(entities, problems):
                     )
 
 
+def _weights_agree(a, b, rel=1e-9):
+    """Two weight lists describing the same rational curve.
+
+    Compared up to a common positive factor, because a rational B-spline is
+    unchanged by scaling every weight together - (1, w, 1) and (2, 2w, 2) are the
+    same curve, and an exporter is entitled to write either.
+    """
+    if len(a) != len(b) or not a:
+        return False
+    if any(w <= 0 for w in a) or any(w <= 0 for w in b):
+        return False
+    k = b[0] / a[0]
+    return all(abs(x * k - y) <= rel * max(1.0, abs(y)) for x, y in zip(a, b))
+
+
 def check_bspline_faces(entities, problems):
     """A B-spline patch and the curves bounding it must come off one control net.
 
@@ -1732,6 +1747,26 @@ def check_bspline_faces(entities, problems):
         cols = [pts([grid[i][j] for i in range(len(grid))]) for j in range(len(grid[0]))]
         edges = [e for e in (rows + cols) if e is not None]
 
+        # The same rails as weights, so a rational curve can be held to the
+        # rational surface it bounds. Control points alone do not settle a
+        # rational curve: the weights are half of what it is, and the middle one
+        # is the whole difference between a circular arc and a parabola through
+        # the same three points. A curve carrying the right points and the wrong
+        # weights lies off the face it bounds and every other check here passes
+        # it - the count is right, the values are positive, the points are a net
+        # edge. Found in external review 2026-09-10 and confirmed by mutation:
+        # a fillet rail's 0.7071 changed to 0.5 was accepted.
+        wgrid = None
+        if surface.has("RATIONAL_B_SPLINE_SURFACE"):
+            flat = weights_of(surface.part("RATIONAL_B_SPLINE_SURFACE"))
+            if len(flat) == len(grid) * len(grid[0]):
+                nc = len(grid[0])
+                wgrid = [flat[i * nc:(i + 1) * nc] for i in range(len(grid))]
+        wrows = [list(r) for r in wgrid] if wgrid else []
+        wcols = ([[wgrid[i][j] for i in range(len(wgrid))] for j in range(len(wgrid[0]))]
+                 if wgrid else [])
+        wedges = wrows + wcols
+
         for b in refs[:-1]:
             loop, _ = _bound_loop(entities, b)
             if loop is None:
@@ -1748,6 +1783,31 @@ def check_bspline_faces(entities, problems):
                     problems.append(
                         "#%d: bounding curve #%d is not an edge of the patch's control net, so it "
                         "does not lie on the face it bounds" % (face.id, geom.id)
+                    )
+                    continue
+                # It is a rail. If both sides are rational, it has to be that
+                # rail's weights too, taken in whichever direction its points
+                # matched.
+                if not (wedges and geom.has("RATIONAL_B_SPLINE_CURVE")):
+                    continue
+                cw = weights_of(geom.part("RATIONAL_B_SPLINE_CURVE"))
+                if len(cw) != len(cp):
+                    continue  # the count is already reported above
+                fits = False
+                for e, we in zip(edges, wedges):
+                    if e is None or len(we) != len(cw):
+                        continue
+                    if cp == e and _weights_agree(cw, we):
+                        fits = True
+                    elif cp == e[::-1] and _weights_agree(cw, we[::-1]):
+                        fits = True
+                    if fits:
+                        break
+                if not fits:
+                    problems.append(
+                        "#%d: bounding curve #%d has the control points of a net edge but not its "
+                        "weights, so it is a different rational curve from the one the face is "
+                        "bounded by" % (face.id, geom.id)
                     )
 
 
