@@ -226,13 +226,62 @@ step along, and the crossing curve is what replaces it. A user sees it before
 any instrument does, which is an argument the slack measurement could not make.
 
 The full record of what was built and why it was reverted is
-in `doc/step-export-development.md`, *Refuted claims*. Two things it must get
-right that the first attempt did not: accept a point that is *on* both surfaces
-to a stated residual rather than one the iteration arrived at, and give the grid
-emitter the same edge ladder the quadric emitter has, because half of it is worse
-than none — a crossing curve taken by the cylinder's face while the sweep's face
-still writes a chord gives one edge two geometries and the shell comes apart on
-420 edges.
+in `doc/step-export-development.md`, *Refuted claims*. Three stages, and the
+first has landed.
+
+**Stage A — the convergence test. Done 2026-09-10.** `projectOntoBoth` asked
+whether its last Newton *step* was small; it now asks whether the point *is* on
+both surfaces, as `|f| / |grad|` in millimetres. A quadric passes either test;
+a surface whose implicit is itself an iteration inherits that iteration's floor
+and can sit on both surfaces while still stepping above it forever, which is why
+only 93 of 507 candidate edges got a curve the first time and all 507 did once
+the question changed. No output moves — 50/50, both crossing-curve fixtures
+still write their 80 `SURFACE_CURVE`s — and it is mutation-checked: a residual
+of 1e-30 fails `step-bored-cylinder` and `step-bored-cone` and nothing else.
+
+**Stage B — let a sweep take part.** `quadricImplicit` handles sphere, cylinder
+and cone by algebra and returns false for everything else, so `projectOntoBoth`
+refuses a sweep before it starts. What is needed is a dispatcher — call it
+`surfaceImplicit` — that keeps the exact algebra for the three quadrics and
+falls back for anything with `evaluate` and `project`, which is `GridSurface`
+(and so `SweepSurface`) and `BezierPatchSurface`:
+
+```text
+project(p) -> (u,v);  q = evaluate(u,v);  n = normalised du x dv at (u,v)
+f = n . (p - q);      grad = n
+```
+
+`|f| / |grad|` is then the distance along the normal, which is what Stage A's
+test wants, and the sign flips as `p` crosses the surface, which is what Newton
+wants. Watch the cost: `GridSurface::project` is a Newton from a coarse sample,
+and this puts one inside a 24-iteration loop for each of degree+1 samples on
+each candidate edge.
+
+**Stage C — the edge ladder, and this is the one that opened the shell.** The
+two emitters build their boundary cycles from the same place and then diverge:
+
+- `rawBoundaryCycles` (StepKernel.cc ~line 738) walks `patch.runs` and drops
+  each run's last vertex;
+- the grid emitter (~line 3163) walks `patch.runs` and drops each run's last
+  vertex — *the identical sequence*, so the vertex-pair keys already line up;
+- but the quadric emitter does not use the raw cycle. It uses `boundaryCycles`,
+  which post-processes the raw one against `section_planes` and `crossing_keys`
+  and splits it where a curve is to be written.
+
+So a crossing edge is decided once, in `crossing_edges` keyed by
+`{min(u,v), max(u,v)}`, and only one of the two emitters ever reads that map.
+The grid face writes a chord over the same vertex pair, the edge has two
+geometries, and the shell comes apart — 420 edges used once, last time.
+
+The fix is not to teach the grid emitter the ladder a second time. It is to
+lift the per-edge decision (crossing curve, then plane section, then arc, then
+chord) into one helper keyed by the vertex pair, and have both emitters call it.
+That is a refactor of the most delicate invariant in the file — *the two faces
+meeting along an edge must write the same curve* — so it wants its own session
+and its own validator check, not the tail of another one.
+
+**Do not land Stage B without Stage C.** Half of this is measurably worse than
+none of it.
 
 ### 4. `c06` imports clean and inside out
 
@@ -588,9 +637,19 @@ beside the fault column.
 > have been proposed and refuted, the last four in one session — the sliver, the
 > taper, the boundary's jaggedness and the import settings — and the two coupons
 > that differ by 0.01 in one parameter are identical in every count the exporter
-> makes, in SOLIDWORKS' own re-export, and to the eye. Take open item 3 instead
-> and remove the class: a sweep whose boundary lies on its own surface leaves no
-> mesh polyline for a kernel to object to.
+> makes, in SOLIDWORKS' own re-export, and to the eye.
+>
+> Take open item 3 and remove the class instead. Stage A has landed and is
+> mutation-checked; Stage B is about forty lines; **Stage C is the work** and it
+> is a refactor rather than an addition — one helper that decides an edge's
+> geometry from its vertex pair, called by both emitters, replacing two ladders
+> that currently disagree. Do not land B without C: the last attempt did, and
+> the shell came apart on 420 edges.
+>
+> Judge the result on whether the boundary stops being a staircase, which is
+> visible in a CAD system, and not on the granted slack, which has already been
+> shown not to move. Whether it also takes code 17 with it is the open question
+> and would be a bonus, not the criterion.
 >
 > Put `f02-band-fn032-analytic.stp` in **every** interop run as the positive
 > control; it must read `faults=2 faultyfaces=2 codes=17`, or a page of clean
