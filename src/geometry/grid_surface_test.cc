@@ -355,3 +355,46 @@ TEST_CASE("the band covers the facets the grid was built from", "[surface][grid]
   CHECK(worst_vertex < 1e-9);
   CHECK(worst_middle <= grid.membershipTolerance());
 }
+
+/*! `project` clamps to the patch, so the normal component is not the distance.
+ *
+ * This pins the premise behind a defect in the STEP exporter's crossing-curve
+ * solver, found in review on 2026-09-10 and fixed the same day. That solver
+ * needs an implicit `f` for a surface that has no algebraic one, and takes the
+ * foot-point plane: project, and use `n . (p - foot)`. For a point *inside* the
+ * patch that is the distance. For one off the end of it, it is not, and the
+ * difference is unbounded.
+ *
+ * `evaluate` clamps both parameters and `project` returns the nearest point of
+ * the bounded rectangle, so a point beyond the patch gets a foot on the
+ * boundary and `p - foot` lies almost entirely *in* the tangent plane. Anything
+ * accepting `n . (p - foot)` as proof of membership then believes a point is on
+ * a surface it has run off the end of.
+ *
+ * A flat grid over the unit square makes it exact rather than approximate: the
+ * normal is z everywhere, so the normal component of a purely in-plane offset
+ * is zero to the last bit.
+ */
+TEST_CASE("a point off the end of a grid projects to its boundary", "[gridsurface]")
+{
+  // z = 0 over 0 <= x <= 1, 0 <= y <= 1, as three rows of two columns.
+  std::vector<std::vector<Vector3d>> rows = {
+    {Vector3d(0, 0, 0), Vector3d(0, 1, 0)},
+    {Vector3d(0.5, 0, 0), Vector3d(0.5, 1, 0)},
+    {Vector3d(1, 0, 0), Vector3d(1, 1, 0)},
+  };
+  std::string why;
+  const auto grid = GridSurface::fromRows(rows, false, why);
+  REQUIRE(grid != nullptr);
+
+  const Vector3d outside(2.0, 0.5, 0.0);
+  double u = 0, v = 0;
+  REQUIRE(grid->project(outside, u, v));
+  const Vector3d foot = grid->evaluate(u, v);
+
+  // The foot is on the patch, a whole unit away.
+  CHECK((outside - foot).norm() > 0.9);
+  // And the offset is in the plane, so the normal component says zero.
+  CHECK(std::fabs(foot.z()) < 1e-9);
+  CHECK(std::fabs(Vector3d(0, 0, 1).dot(outside - foot)) < 1e-12);
+}

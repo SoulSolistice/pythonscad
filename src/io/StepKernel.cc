@@ -367,7 +367,8 @@ bool quadricImplicit(const Surface *surface, const Vector3d& p, double& f, Vecto
  * still gets two directions to cross.
  */
 template <class S>
-bool footPointImplicit(const S *surface, const Vector3d& p, double& f, Vector3d& grad)
+bool footPointImplicit(const S *surface, const Vector3d& p, double& f, Vector3d& grad,
+                       double *true_distance)
 {
   double u = 0, v = 0;
   if (!surface->project(p, u, v)) return false;
@@ -380,8 +381,25 @@ bool footPointImplicit(const S *surface, const Vector3d& p, double& f, Vector3d&
   const double len = n.norm();
   if (!(len > 0) || !std::isfinite(len)) return false;  // degenerate, or a pole
   n /= len;
-  f = n.dot(p - surface->evaluate(u, v));
+  const Vector3d foot = surface->evaluate(u, v);
+  f = n.dot(p - foot);
   grad = n;
+  // The whole distance, not the part along the normal, and the two differ in a
+  // way that matters at the edge of the patch.
+  //
+  // `evaluate` clamps its parameters and `project` returns the nearest point of
+  // the *bounded* rectangle, so for a point off the end of a sweep the foot sits
+  // on the boundary and `p - foot` is mostly *in* the tangent plane. `n . (p -
+  // foot)` is then near zero however far away `p` is: a flat grid over the unit
+  // square and a point at (2, 0.5, 0) gives a residual of exactly zero, one
+  // whole unit outside the surface. Believing that residual is believing a
+  // point is on a patch it has run off the end of, and every acceptance test
+  // downstream - the solver's, the fit's, and the one asking whether a mesh
+  // vertex is on a declared surface - would inherit it.
+  //
+  // So Newton gets `f` and `grad`, which are what it needs to step, and every
+  // *acceptance* test gets this instead.
+  if (true_distance != nullptr) *true_distance = (p - foot).norm();
   return true;
 }
 
@@ -393,14 +411,23 @@ bool footPointImplicit(const S *surface, const Vector3d& p, double& f, Vector3d&
  * that can do neither has no crossing curve, which is the honest answer for a
  * face whose shape this exporter cannot state.
  */
-bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad)
+bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad,
+                     double *true_distance = nullptr)
 {
-  if (quadricImplicit(surface, p, f, grad)) return true;
+  if (quadricImplicit(surface, p, f, grad)) {
+    // A quadric's implicit is global - there is no patch to run off - so the
+    // Newton distance *is* the distance.
+    if (true_distance != nullptr) {
+      const double g = grad.norm();
+      *true_distance = g > 0 ? fabs(f) / g : fabs(f);
+    }
+    return true;
+  }
   if (const auto *grid = dynamic_cast<const GridSurface *>(surface)) {
-    return footPointImplicit(grid, p, f, grad);
+    return footPointImplicit(grid, p, f, grad, true_distance);
   }
   if (const auto *patch = dynamic_cast<const BezierPatchSurface *>(surface)) {
-    return footPointImplicit(patch, p, f, grad);
+    return footPointImplicit(patch, p, f, grad, true_distance);
   }
   return false;
 }
@@ -437,20 +464,6 @@ double declaredBand(const Surface *surface)
   return 0.0;
 }
 
-/*! How far `p` is from the surface, to first order, from its implicit form.
- *
- * `f` is the implicit's value and is in the units of whatever the implicit
- * squares; `|f| / |grad|` is the distance to the level set and is in
- * millimetres. Asking about that rather than about `f` is what lets one
- * tolerance mean the same thing on a sphere, a cone and anything else added
- * later.
- */
-double implicitDistance(double f, const Vector3d& grad)
-{
-  const double g = grad.norm();
-  return g > 0 ? fabs(f) / g : fabs(f);
-}
-
 /*! Pull a point onto both surfaces at once.
  *
  * Two Newton equations in the two directions that matter - along each surface's
@@ -475,8 +488,9 @@ bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol
   for (int step = 0; step < 24; step++) {
     double fa = 0, fb = 0;
     Vector3d ga, gb;
-    if (!surfaceImplicit(a, p, fa, ga) || !surfaceImplicit(b, p, fb, gb)) return false;
-    if (implicitDistance(fa, ga) <= tol && implicitDistance(fb, gb) <= tol) return true;
+    double da = 0, db = 0;
+    if (!surfaceImplicit(a, p, fa, ga, &da) || !surfaceImplicit(b, p, fb, gb, &db)) return false;
+    if (da <= tol && db <= tol) return true;
     const double aa = ga.dot(ga), ab = ga.dot(gb), bb = gb.dot(gb);
     const double det = aa * bb - ab * ab;
     if (fabs(det) < 1e-18 * std::max(1.0, aa * bb)) return false;  // tangent, or worse
@@ -487,8 +501,9 @@ bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol
   // One last chance: the loop may have arrived on its final step.
   double fa = 0, fb = 0;
   Vector3d ga, gb;
-  if (!surfaceImplicit(a, p, fa, ga) || !surfaceImplicit(b, p, fb, gb)) return false;
-  return implicitDistance(fa, ga) <= tol && implicitDistance(fb, gb) <= tol;
+  double da = 0, db = 0;
+  if (!surfaceImplicit(a, p, fa, ga, &da) || !surfaceImplicit(b, p, fb, gb, &db)) return false;
+  return da <= tol && db <= tol;
 }
 
 /*! The arc of the curve where two declared quadrics cross, between two points
@@ -578,10 +593,10 @@ double intersectionArcError(const Surface *a, const Surface *b, const std::vecto
     for (const Surface *s : {a, b}) {
       double f = 0;
       Vector3d g;
-      if (!surfaceImplicit(s, p, f, g)) return std::numeric_limits<double>::infinity();
-      const double gn = g.norm();
-      if (gn < 1e-12) return std::numeric_limits<double>::infinity();
-      worst = std::max(worst, fabs(f) / gn);  // the Newton distance to the surface
+      double d = 0;
+      if (!surfaceImplicit(s, p, f, g, &d)) return std::numeric_limits<double>::infinity();
+      if (g.norm() < 1e-12) return std::numeric_limits<double>::infinity();
+      worst = std::max(worst, d);  // the distance to the surface, not to its tangent plane
     }
   }
   return worst;
@@ -1951,7 +1966,8 @@ void StepKernel::build_tri_body(
               double f = 0;
               Vector3d g;
               const double owed = std::max(1e-9 * scale, declaredBand(s));
-              if (!surfaceImplicit(s, *p, f, g) || g.norm() < 1e-12 || fabs(f) / g.norm() > owed) {
+              double d = 0;
+              if (!surfaceImplicit(s, *p, f, g, &d) || g.norm() < 1e-12 || d > owed) {
                 on = false;
               }
             }
