@@ -318,13 +318,30 @@ demanded 2.8e-13. Refuted.
 
 #### Still open
 
-**What stops the remaining ones.** The corner placement is fixed — see item 9 —
-and took the band family's chords from 142 to 116. What is left is
-`intersectionArc` abandoning the whole fit when `projectOntoBoth` fails at a
-*single* interior sample, without trying a higher degree whose samples fall at
-different parameters. Item 10 B1 carries that, with the measurement that makes
-it the candidate: at an iteration cap of 4096, with every corner placed, 47
-edges were still chords.
+**The 142 are down to 47, and every corner is placed.** Three changes, each of
+which had to be measured before it could be believed, and two hypotheses died
+between them — the full account is in items 9 and 10.
+
+| | vertices reaching the curve | corners left off | chords |
+| --- | --- | --- | --- |
+| at the head of this branch | 502 of 704 | 138 | 142 |
+| Newton in the corner placement | 598 | 42 | 116 |
+| `GridSurface::project` per span | 598 | 42 | 116 |
+| the solve tolerance made absolute | **640** | **0** | **47** |
+
+593 crossing curves and 47 chords — which is exactly what an iteration cap of
+4096 reached in the experiment that opened this, arrived at by converging rather
+than by iterating.
+
+**What stops the remaining 47.** Not the fitter and not the projector, both of
+which were suspected here and cleared. The fitter reports them as coming within
+1.21e-02 to 4.73e-02 of the sweep against the 1e-07 asked for, with *none*
+failing to fit at any degree, and the arcs sit on the quadric they bound to
+5.5e-06 — so the whole miss is against the declared sweep. 64 of the 704
+junction vertices still do not reach a crossing curve, being claimed by two
+coaxial cylinders 3.000 mm apart that never meet, and those are correctly
+refused. Whether the 47 are the edges those 64 touch has not been measured, and
+is the next thing to establish.
 
 **Every crossing curve has a pcurve on the sweep and none on the cylinder.** All
 640 edges are a `SURFACE_CURVE` carrying exactly one `PCURVE`, on the B-spline
@@ -337,10 +354,16 @@ two faces it is not.
 
 #### The measurement to make next
 
-Import the cap-4096 coupon, with `f02-band-fn032-analytic` unchanged in the same
-run as the positive control. It is the first coupon whose boundary is mostly
-exact, and 47 chords is a testable step down from 142 — but read `-FaultDetail`
-and the recognised share, not `faults=0`.
+Put the coupon to SOLIDWORKS. Its boundary is now 593 crossing curves against 47
+chords, where the run that produced `faults=2 faultyfaces=2 codes=17` had 498
+against 142, and every junction vertex that can be on both surfaces is. That
+makes it the first honest test of "is code 17 the boundary", which every earlier
+attempt was not.
+
+Keep `f02-band-fn032-analytic` from the recorded run in the same session as the
+positive control, and read `-FaultDetail` and the recognised share rather than
+`faults=0` — a clean count over a half-recognised sweep has been mistaken for
+success in this file before.
 
 ### 4. `c06` imports clean and inside out
 
@@ -490,7 +513,20 @@ band family is flat at 598 of 704 junction vertices from 24 iterations through
 model - the normal curvature at the foot point, available from evaluations the
 projection already makes - would restore superlinear convergence there.
 
-**A3. `GridSurface::project` descends on the *squared* distance.** Minimising
+**A3. DONE, and it was not the objective.** `GridSurface::project` could not
+find a point `evaluate` had just produced: 0.78 mm out on the band family's own
+ridge, at the closing strip. The squared-distance floor below is real arithmetic
+and was the wrong suspect — so was the descent, which Levenberg-Marquardt
+damping did not move by one significant digit. The start was already a local
+minimum: the profile is a polyline, so each span is a separate smooth piece a
+descent cannot walk out of, and the best coarse sample lay on a flank while the
+point sought was on the back. One start per *declared* span took it to 7.8e-07,
+and holding the v difference inside its own span — a central difference at a
+profile corner measures the average of two slopes — took the rest to rounding.
+A unit test pins it, and fails by six orders without the per-span starts.
+
+*What the arithmetic below still says, unmeasured:* `GridSurface::project`
+descends on the *squared* distance. Minimising
 `|S(u,v) - p|^2` rather than `|S(u,v) - p|` halves the significant digits:
 within `sqrt(eps)` of the minimum the squared distance stops changing in double
 precision, so the attainable accuracy in the distance itself is about
@@ -508,8 +544,16 @@ A3 rather than standing alone.
 
 #### (b) Analytics that give up before their capability
 
-**B1. `intersectionArc` abandons the whole fit when a single interior sample
-fails.** `if (!ok) return false;` - it does not try the next degree, and the next
+**B1. DONE, and refuted as a cause.** `intersectionArc` no longer abandons the
+fit when one degree's samples will not project — the next degree samples at
+different parameters, so the attempt that failed says nothing about the one
+after it. Correct, and worth no measurable change on any fixture: the reporting
+added as B2 showed *zero* edges failing to fit at any degree. Sampling was never
+what stopped them. The original text follows, and the measurement that made it
+look like the candidate was sound — it was the inference from it that was not.
+
+**B1 (as written).** `intersectionArc` abandons the whole fit when a single
+interior sample fails. `if (!ok) return false;` - it does not try the next degree, and the next
 degree samples at *different* parameters, so the attempt that failed says
 nothing about the one that would have followed. **Measured**: at an iteration cap
 of 4096, with every corner placed and none left off, 47 edges of the band family
@@ -517,7 +561,14 @@ were still chords. Those are arc failures and not corner failures, which makes
 this the top candidate for the boundary that remains. **This is the next thing
 to work on.**
 
-**B2. The degree cap of 9 is a silent floor.** An edge whose curve will not fit
+**B2. DONE, and it is what found everything above.** The fitter now reports how
+many edges never fitted at any degree, how near the rest came, and — the half
+that mattered — how much of that miss is against a surface stated algebraically
+against one that answers by projecting. On the band family: 6.60e-06 and
+1.73e-02. Three orders apart, and it is what sent this at the projector. A count
+of chorded edges could not have said any of it.
+
+**B2 (as written).** The degree cap of 9 is a silent floor. An edge whose curve will not fit
 by degree 9 becomes a chord - an error of order 0.1 mm against a demanded 1e-7 -
 and nothing reports how close it got. The fitter computes `intersectionArcError`
 and throws the number away. Saying it would turn "142 chords" into "142 chords,
@@ -556,12 +607,20 @@ fixture reaches means the change's own regressions are unreachable too.
 
 #### Order of work
 
-1. **B1**, which is measured and is the whole of the remaining chorded boundary.
-2. **B2**, which costs one log line and turns the next investigation from a
-   count into a distribution.
-3. **A3**, but measure it first: instrument the projection's achieved residual
-   before assuming the objective is what pins it.
-4. **A1**, cheap and self-contained, once B1 has said how much is left to win.
+B1, B2 and A3 are done, and the ordering above was wrong in an instructive way:
+B1 was ranked first on a measurement that was sound and an inference from it
+that was not, and A3 was ranked third with a caveat to measure before assuming
+— which is the only reason the actual defect, six orders worse than the
+arithmetic predicted, was found rather than papered over.
+
+What is left:
+
+1. **A2**, the first-order foot-point implicit, which is why Newton is linear on
+   a declared sweep. Now the more interesting of the two, because A3's fix
+   removed the noise that was hiding it.
+2. **A1**, cheap and self-contained: Chebyshev-Lobatto collocation in place of
+   uniform. Worth measuring against the 47 chords that remain.
+3. **B3 to B7**, unchanged, and none of them measured to reach an export.
 
 ---
 
