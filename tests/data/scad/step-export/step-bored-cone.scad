@@ -10,8 +10,8 @@
 // interrupt - and leaves fifty-four planes.
 // Four records: a circle at each rim of the frustum, the cone between them, and
 // the bore's own cylinder. The cone is declared rather than left to be
-// recognised from its two rims - see doc/step-export.md, *The rule: declare
-// first, recognise second*.
+// recognised from its two rims - see doc/step-export-development.md, *The rule:
+// declare first, recognise second*.
 // EXPECT: 4 analytic surfaces available (3 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 2 conical, 2 partial), 20 facets replaced
 //

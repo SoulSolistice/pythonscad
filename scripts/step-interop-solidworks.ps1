@@ -3,7 +3,7 @@
   Import every STEP file of an interop kit into SOLIDWORKS and record what it made of them.
 
 .DESCRIPTION
-  doc/step-interop-validation.md explains why this exists: OpenCASCADE is the only
+  doc/step-export-development.md explains why this exists: OpenCASCADE is the only
   kernel that has ever read this exporter's output, and the failure that started
   the work was seen in SOLIDWORKS. scripts/step-interop-kit.py writes the coupons,
   each one twice - analytic, and faceted as a control.
@@ -32,7 +32,7 @@
                  gated - see -MaxWalkFaces.
 
                  The edge count is the one to read first. Every measurement in
-                 doc/step-interop-validation.md says the defect is edges that do
+                 doc/step-export-development.md says the defect is edges that do
                  not lie on the faces they bound - 254 of 258 on one coupon, by
                  up to 0.196 - and that was measured with OpenCASCADE. This is
                  SOLIDWORKS' own verdict on the same edges, per edge, so the two
@@ -57,12 +57,12 @@
   exactly that.
 
   Check Entity and feature recognition need the UI and stay manual; the procedure
-  is in doc/step-interop-validation.md. Feature recognition on c07-fillet-quadrics
+  is in doc/step-export-development.md. Feature recognition on c07-fillet-quadrics
   is the one worth doing by hand - whether SOLIDWORKS calls a cylinder a cylinder
   is the entire point of the analytic path, and no script answers it for a user.
 
 .NOTES
-  Three things about driving SOLIDWORKS from PowerShell, all learned the hard way:
+  Five things about driving SOLIDWORKS from PowerShell, all learned the hard way:
 
   1. It must already be running, started by hand. COM-activating it from a script
      yields a process that never finishes starting: every call returns
@@ -83,17 +83,28 @@
      file - -Only takes a regex - so a hang costs one import rather than the
      whole kit.
 
-     -FaultDetail is the riskier half and it is separable. It re-imports every
-     file a *second* time, and on 2026-09-08 SOLIDWORKS died in the middle of
-     that pass with nothing killed and nobody touching it - the TSV ends in
-     "Der RPC-Server ist nicht verfuegbar" and the event log has the same
-     mfc140u.dll access violation. The main pass already reports faults,
-     faulty faces and faulty edges per file; only the *identity* of the
-     entities needs the second one. So take the counts first, then re-run with
-     -FaultDetail and -Only over the handful of files whose counts were not
-     zero.
+  3. -FaultDetail is separable and worth separating. It re-imports every file a
+     *second* time, and on 2026-09-08 SOLIDWORKS died in the middle of that pass
+     with nothing killed and nobody touching it. That is one observation and not
+     a rule - the run of 2026-09-02 did 48 files with the same flag and survived
+     - but the main pass already reports faults, faulty faces and faulty edges
+     per file, and only the *identity* of the entities needs the second one. So
+     take the counts first, then re-run with -FaultDetail and -Only over the
+     handful of files whose counts were not zero.
 
-  3. The work has to happen in compiled C#, not in PowerShell. PowerShell binds
+     Two other explanations for the instability were floated and both were
+     refuted, so do not reach for a third on one observation: "these files hang
+     it" (the file that stalled then imported cleanly twice in a row) and "the
+     driver change did it" (the pristine script from HEAD and the modified one
+     give byte-identical results on the same coupon).
+
+  4. Put a known-faulty coupon in every run. A page of clean rows and a silent
+     instrument look the same, and this project has twice reasoned from a set of
+     clean verdicts before establishing that the session could produce a dirty
+     one. f02-band-fn032-analytic.stp must read
+     "faults=2 faultyfaces=2 codes=17".
+
+  5. The work has to happen in compiled C#, not in PowerShell. PowerShell binds
      COM late, through IDispatch, and SOLIDWORKS 2026 answers GetIDsOfNames with
      TYPE_E_ELEMENTNOTFOUND for every name - including RevisionNumber - even
      though QueryInterface for ISldWorks succeeds. Early binding against
@@ -212,7 +223,7 @@ public class SwKitRunner
     //
     // -ImportSettings is a label and nothing checks it, which is the point of
     // the parameter - but a label is only as good as the person writing it, and
-    // doc/step-interop-validation.md carries a whole run recorded as
+    // doc/step-export-development.md carries a whole run recorded as
     // "as-configured-2026-09-08-unverified" and therefore comparable with
     // nothing. These preferences are readable through the same API the rest of
     // this file uses, so there is no reason for that to happen twice. The label
@@ -470,7 +481,7 @@ public class SwKitRunner
 
     // One line per faulty entity: what kind of surface it is, how big, and
     // where. Everything measurable about these files from our side orders them
-    // the opposite way to SOLIDWORKS' verdict - see doc/step-interop-validation.md
+    // the opposite way to SOLIDWORKS' verdict - see doc/step-export-development.md
     // - so the only way left to find the mechanism is to ask which faces it
     // objects to and look at those.
     public static string FaultDetail(string path)

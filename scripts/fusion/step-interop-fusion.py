@@ -2,7 +2,7 @@
 it made of them.
 
 A third kernel, and the reason for wanting one is in
-doc/step-interop-validation.md: two real parts in this repository import into
+doc/step-export-development.md: two real parts in this repository import into
 SOLIDWORKS as *surface* bodies where their own faceted controls import as
 solids, and everything that might explain it has been measured and ruled out -
 the tessellation, the size of the model, the boundary of a single face, and the
@@ -36,7 +36,7 @@ two can be read side by side:
 
 Run against Fusion, and it accepted all six files of the focused kit as single
 valid solids - including the two SOLIDWORKS refuses. The results and what they
-settle are in doc/step-interop-validation.md.
+settle are in doc/step-export-development.md.
 """
 
 import csv

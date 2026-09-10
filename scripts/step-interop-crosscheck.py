@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Put three measurements of every coupon beside each other and flag the disagreements.
 
-`doc/step-interop-validation.md`, step 5 of the per-file procedure, says to
+`doc/step-export-development.md`, step 5 of the per-file procedure, says to
 compare a CAD system's volume three ways: against the coupon's own faceted
 control, against the exact value where the model has one, and against
 OpenCASCADE's answer - "a disagreement between two kernels on the same file is a
@@ -18,7 +18,7 @@ Three columns, and the point is which of them can disagree:
 
   derived    what the model's own arithmetic says, read from the fixture's
              `// VOLUME:` directive. Available only where a closed form exists,
-             which is the minority - see doc/step-export-testing.md on why a
+             which is the minority - see doc/step-export-development.md on why a
              number that can only be got by running the exporter is not one.
   OCCT       OpenCASCADE reading the exported file.
   CAD        what the target system measured, from solidworks-results.csv.

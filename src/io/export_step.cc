@@ -56,8 +56,9 @@ namespace {
  * This reports it and gates nothing, on purpose. Landing a channel and gating
  * on it in one step means a change in behaviour and a change in what is known
  * arriving together, with no way to tell which moved the result - and the
- * record in doc/step-export-status.md §§17-20 is a long argument for not doing
- * that again. What it is good for immediately is telling two failures apart:
+ * record in doc/step-export-development.md, *The ladder a change climbs*, is a
+ * long argument for not doing that again. What it is good for immediately is
+ * telling two failures apart:
  * a region left faceted can now say which solid it belonged to, rather than
  * quoting its own dihedral back.
  */
@@ -245,7 +246,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   // Declared planes take no part in ownership. A corner's owners here are the
   // curved surfaces provenance can name from the originals that made it; which
   // *plane* a corner is on is a different question, answerable only once
-  // mergeTriangles has run - doc/step-corner-exactness.md records three ways of
+  // mergeTriangles has run - doc/step-export-development.md records three ways of
   // guessing it from raw triangles that do not work - and build_tri_body reads
   // the declarations there. Letting a plane in here would put a corner on its
   // own cap into the three-owner bucket, which places nothing at all.
@@ -491,7 +492,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // nothing declared - a cube face taking the base off a cone. *Which*
       // plane cannot be answered from raw triangles, and is answered exactly
       // once mergeTriangles has run, so the vertex is handed on and placed in
-      // build_tri_body. doc/step-corner-exactness.md records the three ways of
+      // build_tri_body. doc/step-export-development.md records the three ways of
       // guessing it from triangles that do not work.
       if (out_single != nullptr) out_single->emplace(int(v), candidates[0]);
     } else if (candidates.size() == 2) {
@@ -521,7 +522,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // GridSurface was interpolated through the model's own stations and says
       // so, publishing a tessellation band. Where a corner has one of each, the
       // exact one is the thing to be placed on and the fit is a tolerance to be
-      // checked against - see doc/step-corner-exactness-handover.md. Handed on
+      // checked against - see doc/step-export-development.md. Handed on
       // for build_tri_body, which is where the planes are answerable.
       if (out_split != nullptr) {
         const bool a_fit = dynamic_cast<const GridSurface *>(a) != nullptr;

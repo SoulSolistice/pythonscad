@@ -1064,7 +1064,7 @@ void StepKernel::build_tri_body(
     // the result as two solids and adds them - 68422 where step-nested-rings
     // measures 31901, and 998121 where the bayonet lid measures 223482 - and
     // rejects the faces with InvalidImbricationOfWires. Tried, measured,
-    // reverted; see doc/step-export-status.md.
+    // reverted; see doc/step-export-development.md.
     const std::array<double, 2> probe = projectPoint(vertices[loops[i][0]], drop);
     std::vector<std::array<double, 2>> cand;
     int found = -1;
@@ -1107,7 +1107,7 @@ void StepKernel::build_tri_body(
       // along every one of them. An analytic export of the bayonet lid came out
       // with 94 such edges over 61 faces, all of them in the one annulus where
       // this fired, and the only sign was a line on stdout nobody reads. See
-      // *The dropped loop* in doc/step-export.md.
+      // *The defects the checks exist for* in doc/step-export-development.md.
       parents[i] = -1;
       loop_is_hole[i] = 0;
       // Keep the winding the loop arrived with. It used to be reversed to agree
@@ -1997,10 +1997,11 @@ void StepKernel::build_tri_body(
   // A corner two declared surfaces made belongs on their intersection, and
   // reportOwnership has computed that point all along. Where it may be applied
   // is the whole difficulty, and two earlier places are ruled out by
-  // measurement, both recorded in doc/step-corner-exactness.md: before
-  // mergeTriangles it keeps the neighbours planar and destroys the merge, at
-  // twelve to sixty-two times the faces; after the merge but before recognition
-  // it bends the faceted neighbours by 0.0331 where they are polygons.
+  // measurement, both recorded in doc/step-export-development.md, *Corner
+  // placement*: before mergeTriangles it keeps the neighbours planar and
+  // destroys the merge, at twelve to sixty-two times the faces; after the merge
+  // but before recognition it bends the faceted neighbours by 0.0331 where they
+  // are polygons.
   //
   // Here is the place that costs neither. Recognition has already run on the
   // untouched, fully merged mesh, so the claims are what they were; and an
@@ -2009,10 +2010,10 @@ void StepKernel::build_tri_body(
   // them is written analytic, so nothing is bent and nothing is split.
   //
   // All of them or none, and per export rather than per corner. A boundary half
-  // moved is worse than one not moved at all - doc/step-interop-validation.md
-  // measured that at 83 faulty faces against 9 - so where a polygon that keeps
-  // its plane would be bent, this declines the lot and the export is exactly
-  // what it was.
+  // moved is worse than one not moved at all - doc/step-export-development.md,
+  // *Half a fix is worse than none*, measured that at 83 faulty faces against 9
+  // - so where a polygon that keeps its plane would be bent, this declines the
+  // lot and the export is exactly what it was.
   // The other half of the placement: a corner one declared surface shares with
   // a plane the mesh carries and nothing declared.
   //
@@ -2021,9 +2022,9 @@ void StepKernel::build_tri_body(
   // done: a frustum cap shares an original with its wall, and no distance
   // threshold separates a cut facet near the rim from a wall facet, or a thin
   // base sliver from either - three attempts, all in
-  // doc/step-corner-exactness.md. mergeTriangles has since answered it exactly,
-  // because a merged face that keeps a PLANE *is* a plane: the planes at a
-  // corner are the distinct ones among the faces using it.
+  // doc/step-export-development.md. mergeTriangles has since answered it
+  // exactly, because a merged face that keeps a PLANE *is* a plane: the planes
+  // at a corner are the distinct ones among the faces using it.
   //
   // One plane, and the corner goes on the conic where it meets the declared
   // surface. Two, and it is a triple point - the cut and the sliver of base a
@@ -2172,7 +2173,7 @@ void StepKernel::build_tri_body(
         //
         // That margin is the weakest thing here and it is an inference standing
         // in for something the model knew: a declared plane would make this a
-        // lookup. See doc/step-corner-exactness-handover.md.
+        // lookup. See doc/step-export-development.md, *Corner placement*.
         std::vector<std::pair<Vector3d, double>> faces_here;
         double reach_all = 0;
         {
@@ -3825,7 +3826,7 @@ void StepKernel::build_tri_body(
   // exporter drops a cylinder behind the mesh's polyline boundary, so the edge
   // is the chord where the surface is the arc, and the gap between them is the
   // sagitta. Measured on the band family, 366 of 388 line-on-cylinder edges lay
-  // off the cylinder they bounded, by up to 0.17mm - doc/step-interop-validation.md
+  // off the cylinder they bounded, by up to 0.17mm - doc/step-export-development.md
   // has the tables. Every kernel that reads such a file has to widen its
   // tolerance to swallow that; two do it silently and one declines, and none of
   // them is wrong to object.

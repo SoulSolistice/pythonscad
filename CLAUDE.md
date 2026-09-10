@@ -80,12 +80,18 @@ hours away from anything that could explain it. The tell was the target count -
 **Optional: the CAD kernel round trip.** `tests/steproundtrip.py` reads each STEP
 export back with OpenCASCADE and checks it comes back as a solid a kernel can
 use, which is the one thing the exporter's own validator cannot answer. It is
-optional and skips silently when absent, so install it only when working on the
-exporter:
+optional and **skips silently when absent**, so a green STEP suite does not mean
+it ran. Install it when working on the exporter:
 
 ```bash
-pip install cadquery-ocp     # ~68 MB wheel, provides the OCP bindings
+pip install cadquery-ocp==7.8.1.1.post1   # ~68 MB wheel, provides the OCP bindings
 ```
+
+**The version pin is not cosmetic.** `steproundtrip.py` needs
+`TopTools_IndexedMapOfShape`, which `cadquery-ocp` 8.0 no longer exposes; under
+8.0 the module fails to import, the round trip skips without a word, and whole
+classes of failure become invisible. If a STEP change appears to cost nothing,
+check that the round trip actually ran before believing it.
 
 **Tests.** `ctest --test-dir build -R <regex>` works headless for everything
 except the GL/PNG comparison tests, which need the virtual framebuffer that
@@ -95,6 +101,19 @@ fixture conclude the server is already running, so it never exports `DISPLAY`
 and every GL test fails with "Unable to open a connection to the X server".
 Recovery is `rm -f build/tests/virtualfb.{PID,DISPLAY}`; as a stopgap,
 `DISPLAY=$(cat build/tests/virtualfb.DISPLAY) ctest ...` works.
+
+**Run ctest under the machine's own locale.** `LC_ALL=C` is not a blanket answer
+here: it breaks five tests carrying non-ASCII paths (`astdump_include-tests`,
+`echo_include-tests`, `echo_use-tests`, `dump_use-tests`,
+`preview-cgal_utf8-import`) because the C locale is not UTF-8. Where a locale
+does have to be forced - a non-English system translates the diagnostics the echo
+tests compare against - use `LC_ALL=C.UTF-8` or `en_US.UTF-8`. The STEP exporter
+no longer needs either: it holds `LC_NUMERIC` at `"C"` for the duration of the
+export itself.
+
+**Do not grep a build log you piped through `tail`.** A `FAILED` line off the end
+of the window reads as a green run. Keep enough of the tail to see the failure,
+or check the exit status.
 
 Note that `python3 ./scripts/get-dependencies.py` needs no `sudo` to *list*, and
 that apt behind an agent proxy may 403 on third-party PPAs while the main
@@ -129,6 +148,80 @@ ctest -C All                   # Run all tests
 ./OpenSCADUnitTests "*vector*"                # Run tests matching pattern
 ./OpenSCADUnitTests -# #vector_math_test      # Run tests from specific file
 ```
+
+### Testing the STEP exporter
+
+The exporter has two experimental feature flags, both off by default and both
+needed to exercise the whole of it:
+
+```bash
+pythonscad model.scad -o out.stp \
+  --enable=step-analytic-surfaces --enable=step-approximate-surfaces
+```
+
+**The fixture suite** is wired by a glob, so **adding a fixture needs a
+`cmake -B build` before ctest can see it** — which on Windows costs a full
+rebuild:
+
+```bash
+ctest --test-dir build -R 'export-step-|mutations'   # 50 tests
+TEST_GENERATE=1 ctest --test-dir build -R <fixture>
+```
+
+Use that regex and not `-R step`, which matches 45 of the 50 and drops
+`bspline-check-mutations` and `closed-sphere-check-mutations` — the harnesses
+that prove the other tests would fail if the defect came back. A run without
+them is the green suite that never ran the check.
+
+**The reference part** `examples/step_test/lid10.scad` is not in the suite and
+needs its customizer set; without it you get the default component and every
+number is incomparable with anything recorded:
+
+```bash
+build/staging/pythonscad.com examples/step_test/lid10.scad \
+  -p examples/step_test/lid10.json -P "New set 1" -o lid10.stp \
+  --enable=step-analytic-surfaces --enable=step-approximate-surfaces
+```
+
+**The interop kit** builds 24 coupons as 48 STEP files — each model exported
+twice, once analytic and once faceted as a control — plus a CSV to record a
+commercial kernel's answers:
+
+```bash
+python3 scripts/step-interop-kit.py --binary <abs path to pythonscad.com> --outdir build/interop-kit
+```
+
+The binary path must be **absolute** and must be the **staged** one: every export
+runs with `cwd=ROOT`, and Windows resolves a relative executable against the
+parent's directory instead, failing with "cannot find the file specified" and not
+saying which file.
+
+Driving a target kernel:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\step-interop-solidworks.ps1 `
+  -KitDir build\interop-kit -ImportSettings do-not-knit -RoundTrip
+```
+
+SOLIDWORKS must already be running, and **every run has to be labelled with its
+import settings** — its verdict depends on Tools > Options > Import, so a result
+recorded without them cannot be compared with another one. Fusion has no
+out-of-process automation; `scripts/fusion/step-interop-fusion.py` runs inside it
+via Utilities → ADD-INS → Scripts and Add-Ins.
+
+Licence-free instruments, all Python over OCP:
+
+| script | reports |
+| --- | --- |
+| `scripts/step-occt-strict.py [--kitdir <dir>]` | how far a face's corners are from its own surface, p95 per file |
+| `scripts/step-corner-stray.py <file> …` | the same, broken down by kind of surface |
+| `scripts/step-analytic-probe.py` | replays the recogniser over a faceted export |
+| `scripts/step-interop-crosscheck.py` | derived, OpenCASCADE and CAD volumes side by side |
+| `scripts/step-interop-faultmap.py` | per-entity fault dump |
+| `scripts/step-interop-sw-roundtrip.py` | what survived a CAD system's re-export |
+
+What each coupon isolates, what the numbers mean and how to read a kernel's
+answer are in `doc/step-export-development.md`.
 
 ### Code Formatting
 
@@ -604,8 +697,13 @@ make `import OCP` work. It has to go into the interpreter CMake found, which on
 Windows is the system Python ctest drives the tests with, not MSYS2's:
 
 ```bash
-"$(grep -ao 'Python3_EXECUTABLE:INTERNAL=[^;]*' build/CMakeCache.txt | cut -d= -f2)" -m pip install cadquery-ocp
+"$(grep -ao 'Python3_EXECUTABLE:INTERNAL=[^;]*' build/CMakeCache.txt | cut -d= -f2)" \
+  -m pip install cadquery-ocp==7.8.1.1.post1
 ```
+
+Pin the version: `cadquery-ocp` 8.0 no longer exposes
+`TopTools_IndexedMapOfShape`, so `steproundtrip.py` fails to import and skips
+without a word.
 
 Worth doing before touching the exporter. On the day it was installed here it
 rejected `step-nested-rings` within minutes, on a regression `validatestep.py`
@@ -629,20 +727,6 @@ porting one, not the first.
 
 See `doc/win-build.md` for the older MSVC/vcpkg build notes. The historical MXE
 cross-build path is `./scripts/mingw-x-build-dependencies.sh 64`.
-
-### STEP export interop
-
-The analytic STEP path is validated against OpenCASCADE only. To get a second
-opinion from a commercial kernel, `scripts/step-interop-kit.py` builds a set of
-coupons — each exported twice, once analytic and once faceted as a control — and
-a CSV to record the target system's answers:
-
-```bash
-python3 scripts/step-interop-kit.py --binary build/staging/pythonscad.exe --outdir build/interop-kit
-```
-
-`doc/step-interop-validation.md` explains what each coupon isolates and gives
-the per-file procedure and pass criteria.
 
 ### WebAssembly Build
 
@@ -719,6 +803,18 @@ smoke testing, JavaScript API (`EmsInitPython` / `EmsEvaluatePython`), and known
 - `doc/testing.md` - Detailed testing documentation
 - `CONTRIBUTING.md` - Contribution guidelines
 - `VERSIONING.md` - Versioning and release process
+
+## Documentation map
+
+| document | scope |
+| --- | --- |
+| `CLAUDE.md` | this file: environment, build, packaging, running and testing |
+| `doc/step-export-development.md` | STEP exporter: settled design, kernel behaviour, testing doctrine, traps, refuted claims |
+| `doc/step-export-wip.md` | STEP exporter: open items, unexplained results, roadmap, handover |
+| `doc/testing.md` | the test suite in general |
+| `doc/python-modules.md` | the three-module Python layout |
+| `doc/wasm-build.md` | the WebAssembly build in full |
+| `doc/win-build.md` | the older MSVC/vcpkg Windows notes |
 
 ## Versioning
 

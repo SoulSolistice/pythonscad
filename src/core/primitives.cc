@@ -490,7 +490,8 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
   // what a pair of circles cannot. Anchored at the wider rim because a record
   // whose own radius is zero is one every membership test has to special-case.
   //
-  // See doc/step-export.md, *The rule: declare first, recognise second*.
+  // See doc/step-export-development.md, *The rule: declare first, recognise
+  // second*.
   if (r1 != r2 && z2 != z1) {
     const bool at_bottom = r1 >= r2;
     polyset->surfaces.push_back(std::make_shared<ConeSurface>(Vector3d(0, 0, at_bottom ? z1 : z2),

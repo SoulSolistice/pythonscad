@@ -10,9 +10,9 @@ only be measured on something real.
 | file | what it is |
 | --- | --- |
 | `bayonet_container_v1-2.scad`, `.json` | the model and its parameter set |
-| `bayonet_container_v1-2.stp` | **faceted** export of the base, `$fn = 60`, 2026-08-10 — predates the F1 fixes and still fails `validatestep.py`; a fresh export of the same part is clean at the same 1685 faces, so regenerating it would not move the probe figures |
+| `bayonet_container_v1-2.stp` | **faceted** export of the base, `$fn = 60`, dated 2026-08-10 — 1685 faces over 1693 loops. Still fails `validatestep.py`'s hole-nesting check, which is consistent with its date; a fresh export of the same part is clean at the same face count, so regenerating it would not move the probe figures |
 | `lid10.scad`, `.json` | the same model, lid part |
-| `lid10.stp` | **analytic** export of the lid, 2026-08-31 (validates: 1977 faces) |
+| `lid10.stp` | **analytic** export of the lid, dated 2026-09-01 — 1326 faces, validates clean (42801 entities, 1 shell) |
 
 ## What each one is for
 
@@ -24,42 +24,51 @@ scripts/step-analytic-probe.py surfaces examples/step_test/bayonet_container_v1-
 scripts/step-analytic-probe.py bands     examples/step_test/bayonet_container_v1-2.stp
 ```
 
-Every figure in *What is actually left in the bayonet* in `doc/step-export.md` is
-one run of that script over this file: 1693 faces, 664 of them (39.4%) on one of
-14 surfaces of revolution, 26 bands fitted, 25 surviving the rim rules.
+Every figure in *What a model author can do about it* in
+`doc/step-export-development.md` is one run of that script over this file: 1693
+loops (1685 faces plus 8 holes), 664 facets - 39.4% of the outer loops - on one
+of 14 surfaces of revolution, 26 bands fitted exactly, 25 surviving the rim
+rules.
 
 It has to stay a **faceted** export. The probe replays the recogniser, so running
 it over an analytic export measures the answer rather than the question.
 
-`lid10.stp` is an analytic export, so the probe does not apply to it. It is kept
-as the witness for a defect it exposed - see below.
+`lid10.stp` is an analytic export, so the probe does not apply to it. It is a
+readable sample of what the analytic path produces on a real part.
 
-## Both files fail `tests/validatestep.py`, on purpose
+## Neither is a known-good reference
 
-Neither is a known-good reference, and neither should be treated as one:
+Check either one rather than assuming:
 
 ```bash
 cd tests && python3 -c "from validatestep import validateSTEP; validateSTEP('../examples/step_test/lid10.stp')"
 ```
 
-- `bayonet_container_v1-2.stp` fails the hole nesting check. It predates the fix
-  for the membrane that check exists to catch, which is consistent with its date
-  and does not affect its use as probe input - the probe reads loops, not
-  validity.
-- `lid10.stp` has 94 edges used by one face. That is the defect described under
-  *The dropped loop* in `doc/step-export.md`: a loop whose winding disagreed with
-  the mesh normal, enclosed by nothing, was dropped rather than kept, and dropping
-  a face opens the shell along every edge of it. The exporter no longer does that,
-  so **this file is the before, not the after**. Re-exporting it after the fix,
-  and validating the result, is the cheapest confirmation that the fix works:
+- `bayonet_container_v1-2.stp` **fails** the hole-nesting check. It predates the
+  fix for the membrane that check exists to catch, which is consistent with its
+  date, and it does not affect its use as probe input - the probe reads loops,
+  not validity.
+- `lid10.stp` **passes** as committed. It used to be the witness for the dropped
+  loop - 94 edges used by one face, described under *The defects the checks exist
+  for* in `doc/step-export-development.md` - and it was re-exported after that
+  fix, so it is now the after rather than the before.
+
+**Both are stale in the other sense.** Nothing regenerates them and no test reads
+them, so every improvement to the exporter silently invalidates them; twice they
+have been a whole feature behind, and each time the part looked in a CAD system
+exactly as though the feature did not work. `lid10.stp` predates the sphere
+closure, the projection fixes and the plane declarations. Regenerate with the
+part's own parameter set and both flags - without `-p`/`-P` you get the default
+component, not the lid:
 
 ```bash
-pythonscad examples/step_test/lid10.scad -o /tmp/lid10.stp \
-    --enable=step-analytic-surfaces --trust-python
-cd tests && python3 -c "from validatestep import validateSTEP; validateSTEP('/tmp/lid10.stp')"
+build/staging/pythonscad.com examples/step_test/lid10.scad \
+    -p examples/step_test/lid10.json -P "New set 1" -o examples/step_test/lid10.stp \
+    --enable=step-analytic-surfaces --enable=step-approximate-surfaces
 ```
 
-Keep it until that has been run on a build that has the fix.
+A quick way to tell whether one is current is to count its faces against a fresh
+export with `grep -c ADVANCED_FACE`.
 
 ## They are excluded from the example test suite
 

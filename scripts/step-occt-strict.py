@@ -2,7 +2,7 @@
 """Check every export against a tolerance we choose, not the one OpenCASCADE granted.
 
 `tests/steproundtrip.py` asks `BRepCheck_Analyzer` whether a shape is valid, and
-the answer is almost always yes. `doc/step-interop-validation.md` explains why:
+the answer is almost always yes. `doc/step-export-development.md` explains why:
 OCCT sews by widening the tolerance of an edge until it covers the gap between
 that edge and the faces it bounds, so the shape is valid *with respect to the
 slack it was granted*. On the bayonet that slack is 0.264 mm. A check against a

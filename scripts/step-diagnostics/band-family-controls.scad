@@ -13,7 +13,8 @@
 // directory is globbed into the test suite, so a file added to it is a fixture
 // and needs derived expectations and a cmake configure. This is an instrument.
 //
-// See doc/step-interop-validation.md, "Code 17, chased as five whys", for what
+// See doc/step-export-wip.md open item 1, and the refuted claims in
+// doc/step-export-development.md, for what
 // each corner of the cube is for. In short:
 //
 //   WALL = 0   removes the boolean - and is NOT a usable control, because it
