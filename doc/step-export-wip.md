@@ -161,21 +161,35 @@ boolean's, and their lengths are predicted to about 5% by the model's two
 angular steps — see the alignment entry in §10. They are simply not what
 SOLIDWORKS objects to.
 
-**Next, and it is about the import rather than the export.**
+**What was tried after the population was found, and what it returned.**
 
-1. **`-FaultDetail` over the whole taper series including the clean members.**
-   It only emits rows for faulty entities, so the clean files' corresponding
-   faces have to be reached another way — which is what (2) is for.
-2. **Round-trip the series** and read what came back. This is the only way to
-   see a knitted face as geometry rather than as an area and a centre. Already
-   run once and it did not separate them, but the per-face comparison was coarse.
-3. **Ask whether knitting is the variable at all**, by importing one faulty
-   coupon under `knit=form-solids` against `knit=do-not-knit`. That is a settings
-   change and therefore the user's to make, but it is one toggle.
-4. **Eyeball `t007` against `t008`.** They straddle the sharpest boundary found —
-   run-out 0.07 faulty, 0.08 clean, 19 faces each — and nothing numeric
-   distinguishes them. Human eyes have found two defects in this project that no
-   instrument did.
+1. ~~Round-trip the series and read what came back.~~ **Run.** SOLIDWORKS'
+   own re-export does not separate them either: the knitted face structure of
+   the clean `t010` and the faulty `t005` is near-identical, 3 B-splines and 10
+   cylinders each, with the largest cylinder the same 2890.265 mm² in every
+   member of the series.
+2. ~~Ask whether knitting is the variable at all.~~ **Refuted.** *Try forming
+   solid(s)* and *Create analytic faces* were both changed and SOLIDWORKS'
+   reading of `f02` is bit-identical across the change, down to the two faulty
+   faces' areas to six decimals. The knit option has little to act on here: our
+   files carry a `MANIFOLD_SOLID_BREP` over one `CLOSED_SHELL`, so the solid is
+   read rather than sewn — which is also why solids arrived under *Do not knit*
+   all along.
+3. ~~Eyeball `t007` against `t008`.~~ **Done, and it returned three things.**
+   The two are "visually rather identical". On the faulty one **virtually the
+   whole sweep is flagged**, not a region of it, which retires every local
+   reading of a face-level complaint. And the boundary of the sweep is
+   *visibly* a staircase — which turned out to be true of every member, clean
+   and faulty alike, and true of the faceted control as well, so it is the
+   mesh's and not the analytic path's. It is not the trigger; it is open item 3.
+
+**So there is no measurement left on this side.** Everything the exporter
+counts, everything measurable on the file, the boundary's shape, SOLIDWORKS' own
+re-export and three import settings all fail to separate a faulty coupon from a
+clean one that differs from it in a single parameter by 0.01. What remains is
+not a better measurement of the trigger but removing the class: give the sweep a
+boundary that lies on its own surface (open item 3), and there is no longer a
+mesh polyline for a kernel to object to.
 
 Positive control in the same session, every time: `f02-band-fn032-analytic.stp`
 must read `faults=2 faultyfaces=2 codes=17`, or the run says nothing. It has
@@ -570,10 +584,13 @@ beside the fault column.
 > faulty files from the clean ones, and the faulty cylinder is nine of our faces
 > knitted into one, so it does not exist until SOLIDWORKS makes it.
 >
-> So stop measuring the file we write and measure the import: the round trip,
-> `-FaultDetail` across clean and faulty alike, and the one knit toggle. And put
-> `t007` against `t008` in front of your own eyes — run-out 0.07 faulty, 0.08
-> clean, 19 faces each, and no number tells them apart.
+> Do not open another measurement of code 17 on this side. Twelve mechanisms
+> have been proposed and refuted, the last four in one session — the sliver, the
+> taper, the boundary's jaggedness and the import settings — and the two coupons
+> that differ by 0.01 in one parameter are identical in every count the exporter
+> makes, in SOLIDWORKS' own re-export, and to the eye. Take open item 3 instead
+> and remove the class: a sweep whose boundary lies on its own surface leaves no
+> mesh polyline for a kernel to object to.
 >
 > Put `f02-band-fn032-analytic.stp` in **every** interop run as the positive
 > control; it must read `faults=2 faultyfaces=2 codes=17`, or a page of clean

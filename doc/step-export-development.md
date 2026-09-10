@@ -1866,3 +1866,25 @@ live idea gets buried.
 turning angle between consecutive boundary chords is median 11.586 / max 94.395
 on the faulty `t007` and median 11.588 / max 94.393 on the clean `t008`, with 14
 edges over 30 degrees on each.
+
+**"An import setting is the lever on code 17."** Refuted 2026-09-10, and by a
+stronger result than "nothing flipped". *Try forming solid(s)* against *Do not
+knit*, and *Create analytic faces* on against off, were changed together, and
+SOLIDWORKS' reading of `f02` is **bit-identical** across the change: solid, 9
+faces, volume 19555.2696, `faults=2 faultyfaces=2 faultyedges=0 codes=17`, and
+`-FaultDetail` names the same two faces with the same areas to six decimals —
+bspline 1027.844725 at `(0.0298, 0.0882, 17.3483)` and cylinder 2098.714282 at
+`(0.1454, 0.0000, 20.0000)`. `t008` and the faceted control stayed clean.
+
+Two things fall out of it. The knit setting has almost nothing to act on: our
+files carry a `MANIFOLD_SOLID_BREP` over one `CLOSED_SHELL` with no `OPEN_SHELL`
+and no `SHELL_BASED_SURFACE_MODEL`, so SOLIDWORKS reads the solid directly
+rather than sewing surfaces — which also explains why solids arrived under *Do
+not knit* all along. And every run in this document is comparable across the
+change, because the coupon that anchors them is faulty either way.
+
+**"The jagged sweep boundary is the analytic path's."** Seen rather than
+computed: the faceted control shows the same staircase along the ridge's trim,
+with the mesh's triangles visible. The jaggedness is the boolean's intersection
+polyline, and the analytic export inherits it — the same conclusion the sliver
+measurements reached from the other side, now visible in a CAD system.
