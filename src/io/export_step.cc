@@ -438,6 +438,12 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   std::size_t guess_wrong = 0, guess_right = 0, on_edge = 0;
   double worst_travel = 0, worst_within = 0, band_used = 0;
   std::size_t within_bound = 0, on_exact_only = 0;
+  // For the corners the acceptance turns down: how far Newton actually got from
+  // each of the two owners, and which of them answers by projecting. The test
+  // reads only `a`, so whether a corner is kept can depend on which surface the
+  // candidate list happened to put first - and a grid cannot place a point on
+  // itself as tightly as a quadric states where it is.
+  std::vector<double> miss_a, miss_b, miss_fitted, miss_exact;
   double worst_exact_only = 0;
   for (std::size_t v = 0; v < ps.vertices.size(); v++) {
     if (ids_at[v].size() < 2) continue;
@@ -517,9 +523,14 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // handful of steps and with no threshold to tune. See open item 3 of
       // doc/step-export-wip.md.
       //
-      // Tighter than the acceptance below by an order, so that test stays the
-      // arbiter of what is placed rather than this tolerance.
-      const double solve_tol = 1e-10 * std::max(1.0, ps.vertices[v].norm());
+      // Tighter than the acceptance below by two orders, and *absolute* because
+      // that test is. Scaling this by the corner's distance from the origin was
+      // the same mistake in miniature: at |v| = 28 on the band family it made
+      // the solver stop at 2.8e-09 and the test then asked for 1e-09, so 42
+      // corners were turned down having missed by a median 1.23e-09 - refused
+      // for the last factor of two of a convergence nobody had asked them to
+      // finish.
+      const double solve_tol = 1e-11;
       // Its answer is `p`, whether or not it met `solve_tol`: the test below is
       // what decides, and it is the same test either way.
       AnalyticFeatures::projectOntoBoth(a, b, p, solve_tol);
@@ -556,6 +567,15 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       if (!(closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-9)) {
         const auto *a_fit = dynamic_cast<const GridSurface *>(a);
         const auto *b_fit = dynamic_cast<const GridSurface *>(b);
+        {
+          Vector3d ma, mb;
+          const double da = closestOnSurface(a, p, ma) ? (ma - p).norm() : -1;
+          const double db = closestOnSurface(b, p, mb) ? (mb - p).norm() : -1;
+          if (da >= 0) miss_a.push_back(da);
+          if (db >= 0) miss_b.push_back(db);
+          if (da >= 0) (a_fit != nullptr ? miss_fitted : miss_exact).push_back(da);
+          if (db >= 0) (b_fit != nullptr ? miss_fitted : miss_exact).push_back(db);
+        }
         const Surface *exact =
           a_fit != nullptr ? (b_fit != nullptr ? nullptr : b) : (b_fit != nullptr ? a : nullptr);
         const GridSurface *fit = a_fit != nullptr ? a_fit : b_fit;
@@ -641,6 +661,21 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       "STEP export: %1$d corners whose two owners do not cross transversally are placed on the "
       "exact one of them, moving at most %2$.4f, the fit agreeing within its own band",
       int(on_exact_only), worst_exact_only);
+    auto spread = [](std::vector<double>& v) {
+      std::sort(v.begin(), v.end());
+      if (v.empty()) return std::string("none");
+      char buf[128];
+      snprintf(buf, sizeof(buf), "%.3e/%.3e/%.3e (n=%d)", v.front(), v[v.size() / 2], v.back(),
+               int(v.size()));
+      return std::string(buf);
+    };
+    const std::string sa = spread(miss_a), sb = spread(miss_b);
+    const std::string sf = spread(miss_fitted), se = spread(miss_exact);
+    LOG(
+      "STEP export:    how far those got from each owner, min/med/max - first owner %1$s, second "
+      "%2$s; by kind, stated algebraically %3$s, answering by projecting %4$s, against the 1e-09 "
+      "the first owner alone is asked for",
+      sa.c_str(), sb.c_str(), se.c_str(), sf.c_str());
   }
   if (pair > 0 && band_used > 0) {
     LOG(
