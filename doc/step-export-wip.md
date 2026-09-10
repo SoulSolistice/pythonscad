@@ -870,6 +870,25 @@ occurs rather than only under a relaxed veto. Then A, which is the larger
 change and the one that needs the section pass restructured. Then, and only
 then, the veto.
 
+**B is done.** And it needed no new mechanism: the rule was already written and
+already implemented, and only ran too early. `get_vertex` now resolves through a
+position map instead of indexing by mesh vertex, which is the same rule at the
+first moment it can be obeyed - every caller emits faces, and that is after the
+moves are applied.
+
+Verified where it can be. Nothing coincides on today's exports, so the suite can
+only show it breaks nothing; the measurement that shows it *fixes* something is
+the relaxed-veto configuration, which is where the defect lives:
+
+| under the relaxed veto | before | after |
+| --- | --- | --- |
+| `lid10` | `VERTEX_POINT #45 and #70 sit on the same coordinates` | **valid**, 830 faces, one shell |
+| `f04` | `2 edge(s) used by only one face` | unchanged, as expected |
+
+So **A is what still stands between the veto and being relaxable**: an edge's
+geometry is decided twice, once by each of its two faces, and the two can
+diverge once a corner moves.
+
 #### Both conditions are now enforced rather than reported
 
 Neither of these should ever be reached, and saying so in a comment is not
