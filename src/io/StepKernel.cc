@@ -941,11 +941,39 @@ void StepKernel::build_tri_body(
     }
   }
 
+  // The same rule as `canonical` above, applied at the moment it can actually be
+  // obeyed. That map is built from `vertices` here, before the corner placement
+  // has moved any of them, so it catches vertices the *mesh* left coincident and
+  // cannot catch vertices the placement makes coincident - which is a thing a
+  // correct placement does. Where a cylinder, two cones and a plane meet, the
+  // corners the mesh keeps apart are one point on the surfaces, and moving each
+  // onto its own owners brings them together.
+  //
+  // Measured on lid10, on the export that relaxed the plane veto: three mesh
+  // vertices - one cylinder-and-plane corner and two cone-and-plane corners -
+  // all placed at (-66.905705, -48.609840, 95.0), and three VERTEX_POINTs
+  // written for one point. `validatestep.py` calls that "vertices are not
+  // shared" and it is the same defect the comment above describes, arriving too
+  // late for the map above to see it.
+  //
+  // Resolving by position *here* is late enough: every caller is emitting faces,
+  // which happens after the moves are applied. Exact coordinates rather than a
+  // tolerance, for the same reason the map above uses them - two corners placed
+  // on the same crossing of the same surfaces land on the same doubles, and a
+  // tolerance would additionally merge things that are merely close.
   std::vector<Vertex *> step_verts(vertices.size(), nullptr);
+  std::map<std::tuple<double, double, double>, Vertex *> vertex_at;
   auto get_vertex = [&](int ind) {
     if (step_verts[ind] == nullptr) {
-      auto point = new Point(entities, vertices[ind]);
-      step_verts[ind] = new Vertex(entities, point);
+      const auto key = std::make_tuple(vertices[ind][0], vertices[ind][1], vertices[ind][2]);
+      const auto it = vertex_at.find(key);
+      if (it != vertex_at.end()) {
+        step_verts[ind] = it->second;
+      } else {
+        auto point = new Point(entities, vertices[ind]);
+        step_verts[ind] = new Vertex(entities, point);
+        vertex_at.emplace(key, step_verts[ind]);
+      }
     }
     return step_verts[ind];
   };
