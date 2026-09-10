@@ -346,6 +346,97 @@ bool quadricImplicit(const Surface *surface, const Vector3d& p, double& f, Vecto
   return true;
 }
 
+/*! A foot-point implicit for a surface that has no algebraic one.
+ *
+ * `GridSurface` - and so `SweepSurface` - and `BezierPatchSurface` answer
+ * membership by projecting rather than by evaluating a polynomial, so there is
+ * no `f(x,y,z)` to differentiate. There is something just as good for Newton:
+ * project, take the foot point `q` and the unit normal `n` there, and use the
+ * plane through `q` as the local implicit. `f = n . (p - q)` is signed, changes
+ * sign as `p` crosses the surface, and `|f| / |grad|` is a distance in
+ * millimetres because `|n|` is one - which is exactly what `projectOntoBoth`'s
+ * residual test asks for.
+ *
+ * It is first order where a quadric's is exact, so Newton converges linearly
+ * here rather than quadratically. That costs iterations and not correctness:
+ * the residual test is on the answer, so a linear approach still has to arrive
+ * before it is believed.
+ *
+ * The normal is taken by central differences in the surface's own parameters,
+ * stepped inward at the edges of the rectangle so a foot point on the boundary
+ * still gets two directions to cross.
+ */
+template <class S>
+bool footPointImplicit(const S *surface, const Vector3d& p, double& f, Vector3d& grad)
+{
+  double u = 0, v = 0;
+  if (!surface->project(p, u, v)) return false;
+  const double h = 1e-5;
+  const double u0 = std::max(0.0, std::min(1.0 - h, u - h)), u1 = std::min(1.0, u0 + 2 * h);
+  const double v0 = std::max(0.0, std::min(1.0 - h, v - h)), v1 = std::min(1.0, v0 + 2 * h);
+  const Vector3d du = surface->evaluate(u1, v) - surface->evaluate(u0, v);
+  const Vector3d dv = surface->evaluate(u, v1) - surface->evaluate(u, v0);
+  Vector3d n = du.cross(dv);
+  const double len = n.norm();
+  if (!(len > 0) || !std::isfinite(len)) return false;  // degenerate, or a pole
+  n /= len;
+  f = n.dot(p - surface->evaluate(u, v));
+  grad = n;
+  return true;
+}
+
+/*! The implicit form of whatever surface this is, exact where one exists.
+ *
+ * Quadrics keep their algebra - it is exact and quadratically convergent, and
+ * nothing here should trade that for a projection. Everything else that can
+ * answer `project` and `evaluate` gets the foot-point plane instead. A surface
+ * that can do neither has no crossing curve, which is the honest answer for a
+ * face whose shape this exporter cannot state.
+ */
+bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad)
+{
+  if (quadricImplicit(surface, p, f, grad)) return true;
+  if (const auto *grid = dynamic_cast<const GridSurface *>(surface)) {
+    return footPointImplicit(grid, p, f, grad);
+  }
+  if (const auto *patch = dynamic_cast<const BezierPatchSurface *>(surface)) {
+    return footPointImplicit(patch, p, f, grad);
+  }
+  return false;
+}
+
+/*! What a surface is entitled to be missed by, from its own declaration.
+ *
+ * A quadric states where it is exactly, so nothing is owed it and this is zero;
+ * every caller keeps whatever exactness it was already demanding. A declared
+ * grid does not: it describes the smooth surface a generator meant, the mesh is
+ * its tessellation, and a boolean cuts the *tessellation*, so the vertices it
+ * makes lie on facets standing off the smooth surface by up to a station's
+ * sagitta. `GridSurface::membershipTolerance` is that figure, computed by the
+ * surface from the points it was declared with.
+ *
+ * Using it here is not a loosened tolerance chosen to admit more curves. It is
+ * the same number the declaration channel already answers membership with, and
+ * a crossing curve is refused or accepted on exactly the terms the surface's
+ * own face is. Demanding 1e-9 of a tessellated vertex instead refuses every
+ * sweep before the question is asked, which is what happened the first time.
+ */
+/*! Whether this surface states where it is algebraically. */
+bool isQuadric(const Surface *surface)
+{
+  return dynamic_cast<const SphereSurface *>(surface) != nullptr ||
+         dynamic_cast<const CylinderSurface *>(surface) != nullptr ||
+         dynamic_cast<const ConeSurface *>(surface) != nullptr;
+}
+
+double declaredBand(const Surface *surface)
+{
+  if (const auto *grid = dynamic_cast<const GridSurface *>(surface)) {
+    return grid->membershipTolerance();
+  }
+  return 0.0;
+}
+
 /*! How far `p` is from the surface, to first order, from its implicit form.
  *
  * `f` is the implicit's value and is in the units of whatever the implicit
@@ -384,7 +475,7 @@ bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol
   for (int step = 0; step < 24; step++) {
     double fa = 0, fb = 0;
     Vector3d ga, gb;
-    if (!quadricImplicit(a, p, fa, ga) || !quadricImplicit(b, p, fb, gb)) return false;
+    if (!surfaceImplicit(a, p, fa, ga) || !surfaceImplicit(b, p, fb, gb)) return false;
     if (implicitDistance(fa, ga) <= tol && implicitDistance(fb, gb) <= tol) return true;
     const double aa = ga.dot(ga), ab = ga.dot(gb), bb = gb.dot(gb);
     const double det = aa * bb - ab * ab;
@@ -396,7 +487,7 @@ bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol
   // One last chance: the loop may have arrived on its final step.
   double fa = 0, fb = 0;
   Vector3d ga, gb;
-  if (!quadricImplicit(a, p, fa, ga) || !quadricImplicit(b, p, fb, gb)) return false;
+  if (!surfaceImplicit(a, p, fa, ga) || !surfaceImplicit(b, p, fb, gb)) return false;
   return implicitDistance(fa, ga) <= tol && implicitDistance(fb, gb) <= tol;
 }
 
@@ -426,6 +517,16 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
                      double tol, std::vector<Vector3d>& ctrl)
 {
   const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
+  // The band does NOT belong here, and putting it here was wrong once already.
+  // A declared grid's band says how far the *mesh* stands off the surface, which
+  // is why a mesh vertex is allowed to miss it by that much. It says nothing
+  // about how precisely a point can be placed *on* the interpolant, which is
+  // what this solves, nor about how closely a Bezier can follow the curve, which
+  // is what the fit measures. Widening either to the band makes `intersectionArc`
+  // accept a cubic on its first try and write a curve no better than the chord
+  // it replaces - measured: identical boundary deviation to seven digits.
+  const double solve_tol = 1e-14 * scale;
+  const double fit_tol = tol;
   for (int degree = 3; degree <= 9; degree++) {
     // Sample the true curve at the Bezier's own parameters, by pulling the
     // chord's point at each onto both surfaces.
@@ -435,7 +536,7 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
     on_curve[degree] = p1;
     for (int i = 1; i < degree && ok; i++) {
       Vector3d q = p0 + (p1 - p0) * (double(i) / degree);
-      ok = projectOntoBoth(a, b, q, 1e-14 * scale);
+      ok = projectOntoBoth(a, b, q, solve_tol);
       on_curve[i] = q;
     }
     if (!ok) return false;
@@ -456,7 +557,7 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
     const Eigen::MatrixXd solved = m.colPivHouseholderQr().solve(rhs);
     ctrl.assign(degree + 1, Vector3d::Zero());
     for (int j = 0; j <= degree; j++) ctrl[j] = solved.row(j).transpose();
-    if (intersectionArcError(a, b, ctrl) <= tol) return true;
+    if (intersectionArcError(a, b, ctrl) <= fit_tol) return true;
   }
   return false;
 }
@@ -477,7 +578,7 @@ double intersectionArcError(const Surface *a, const Surface *b, const std::vecto
     for (const Surface *s : {a, b}) {
       double f = 0;
       Vector3d g;
-      if (!quadricImplicit(s, p, f, g)) return std::numeric_limits<double>::infinity();
+      if (!surfaceImplicit(s, p, f, g)) return std::numeric_limits<double>::infinity();
       const double gn = g.norm();
       if (gn < 1e-12) return std::numeric_limits<double>::infinity();
       worst = std::max(worst, fabs(f) / gn);  // the Newton distance to the surface
@@ -1809,16 +1910,29 @@ void StepKernel::build_tri_body(
         // declared quadrics can be recognised from either side and written the
         // same way from both.
         std::map<std::pair<int, int>, std::vector<const Surface *>> along;
-        for (const auto *patch : standing) {
-          for (const auto& entry : rawBoundaryCycles(*patch, loops, loop_valid, taken)) {
+        auto walk_into_along = [&](const AnalyticFeatures::Patch& patch) {
+          for (const auto& entry : rawBoundaryCycles(patch, loops, loop_valid, taken)) {
             const std::vector<int>& verts = entry.second.verts;
             const std::size_t n = verts.size();
             for (std::size_t i = 0; i < n; i++) {
               const int u = verts[i], v = verts[(i + 1) % n];
-              along[{std::min(u, v), std::max(u, v)}].push_back(patch->surface.get());
+              along[{std::min(u, v), std::max(u, v)}].push_back(patch.surface.get());
             }
           }
-        }
+        };
+        for (const auto *patch : standing) walk_into_along(*patch);
+        // The declared sweeps too. An edge where a sweep meets a cylinder is a
+        // crossing of two declarations exactly as much as one between two
+        // cylinders is, and leaving the sweeps out of this map is what made the
+        // question unaskable rather than answered - `along` would only ever see
+        // one owner for such an edge and drop it at the size test below.
+        //
+        // They are safe to add only because the grid emitter now reads
+        // `crossing_curves` as well: an edge admitted here and taken by the
+        // cylinder's face while the sweep's face still wrote a chord would give
+        // one edge two geometries, which is how this opened the shell on 420
+        // edges the first time it was tried.
+        for (const auto& patch : grid_faces) walk_into_along(patch);
         crossing_edges.clear();
         double worst_arc = 0;
         for (const auto& entry : along) {
@@ -1836,8 +1950,8 @@ void StepKernel::build_tri_body(
             for (const Vector3d *p : {&p0, &p1}) {
               double f = 0;
               Vector3d g;
-              if (!quadricImplicit(s, *p, f, g) || g.norm() < 1e-12 ||
-                  fabs(f) / g.norm() > 1e-9 * scale) {
+              const double owed = std::max(1e-9 * scale, declaredBand(s));
+              if (!surfaceImplicit(s, *p, f, g) || g.norm() < 1e-12 || fabs(f) / g.norm() > owed) {
                 on = false;
               }
             }
@@ -1862,7 +1976,16 @@ void StepKernel::build_tri_body(
           // The smallest eigenvalue is the sum of squared distances to the best
           // plane, so its root over the count is the RMS off it.
           const double flat = sqrt(std::max(0.0, es.eigenvalues()(0)) / double(ctrl.size()));
-          if (flat <= 1e-9 * scale) continue;
+          // ...but only between two of them. The sentence above is a statement
+          // about quadrics: two of those meeting in a planar curve meet in a
+          // conic, which ELLIPSE states exactly. A *sweep* cut by a plane is
+          // not a conic and no pass in this exporter writes one for it, so
+          // skipping it here does not hand the edge to something better - it
+          // hands it back to the chord it was. Measured on the band family at
+          // $fn 32: all 640 edges where the sweep meets the bore pass every
+          // other gate and every one of them is planar to 1e-9, because each
+          // spans a single facet and a short arc of anything is flat.
+          if (flat <= 1e-9 * scale && isQuadric(a) && isQuadric(b)) continue;
           worst_arc = std::max(worst_arc, intersectionArcError(a, b, ctrl));
           crossing_fit = std::max(crossing_fit, worst_arc);
           crossing_edges.emplace(entry.first, std::make_pair(a, b));
@@ -3133,8 +3256,86 @@ void StepKernel::build_tri_body(
   // the edges from the same map every other face uses is therefore both the
   // simplest thing and the only one that keeps the shell closed: the neighbour
   // is not asked to give anything up.
+  //
+  // One neighbour is not a planar facet, and it is the exception that sentence
+  // does not cover: where the sweep meets a *declared* surface, the two cross
+  // along a curve both of them can derive from their own declarations, and
+  // `crossing_edges` holds exactly those edges. Such an edge has to be taken
+  // from `crossing_curves` here for the same reason it is taken there - it is
+  // one edge, and the two faces on it must name one geometry. Whichever emitter
+  // reaches it first builds it and the other reuses the object, which is why
+  // that map is declared above both of them rather than beside either.
+  std::map<std::pair<int, int>, EdgeCurve *> crossing_curves;
+  /*! One face's view of a crossing edge: the surface entity it wrote and the
+   *  placement that entity carries, which is what a PCURVE's parameters mean.
+   *
+   * Recorded per face rather than per surface because the reference direction is
+   * chosen from each face's own boundary, so two faces on one cylinder do not
+   * share a parameter origin and a pcurve written against the wrong one is off
+   * by a rotation.
+   */
+  struct CrossingSide {
+    SurfaceType *surface = nullptr;
+    Vector3d base, axis, ref;
+    double slope = 0;  // a cone's, in its written direction; zero for a cylinder
+  };
+  std::map<std::pair<int, int>, std::vector<CrossingSide>> crossing_sides;
+  int crossing_written = 0;
+
   // One per file - nothing about a 2D parametric context varies.
   ParametricContext *param_context = nullptr;
+  // Settle the sections and the crossing curves before *either* emitter runs.
+  // This used to sit after the grid faces were written, which meant the grid
+  // emitter read a set that had not been decided yet and the quadric emitter
+  // read one that had: the same edge then got a crossing curve from one face
+  // and a chord from the other, and the shell came apart on twice the number
+  // of crossings - 1278 edges used once, on the band family at $fn 32. Its own
+  // comment says it has to run after the corner placement, and it still does;
+  // the placement is a long way above here.
+  // A trimmed quadric, bounded by the mesh's own boundary rather than by
+  // circles. The band pass writes a cylinder between two circular rims and
+  // writes it better - a CIRCLE is a curve a kernel can offset and pattern
+  // along - so this only ever sees what that pass could not take: a face whose
+  // trim is not a plane section and has no conic to bound it with.
+  //
+  // The bound is the polyline the neighbouring faceted faces already use, for
+  // the same reason a declared sweep's is: those faces have to close against
+  // this one edge for edge, and a curve of our own devising there would open
+  // the shell. The surface is exact; only its boundary is the mesh's.
+  // One curve per plane section, shared by the two faces that meet along it -
+  // the same rule the band pass follows for a shared rim. Without it each face
+  // would write its own ellipse and the shell would come apart along them.
+  // Ask again, now that the corner placement has moved what it is going to move.
+  // The faces are settled; what is being re-decided is only which sections both
+  // of their faces can still see, and it has to be decided on the geometry that
+  // is about to be written rather than on the geometry it was chosen from.
+  if (decide_sections) {
+    const std::set<std::set<int>> agreed_before = section_curves;
+    std::vector<const AnalyticFeatures::Patch *> live;
+    live.reserve(quadric_faces.size());
+    for (const auto& patch : quadric_faces) live.push_back(&patch);
+    decide_sections(live);
+    std::size_t lost = 0;
+    for (const auto& key : agreed_before) {
+      if (section_curves.find(key) == section_curves.end()) lost++;
+    }
+    if (lost > 0) {
+      // Say so rather than let it pass: this is the one place the two meshes can
+      // disagree, and in the exact tier it means a face was called exact partly
+      // because a section covered chords which are now written as chords after
+      // all. A plane fitted to mesh facets is what does not survive: the
+      // placement moves a corner onto the surface the model declared, which is
+      // exactly off the facet plane it happened to share with a neighbour. A
+      // declared plane survives, because that is what the corner was moved onto.
+      LOG(message_group::Export_Warning,
+          "STEP export: %1$d plane section%2$s agreed before the corners were placed and %3$s not "
+          "after, so %4$s boundary is written as chords%5$s",
+          int(lost), lost == 1 ? "" : "s", lost == 1 ? "does" : "do",
+          lost == 1 ? "that much of a" : "that much of the",
+          approximate ? "" : " under a face called exact");
+    }
+  }
+
   for (const auto& patch : grid_faces) {
     const auto *grid = dynamic_cast<const GridSurface *>(patch.surface.get());
     if (grid == nullptr) continue;
@@ -3201,8 +3402,36 @@ void StepKernel::build_tri_body(
       for (std::size_t i = 0; i < cycle.size(); i++) {
         const int a = cycle[i], b = cycle[(i + 1) % cycle.size()];
         bool dir = true;
-        EdgeCurve *edge =
-          get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+        EdgeCurve *edge = nullptr;
+        // The one edge a sweep shares with something that can give it a curve.
+        // Same map, same key and the same EdgeCurve object as the quadric
+        // emitter uses, so the two faces on this edge name one geometry however
+        // the passes are ordered.
+        const std::pair<int, int> key{std::min(a, b), std::max(a, b)};
+        const auto crossing = crossing_edges.find(key);
+        if (crossing != crossing_edges.end()) {
+          const auto found = crossing_curves.find(key);
+          if (found != crossing_curves.end()) {
+            edge = found->second;
+            dir = edge->vert1 == get_vertex(a);
+          } else {
+            std::vector<Vector3d> ctrl;
+            if (intersectionArc(crossing->second.first, crossing->second.second, vertices[key.first],
+                                vertices[key.second], 1e-7, ctrl)) {
+              std::vector<Point *> cp;
+              cp.reserve(ctrl.size());
+              for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
+              edge = new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
+                                   new BSplineCurve(entities, "", cp), true);
+              crossing_curves.emplace(key, edge);
+              crossing_written++;
+              dir = edge->vert1 == get_vertex(a);
+            }
+          }
+        }
+        if (edge == nullptr) {
+          edge = get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+        }
         loop.push_back(new OrientedEdge(entities, edge, dir));
         face_edges_here.push_back(edge);
         // Where this edge runs across the surface, written down rather than
@@ -3267,69 +3496,9 @@ void StepKernel::build_tri_body(
     face_edges_extra.push_back(face_edges_here);
   }
 
-  // A trimmed quadric, bounded by the mesh's own boundary rather than by
-  // circles. The band pass writes a cylinder between two circular rims and
-  // writes it better - a CIRCLE is a curve a kernel can offset and pattern
-  // along - so this only ever sees what that pass could not take: a face whose
-  // trim is not a plane section and has no conic to bound it with.
-  //
-  // The bound is the polyline the neighbouring faceted faces already use, for
-  // the same reason a declared sweep's is: those faces have to close against
-  // this one edge for edge, and a curve of our own devising there would open
-  // the shell. The surface is exact; only its boundary is the mesh's.
-  // One curve per plane section, shared by the two faces that meet along it -
-  // the same rule the band pass follows for a shared rim. Without it each face
-  // would write its own ellipse and the shell would come apart along them.
-  // Ask again, now that the corner placement has moved what it is going to move.
-  // The faces are settled; what is being re-decided is only which sections both
-  // of their faces can still see, and it has to be decided on the geometry that
-  // is about to be written rather than on the geometry it was chosen from.
-  if (decide_sections) {
-    const std::set<std::set<int>> agreed_before = section_curves;
-    std::vector<const AnalyticFeatures::Patch *> live;
-    live.reserve(quadric_faces.size());
-    for (const auto& patch : quadric_faces) live.push_back(&patch);
-    decide_sections(live);
-    std::size_t lost = 0;
-    for (const auto& key : agreed_before) {
-      if (section_curves.find(key) == section_curves.end()) lost++;
-    }
-    if (lost > 0) {
-      // Say so rather than let it pass: this is the one place the two meshes can
-      // disagree, and in the exact tier it means a face was called exact partly
-      // because a section covered chords which are now written as chords after
-      // all. A plane fitted to mesh facets is what does not survive: the
-      // placement moves a corner onto the surface the model declared, which is
-      // exactly off the facet plane it happened to share with a neighbour. A
-      // declared plane survives, because that is what the corner was moved onto.
-      LOG(message_group::Export_Warning,
-          "STEP export: %1$d plane section%2$s agreed before the corners were placed and %3$s not "
-          "after, so %4$s boundary is written as chords%5$s",
-          int(lost), lost == 1 ? "" : "s", lost == 1 ? "does" : "do",
-          lost == 1 ? "that much of a" : "that much of the",
-          approximate ? "" : " under a face called exact");
-    }
-  }
-
   std::map<std::set<int>, EdgeCurve *> section_edges;
   std::set<std::set<int>> section_subs;  // sections already handed to a planar face
   int sections_declared = 0, sections_fitted = 0;
-  std::map<std::pair<int, int>, EdgeCurve *> crossing_curves;
-  /*! One face's view of a crossing edge: the surface entity it wrote and the
-   *  placement that entity carries, which is what a PCURVE's parameters mean.
-   *
-   * Recorded per face rather than per surface because the reference direction is
-   * chosen from each face's own boundary, so two faces on one cylinder do not
-   * share a parameter origin and a pcurve written against the wrong one is off
-   * by a rotation.
-   */
-  struct CrossingSide {
-    SurfaceType *surface = nullptr;
-    Vector3d base, axis, ref;
-    double slope = 0;  // a cone's, in its written direction; zero for a cylinder
-  };
-  std::map<std::pair<int, int>, std::vector<CrossingSide>> crossing_sides;
-  int crossing_written = 0;
   auto conic_placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
     return new Axis2Placement(entities, new Direction(entities, dir), new Direction(entities, towards),
                               new Point(entities, origin));
