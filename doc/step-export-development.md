@@ -1888,3 +1888,16 @@ computed: the faceted control shows the same staircase along the ridge's trim,
 with the mesh's triangles visible. The jaggedness is the boolean's intersection
 polyline, and the analytic export inherits it — the same conclusion the sliver
 measurements reached from the other side, now visible in a CAD system.
+
+**"The crossing curve on a sweep will move code 17."** Not refuted and not
+shown — **untested**, and the distinction matters. Built 2026-09-10, it writes
+498 of `f02`'s 640 candidate edges as the true crossing fitted to 9.96e-08 and
+takes the faces whose boundary leaves their own surface from 9 of 12 to 7 of 12.
+SOLIDWORKS reads the result as `faults=2 faultyfaces=2 codes=17`, exactly as it
+read the all-chord version, and the run-out flip survives intact.
+
+The reason that settles nothing is in this document already: *one chorded edge
+is enough to fail its face*. 142 edges still fail to fit inside 1e-7 and stay
+chords, so the face SOLIDWORKS objects to has never yet been offered a boundary
+that lies on it. Reporting this as "the crossing curve does not fix code 17"
+would be the same error as reporting a green suite whose round trip never ran.

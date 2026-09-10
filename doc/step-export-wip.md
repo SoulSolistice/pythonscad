@@ -206,82 +206,45 @@ reproduced that on four separate runs.
   `src/core/DeclareSurfaceNode.cc` does not. `doc/step-export-development.md`
   says to keep both front ends in step, and this is the one that is not.
 
-### 3. The crossing curve, revisited
+### 3. The crossing curve on a sweep: landed, and 142 edges short
 
-Worth reopening now and not before. The slack it was meant to pay off is the
-*boundary* of a face, and until the projection fixes half the surface inside that
-boundary was missing, so the measurement means something it did not mean then.
+**Built 2026-09-10.** A declared sweep is now trimmed to the curve where it
+crosses a quadric, the same way two quadrics have been since 2026-09-07. The
+full account of the three things that had to be right is in the commit; the two
+worth carrying here are that the previous revert mis-attributed the shell
+opening — `along` and the grid emitter walk the same vertex sequence, and the
+fault was that `decide_sections` rebuilt `crossing_edges` *between* the two
+emitters — and that the tessellation band belongs in the gate asking whether a
+mesh vertex is on a surface, and nowhere else. Putting it in the fit as well
+makes `intersectionArc` accept a cubic immediately and write a curve no better
+than the chord: identical boundary deviation to seven digits, measured.
 
-Land it on its own merits — 210 edges made exact is a result — and judge it on
-whether it moves code 17, **not** on the granted slack, which it has already been
-shown not to move.
+**What it bought.** On `f02-band-fn032`, 498 of 640 candidate edges are written
+as the true crossing, fitted to within 9.96e-08 of both surfaces. Faces whose
+boundary leaves their own surface by more than 1e-3 go from 9 of 12 to 7 of 12.
+Shell closed everywhere, 50/50, and lid10 unchanged at 818 faces over one shell.
 
-**It now has a second justification that owes nothing to code 17.** Opened in a
-CAD system, the boundary of a declared sweep against the bore is *visibly*
-jagged — a staircase, not a curve. Measured, the turning angle between
-consecutive boundary chords has a median of 5 to 15 degrees and a maximum near
-94 on every member of the family, clean and faulty alike. That is the mesh's
-intersection polyline standing in for a curve neither surface has any reason to
-step along, and the crossing curve is what replaces it. A user sees it before
-any instrument does, which is an argument the slack measurement could not make.
+**What it did not.** Code 17 does not move: `f02` reads `faults=2
+faultyfaces=2 codes=17` with 498 crossing curves exactly as it did with none,
+and the run-out flip survives — `t007` faulty, `t008` clean, on the new
+exporter. Its volume moves by 0.006%.
 
-The full record of what was built and why it was reverted is
-in `doc/step-export-development.md`, *Refuted claims*. Three stages, and the
-first has landed.
+**And that is not yet a refutation, which is the point to be careful about.**
+142 of the 640 edges still fail to fit inside 1e-7 and fall back to chords, and
+*one chorded edge is enough to fail its face* is this project's own finding from
+the first attempt. A face with 142 chords left on it is not a test of "does an
+exact boundary satisfy SOLIDWORKS". The hypothesis is untested, not disproved.
 
-**Stage A — the convergence test. Done 2026-09-10.** `projectOntoBoth` asked
-whether its last Newton *step* was small; it now asks whether the point *is* on
-both surfaces, as `|f| / |grad|` in millimetres. A quadric passes either test;
-a surface whose implicit is itself an iteration inherits that iteration's floor
-and can sit on both surfaces while still stepping above it forever, which is why
-only 93 of 507 candidate edges got a curve the first time and all 507 did once
-the question changed. No output moves — 50/50, both crossing-curve fixtures
-still write their 80 `SURFACE_CURVE`s — and it is mutation-checked: a residual
-of 1e-30 fails `step-bored-cylinder` and `step-bored-cone` and nothing else.
+**So the next question is bounded and specific: why do those 142 fail?** The
+likely answer is where the sweep and the bore run nearly tangent — the shallow
+end of the ridge, which is where every previous measurement of this boundary has
+also concentrated, and where `projectOntoBoth` is documented to fail because the
+2x2 goes singular. Count them by position along the sweep first; if they are the
+tangent ones, the question becomes whether a crossing curve is the right entity
+there at all, or whether that stretch wants the plane section it nearly is.
 
-**Stage B — let a sweep take part.** `quadricImplicit` handles sphere, cylinder
-and cone by algebra and returns false for everything else, so `projectOntoBoth`
-refuses a sweep before it starts. What is needed is a dispatcher — call it
-`surfaceImplicit` — that keeps the exact algebra for the three quadrics and
-falls back for anything with `evaluate` and `project`, which is `GridSurface`
-(and so `SweepSurface`) and `BezierPatchSurface`:
-
-```text
-project(p) -> (u,v);  q = evaluate(u,v);  n = normalised du x dv at (u,v)
-f = n . (p - q);      grad = n
-```
-
-`|f| / |grad|` is then the distance along the normal, which is what Stage A's
-test wants, and the sign flips as `p` crosses the surface, which is what Newton
-wants. Watch the cost: `GridSurface::project` is a Newton from a coarse sample,
-and this puts one inside a 24-iteration loop for each of degree+1 samples on
-each candidate edge.
-
-**Stage C — the edge ladder, and this is the one that opened the shell.** The
-two emitters build their boundary cycles from the same place and then diverge:
-
-- `rawBoundaryCycles` (StepKernel.cc ~line 738) walks `patch.runs` and drops
-  each run's last vertex;
-- the grid emitter (~line 3163) walks `patch.runs` and drops each run's last
-  vertex — *the identical sequence*, so the vertex-pair keys already line up;
-- but the quadric emitter does not use the raw cycle. It uses `boundaryCycles`,
-  which post-processes the raw one against `section_planes` and `crossing_keys`
-  and splits it where a curve is to be written.
-
-So a crossing edge is decided once, in `crossing_edges` keyed by
-`{min(u,v), max(u,v)}`, and only one of the two emitters ever reads that map.
-The grid face writes a chord over the same vertex pair, the edge has two
-geometries, and the shell comes apart — 420 edges used once, last time.
-
-The fix is not to teach the grid emitter the ladder a second time. It is to
-lift the per-edge decision (crossing curve, then plane section, then arc, then
-chord) into one helper keyed by the vertex pair, and have both emitters call it.
-That is a refactor of the most delicate invariant in the file — *the two faces
-meeting along an edge must write the same curve* — so it wants its own session
-and its own validator check, not the tail of another one.
-
-**Do not land Stage B without Stage C.** Half of this is measurably worse than
-none of it.
+Only once all 640 are exact does the answer to "is code 17 the boundary" mean
+anything.
 
 ### 4. `c06` imports clean and inside out
 
@@ -639,17 +602,20 @@ beside the fault column.
 > that differ by 0.01 in one parameter are identical in every count the exporter
 > makes, in SOLIDWORKS' own re-export, and to the eye.
 >
-> Take open item 3 and remove the class instead. Stage A has landed and is
-> mutation-checked; Stage B is about forty lines; **Stage C is the work** and it
-> is a refactor rather than an addition — one helper that decides an edge's
-> geometry from its vertex pair, called by both emitters, replacing two ladders
-> that currently disagree. Do not land B without C: the last attempt did, and
-> the shell came apart on 420 edges.
+> Open item 3 has landed: a declared sweep is trimmed to the curve where it
+> crosses a quadric, 498 of 640 edges on the band family, shell closed, 50/50.
+> It did **not** move code 17 — and that is not a refutation, because 142 edges
+> still fall back to chords and one chord is enough to fail a face.
 >
-> Judge the result on whether the boundary stops being a staircase, which is
-> visible in a CAD system, and not on the granted slack, which has already been
-> shown not to move. Whether it also takes code 17 with it is the open question
-> and would be a bonus, not the criterion.
+> So take the 142. Count them by position along the sweep before theorising;
+> the tangent stretch at the shallow end of the ridge is where every other
+> measurement of this boundary has concentrated and where `projectOntoBoth` is
+> documented to fail. If that is where they are, ask whether a crossing curve is
+> the right entity there at all rather than pushing the solver harder.
+>
+> Only when all 640 are exact does "is code 17 the boundary?" become a question
+> the answer can be trusted on. Put `f02-band-fn032-analytic.stp` in every
+> interop run as the positive control regardless.
 >
 > Put `f02-band-fn032-analytic.stp` in **every** interop run as the positive
 > control; it must read `faults=2 faultyfaces=2 codes=17`, or a page of clean
