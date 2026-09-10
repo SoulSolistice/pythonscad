@@ -257,7 +257,8 @@ one whose code 17 moved, and the three that kept a chorded boundary kept their
 fault. That is the correlation this chase has been trying to establish, and it
 is **n = 1** on the positive side.
 
-**The gate is named and it is not one of the ones fixed for item 3.** On f04 the
+**The gate is named, it is not one of the ones fixed for item 3, and it has an
+item of its own — 11.** On f04 the
 solvers work: 1278 of 1406 junction vertices reach the crossing curve and *no*
 corner is left on one surface. Only two edges are ever candidates. The exporter
 says why itself:
@@ -718,6 +719,87 @@ What is left:
 2. **A1**, cheap and self-contained: Chebyshev-Lobatto collocation in place of
    uniform. Worth measuring against the 47 chords that remain.
 3. **B3 to B7**, unchanged, and none of them measured to reach an export.
+
+### 11. The plane veto is blunt by 89 to 1, and relaxing it breaks two other things
+
+**Built, measured and reverted on 2026-09-10.** This is the gate that decides
+whether the crossing curve of item 3 fires at all, and it is why the SOLIDWORKS
+run above could only move code 17 on one coupon.
+
+When a corner move would take a planar face out of the plane it asserts, the
+corner is held on the mesh. That much is right. What was wrong is the scope: one
+bent face refuses **every** corner move in the model.
+
+**How blunt, measured rather than estimated.** The refusal now reports it:
+
+```text
+1263 corners are left where the mesh put them: moving them would bend 7 faces
+that keeps a plane ... of those corners 14 actually touch a bent face, so 1249
+are refused for someone else's
+```
+
+Seven faces, fourteen corners implicated, **1249 refused for a problem they are
+not part of**. And the cost is not abstract: with the corners held, almost no
+edge is a candidate for the curve its two surfaces cross on.
+
+| coupon | crossing curves / chords | why |
+| --- | --- | --- |
+| `step-band-family` `$fn` 32 | 593 / 47 | the veto never fires |
+| `step-band-family` `$fn` 64 | 1 / 1251 | 1263 corners held |
+| `lid10` | 1 / 623 | the same |
+
+`$fn` 32 is the only coupon of the four whose code 17 moved. It is also the only
+one where this veto does not fire. That is not a coincidence and it is the whole
+of item 1's `n = 1`.
+
+#### What was tried, and exactly how it failed
+
+Refusing only the implicated corners, settled until nothing bends - a fixpoint,
+on the argument the section settle loop already uses, that refusals only grow so
+it terminates. It does what it was meant to:
+
+| | before | after |
+| --- | --- | --- |
+| `step-band-family` `$fn` 64 | 1 curve / 1251 chords | **1198 / 54** |
+| `lid10` | 1 / 623 | **589 / 35** |
+| corners moved / dropped at `$fn` 64 | 0 / 1263 | **1249 / 14** |
+
+And it breaks both of them:
+
+```text
+f04-band-fn064-analytic   2 edge(s) used by only one face (shell is not closed)
+r01-lid10-analytic        VERTEX_POINT #45 and #70 sit on the same coordinates
+```
+
+**Neither is caught by the test suite**, because neither coupon is a fixture -
+50/50 passed on the broken build. The kit's own validator caught them. That is
+the second time on this branch that a green suite has hidden a broken flagship
+export, and it is worth its own entry rather than a footnote.
+
+#### What it means
+
+"Half a boundary moved is worse than none" carries more than planarity. It is
+also holding two vertices apart that a pair of moves would collapse onto the
+same point, and holding a shell closed that a partial move opens. Those are two
+distinct further failure modes, and both have to be answered before the veto can
+be made local.
+
+**The order to do it in.** Neither failure is mysterious and both are local:
+
+1. **Vertex collapse.** Two corners moved onto the same coordinates are two
+   `VERTEX_POINT`s the writer never merged. Either refuse a move that lands on
+   another corner's position, or merge them and re-point the edges - the second
+   is right and the first is cheap.
+2. **The open shell.** Two edges used once. Most likely a face that the fan
+   split while its neighbour did not, so the two no longer share an edge. The
+   fan is already conditional on `split_for_corners`; whatever is inconsistent
+   there is what to find.
+3. Only then the local veto, with both coupons in the kit as the check.
+
+**And the fixture gap is the precondition for all of it.** `f04-band-fn064` and
+`lid10` are the coupons this work is about and neither is in the suite; both
+regressions above would have been caught before the kit if they were. See item
+7, which asks for the same thing for a different reason.
 
 ---
 
