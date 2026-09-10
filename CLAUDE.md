@@ -164,14 +164,23 @@ pythonscad model.scad -o out.stp \
 rebuild:
 
 ```bash
-ctest --test-dir build -R 'export-step-|mutations'   # 50 tests
+ctest --test-dir build -R 'export-step-|mutations'   # 51 tests
 TEST_GENERATE=1 ctest --test-dir build -R <fixture>
 ```
 
-Use that regex and not `-R step`, which matches 45 of the 50 and drops
+Use that regex and not `-R step`, which matches 45 of the 51 and drops
 `bspline-check-mutations` and `closed-sphere-check-mutations` — the harnesses
 that prove the other tests would fail if the defect came back. A run without
 them is the green suite that never ran the check.
+
+`export-step-flagship-coupons` is the third of that kind and the newest. The
+fixture glob runs each `.scad` at whatever parameters the file sets, so
+`step-band-family.scad` is only ever exported at its declared `FN = 32` and the
+reference parts are not fixtures at all. That is not hypothetical: on 2026-09-10
+a change to the corner placement left `$fn` 32 valid, opened the shell at `$fn`
+64 and put two `VERTEX_POINT`s on the same coordinates in `lid10`, and this
+suite passed 50 of 50. It asserts nothing that has to be derived — no face
+counts, no volumes — only what is true of any correct export.
 
 **The reference part** `examples/step_test/lid10.scad` is not in the suite and
 needs its customizer set; without it you get the default component and every

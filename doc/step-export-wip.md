@@ -796,10 +796,15 @@ be made local.
    there is what to find.
 3. Only then the local veto, with both coupons in the kit as the check.
 
-**And the fixture gap is the precondition for all of it.** `f04-band-fn064` and
-`lid10` are the coupons this work is about and neither is in the suite; both
-regressions above would have been caught before the kit if they were. See item
-7, which asks for the same thing for a different reason.
+**The fixture gap was the precondition and it is now closed.**
+`export-step-flagship-coupons` exports the band family across `$fn` 24, 48, 64
+and 96 and both reference parts, and runs them through the validator and the
+kernel round trip the fixtures already use. Checked the way this repository
+checks a guard: with the change above reinstated it fails three of its six
+coupons — `band-fn024`, `band-fn064` and `lid10` — and `band-fn024` was not even
+one of the two found by hand. It asserts nothing that has to be derived, so
+coupons still earn face counts and volumes one at a time as fixtures; see item
+7, which asks for that for a different reason.
 
 ---
 

@@ -1197,6 +1197,25 @@ add_test(NAME bspline-check-mutations
   COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/bspline-check-mutations.py
 )
 
+# The coupons this exporter's work is actually about, run through the validator
+# the fixtures already use. Two gaps let a broken export past a green run on
+# 2026-09-10: step-band-family.scad is a *family* and the fixture exports only
+# its declared FN = 32, and the reference parts are not fixtures at all. A
+# change to the corner placement left $fn 32 valid, opened the shell at $fn 64
+# and put two VERTEX_POINTs on the same coordinates in lid10, and this suite
+# passed 50 of 50.
+#
+# Named to match the documented `-R 'export-step-|mutations'` selection, because
+# a guard that only runs when someone remembers it is not a guard. It asserts
+# nothing that has to be derived - no face counts, no volumes - only what is
+# true of any correct export: it parses, the shell closes, vertices are shared,
+# and a kernel reads it back as a solid. Coupons earn derived expectations one
+# at a time, as fixtures.
+add_test(NAME export-step-flagship-coupons
+  COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/step-flagship-check.py
+          --openscad ${OPENSCAD_BINPATH}
+)
+
 # The same calibration for check_closed_sphere(). A whole sphere is bounded by
 # its seam and nothing else, which is two edges - fewer than any other face of
 # revolution - so teaching validatestep.py that shape is adding an acceptance,
