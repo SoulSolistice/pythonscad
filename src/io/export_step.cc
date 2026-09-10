@@ -504,19 +504,25 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // moved - this reports and gates nothing.
       const Surface *a = ps.surfaces[candidates[0]].get();
       const Surface *b = ps.surfaces[candidates[1]].get();
-      Vector3d p = ps.vertices[v], qa, qb;
-      bool ok = true;
-      for (int iter = 0; iter < 64; iter++) {
-        if (!closestOnSurface(a, p, qa) || !closestOnSurface(b, qa, qb)) {
-          ok = false;
-          break;
-        }
-        if ((qb - p).norm() < 1e-12) {
-          p = qb;
-          break;
-        }
-        p = qb;
-      }
+      Vector3d p = ps.vertices[v], qa;
+      // Newton on both implicits at once, rather than projecting onto each in
+      // turn. Alternating projection converges - but linearly, contracting the
+      // error by cos^2(theta) per cycle where theta is how squarely the two
+      // surfaces cross. Under a fixed budget that is not a solver but an angle
+      // threshold: at 64 cycles, from a bore facet's sagitta down to 1e-9, it
+      // reaches only crossings above 29.98 degrees. On the band family that
+      // left 138 corners on one surface and up to 0.0963 off the other, and
+      // 141 of the 142 edges that then fell back to chords cross below 29.98.
+      // Raising the cap to 4096 placed every one of them; Newton does it in a
+      // handful of steps and with no threshold to tune. See open item 3 of
+      // doc/step-export-wip.md.
+      //
+      // Tighter than the acceptance below by an order, so that test stays the
+      // arbiter of what is placed rather than this tolerance.
+      const double solve_tol = 1e-10 * std::max(1.0, ps.vertices[v].norm());
+      // Its answer is `p`, whether or not it met `solve_tol`: the test below is
+      // what decides, and it is the same test either way.
+      AnalyticFeatures::projectOntoBoth(a, b, p, solve_tol);
       // Which of the two is exact and which is a fit, because they are not
       // worth the same. A declared quadric states where the surface is; a
       // GridSurface was interpolated through the model's own stations and says
@@ -547,7 +553,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // sweep crosses the bore at a median 15.85 degrees where the projection
       // fails against 42.70 where it succeeds, which is the whole difference
       // between the two populations.
-      if (!(ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-9)) {
+      if (!(closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-9)) {
         const auto *a_fit = dynamic_cast<const GridSurface *>(a);
         const auto *b_fit = dynamic_cast<const GridSurface *>(b);
         const Surface *exact =
@@ -582,7 +588,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // put a corner 5.82e-07 off the cylinder its own face is written on -
       // small, but the file says that vertex is on that cylinder and it is not,
       // and it is the exporter's own slack rather than anything the model did.
-      if (ok && closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-9) {
+      if (closestOnSurface(a, p, qa) && (qa - p).norm() <= 1e-9) {
         on_edge++;
         const double travel = (p - ps.vertices[v]).norm();
         const Vector3d exact_here = p;

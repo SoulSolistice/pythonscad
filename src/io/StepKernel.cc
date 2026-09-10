@@ -318,193 +318,16 @@ std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
   return out;
 }
 
-/*! A quadric written implicitly: the value of f at a point, and its gradient.
- *
- * f is zero on the surface, and the gradient points off it, which is all a
- * Newton step needs. Distances are not wanted here and are not returned - f is
- * the square of a radius, not a length.
- */
-bool quadricImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad)
-{
-  if (const auto *sph = dynamic_cast<const SphereSurface *>(surface)) {
-    const Vector3d rel = p - sph->refpt;
-    f = rel.squaredNorm() - sph->r * sph->r;
-    grad = 2 * rel;
-    return true;
-  }
-  const auto *cyl = dynamic_cast<const CylinderSurface *>(surface);
-  const auto *cone = dynamic_cast<const ConeSurface *>(surface);
-  if (cyl == nullptr && cone == nullptr) return false;
-  const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
-  const Vector3d rel = p - (cyl != nullptr ? cyl->refpt : cone->refpt);
-  const double along = rel.dot(axis);
-  const Vector3d perp = rel - axis * along;
-  const double slope = cone != nullptr ? cone->slope : 0.0;
-  const double want = (cyl != nullptr ? cyl->r : cone->r) + slope * along;
-  f = perp.squaredNorm() - want * want;
-  grad = 2 * perp - 2 * want * slope * axis;
-  return true;
-}
+// The implicit-surface machinery these passes solve with - `surfaceImplicit`,
+// `projectOntoBoth`, `isQuadric`, `declaredBand` - lives in AnalyticFeatures,
+// beside `closestOnSurface`, because it is geometry rather than STEP and
+// `export_step.cc` needs the same Newton for its corner placement.
+using AnalyticFeatures::declaredBand;
+using AnalyticFeatures::isQuadric;
+using AnalyticFeatures::projectOntoBoth;
+using AnalyticFeatures::surfaceImplicit;
 
-/*! A foot-point implicit for a surface that has no algebraic one.
- *
- * `GridSurface` - and so `SweepSurface` - and `BezierPatchSurface` answer
- * membership by projecting rather than by evaluating a polynomial, so there is
- * no `f(x,y,z)` to differentiate. There is something just as good for Newton:
- * project, take the foot point `q` and the unit normal `n` there, and use the
- * plane through `q` as the local implicit. `f = n . (p - q)` is signed, changes
- * sign as `p` crosses the surface, and `|f| / |grad|` is a distance in
- * millimetres because `|n|` is one - which is exactly what `projectOntoBoth`'s
- * residual test asks for.
- *
- * It is first order where a quadric's is exact, so Newton converges linearly
- * here rather than quadratically. That costs iterations and not correctness:
- * the residual test is on the answer, so a linear approach still has to arrive
- * before it is believed.
- *
- * The normal is taken by central differences in the surface's own parameters,
- * stepped inward at the edges of the rectangle so a foot point on the boundary
- * still gets two directions to cross.
- */
-template <class S>
-bool footPointImplicit(const S *surface, const Vector3d& p, double& f, Vector3d& grad,
-                       double *true_distance)
-{
-  double u = 0, v = 0;
-  if (!surface->project(p, u, v)) return false;
-  const double h = 1e-5;
-  const double u0 = std::max(0.0, std::min(1.0 - h, u - h)), u1 = std::min(1.0, u0 + 2 * h);
-  const double v0 = std::max(0.0, std::min(1.0 - h, v - h)), v1 = std::min(1.0, v0 + 2 * h);
-  const Vector3d du = surface->evaluate(u1, v) - surface->evaluate(u0, v);
-  const Vector3d dv = surface->evaluate(u, v1) - surface->evaluate(u, v0);
-  Vector3d n = du.cross(dv);
-  const double len = n.norm();
-  if (!(len > 0) || !std::isfinite(len)) return false;  // degenerate, or a pole
-  n /= len;
-  const Vector3d foot = surface->evaluate(u, v);
-  f = n.dot(p - foot);
-  grad = n;
-  // The whole distance, not the part along the normal, and the two differ in a
-  // way that matters at the edge of the patch.
-  //
-  // `evaluate` clamps its parameters and `project` returns the nearest point of
-  // the *bounded* rectangle, so for a point off the end of a sweep the foot sits
-  // on the boundary and `p - foot` is mostly *in* the tangent plane. `n . (p -
-  // foot)` is then near zero however far away `p` is: a flat grid over the unit
-  // square and a point at (2, 0.5, 0) gives a residual of exactly zero, one
-  // whole unit outside the surface. Believing that residual is believing a
-  // point is on a patch it has run off the end of, and every acceptance test
-  // downstream - the solver's, the fit's, and the one asking whether a mesh
-  // vertex is on a declared surface - would inherit it.
-  //
-  // So Newton gets `f` and `grad`, which are what it needs to step, and every
-  // *acceptance* test gets this instead.
-  if (true_distance != nullptr) *true_distance = (p - foot).norm();
-  return true;
-}
-
-/*! The implicit form of whatever surface this is, exact where one exists.
- *
- * Quadrics keep their algebra - it is exact and quadratically convergent, and
- * nothing here should trade that for a projection. Everything else that can
- * answer `project` and `evaluate` gets the foot-point plane instead. A surface
- * that can do neither has no crossing curve, which is the honest answer for a
- * face whose shape this exporter cannot state.
- */
-bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad,
-                     double *true_distance = nullptr)
-{
-  if (quadricImplicit(surface, p, f, grad)) {
-    // A quadric's implicit is global - there is no patch to run off - so the
-    // Newton distance *is* the distance.
-    if (true_distance != nullptr) {
-      const double g = grad.norm();
-      *true_distance = g > 0 ? fabs(f) / g : fabs(f);
-    }
-    return true;
-  }
-  if (const auto *grid = dynamic_cast<const GridSurface *>(surface)) {
-    return footPointImplicit(grid, p, f, grad, true_distance);
-  }
-  if (const auto *patch = dynamic_cast<const BezierPatchSurface *>(surface)) {
-    return footPointImplicit(patch, p, f, grad, true_distance);
-  }
-  return false;
-}
-
-/*! What a surface is entitled to be missed by, from its own declaration.
- *
- * A quadric states where it is exactly, so nothing is owed it and this is zero;
- * every caller keeps whatever exactness it was already demanding. A declared
- * grid does not: it describes the smooth surface a generator meant, the mesh is
- * its tessellation, and a boolean cuts the *tessellation*, so the vertices it
- * makes lie on facets standing off the smooth surface by up to a station's
- * sagitta. `GridSurface::membershipTolerance` is that figure, computed by the
- * surface from the points it was declared with.
- *
- * Using it here is not a loosened tolerance chosen to admit more curves. It is
- * the same number the declaration channel already answers membership with, and
- * a crossing curve is refused or accepted on exactly the terms the surface's
- * own face is. Demanding 1e-9 of a tessellated vertex instead refuses every
- * sweep before the question is asked, which is what happened the first time.
- */
-/*! Whether this surface states where it is algebraically. */
-bool isQuadric(const Surface *surface)
-{
-  return dynamic_cast<const SphereSurface *>(surface) != nullptr ||
-         dynamic_cast<const CylinderSurface *>(surface) != nullptr ||
-         dynamic_cast<const ConeSurface *>(surface) != nullptr;
-}
-
-double declaredBand(const Surface *surface)
-{
-  if (const auto *grid = dynamic_cast<const GridSurface *>(surface)) {
-    return grid->membershipTolerance();
-  }
-  return 0.0;
-}
-
-/*! Pull a point onto both surfaces at once.
- *
- * Two Newton equations in the two directions that matter - along each surface's
- * own gradient - and nowhere else, so the point slides along the intersection
- * rather than away down it. Fails where the two are tangent, which is where the
- * 2x2 goes singular and where there is no honest answer anyway.
- *
- * `tol` is a distance, and the test is that the point *is* on both surfaces to
- * it - not that the last step was shorter than it. Those differ in exactly the
- * case this has to serve. A quadric's implicit is exact and Newton on it is
- * quadratically convergent, so the step collapses to nothing and either test
- * passes; a surface whose implicit is itself the result of an iteration -
- * anything answered by `project` rather than by algebra - inherits that
- * iteration's floor and can sit *on* both surfaces while still taking steps
- * above it forever. Asked for a step, it never converges and every crossing
- * curve over such a surface is refused; asked whether it has arrived, it says
- * yes. That distinction was measured: it is the difference between 93 of 507
- * crossing curves and all 507.
- */
-bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol)
-{
-  for (int step = 0; step < 24; step++) {
-    double fa = 0, fb = 0;
-    Vector3d ga, gb;
-    double da = 0, db = 0;
-    if (!surfaceImplicit(a, p, fa, ga, &da) || !surfaceImplicit(b, p, fb, gb, &db)) return false;
-    if (da <= tol && db <= tol) return true;
-    const double aa = ga.dot(ga), ab = ga.dot(gb), bb = gb.dot(gb);
-    const double det = aa * bb - ab * ab;
-    if (fabs(det) < 1e-18 * std::max(1.0, aa * bb)) return false;  // tangent, or worse
-    const double alpha = (-fa * bb + fb * ab) / det;
-    const double beta = (-fb * aa + fa * ab) / det;
-    p += ga * alpha + gb * beta;
-  }
-  // One last chance: the loop may have arrived on its final step.
-  double fa = 0, fb = 0;
-  Vector3d ga, gb;
-  double da = 0, db = 0;
-  if (!surfaceImplicit(a, p, fa, ga, &da) || !surfaceImplicit(b, p, fb, gb, &db)) return false;
-  return da <= tol && db <= tol;
-}
+using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 
 /*! The arc of the curve where two declared quadrics cross, between two points
  *  already on it, as the control points of a Bezier.
@@ -2291,6 +2114,16 @@ void StepKernel::build_tri_body(
       for (const int v : loops[i]) faces_at[v].push_back(i);
     }
     std::size_t placed = 0, triple = 0, placed_triple = 0, plane_gave_up = 0;
+    // Why the surface-against-line placement gives up, kept apart: these are
+    // five unrelated reasons and one number for all of them says nothing about
+    // which to work on. `t_offsurf` is the corner's own surface refusing to
+    // answer, `t_faces` is the corner not having exactly two mesh planes to
+    // cross - not a solver failure at all - `t_parallel` is those two planes
+    // being parallel, and `t_solve` is the only one the projection owns.
+    std::size_t t_offsurf = 0, t_faces = 0, t_parallel = 0, t_solve = 0;
+    std::size_t ts_noconv = 0, ts_offsurf = 0, ts_plane = 0, ts_far = 0;
+    double near_min = 0, near_med = 0, near_max = 0;
+    std::vector<double> near_misses;
     double worst_plane = 0, worst_triple = 0;
     for (const auto& entry : singleOwner) {
       const int v = entry.first;
@@ -2349,6 +2182,7 @@ void StepKernel::build_tri_body(
           Vector3d q0;
           if (!AnalyticFeatures::closestOnSurface(os, vertices[v], q0)) {
             triple++;
+            t_offsurf++;
             continue;
           }
           const double off0 = (vertices[v] - q0).norm();
@@ -2380,6 +2214,7 @@ void StepKernel::build_tri_body(
         }
         if (faces_here.size() != 2) {
           triple++;
+          t_faces++;
           continue;
         }
         // Where the two faces cross is a line; where that line meets the
@@ -2390,35 +2225,35 @@ void StepKernel::build_tri_body(
         const Vector3d dir = n1.cross(n2);
         if (dir.norm() < 1e-9) {
           triple++;
+          t_parallel++;
           continue;
         }
-        const Vector3d dhat = dir.normalized();
-        // A point on the line: solve n1.x = d1, n2.x = d2 within span(n1, n2).
-        const double c = n1.dot(n2), det = 1 - c * c;
-        if (fabs(det) < 1e-12) {
-          triple++;
-          continue;
-        }
-        const Vector3d online = n1 * ((d1 - d2 * c) / det) + n2 * ((d2 - d1 * c) / det);
         const Surface *own3 = surfaces[entry.second].get();
         Vector3d p3 = vertices[v], q3;
-        bool ok3 = true;
-        for (int iter = 0; iter < 64; iter++) {
-          if (!AnalyticFeatures::closestOnSurface(own3, p3, q3)) {
-            ok3 = false;
-            break;
-          }
-          const Vector3d next = online + dhat * dhat.dot(q3 - online);
-          if ((next - p3).norm() < 1e-12) {
-            p3 = next;
-            break;
-          }
-          p3 = next;
+        // Newton on all three at once - the surface and both planes. This used
+        // to alternate between projecting onto the surface and onto the line,
+        // which converges linearly at cos^2(theta) per cycle and so, under its
+        // 64-iteration cap, only for lines meeting the surface above about 30
+        // degrees. It gave up on 280 corners across the fixture set, 260 of
+        // them on lid10, and none of them because the geometry was not there.
+        const double solve_tol = 1e-12 * std::max(1.0, vertices[v].norm());
+        double near3 = 0;
+        const bool ok3 =
+          projectOntoSurfaceAndPlanes(own3, n1, d1, n2, d2, p3, solve_tol, reach_all, &near3);
+        const bool got3 = ok3 && AnalyticFeatures::closestOnSurface(own3, p3, q3);
+        if (!got3) {
+          ts_noconv++;
+          if (std::isfinite(near3)) near_misses.push_back(near3);
+        } else if ((q3 - p3).norm() > 1e-6) ts_offsurf++;
+        else if (fabs(n1.dot(p3) - d1) > 1e-9 || fabs(n2.dot(p3) - d2) > 1e-9) ts_plane++;
+        else if ((p3 - vertices[v]).norm() > reach_all) {
+          ts_far++;
+          (void)reach_all;
         }
-        if (!ok3 || !AnalyticFeatures::closestOnSurface(own3, p3, q3) || (q3 - p3).norm() > 1e-6 ||
-            fabs(n1.dot(p3) - d1) > 1e-9 || fabs(n2.dot(p3) - d2) > 1e-9 ||
-            (p3 - vertices[v]).norm() > reach_all) {
+        if (!got3 || (q3 - p3).norm() > 1e-6 || fabs(n1.dot(p3) - d1) > 1e-9 ||
+            fabs(n2.dot(p3) - d2) > 1e-9 || (p3 - vertices[v]).norm() > reach_all) {
           triple++;
+          t_solve++;
           continue;
         }
         worst_triple = std::max(worst_triple, (p3 - vertices[v]).norm());
@@ -2469,9 +2304,22 @@ void StepKernel::build_tri_body(
     if (placed_triple > 0) {
       LOG(
         "STEP export: %1$d corners where a declared surface meets two faces of the model are "
-        "placed where all three cross, moving at most %2$.4f; %3$d more are left where the mesh "
-        "put them",
-        int(placed_triple), worst_triple, int(triple));
+        "placed where all three cross, moving at most %2$.4f; %3$d are not - %4$d off their own "
+        "surface, %5$d without two faces to cross, %6$d on parallel faces, %7$d the solve did not reach",
+        int(placed_triple), worst_triple, int(triple), int(t_offsurf), int(t_faces), int(t_parallel),
+        int(t_solve));
+      if (!near_misses.empty()) {
+        std::sort(near_misses.begin(), near_misses.end());
+        near_min = near_misses.front();
+        near_med = near_misses[near_misses.size() / 2];
+        near_max = near_misses.back();
+      }
+      LOG(
+        "STEP export:    of those %1$d: %2$d no answer, %3$d off the surface, %4$d off a plane, %5$d "
+        "past the nearest neighbour; closest the line came to the surface inside the window "
+        "%6$.3e/%7$.3e/%8$.3e min/med/max",
+        int(t_solve), int(ts_noconv), int(ts_offsurf), int(ts_plane), int(ts_far), near_min, near_med,
+        near_max);
     }
     if (placed > 0) {
       LOG(

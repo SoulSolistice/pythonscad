@@ -532,6 +532,53 @@ Vector3d perpendicular(const Vector3d& norm);
  * rather than as an answer. */
 bool closestOnSurface(const Surface *s, const Vector3d& p, Vector3d& out);
 
+/*! Whether this surface states where it is algebraically. */
+bool isQuadric(const Surface *surface);
+
+/*! What a surface is entitled to be missed by, from its own declaration.
+ *
+ * Zero for a quadric, which states where it is exactly; a declared grid's
+ * `membershipTolerance` otherwise, being the sagitta its own tessellation
+ * stands off the smooth surface it describes. */
+double declaredBand(const Surface *surface);
+
+/*! A surface written implicitly at a point: `f`, its gradient, and - where
+ * asked for - the true distance to the surface rather than to its tangent
+ * plane.
+ *
+ * `f` is zero on the surface and signed across it. It is algebra for a quadric
+ * and a foot-point plane for a grid or a Bezier patch, so its scale differs by
+ * kind; `true_distance` is in millimetres either way, and is what an acceptance
+ * test should read. Returns false for a surface with no implicit form, and for
+ * a projection that did not converge. */
+bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad,
+                     double *true_distance = nullptr);
+
+/*! Newton onto two surfaces at once: the point of `p`'s neighbourhood that is
+ * on both, to within `tol` of each.
+ *
+ * Quadratically convergent, and so without the crossing-angle threshold that a
+ * fixed budget of alternating projections has - that budget is why 138 corners
+ * of the band family were placed on one surface and left up to 0.0963 off the
+ * other. Returns false where the two run tangent, the 2x2 having no inverse
+ * there, and where either surface has no implicit form. */
+bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol);
+
+/*! The point where a surface meets the line two planes cross in, nearest to
+ * `p`, searched within `travel` millimetres of it along that line.
+ *
+ * The line is solved along rather than around, so both planes come out exact
+ * and the *near* crossing is the one found - a line meets a quadric twice, and
+ * the far root is a true solution that is the wrong answer. `closest`, when
+ * given, receives how near the line came to the surface inside the window,
+ * which is what distinguishes "no crossing here" from "not converged".
+ *
+ * Returns false where the planes are parallel, where the line runs tangent
+ * along the surface, and where no crossing lies within the window. */
+bool projectOntoSurfaceAndPlanes(const Surface *surface, const Vector3d& n1, double d1,
+                                 const Vector3d& n2, double d2, Vector3d& p, double tol, double travel,
+                                 double *closest = nullptr);
+
 /*! Least squares circle centre for points known to lie on a circle about
  * `axis`, returned projected onto the plane at `level`.
  *

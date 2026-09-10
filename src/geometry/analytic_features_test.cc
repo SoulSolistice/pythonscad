@@ -837,8 +837,7 @@ TEST_CASE("a turned surface is recovered as the rings that made it", "[analytic]
     REQUIRE(wall.facets.size() == 48);
 
     const char *why = "";
-    const std::vector<std::shared_ptr<Surface>> rings =
-      fitRevolved(frustum.mesh(), wall, 1e-5, &why);
+    const std::vector<std::shared_ptr<Surface>> rings = fitRevolved(frustum.mesh(), wall, 1e-5, &why);
     INFO(why);
     REQUIRE(rings.size() == 2);
     std::vector<double> radii;
@@ -894,4 +893,109 @@ TEST_CASE("a turned surface is recovered as the rings that made it", "[analytic]
     CHECK(fitRevolved(m, region, 1e-5, &why).empty());
     CHECK(std::string(why).size() > 0);
   }
+}
+
+// The two-surface and surface-with-two-planes solvers, which place the corners
+// an analytic export is trimmed at. Every case here is derivable in closed
+// form, and half of them assert a *refusal*: a solver that quietly returns a
+// wrong point is worse than one that says it has none, and the wrong point it
+// used to return - the far root of a line through a quadric - was caught only
+// by a travel limit that is a proxy for the question and not the question.
+
+TEST_CASE("two crossing cylinders meet where both say they do", "[projectontoboth]")
+{
+  // x^2 + y^2 = 100 and y^2 + z^2 = 36 cross; (10, 0, 6) is on both by
+  // inspection, and every point of the curve satisfies the same two equations.
+  auto a = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  auto b = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(1, 0, 0), 6);
+
+  Vector3d p(10.05, 0.02, 5.97);  // off both, as a tessellation leaves a vertex
+  REQUIRE(projectOntoBoth(a.get(), b.get(), p, 1e-12));
+  CHECK(fabs(sqrt(p.x() * p.x() + p.y() * p.y()) - 10.0) <= 1e-9);
+  CHECK(fabs(sqrt(p.y() * p.y() + p.z() * p.z()) - 6.0) <= 1e-9);
+}
+
+TEST_CASE("two cylinders that touch rather than cross are refused", "[projectontoboth]")
+{
+  // Radius 10 about z, and radius 10 about a parallel axis 20 away: they meet
+  // along the line x = 10 and their normals there are exactly opposed, so the
+  // 2x2 has no inverse. There is no crossing curve to place a corner on and
+  // saying so is the answer.
+  auto a = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  auto b = std::make_shared<CylinderSurface>(Vector3d(20, 0, 0), Vector3d(0, 0, 1), 10);
+
+  Vector3d p(10.001, 0, 0);
+  CHECK_FALSE(projectOntoBoth(a.get(), b.get(), p, 1e-12));
+}
+
+TEST_CASE("a line through a cylinder is met at the near crossing", "[surfaceandplanes]")
+{
+  // The planes y = 0 and z = 5 cross in the line (t, 0, 5), which meets the
+  // radius-10 cylinder about z at x = +10 and x = -10 both. Starting at 9.5 the
+  // answer is +10, and -10 is a true solution of the same system 19.5 away.
+  auto cyl = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  const Vector3d n1(0, 1, 0), n2(0, 0, 1);
+
+  Vector3d p(9.5, 0, 5);
+  REQUIRE(projectOntoSurfaceAndPlanes(cyl.get(), n1, 0.0, n2, 5.0, p, 1e-12, 2.0));
+  CHECK(fabs(p.x() - 10.0) <= 1e-9);
+  // Both planes hold exactly, because the search never leaves their line.
+  CHECK(fabs(p.y()) <= 1e-15);
+  CHECK(fabs(p.z() - 5.0) <= 1e-15);
+}
+
+TEST_CASE("a window wide enough for the far root still returns the near one", "[surfaceandplanes]")
+{
+  // The same line, and room to reach either crossing. Alternating projection
+  // and a 3x3 Newton both wander to the far one from here; on the fixtures that
+  // put a corner up to 1453 times its allowed travel away, and it was refused
+  // by the travel limit rather than by anything that knew it was wrong.
+  auto cyl = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+
+  Vector3d p(9.5, 0, 5);
+  REQUIRE(projectOntoSurfaceAndPlanes(cyl.get(), Vector3d(0, 1, 0), 0.0, Vector3d(0, 0, 1), 5.0, p,
+                                      1e-12, 100.0));
+  CHECK(fabs(p.x() - 10.0) <= 1e-9);
+}
+
+TEST_CASE("a crossing outside the window is refused rather than reached for", "[surfaceandplanes]")
+{
+  // The near crossing is 0.5 away and the window is 0.1. There is no corner
+  // within reach and the answer is no.
+  auto cyl = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+
+  Vector3d p(9.5, 0, 5);
+  double closest = -1;
+  CHECK_FALSE(projectOntoSurfaceAndPlanes(cyl.get(), Vector3d(0, 1, 0), 0.0, Vector3d(0, 0, 1), 5.0, p,
+                                          1e-12, 0.1, &closest));
+  // And it says how near it got, which is what tells "nothing here" apart from
+  // "did not converge".
+  CHECK(closest > 0.0);
+  CHECK(closest < 0.5);
+}
+
+TEST_CASE("parallel planes have no line to meet the surface in", "[surfaceandplanes]")
+{
+  auto cyl = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+
+  Vector3d p(9.5, 0, 5);
+  CHECK_FALSE(projectOntoSurfaceAndPlanes(cyl.get(), Vector3d(0, 1, 0), 0.0, Vector3d(0, 1, 0), 1.0, p,
+                                          1e-12, 100.0));
+}
+
+TEST_CASE("a line lying along a cylinder's ruling is refused", "[surfaceandplanes]")
+{
+  // x = 10 and y = 0 cross in the vertical line through (10, 0, .), which is a
+  // ruling of the radius-10 cylinder: it lies *in* the surface rather than
+  // crossing it, so df/dt is zero all along and there is no isolated point to
+  // place a corner at.
+  auto cyl = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+
+  Vector3d p(10, 0, 3);
+  // On the surface already, so this is the one case it may answer at once.
+  CHECK(projectOntoSurfaceAndPlanes(cyl.get(), Vector3d(1, 0, 0), 10.0, Vector3d(0, 1, 0), 0.0, p, 1e-12,
+                                    5.0));
+  Vector3d off(10.5, 0, 3);
+  CHECK_FALSE(projectOntoSurfaceAndPlanes(cyl.get(), Vector3d(1, 0, 0), 10.5, Vector3d(0, 1, 0), 0.0,
+                                          off, 1e-12, 5.0));
 }

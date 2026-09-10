@@ -3698,4 +3698,276 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
   return result;
 }
 
+/*! A quadric written implicitly: the value of f at a point, and its gradient.
+ *
+ * f is zero on the surface, and the gradient points off it, which is all a
+ * Newton step needs. Distances are not wanted here and are not returned - f is
+ * the square of a radius, not a length.
+ */
+bool quadricImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad)
+{
+  if (const auto *sph = dynamic_cast<const SphereSurface *>(surface)) {
+    const Vector3d rel = p - sph->refpt;
+    f = rel.squaredNorm() - sph->r * sph->r;
+    grad = 2 * rel;
+    return true;
+  }
+  const auto *cyl = dynamic_cast<const CylinderSurface *>(surface);
+  const auto *cone = dynamic_cast<const ConeSurface *>(surface);
+  if (cyl == nullptr && cone == nullptr) return false;
+  const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
+  const Vector3d rel = p - (cyl != nullptr ? cyl->refpt : cone->refpt);
+  const double along = rel.dot(axis);
+  const Vector3d perp = rel - axis * along;
+  const double slope = cone != nullptr ? cone->slope : 0.0;
+  const double want = (cyl != nullptr ? cyl->r : cone->r) + slope * along;
+  f = perp.squaredNorm() - want * want;
+  grad = 2 * perp - 2 * want * slope * axis;
+  return true;
+}
+
+/*! A foot-point implicit for a surface that has no algebraic one.
+ *
+ * `GridSurface` - and so `SweepSurface` - and `BezierPatchSurface` answer
+ * membership by projecting rather than by evaluating a polynomial, so there is
+ * no `f(x,y,z)` to differentiate. There is something just as good for Newton:
+ * project, take the foot point `q` and the unit normal `n` there, and use the
+ * plane through `q` as the local implicit. `f = n . (p - q)` is signed, changes
+ * sign as `p` crosses the surface, and `|f| / |grad|` is a distance in
+ * millimetres because `|n|` is one - which is exactly what `projectOntoBoth`'s
+ * residual test asks for.
+ *
+ * It is first order where a quadric's is exact, so Newton converges linearly
+ * here rather than quadratically. That costs iterations and not correctness:
+ * the residual test is on the answer, so a linear approach still has to arrive
+ * before it is believed.
+ *
+ * The normal is taken by central differences in the surface's own parameters,
+ * stepped inward at the edges of the rectangle so a foot point on the boundary
+ * still gets two directions to cross.
+ */
+template <class S>
+bool footPointImplicit(const S *surface, const Vector3d& p, double& f, Vector3d& grad,
+                       double *true_distance)
+{
+  double u = 0, v = 0;
+  if (!surface->project(p, u, v)) return false;
+  const double h = 1e-5;
+  const double u0 = std::max(0.0, std::min(1.0 - h, u - h)), u1 = std::min(1.0, u0 + 2 * h);
+  const double v0 = std::max(0.0, std::min(1.0 - h, v - h)), v1 = std::min(1.0, v0 + 2 * h);
+  const Vector3d du = surface->evaluate(u1, v) - surface->evaluate(u0, v);
+  const Vector3d dv = surface->evaluate(u, v1) - surface->evaluate(u, v0);
+  Vector3d n = du.cross(dv);
+  const double len = n.norm();
+  if (!(len > 0) || !std::isfinite(len)) return false;  // degenerate, or a pole
+  n /= len;
+  const Vector3d foot = surface->evaluate(u, v);
+  f = n.dot(p - foot);
+  grad = n;
+  // The whole distance, not the part along the normal, and the two differ in a
+  // way that matters at the edge of the patch.
+  //
+  // `evaluate` clamps its parameters and `project` returns the nearest point of
+  // the *bounded* rectangle, so for a point off the end of a sweep the foot sits
+  // on the boundary and `p - foot` is mostly *in* the tangent plane. `n . (p -
+  // foot)` is then near zero however far away `p` is: a flat grid over the unit
+  // square and a point at (2, 0.5, 0) gives a residual of exactly zero, one
+  // whole unit outside the surface. Believing that residual is believing a
+  // point is on a patch it has run off the end of, and every acceptance test
+  // downstream - the solver's, the fit's, and the one asking whether a mesh
+  // vertex is on a declared surface - would inherit it.
+  //
+  // So Newton gets `f` and `grad`, which are what it needs to step, and every
+  // *acceptance* test gets this instead.
+  if (true_distance != nullptr) *true_distance = (p - foot).norm();
+  return true;
+}
+
+/*! The implicit form of whatever surface this is, exact where one exists.
+ *
+ * Quadrics keep their algebra - it is exact and quadratically convergent, and
+ * nothing here should trade that for a projection. Everything else that can
+ * answer `project` and `evaluate` gets the foot-point plane instead. A surface
+ * that can do neither has no crossing curve, which is the honest answer for a
+ * face whose shape this exporter cannot state.
+ */
+bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad,
+                     double *true_distance)
+{
+  if (quadricImplicit(surface, p, f, grad)) {
+    // A quadric's implicit is global - there is no patch to run off - so the
+    // Newton distance *is* the distance.
+    if (true_distance != nullptr) {
+      const double g = grad.norm();
+      *true_distance = g > 0 ? fabs(f) / g : fabs(f);
+    }
+    return true;
+  }
+  if (const auto *grid = dynamic_cast<const GridSurface *>(surface)) {
+    return footPointImplicit(grid, p, f, grad, true_distance);
+  }
+  if (const auto *patch = dynamic_cast<const BezierPatchSurface *>(surface)) {
+    return footPointImplicit(patch, p, f, grad, true_distance);
+  }
+  return false;
+}
+
+/*! What a surface is entitled to be missed by, from its own declaration.
+ *
+ * A quadric states where it is exactly, so nothing is owed it and this is zero;
+ * every caller keeps whatever exactness it was already demanding. A declared
+ * grid does not: it describes the smooth surface a generator meant, the mesh is
+ * its tessellation, and a boolean cuts the *tessellation*, so the vertices it
+ * makes lie on facets standing off the smooth surface by up to a station's
+ * sagitta. `GridSurface::membershipTolerance` is that figure, computed by the
+ * surface from the points it was declared with.
+ *
+ * Using it here is not a loosened tolerance chosen to admit more curves. It is
+ * the same number the declaration channel already answers membership with, and
+ * a crossing curve is refused or accepted on exactly the terms the surface's
+ * own face is. Demanding 1e-9 of a tessellated vertex instead refuses every
+ * sweep before the question is asked, which is what happened the first time.
+ */
+/*! Whether this surface states where it is algebraically. */
+bool isQuadric(const Surface *surface)
+{
+  return dynamic_cast<const SphereSurface *>(surface) != nullptr ||
+         dynamic_cast<const CylinderSurface *>(surface) != nullptr ||
+         dynamic_cast<const ConeSurface *>(surface) != nullptr;
+}
+
+double declaredBand(const Surface *surface)
+{
+  if (const auto *grid = dynamic_cast<const GridSurface *>(surface)) {
+    return grid->membershipTolerance();
+  }
+  return 0.0;
+}
+
+/*! Pull a point onto both surfaces at once.
+ *
+ * Two Newton equations in the two directions that matter - along each surface's
+ * own gradient - and nowhere else, so the point slides along the intersection
+ * rather than away down it. Fails where the two are tangent, which is where the
+ * 2x2 goes singular and where there is no honest answer anyway.
+ *
+ * `tol` is a distance, and the test is that the point *is* on both surfaces to
+ * it - not that the last step was shorter than it. Those differ in exactly the
+ * case this has to serve. A quadric's implicit is exact and Newton on it is
+ * quadratically convergent, so the step collapses to nothing and either test
+ * passes; a surface whose implicit is itself the result of an iteration -
+ * anything answered by `project` rather than by algebra - inherits that
+ * iteration's floor and can sit *on* both surfaces while still taking steps
+ * above it forever. Asked for a step, it never converges and every crossing
+ * curve over such a surface is refused; asked whether it has arrived, it says
+ * yes. That distinction was measured: it is the difference between 93 of 507
+ * crossing curves and all 507.
+ */
+bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol)
+{
+  // The best point seen, not the last one. Newton's final iterate is not
+  // necessarily its closest approach - a step near tangency can throw it
+  // further out than where it started - and the caller's acceptance test is a
+  // better judge of a candidate than this function's own tolerance is. Keeping
+  // the best and handing it back either way is what lets a caller take a point
+  // that missed `tol` but satisfies what it actually needs; discarding it cost
+  // 42 corners of the band family that the acceptance test would have kept.
+  Vector3d best = p;
+  double best_residual = std::numeric_limits<double>::infinity();
+  for (int step = 0; step <= 256; step++) {
+    double fa = 0, fb = 0;
+    Vector3d ga, gb;
+    double da = 0, db = 0;
+    if (!surfaceImplicit(a, p, fa, ga, &da) || !surfaceImplicit(b, p, fb, gb, &db)) break;
+    const double residual = std::max(da, db);
+    if (residual < best_residual) {
+      best_residual = residual;
+      best = p;
+    }
+    if (residual <= tol) break;
+    if (step == 256) break;
+    const double aa = ga.dot(ga), ab = ga.dot(gb), bb = gb.dot(gb);
+    const double det = aa * bb - ab * ab;
+    if (fabs(det) < 1e-18 * std::max(1.0, aa * bb)) break;  // tangent, or worse
+    const double alpha = (-fa * bb + fb * ab) / det;
+    const double beta = (-fb * aa + fa * ab) / det;
+    const Vector3d stepv = ga * alpha + gb * beta;
+    if (!stepv.allFinite()) break;
+    p += stepv;
+    if (!p.allFinite()) break;
+  }
+  if (!std::isfinite(best_residual)) return false;
+  p = best;
+  return best_residual <= tol;
+}
+
+/*! The point where a surface meets the line two planes cross in, nearest to a
+ *  given start.
+ *
+ * The line is solved *along*, not around. Writing it as `base + t.dhat` leaves
+ * one unknown and one equation, `f(base + t.dhat) = 0`, and Newton on that is
+ * one division per step. Two things follow that matter more than the speed.
+ *
+ * **The planes come out exact.** Every candidate is on the line by
+ * construction, so `n.p - d` is zero to rounding rather than to a tolerance,
+ * and there is no residual left for a caller to check.
+ *
+ * **The near root is the one found.** A line meets a quadric twice, and the
+ * far crossing is a real solution of the system that is the wrong answer to the
+ * question - on `step-shared-arc` it is 2.0 away and takes a cone that was
+ * exact out by 1.41. Alternating projection and a 3x3 Newton both wander to it:
+ * measured over the fixtures, every one of the 184 corners this used to give up
+ * on had converged, none of them off the surface or off a plane, and the worst
+ * landed 1453 times the allowed travel away. Searching a window around the
+ * start cannot reach it.
+ *
+ * `travel` is the half width of that window, in millimetres, and the search is
+ * confined to it: a root outside is not a near root and saying so is the
+ * answer, not a failure to converge.
+ */
+bool projectOntoSurfaceAndPlanes(const Surface *surface, const Vector3d& n1, double d1,
+                                 const Vector3d& n2, double d2, Vector3d& p, double tol, double travel,
+                                 double *closest)
+{
+  const Vector3d dir = n1.cross(n2);
+  const double dirn = dir.norm();
+  if (dirn < 1e-12) return false;  // the planes are parallel; there is no line
+  const Vector3d dhat = dir / dirn;
+  // A point on the line: solve n1.x = d1, n2.x = d2 within span(n1, n2).
+  const double c = n1.dot(n2), det = 1 - c * c;
+  if (fabs(det) < 1e-12) return false;
+  const Vector3d base = n1 * ((d1 - d2 * c) / det) + n2 * ((d2 - d1 * c) / det);
+
+  const double t0 = dhat.dot(p - base);
+  const double lo = t0 - travel, hi = t0 + travel;
+  double t = t0, best_t = t0, best = std::numeric_limits<double>::infinity();
+  for (int step = 0; step <= 32; step++) {
+    const Vector3d at = base + dhat * t;
+    double f = 0, d = 0;
+    Vector3d g;
+    if (!surfaceImplicit(surface, at, f, g, &d)) break;
+    if (d < best) {
+      best = d;
+      best_t = t;
+    }
+    if (d <= tol) break;
+    if (step == 32) break;
+    // df/dt = grad f . dhat, zero where the line runs tangent along the
+    // surface - there is no crossing there to walk to.
+    const double slope = g.dot(dhat);
+    if (fabs(slope) < 1e-12 * std::max(1.0, g.norm())) break;
+    double next = t - f / slope;
+    if (!std::isfinite(next)) break;
+    // Confined rather than clipped: a step that leaves the window is walked to
+    // its edge, so the search still explores the whole of what is allowed.
+    next = std::min(hi, std::max(lo, next));
+    if (fabs(next - t) < 1e-16 * std::max(1.0, fabs(t))) break;
+    t = next;
+  }
+  if (closest != nullptr) *closest = best;
+  if (!std::isfinite(best)) return false;
+  p = base + dhat * best_t;
+  return best <= tol;
+}
+
 }  // namespace AnalyticFeatures
