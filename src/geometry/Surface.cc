@@ -1336,6 +1336,22 @@ bool SweepSurface::transform(const Transform3d& mat)
   const Eigen::Matrix3d mtm = m.transpose() * m;
   const double scale2 = mtm(0, 0);
   if (scale2 < 1e-18) return false;
+  // A reflection is not one of those, and `m^T m == scale^2 I` does not exclude
+  // it: every orthogonal matrix satisfies that, whatever its determinant. It
+  // has to be excluded by hand, because this record cannot absorb one.
+  //
+  // `evaluate` builds the second radial direction as `normdir x ref`, and a
+  // cross product is not preserved by a reflection - it comes out negated. So a
+  // mirrored record turns its helix the other way while the mesh beside it is
+  // mirrored correctly, and the two describe different solids. Measured: a
+  // radius-10 sweep mirrored in x puts the declaration **20.0 mm** from the
+  // mesh at a quarter turn, which is the point on the far side of the axis.
+  //
+  // Negating `turns` almost absorbs it and does not quite: `turns` also carries
+  // the axial rise through `z = pitch * turns * u`, so flipping it reverses a
+  // height the mirror did not touch. Refusing loses the declaration and leaves
+  // the mesh faceted, which is this file's rule for anything it cannot state.
+  if (m.determinant() < 0) return false;
   for (int i = 0; i < 3; i++) {
     for (int j = 0; j < 3; j++) {
       const double want = i == j ? scale2 : 0.0;

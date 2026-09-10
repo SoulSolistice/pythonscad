@@ -398,3 +398,48 @@ TEST_CASE("a point off the end of a grid projects to its boundary", "[gridsurfac
   CHECK(std::fabs(foot.z()) < 1e-9);
   CHECK(std::fabs(Vector3d(0, 0, 1).dot(outside - foot)) < 1e-12);
 }
+
+/*! A mirrored sweep declares a different surface from the mirrored mesh.
+ *
+ * `SweepSurface::transform` accepts any map whose `m^T m` is `scale^2 I`. Every
+ * *orthogonal* matrix satisfies that, reflections included, because nothing
+ * checks the determinant's sign. The record it then writes keeps `turns` and the
+ * sign of `pitch` and transforms `ref` and `normdir` - but `evaluate` builds the
+ * second radial direction as `normdir x ref`, and a cross product is not
+ * preserved by a reflection. So the declaration comes out with the helix turning
+ * the other way while `PolySet::transform` mirrors the mesh correctly, and the
+ * two no longer describe the same solid.
+ *
+ * Found in external review 2026-09-10, where the declaration came out 20.0 mm
+ * from the mesh - the point on the far side of the axis. `transform` now refuses
+ * a reflection, so the declaration is dropped and the mesh is exported faceted:
+ * a recognition loss, never a wrong solid.
+ */
+TEST_CASE("a mirrored sweep is refused rather than declared wrongly", "[sweepsurface]")
+{
+  const std::vector<Vector2d> profile = {Vector2d(0, 0), Vector2d(1, 0), Vector2d(0, 1)};
+  SweepSurface sweep(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0), 10.0, 4.0, 1.0, profile,
+                     16);
+
+  // A quarter turn along the helix, on the profile's first vertex.
+  const Vector3d before = sweep.evaluate(0.25, 0.0);
+
+  // Mirror in x. The mesh point goes to (-x, y, z).
+  Transform3d mirror = Transform3d::Identity();
+  mirror.linear() = Eigen::Vector3d(-1, 1, 1).asDiagonal();
+  const Vector3d mesh_says = mirror * before;
+
+  auto moved = sweep.clone();
+  // Refused, so no declaration survives to disagree with `mesh_says`.
+  CHECK_FALSE(moved->transform(mirror));
+
+  // A rotation of the same magnitude is still accepted, so the guard is on the
+  // determinant and not on orthogonal maps in general.
+  Transform3d turn = Transform3d::Identity();
+  turn.linear() = Eigen::AngleAxisd(M_PI / 2, Vector3d::UnitZ()).toRotationMatrix();
+  auto turned = sweep.clone();
+  REQUIRE(turned->transform(turn));
+  const auto *ok = dynamic_cast<const SweepSurface *>(turned.get());
+  REQUIRE(ok != nullptr);
+  CHECK((ok->evaluate(0.25, 0.0) - turn * before).norm() < 1e-9);
+}
