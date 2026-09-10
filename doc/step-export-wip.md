@@ -285,14 +285,33 @@ One kit run and one refusal column.
   Deterministic: `t007` faulty three times and `t008` clean three times in one
   session under six different file names, plus the control.
 
-  **Across that flip the exporter's own report is identical in every count** —
-  claims 607 whole and 64 cut, 12 facets left faceted, 2 smooth regions of 12
-  facets, covers 521 over 218 runs, 3 of the profile's 4 spans, at 0.06, 0.07,
-  0.08 and 0.09 alike. The only quantities that move are smooth monotone drifts
-  that cross nothing: the tessellation band 0.2189 → 0.2083, the typical stray
-  0.0288 → 0.0293. Nor does the boundary's shape: the turning angle between
+  **Across that flip every count the exporter makes is identical** — claims 607
+  whole and 64 cut, 12 facets left faceted, 2 smooth regions of 12 facets,
+  covers 521 over 218 runs, 3 of the profile's 4 spans, at 0.06, 0.07, 0.08 and
+  0.09 alike. Nor does the boundary's shape move: the turning angle between
   consecutive boundary chords has median 11.586 on `t007` and 11.588 on `t008`,
   max 94.395 against 94.393, 14 edges over 30 degrees on each.
+
+  **The faceted run-in's *area* is the one measure that nearly works, and a
+  count hides it** — the same 12 facets span a run-in whose length changes with
+  the parameter. Subtracting the wall's two constant annuli (810.531 mm², the
+  only planes at run-out 0.20 and 0.40):
+
+  ```text
+  run-out      0     0.05    0.06    0.07  |  0.08    0.09    0.10    0.20  0.40
+  run-in area  20.60 32.63   37.94   35.32 |  33.07   31.11   29.41   0     0
+  verdict      clean FAULTY  FAULTY  FAULTY|  clean   clean   clean   FAULTY FAULTY
+  ```
+
+  Pairwise it is right and it was found by eye before it was measured: `t007`
+  carries more faceted run-in than `t008`, 35.32 against 33.07. Across the
+  series it fails twice — the faulty band 32.63–37.94 overlaps the clean band
+  0–33.07 by 0.44 mm², and both ends invert it, with a clean file at 20.60 and
+  two faulty ones at **zero**. The analytic claim behaves the same way: inside
+  0.05–0.10 the B-spline area falls monotonically 3353 → 3292 with a clean gap
+  at the flip, and outside it the clean `t000` holds the largest B-spline area
+  in the set and the faulty `t040` the smallest. A monotone quantity cannot
+  produce a verdict that alternates.
 
   Seen by eye the two are "visually rather identical", and on the faulty one
   **virtually the whole sweep is flagged** — not a region of it. So whatever

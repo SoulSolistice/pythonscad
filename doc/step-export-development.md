@@ -1841,11 +1841,24 @@ five decimals — 0.000916 against 0.000938 at `$fn` 32, and twelve identical
 edges at `$fn` 64 — and imports clean at every tessellation. It is the boolean's.
 
 **"The faulty member of the run-out pair has more of its run-in left faceted."**
-An eyeball hypothesis, and a good one — it is the visible difference a reader
-reaches for. Refuted by the exporter's own report, which is **identical in every
-count** at run-out 0.06, 0.07, 0.08 and 0.09: claims 607 whole and 64 cut, 12
-facets left faceted, 2 smooth regions of 12 facets, covers 521 over 218 runs,
-3 of the profile's 4 spans. Two of those four import faulty and two clean.
+An eyeball hypothesis, found by looking before it was measured, and the closest
+anything has come. Answering it with the exporter's *count* is answering the
+wrong question — 12 facets in all four, but the same 12 span a run-in whose
+length changes with the parameter, so **measure the area**. By area it is right
+pairwise: 35.32 mm² of faceted run-in on the faulty `t007` against 33.07 on the
+clean `t008`.
+
+It still fails, twice. The faulty band 32.63–37.94 overlaps the clean band
+0–33.07 by 0.44 mm², so `t005` is faulty below a `t008` that is clean; and both
+ends invert it, a clean file at 20.60 and two faulty ones with **no** faceted
+run-in at all. The same shape of answer comes from the analytic claim's area,
+monotone inside the band with a clean gap at the flip and inverted outside it.
+A monotone quantity cannot produce a verdict that alternates — which is the
+general form of why nine of these entries failed.
+
+Worth keeping as the discipline it teaches: a count and an area are different
+measurements, and quoting one to dismiss a hypothesis about the other is how a
+live idea gets buried.
 
 **"The jagged sweep boundary is what SOLIDWORKS objects to."** The boundary
 *is* jagged — visibly so, and the observation is worth having for its own sake
