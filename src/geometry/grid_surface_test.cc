@@ -443,3 +443,29 @@ TEST_CASE("a mirrored sweep is refused rather than declared wrongly", "[sweepsur
   REQUIRE(ok != nullptr);
   CHECK((ok->evaluate(0.25, 0.0) - turn * before).norm() < 1e-9);
 }
+
+/*! A ring - a sweep of zero pitch - rejects points its own evaluator made.
+ *
+ * `make` rejects `turns == 0` and accepts `pitch == 0`, so a closed ring is a
+ * legal declaration. Membership is documented as an inversion rather than a
+ * search, and for a ring the inversion loses a turn: `localCoords` recovers the
+ * angle with `atan2`, which lands in `(-pi, pi]`, and then chooses the turn from
+ * the *height*, which on a ring carries no information at all - `k` is forced to
+ * zero. Any point past the half turn therefore inverts to a negative `t` and is
+ * refused by the surface that generated it.
+ *
+ * Found in external review 2026-09-10, stated here rather than fixed: the repair
+ * is a decision about what `declare_sweep` should accept, not a local edit.
+ */
+TEST_CASE("a zero-pitch sweep inverts its own points", "[sweepsurface][!shouldfail]")
+{
+  const std::vector<Vector2d> profile = {Vector2d(0, 0), Vector2d(1, 0), Vector2d(0, 1)};
+  std::string why;
+  const auto ring = SweepSurface::make(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0), 10.0,
+                                       0.0, 1.0, profile, 16, why);
+  REQUIRE(ring != nullptr);  // zero pitch is accepted
+
+  // Three quarters of the way round, on a point the evaluator itself produced.
+  const Vector3d generated = ring->evaluate(0.75, 0.0);
+  CHECK(ring->onSurface(generated, 1e-6));
+}
