@@ -531,7 +531,9 @@ def corner_stray(shape):
     scripts/step-corner-stray.py does at the command line."""
     face_of = getattr(TopoDS, "Face_s", None) or TopoDS.Face
     vertex_of = getattr(TopoDS, "Vertex_s", None) or TopoDS.Vertex
-    worst, extent = {}, 0.0
+    worst = {}
+    lo = [float("inf")] * 3
+    hi = [float("-inf")] * 3
     exp = TopExp_Explorer(shape, TopAbs_FACE)
     while exp.More():
         face = face_of(exp.Current())
@@ -548,11 +550,22 @@ def corner_stray(shape):
                 off = _off_surface(adaptor, face, pnt)
                 if off > worst.get(kind, 0.0):
                     worst[kind] = off
-                reach = math.sqrt(pnt.X() ** 2 + pnt.Y() ** 2 + pnt.Z() ** 2)
-                extent = max(extent, reach)
+                for axis, value in enumerate((pnt.X(), pnt.Y(), pnt.Z())):
+                    lo[axis] = min(lo[axis], value)
+                    hi[axis] = max(hi[axis], value)
             vexp.Next()
         exp.Next()
-    return worst, extent
+    # The model's own diagonal, not its distance from the world origin.
+    #
+    # This scaled the allowance by the largest `sqrt(x^2+y^2+z^2)` of any vertex,
+    # which is a property of where the part happens to sit rather than of the
+    # part. Translating an unchanged solid away from the origin then relaxed its
+    # own geometric acceptance: at an extent near 1e9 the formula permits an
+    # error near ten coordinate units, on a part that may be millimetres across.
+    # Found in external review 2026-09-10. A bounding-box diagonal is invariant
+    # under translation, which is what a tolerance on shape has to be.
+    span = math.sqrt(sum((hi[i] - lo[i]) ** 2 for i in range(3))) if hi[0] > lo[0] else 0.0
+    return worst, span
 
 
 def _off_surface(adaptor, face, pnt):
