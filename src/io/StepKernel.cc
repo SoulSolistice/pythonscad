@@ -2290,7 +2290,7 @@ void StepKernel::build_tri_body(
       if (!loop_valid[i] || consumed[i] || loops[i].size() < 3) continue;
       for (const int v : loops[i]) faces_at[v].push_back(i);
     }
-    std::size_t placed = 0, triple = 0, placed_triple = 0;
+    std::size_t placed = 0, triple = 0, placed_triple = 0, plane_gave_up = 0;
     double worst_plane = 0, worst_triple = 0;
     for (const auto& entry : singleOwner) {
       const int v = entry.first;
@@ -2441,16 +2441,25 @@ void StepKernel::build_tri_body(
         }
         p = qb;
       }
-      if (!ok || !AnalyticFeatures::closestOnSurface(own, p, qa)) continue;
+      if (!ok || !AnalyticFeatures::closestOnSurface(own, p, qa)) {
+        plane_gave_up++;
+        continue;
+      }
       // Tight, because the file will be read as though it were exact. Accepting
       // 1e-6 here put a corner 1.73e-07 off a plane it was placed *in*, which is
       // outside OpenCASCADE's own Precision::Confusion of 1e-7 - so the face
       // asserted a plane its corner was not on, by the kernel's own reckoning.
       // The alternating projection converges, so there is no reason to accept
       // less than it converges to.
-      if ((qa - p).norm() > 1e-9 || fabs(pn.dot(p) - pd) > 1e-9) continue;
+      if ((qa - p).norm() > 1e-9 || fabs(pn.dot(p) - pd) > 1e-9) {
+        plane_gave_up++;
+        continue;
+      }
       const double travel = (p - vertices[v]).norm();
-      if (travel > reach_here) continue;
+      if (travel > reach_here) {
+        plane_gave_up++;
+        continue;
+      }
       worst_plane = std::max(worst_plane, travel);
       moves.emplace(v, p);
       placed++;
@@ -2467,8 +2476,9 @@ void StepKernel::build_tri_body(
     if (placed > 0) {
       LOG(
         "STEP export: %1$d corners a declared surface shares with one plane of the mesh reach "
-        "the conic where the two cross, moving at most %2$.4f; %3$d sit on two planes and stay",
-        int(placed), worst_plane, int(triple));
+        "the conic where the two cross, moving at most %2$.4f; %3$d do not and stay where the "
+        "mesh put them",
+        int(placed), worst_plane, int(plane_gave_up));
     }
   }
 

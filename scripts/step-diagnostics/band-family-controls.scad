@@ -36,6 +36,25 @@ FN     = 32;
 TAPER  = 1;
 WALL   = 1;
 RUNOUT = 0.2;
+// How far the run-out is allowed to taper, as a fraction of full depth. Zero -
+// the shipped model - takes the crest all the way back to the bore's own radius,
+// so the two surfaces are *tangent* at each end of the sweep by construction:
+// f = 0 gives dr = -ridgeDepth*0 = 0, and radius + 0 is exactly the bore.
+// FLOOR > 0 stops the taper short, so the ridge crosses the bore transversally
+// at every station.
+//
+// This was built to test the theory that the tangency is what makes 131 of the
+// 142 chords on the shipped coupon, and it **refuted** it: FLOOR 0 gives 142
+// chords and FLOOR 0.25 gives 144. The chords do concentrate in the run-in and
+// run-out fifths, but not because the ends are tangent. What actually makes
+// them is the 64-iteration cap on the alternating projection that places the
+// corners, which reaches only crossings above 29.98 degrees - see open item 3
+// of doc/step-export-wip.md for the derivation and the cap sweep.
+//
+// Kept because a refuted control is still a control: it holds the tangency
+// fixed while the crossing angle moves, which is what let the two be told
+// apart.
+FLOOR  = 0;
 // PITCH is the intervention: turns = height/PITCH, and the ridge takes
 // round(FN*turns) stations over turns*360 degrees, so the ridge's angular step
 // equals the wall's facet step exactly when FN*turns is an integer.  At
@@ -60,7 +79,7 @@ module ridge() {
 		let (t = i/steps,
 		     a = 360*turns*t,
 		     z = rootWidth/2 + (height - rootWidth)*t,
-		     f = TAPER ? max(0, min(1, t/RUNOUT, (1 - t)/RUNOUT)) : 1)
+		     f = TAPER ? max(FLOOR, min(1, t/RUNOUT, (1 - t)/RUNOUT)) : 1)
 		[ for (p = [[back, -rootWidth/2], [-ridgeDepth*f, -crestWidth/2],
 		            [-ridgeDepth*f, crestWidth/2], [back, rootWidth/2]])
 			[(radius + p[0])*cos(a), (radius + p[0])*sin(a), z + p[1]] ]

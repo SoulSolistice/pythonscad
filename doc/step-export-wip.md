@@ -206,7 +206,7 @@ reproduced that on four separate runs.
   `src/core/DeclareSurfaceNode.cc` does not. `doc/step-export-development.md`
   says to keep both front ends in step, and this is the one that is not.
 
-### 3. The crossing curve on a sweep: landed, and 142 edges short
+### 3. The crossing curve on a sweep: why 142 edges fell back to chords
 
 **Built 2026-09-10.** A declared sweep is now trimmed to the curve where it
 crosses a quadric, the same way two quadrics have been since 2026-09-07. The
@@ -227,24 +227,118 @@ Shell closed everywhere, 50/50, and lid10 unchanged at 818 faces over one shell.
 **What it did not.** Code 17 does not move: `f02` reads `faults=2
 faultyfaces=2 codes=17` with 498 crossing curves exactly as it did with none,
 and the run-out flip survives — `t007` faulty, `t008` clean, on the new
-exporter. Its volume moves by 0.006%.
+exporter. Its volume moves by 0.006%. That is not yet a refutation: 142 edges
+were still chords, and *one chorded edge is enough to fail its face* is this
+project's own finding from the first attempt.
 
-**And that is not yet a refutation, which is the point to be careful about.**
-142 of the 640 edges still fail to fit inside 1e-7 and fall back to chords, and
-*one chorded edge is enough to fail its face* is this project's own finding from
-the first attempt. A face with 142 chords left on it is not a test of "does an
-exact boundary satisfy SOLIDWORKS". The hypothesis is untested, not disproved.
+#### Why the 142 fail: an iteration budget, not a geometry
 
-**So the next question is bounded and specific: why do those 142 fail?** The
-likely answer is where the sweep and the bore run nearly tangent — the shallow
-end of the ridge, which is where every previous measurement of this boundary has
-also concentrated, and where `projectOntoBoth` is documented to fail because the
-2x2 goes singular. Count them by position along the sweep first; if they are the
-tangent ones, the question becomes whether a crossing curve is the right entity
-there at all, or whether that stretch wants the plane section it nearly is.
+Chased as five whys on 2026-09-10. Four links hold and are measured; the fifth
+is open, and two hypotheses died on the way — including the one this section
+used to name.
 
-Only once all 640 are exact does the answer to "is code 17 the boundary" mean
-anything.
+**Why does SOLIDWORKS fault the swept B-spline and the bore cylinder, and
+nothing else?** Those two faces share all 640 of the edges that lie on neither
+of them exactly. Measured against the bore it bounds, a fitted arc strays at
+most **1.04e-07**; a chord strays up to **9.57e-02**, median 9.5e-03. Nothing
+else in the file is off by more than 1e-6. *Consistent, not confirmed — it still
+has to be put to SOLIDWORKS.*
+
+**Why is an edge a chord rather than the crossing curve?** Because
+`intersectionArc` is only attempted where both endpoints already lie on both
+surfaces. Every one of the 1280 endpoints lies on the **bore** to 6.2e-10, the
+chords' as much as the arcs'. It is the **sweep** they miss: the 498 by at most
+1.2e-13, the 142 by **1.2e-03 to 1.0e-01**. Two populations nine orders apart
+with nothing in between.
+
+**Why do those endpoints miss the sweep?** Because that is what the corner
+placement does on purpose. When a junction vertex cannot be put on both
+surfaces, `export_step.cc` places it on the exact one — the declared bore — and
+leaves the fitted sweep as a tolerance to be checked against. The exporter says
+so itself: *138 corners whose two owners do not cross transversally are placed
+on the exact one of them, moving at most 0.0963*.
+
+**Why can it not put them on both?** Because it finds the crossing by
+**alternating projection capped at 64 iterations**, and that contracts the error
+by `cos^2(theta)` per cycle. A corner starts on a bore facet's chord plane,
+`20(1 - cos(pi/32)) = 0.0963` inside the cylinder, and has to reach 1e-9. So it
+needs `log(1e-9/0.0963) / log(cos^2 theta)` cycles: **30 at 42.70 degrees, 237
+at 15.85**. A 64-cycle budget reaches exactly the crossings above **29.98
+degrees** — and of the 142 chords, **141 cross below 29.98 and one at 30.29**,
+against a median 42.70 for the 498 that succeed. A derived threshold on a
+measured population boundary, agreeing to a third of a degree.
+
+**Why is the cap 64?** Because it was never derived. The comment beside it
+records the symptom as a property of the model — "where the two do not cross
+transversally the projection does not converge" — and quotes the median failing
+angle, 15.85 degrees, as though that were a tangency. It is not. At 15.85
+degrees the projection converges; it takes 237 cycles.
+
+**Root cause: a fixed iteration cap on a linearly convergent projection, written
+down as a geometric fact.**
+
+#### What the experiment then refuted
+
+Raising the cap, with the counts predicted first from `cos^2(theta)` and
+recorded before the run:
+
+| cap | reaches above | corners left off | vertices on the curve | chords predicted | chords measured |
+| --- | --- | --- | --- | --- | --- |
+| 64 | 29.98 deg | 138 | 502 of 704 | — | 142 |
+| 512 | 10.82 deg | 18 | 622 of 704 | 21 | **56** |
+| 4096 | 3.84 deg | 0 | 640 of 704 | 1 | **47** |
+
+The direction is not in doubt — the corners the placement gives up on go 138 to
+18 to zero, and the edges written as the true crossing go 498 to 584 to 593. The
+*magnitude* is refuted: at cap 4096 **every** corner converges and 47 edges are
+still chords. The iteration budget accounts for 95 of the 142 and no more.
+
+**And the survivors are not the shallow ones.** The obvious follow-on — that the
+two-surface Newton in `projectOntoBoth` is conditioning-limited, its 2x2 having
+determinant `~sin^2(theta)`, so attainable precision is about `eps/sin^2(theta)`
+against a demanded `solve_tol` of `1e-14*scale` — predicts failures only below
+about 1.6 degrees. The 47 span **1.35 to 23.46 degrees, median 14.86**, spread
+almost evenly from 6 degrees up. At 20 degrees that limit is 1.9e-15 against a
+demanded 2.8e-13. Refuted.
+
+#### Also refuted, earlier the same day
+
+- **Tangency at the run-out.** The crest returns to exactly the bore's radius at
+  each end, so the two surfaces are tangent there by construction, and 131 of
+  the 142 chords sit in the run-in and run-out fifths. `FLOOR` was added to
+  `band-family-controls.scad` to stop the taper short and remove the tangency:
+  chords went 142 to 144. The location was right and the mechanism was wrong.
+- **The band gate admitting endpoints the fit then rejects.** Tightening the
+  `on` gate from `declaredBand()` to `1e-9*scale` was tried. It is not the
+  separator — both populations sit on the bore exactly, and the difference is
+  the sweep. What the attempt did show is that the crossing curve is
+  load-bearing for the *cylinders'* own acceptance: with fewer curves,
+  `boundary_lies_on_surface` refuses the bore patches and the whole analytic
+  export collapses to 705 facets.
+
+#### Still open
+
+**What stops the remaining 47.** The next place to look is stated rather than
+guessed: `intersectionArc` abandons the whole fit — `if (!ok) return false;` —
+when `projectOntoBoth` fails at a *single* interior sample, without trying a
+higher degree, and those samples start life on the chord, which at a shallow
+crossing is the farthest reasonable starting point from the curve.
+
+**Every crossing curve has a pcurve on the sweep and none on the cylinder.** All
+640 edges are a `SURFACE_CURVE` carrying exactly one `PCURVE`, on the B-spline
+side; the bore is left to re-project the curve itself. The code that would give
+both sides one cannot run: it requires `crossing_sides[key].size() == 2`, and
+the only push site is the quadric emitter, so a sweep-against-cylinder edge
+always has one. It is legal STEP either way — but the pcurve pass exists
+precisely so that a kernel is *told* rather than left to decide, and on these
+two faces it is not.
+
+#### The measurement to make next
+
+Import the cap-4096 coupon, with `f02-band-fn032-analytic` unchanged in the same
+run as the positive control. It is the first coupon whose boundary is mostly
+exact, and 47 chords is a testable step down from 142 — but read `-FaultDetail`
+and the recognised share, not `faults=0`.
 
 ### 4. `c06` imports clean and inside out
 
@@ -294,6 +388,61 @@ sweep the outlier rule fires, post-fix. The mechanism (it fires on the profile
 changing shape, not on the helix, the tessellation or the wall) should hold, but
 the tenths-of-the-sweep numbers in `doc/step-export-development.md` are pre-fix.
 One kit run and one refusal column.
+
+### 9. Four alternating projections, two of them live, one Newton already written
+
+**Found 2026-09-10, out of the chase in item 3.** The corner placement finds
+where a vertex's owners cross by **alternating projection**, and there are four
+such loops, every one capped at 64 iterations. Alternating projection contracts
+the error by `cos^2(theta)` per cycle, so the cap is a *crossing angle* below
+which the loop silently gives up — 29.98 degrees, derived in item 3 and
+confirmed against the population boundary it produces.
+
+`projectOntoBoth` in `StepKernel.cc` already solves the same problem by Newton
+on the two implicits, quadratically and at any angle short of true tangency. It
+is used in exactly one place: `intersectionArc`.
+
+| site | what it intersects | corners it abandons today |
+| --- | --- | --- |
+| `StepKernel.cc:2406` | surface ∩ line where two mesh planes meet | **280** — 260 on lid10, 16 on `step-exact-trim`, 4 on `step-shared-arc` |
+| `export_step.cc:509` | surface ∩ surface | **177** — 138 on the band family, 39 on lid10 |
+| `StepKernel.cc:2432` | surface ∩ plane | 0 |
+| `StepKernel.cc:2584` | surface ∩ plane a declaration vouches for | 0 |
+
+Measured over all 33 STEP fixtures plus lid10 with both feature flags. Only four
+fixtures give up a corner at all; the two live sites lose **457** between them,
+and the largest single number is on the reference part.
+
+**Two of those counts could not be read before this was written down.** Both
+log lines in the pair at `StepKernel.cc:2460` printed `int(triple)`, so the
+surface-against-plane line reported the *triple point* counter under its own
+text — the same 280 appeared twice, as though two sites each lost 280. And the
+surface-against-plane site counted nothing at all: its three give-up paths were
+bare `continue`s, so its true figure was invisible rather than zero. It is zero,
+now that it is counted, but that was not knowable from the log.
+
+**What the sites are worth is not equal.** Three of the four intersect a surface
+with something *linear* — a plane, or the line two planes meet in — whose
+implicit `n.x - d` has an exact constant gradient. Those are strictly easier for
+Newton than the surface-against-surface case that `projectOntoBoth` already
+handles, and three of them sit in `StepKernel.cc` below its definition, so they
+could call it today. Only `export_step.cc:509` needs it hoisted into a header
+along with `surfaceImplicit`.
+
+**Order of work, by measured return.**
+
+1. `StepKernel.cc:2406`, 280 corners, 260 of them on the reference part. Three
+   implicit equations - a surface and two planes - in three unknowns.
+2. `export_step.cc:509`, 177 corners, and the one on the fault-code-17 path.
+   Wants `projectOntoBoth` hoisted; item 3 has the derivation of what it buys.
+3. The two that are zero: leave them. A change with no measurable effect on any
+   fixture is a change whose regressions are also invisible.
+
+**And the comment at 2432 wants correcting whichever way this goes:** *"The
+alternating projection converges, so there is no reason to accept less than it
+converges to."* It converges on this fixture set. Whether it converges is a
+question about the crossing angle and the iteration budget, not a property of
+the method.
 
 ---
 
