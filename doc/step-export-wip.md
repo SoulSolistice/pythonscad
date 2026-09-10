@@ -318,11 +318,13 @@ demanded 2.8e-13. Refuted.
 
 #### Still open
 
-**What stops the remaining 47.** The next place to look is stated rather than
-guessed: `intersectionArc` abandons the whole fit — `if (!ok) return false;` —
-when `projectOntoBoth` fails at a *single* interior sample, without trying a
-higher degree, and those samples start life on the chord, which at a shallow
-crossing is the farthest reasonable starting point from the curve.
+**What stops the remaining ones.** The corner placement is fixed — see item 9 —
+and took the band family's chords from 142 to 116. What is left is
+`intersectionArc` abandoning the whole fit when `projectOntoBoth` fails at a
+*single* interior sample, without trying a higher degree whose samples fall at
+different parameters. Item 10 B1 carries that, with the measurement that makes
+it the candidate: at an iteration cap of 4096, with every corner placed, 47
+edges were still chords.
 
 **Every crossing curve has a pcurve on the sweep and none on the cylinder.** All
 640 edges are a `SURFACE_CURVE` carrying exactly one `PCURVE`, on the B-spline
@@ -389,60 +391,177 @@ changing shape, not on the helix, the tessellation or the wall) should hold, but
 the tenths-of-the-sweep numbers in `doc/step-export-development.md` are pre-fix.
 One kit run and one refusal column.
 
-### 9. Four alternating projections, two of them live, one Newton already written
+### 9. Four alternating projections: what each of them turned out to be
 
-**Found 2026-09-10, out of the chase in item 3.** The corner placement finds
-where a vertex's owners cross by **alternating projection**, and there are four
-such loops, every one capped at 64 iterations. Alternating projection contracts
-the error by `cos^2(theta)` per cycle, so the cap is a *crossing angle* below
-which the loop silently gives up — 29.98 degrees, derived in item 3 and
-confirmed against the population boundary it produces.
+**Chased and settled 2026-09-10.** The corner placements found where a vertex's
+owners cross by alternating projection, four loops of it, every one capped at 64
+iterations. Alternating projection contracts the error by `cos^2(theta)` per
+cycle, so a fixed cap is not a solver but a *crossing angle* below which the
+loop gives up - 29.98 degrees, derived in item 3.
 
-`projectOntoBoth` in `StepKernel.cc` already solves the same problem by Newton
-on the two implicits, quadratically and at any angle short of true tangency. It
-is used in exactly one place: `intersectionArc`.
+That was the theory. Only one of the four was what the theory said.
 
-| site | what it intersects | corners it abandons today |
-| --- | --- | --- |
-| `StepKernel.cc:2406` | surface ∩ line where two mesh planes meet | **280** — 260 on lid10, 16 on `step-exact-trim`, 4 on `step-shared-arc` |
-| `export_step.cc:509` | surface ∩ surface | **177** — 138 on the band family, 39 on lid10 |
-| `StepKernel.cc:2432` | surface ∩ plane | 0 |
-| `StepKernel.cc:2584` | surface ∩ plane a declaration vouches for | 0 |
+| site | intersects | gave up on | what it actually was |
+| --- | --- | --- | --- |
+| `export_step.cc` | surface ∩ surface | 138 band, 39 lid10 | **the iteration budget.** Fixed. |
+| `StepKernel.cc` | surface ∩ line of two mesh planes | 280 | **not a solve at all** - see below |
+| `StepKernel.cc` | surface ∩ plane | 0 | converges everywhere it is asked |
+| `StepKernel.cc` | surface ∩ vouched plane | 0 | the same |
 
-Measured over all 33 STEP fixtures plus lid10 with both feature flags. Only four
-fixtures give up a corner at all; the two live sites lose **457** between them,
-and the largest single number is on the reference part.
+**The surface-against-surface one was the iteration budget**, and Newton on both
+implicits fixes it. Measured with both flags on: junction vertices reaching the
+crossing curve go 502 to 598 of 704 on the band family and 743 to 1079 of 1598
+on lid10; corners left on one surface go 138 to 42 and 39 to 3; the band
+family's chorded boundary edges go 142 to 116.
 
-**Two of those counts could not be read before this was written down.** Both
-log lines in the pair at `StepKernel.cc:2460` printed `int(triple)`, so the
-surface-against-plane line reported the *triple point* counter under its own
-text — the same 280 appeared twice, as though two sites each lost 280. And the
-surface-against-plane site counted nothing at all: its three give-up paths were
-bare `continue`s, so its true figure was invisible rather than zero. It is zero,
-now that it is counted, but that was not knowable from the log.
+Two things were needed beyond swapping the solver. `projectOntoBoth` had to move
+out of `StepKernel.cc` into `AnalyticFeatures`, beside `closestOnSurface`, where
+`export_step.cc` can reach it - it is a geometry predicate on a `Surface` and
+belongs there anyway. And it had to keep its **best** iterate rather than its
+last: Newton's final step is not always its closest approach, and the caller's
+acceptance test is a better judge of a candidate than the solver's own
+tolerance. Gating on the tolerance instead threw away 124 corners of lid10 that
+the acceptance would have kept.
 
-**What the sites are worth is not equal.** Three of the four intersect a surface
-with something *linear* — a plane, or the line two planes meet in — whose
-implicit `n.x - d` has an exact constant gradient. Those are strictly easier for
-Newton than the surface-against-surface case that `projectOntoBoth` already
-handles, and three of them sit in `StepKernel.cc` below its definition, so they
-could call it today. Only `export_step.cc:509` needs it hoisted into a header
-along with `surfaceImplicit`.
+**The surface-against-line one refuted the reason for touching it.** Its 280 are
+94 corners that have no two mesh planes to cross - not a solve - 2 that are off
+their own surface, and 184 that had **converged**: none off the surface, none
+off a plane, every one refused for landing past the nearest neighbour. Newton
+changed the numbers not at all.
 
-**Order of work, by measured return.**
+What it was instead: a line meets a quadric **twice**, and the iteration was
+finding the far root. Worst on lid10, 1453 times the allowed travel away. The
+travel limit that caught it is a proxy for the question rather than the
+question, and the comment beside it records that the far root once took a cone
+that was exact out by 1.41.
 
-1. `StepKernel.cc:2406`, 280 corners, 260 of them on the reference part. Three
-   implicit equations - a surface and two planes - in three unknowns.
-2. `export_step.cc:509`, 177 corners, and the one on the fault-code-17 path.
-   Wants `projectOntoBoth` hoisted; item 3 has the derivation of what it buys.
-3. The two that are zero: leave them. A change with no measurable effect on any
-   fixture is a change whose regressions are also invisible.
+So that site solves *along* the line now - `base + t.dhat`, one unknown, one
+equation - which makes both planes exact to rounding and puts the far root out
+of reach by construction. It changes no count on any fixture: within the allowed
+travel the line comes no nearer the declared surface than a median 1.05e-02 on
+lid10, 3.02e-01 on `step-exact-trim`, 4.42e-01 on `step-shared-arc`. Those 184
+corners are correctly refused. Two facet planes crossing gives a line that is an
+artifact of the tessellation, and where the surface curves away it can miss the
+surface entirely.
 
-**And the comment at 2432 wants correcting whichever way this goes:** *"The
-alternating projection converges, so there is no reason to accept less than it
-converges to."* It converges on this fixture set. Whether it converges is a
-question about the crossing angle and the iteration budget, not a property of
-the method.
+**The two that give up on nothing are left alone deliberately.** A change with
+no measurable effect on any fixture has regressions that are equally invisible.
+
+**Reading the counts needed a fix of its own.** Both log lines in the pair
+printed `int(triple)`, so the surface-against-plane line reported the
+triple-point counter under its own text and the same 280 appeared twice; and
+that site counted nothing at all, its three give-up paths being bare
+`continue`s. Its figure was invisible rather than zero. The give-up reasons are
+now kept apart - off its own surface, no two faces to cross, parallel faces, the
+solve - because one number for five reasons says nothing about which to work on,
+and that is the whole reason this item was mis-ordered to begin with.
+
+**Seven unit tests** in `analytic_features_test.cc` cover both solvers, four of
+them asserting a *refusal*: tangency, parallel planes, a ruling lying in the
+surface, and a crossing outside the window. Deleting the window makes that last
+one fail, which is the check earning its place.
+
+### 10. Survey: approximations that could be sharper, and analytics that stop short
+
+**Written 2026-09-10, out of items 3 and 9.** Both of those turned on the same
+shape of defect - a method that converges, held under a budget or a criterion
+that was never derived, reporting "cannot" where the truth is "did not". This is
+a sweep of the rest of the exporter for the same thing, and the ordering is by
+what is measured rather than by what looks worst.
+
+Nothing here is a bug report. Each is a place where the code returns less than
+it knows, with what is actually established kept apart from what is inferred.
+
+#### (a) Approximations that could profit from a sharper method
+
+**A1. `intersectionArc` interpolates at uniform nodes, up to degree 9.** The
+collocation parameters are `t = i/degree` and the degree is raised until the fit
+is inside tolerance. Uniform interpolation is the worst-conditioned choice as
+degree rises, and this raises the degree *precisely* on the edges that are
+hard, so the method degrades exactly where it is leaned on. Chebyshev-Lobatto
+nodes cost nothing but the arithmetic to place them. **Inferred, not measured**:
+no count yet of how many chords this would recover.
+
+**A2. The foot-point implicit is first order, so Newton is linear on a declared
+sweep.** `footPointImplicit` models the surface by the tangent plane at the foot
+point, and says so in its own comment. **Measured**: `projectOntoBoth` on the
+band family is flat at 598 of 704 junction vertices from 24 iterations through
+1024. It is not iteration-starved, it is *model*-starved. A second-order local
+model - the normal curvature at the foot point, available from evaluations the
+projection already makes - would restore superlinear convergence there.
+
+**A3. `GridSurface::project` descends on the *squared* distance.** Minimising
+`|S(u,v) - p|^2` rather than `|S(u,v) - p|` halves the significant digits:
+within `sqrt(eps)` of the minimum the squared distance stops changing in double
+precision, so the attainable accuracy in the distance itself is about
+`1.5e-08` relative. The corner acceptance asks for `1e-9` absolute. **Inferred**
+from the arithmetic and consistent with the band family's remaining 42 corners
+being flat under every iteration count; **not yet confirmed** by instrumenting
+the projection's achieved residual, which is the measurement to make.
+
+**A4. Finite differences where the derivative is writable.** `GridSurface`'s
+Jacobian is taken with `h = 1e-6` and `footPointImplicit`'s normal with
+`h = 1e-5`; the derivative error of a central difference is about `eps/h`, so
+`1e-10` and `1e-11` respectively. `evaluate` is piecewise polynomial in v and
+interpolatory in u, so both derivatives are closed forms. This compounds A2 and
+A3 rather than standing alone.
+
+#### (b) Analytics that give up before their capability
+
+**B1. `intersectionArc` abandons the whole fit when a single interior sample
+fails.** `if (!ok) return false;` - it does not try the next degree, and the next
+degree samples at *different* parameters, so the attempt that failed says
+nothing about the one that would have followed. **Measured**: at an iteration cap
+of 4096, with every corner placed and none left off, 47 edges of the band family
+were still chords. Those are arc failures and not corner failures, which makes
+this the top candidate for the boundary that remains. **This is the next thing
+to work on.**
+
+**B2. The degree cap of 9 is a silent floor.** An edge whose curve will not fit
+by degree 9 becomes a chord - an error of order 0.1 mm against a demanded 1e-7 -
+and nothing reports how close it got. The fitter computes `intersectionArcError`
+and throws the number away. Saying it would turn "142 chords" into "142 chords,
+worst fit 3.4e-05", which is the difference between a wall and a gradient.
+
+**B3. `sameSurfaceGeometrically` can merge two different cones.** From the
+external audit and confirmed by reading: slopes are compared in absolute value,
+justified by reversing an axis negating the slope, but `axesAgree` accepts
+*parallel* axes too - so two same-direction cones of slope `+s` and `-s` sharing
+a refpt compare equal though one widens and the other narrows. Reachability into
+a wrong export is still not established.
+
+**B4. `_off_surface` records a failed projection as zero error.** Its `else 0.0`
+reads "no projection result" as "no deviation" - fail-open, in the instrument
+that measures how far a face's boundary leaves its own surface.
+
+**B5. `step_real` rewrites every nonfinite as `0.`** A failed computation becomes
+an ordinary-looking coordinate, and the validator's `nan`/`inf` text search
+cannot see it.
+
+**B6. Nonuniform scaling drops plane declarations.** `PlaneSurface` inherits the
+similarity-only `transform`, though a plane is representable under any affine
+map. A recognition loss, never a wrong solid.
+
+**B7. `check_surface_curves` covers only cylinders and cones.** The sweep
+crossing curve writes `SURFACE_CURVE`s on a B-spline face, 498 of them on
+`f02`, and the validator certifies none of them. Needs a de Boor evaluator; exposure
+measured at 8.4e-6 mm, so it is a coverage gap rather than a live defect.
+
+#### Deliberately not on this list
+
+The two remaining alternating projections, `surface ∩ plane` and `surface ∩
+vouched plane`, both capped at 64. Measured over all 33 STEP fixtures plus
+lid10: they give up on **nothing**. Changing a method whose failure path no
+fixture reaches means the change's own regressions are unreachable too.
+
+#### Order of work
+
+1. **B1**, which is measured and is the whole of the remaining chorded boundary.
+2. **B2**, which costs one log line and turns the next investigation from a
+   count into a distribution.
+3. **A3**, but measure it first: instrument the projection's achieved residual
+   before assuming the objective is what pins it.
+4. **A1**, cheap and self-contained, once B1 has said how much is left to win.
 
 ---
 
