@@ -112,7 +112,7 @@ than a placement to fix.
 
 ## Open items, in order
 
-### 1. Fault code 17: the population is known, the trigger is not
+### 1. Fault code 17: it moved, on the one coupon whose boundary was written
 
 `swFaceBadEdge`. Chased as five whys on 2026-09-08/09, with nine predictions put
 to SOLIDWORKS. **Two held and seven failed.** What that bought is the population;
@@ -191,9 +191,106 @@ not a better measurement of the trigger but removing the class: give the sweep a
 boundary that lies on its own surface (open item 3), and there is no longer a
 mesh polyline for a kernel to object to.
 
+#### Run 2026-09-10: the prediction above was put to SOLIDWORKS, and it held
+
+The paragraph before this one said the way out was not a better measurement but
+removing the class - give the sweep a boundary that lies on its own surface and
+there is no mesh polyline left to object to. Open item 3 built that boundary.
+This is what SOLIDWORKS made of it.
+
+**Settings, read from Tools > Options > Import by the driver itself rather than
+trusted to a label:** `solid+surface=on free-curves=off run-diagnostics=on
+analytical-conversion=on attributes=on step-config-data=off
+multibody-as-parts=off knit=form-solids units=file-units
+assembly-mapping=default check-and-repair=1 custom-tolerance=0`.
+
+**Positive control, same session, first:** the recorded 2026-09-08
+`f02-band-fn032-analytic.stp` - 640 chords, no crossing curve - re-imported as
+`solid, 9 faces, faults=2 gaps=0 faultyfaces=2 faultyedges=0 codes=17`. Its
+fifth reproduction. The harness, the machine and the settings are behaving, so
+a difference in the new file is the file.
+
+**The result.**
+
+| | control, 640 chords | new, 593 curves + 47 chords |
+| --- | --- | --- |
+| faults | 2 | **1** |
+| bspline face | 1027.845 mm², **17/17** | 1032.453 mm², **21** |
+| bore cylinder | 2098.714 mm², **17/17** | **not faulty** |
+| volume | 19555.2696 | 19511.9331 |
+
+**The bore cylinder's code 17 is gone**, which is the predicted mechanism
+exactly: its boundary is now the curve it is cut on rather than a polyline of
+chords, and it no longer has an edge that does not lie on it. This is the first
+time code 17 has moved on this coupon in the whole chase.
+
+The sweep's fault is *not* code 17 any more either. It is **21**,
+`swFaceSelfIntersecting`, one record rather than two, on a face 4.6 mm² larger
+and 1.05 mm higher up. That is a different objection to a different thing and it
+is unexplained - see below.
+
+**Corroborated by a number the model fixes and the tessellation must not.** The
+analytic volume cannot depend on `$fn`, and now it nearly does not:
+
+| | analytic volume |
+| --- | --- |
+| f02 at `$fn` 32, control | 19555.2696 |
+| f02 at `$fn` 32, new | **19511.9331** |
+| f04 at `$fn` 64, new | **19511.5976** |
+
+0.0017% apart, where the old f02 sat 43 mm³ from its own `$fn` 64 sibling. The
+two coupons are the same solid and now say so.
+
+#### And why the other three coupons did not move
+
+They never got the boundary. Measured on the files themselves:
+
+| coupon | crossing curves | chords | SOLIDWORKS |
+| --- | --- | --- | --- |
+| `f02-band-fn032` | **593** | 47 | cylinder clean, sweep 21 |
+| `f04-band-fn064` | 1 | 1251 | 17/17, unchanged |
+| `r01-lid10` | 1 | 623 | 7/17/21 |
+| `r02-bayonet` | 1 | 623 | 7/17/21 |
+
+The one coupon whose boundary was actually written as the crossing curve is the
+one whose code 17 moved, and the three that kept a chorded boundary kept their
+fault. That is the correlation this chase has been trying to establish, and it
+is **n = 1** on the positive side.
+
+**The gate is named and it is not one of the ones fixed for item 3.** On f04 the
+solvers work: 1278 of 1406 junction vertices reach the crossing curve and *no*
+corner is left on one surface. Only two edges are ever candidates. The exporter
+says why itself:
+
+```text
+1263 corners are left where the mesh put them: moving them would bend 7 faces
+that keeps a plane, and half a boundary moved is worse than none
+```
+
+f02 prints no such line. A veto that protects planar faces holds 1263 of 1406
+corners on the mesh, so almost no edge becomes a crossing candidate at all.
+Lifting it is what would replicate this result three more times, and until it
+is, n = 1 is what this is.
+
+#### What not to read into it
+
+- **Code 21 is new and unexplained.** It may be a real self-intersection the
+  fitted boundary introduced, or SOLIDWORKS re-diagnosing geometry it now reads
+  differently. Nothing here distinguishes those and it wants its own chase.
+- **47 chords remain on f02**, so this is not a coupon with an exact boundary -
+  it is one with a mostly exact boundary, and the sweep is still faulty.
+- **`r01-lid10-faceted`, the control, now reports `faults=6 codes=24`.** A
+  faceted control with faults of its own weakens lid10 as a test, and that is
+  worth understanding before reading anything into its 7/17/21.
+- **lid10 writes 810 analytic faces** where 818 and 822 are recorded earlier in
+  this file. That moved with the corner work and has not been re-derived against
+  the model, which per §7 is the only way that number means anything.
+
 Positive control in the same session, every time: `f02-band-fn032-analytic.stp`
-must read `faults=2 faultyfaces=2 codes=17`, or the run says nothing. It has
-reproduced that on four separate runs.
+as it stood on 2026-09-08 must read `faults=2 faultyfaces=2 codes=17`, or the
+run says nothing. It has reproduced that on five separate runs. Keep that file;
+the current export of the same coupon no longer reads it, which is the point of
+the entry above.
 
 ### 2. `declare_sweep` is landed and nothing uses it
 
