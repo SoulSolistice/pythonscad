@@ -905,6 +905,74 @@ one of the two found by hand. It asserts nothing that has to be derived, so
 coupons still earn face counts and volumes one at a time as fixtures; see item
 7, which asks for that for a different reason.
 
+### 12. Survey the rest of the exporter for conditions that should never be reached
+
+**Filed 2026-09-10, out of item 11.** Two lines in the corner placement turned
+out to be reporting conditions that ought to be impossible - one of them
+genuinely unreachable and merely warned about, the other reached on every
+flagship coupon and not even warned about. Both are now held to that: losing a
+plane section's agreement is an `EXPORT-ERROR` the flagship check fails on, and
+the plane veto is an `EXPORT-WARNING` asserted never to fire under a `WILL_FAIL`
+test.
+
+Neither was found by looking. They were found by relaxing something else and
+watching what broke, which is an expensive way to find a class of defect that a
+read can find. So: go through the rest of the exporter and ask of every counter
+and every diagnostic line the same two questions.
+
+**The two questions.**
+
+1. *Should this ever be non-zero?* A counter that reports how often a fallback
+   fired is describing a defect if the fallback is not supposed to be needed.
+   The plane veto reported 1263 corners as though it were a statistic.
+2. *If it should never be non-zero, what happens when it is?* Reporting is not
+   holding. The three strengths available, and the measurement that picks one:
+   - reached today, and its cost is real -> `EXPORT-WARNING` plus a `WILL_FAIL`
+     assertion that it is never reached, so a fix announces itself;
+   - unreachable today -> `EXPORT-ERROR`, which the flagship check fails on, so
+     it can never quietly become reachable again;
+   - impossible by construction -> no message at all; delete the branch.
+
+**Where to look, and these are candidates rather than findings.** Every one of
+these is a place the exporter counts something it had to give up on, and none
+has been asked whether the giving up is a defect:
+
+- `%d regions stay faceted, no fit having been found - which is always a valid
+  export`. It says its own answer is valid, which is true and is not the
+  question: on the band family at `$fn` 64 it is 2 regions and 30 facets, and a
+  region left faceted is a region whose boundary is chords.
+- `%d declared sweep left faceted - %d wrap the surface's seam, %d await the
+  approximation flag`. A declared sweep that is not written is the declaration
+  channel not being used, which is the whole point of the channel.
+- `%d facets of the sweep are left faceted: a corner of each is further off the
+  fit than four times the %f this claim is typically off`. An outlier rule, and
+  outlier rules are where "should never happen" hides.
+- `%d facets have every corner on the sweep and their middle off it, by up to
+  %f against an allowance of at most %f` - 149 facets by up to 0.8604 against
+  0.0807 on `$fn` 64, which is ten times the allowance and reported as a fact.
+- `%d corners are left where the mesh put them: they were welded onto an ...`,
+  the other corner refusal, which has had none of the attention item 11 gave the
+  first.
+- `%d regions are not turned surfaces because a vertex is off the ring its
+  height puts it on`.
+- `%d plane sections written as the conic it is - %d on a plane the model
+  declared, %d on one taken from the mesh`. The mesh half is the fragile half
+  and item 11 explains why; on the band family it is all of them.
+- Every `continue` in `decide_sections` and in the emitters that drops a
+  candidate without counting it at all. Those are worse than a counter, because
+  there is nothing to survey.
+
+**How to do it without guessing.** The counters are already printed. Export the
+six flagship coupons, collect every `STEP export:` line, and sort by whether the
+number is zero. The non-zero ones are the survey; the zero ones are candidates
+for promotion to `EXPORT-ERROR` at no cost, because they are already unreachable
+on everything measured.
+
+**What it is worth.** Item 11's two defects were concealed for as long as they
+were because the thing concealing them looked like a statistic. This is a read
+of an existing report, it needs no build, and it is the cheapest thing on this
+list.
+
 ---
 
 ## Unexplained, and to be validated
