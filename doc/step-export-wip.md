@@ -463,6 +463,38 @@ that it cannot say what causes fault code 17 — agrees with this document.
 | **The round trip requires *at least* `expect_solids`.** Extra bodies pass, and aggregate positive volume does not establish that each body has one. | Read. |
 | **`check_surface_curves` handles only cylinders and cones.** Directly relevant now: the sweep crossing curve writes `SURFACE_CURVE`s on a B-spline face, 498 of them on `f02`, and this validator certifies none of them. | Read. Already recorded as an open item; the new work widened what it does not cover. |
 
+### Which of these block the sweep work, measured rather than judged
+
+Three of the open findings are fail-open conditions in measurements the fault-17
+and crossing-curve threads actually rely on, so each was put to the files those
+threads use before being treated as a blocker. **None of them is currently
+biting.**
+
+- **The failed projection scored as zero error** is not reached. `_off_surface`
+  only falls through to `GeomAPI_ProjectPointOnSurf` for surfaces that are not
+  plane, cylinder or cone - which is exactly the sweep - so it is the path every
+  B-spline corner measurement takes. Counted: **0 of 640** corners on the
+  crossing-curve `f02` and **0 of 623** on lid10 return no projection. The
+  corner-exactness figures for sweeps are real numbers, not silent zeroes.
+- **Closure accounted globally rather than per shell** does not weaken the
+  crossing-curve verification, because every file it was verified on has exactly
+  one shell, where the global count and the per-shell count are the same
+  question. It would matter the moment a change produces two.
+- **Pcurves unchecked on anything but cylinders and cones** is the one with real
+  exposure, since the sweep crossing curve writes 640 `SURFACE_CURVE`s with 640
+  `PCURVE`s. Measured directly instead of assumed: the worst written pcurve sits
+  **8.4e-6 mm** from its own 3D curve, on two cylinder faces, against 0.000001
+  and 0.000000 for what a projection would give. Small - but above the 1e-7 the
+  exact tier claims, and near enough to a kernel's linear precision to be worth
+  knowing.
+
+So the thread's own next step - the 142 edges that still fall back to chords -
+is not blocked. What the missing validator costs is that a *future* pcurve
+regression on a B-spline face would not be caught, and closing it means writing
+a de Boor evaluator: `validatestep.py` has none, and OpenCASCADE cannot stand in
+because it silently builds a pcurve where the file stores none, so it cannot be
+asked which one it read.
+
 ### The one correction worth making to the review
 
 It lists the cone deduplication among "the highest-confidence production
