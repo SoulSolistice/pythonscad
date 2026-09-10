@@ -720,7 +720,7 @@ What is left:
    uniform. Worth measuring against the 47 chords that remain.
 3. **B3 to B7**, unchanged, and none of them measured to reach an export.
 
-### 11. The plane veto is blunt by 89 to 1, and relaxing it breaks two other things
+### 11. The plane veto is blunt by 89 to 1, and it is concealing two defects
 
 **Built, measured and reverted on 2026-09-10.** This is the gate that decides
 whether the crossing curve of item 3 fires at all, and it is why the SOLIDWORKS
@@ -776,25 +776,93 @@ r01-lid10-analytic        VERTEX_POINT #45 and #70 sit on the same coordinates
 the second time on this branch that a green suite has hidden a broken flagship
 export, and it is worth its own entry rather than a footnote.
 
-#### What it means
+#### What it means, chased to the root on 2026-09-10
 
-"Half a boundary moved is worse than none" carries more than planarity. It is
-also holding two vertices apart that a pair of moves would collapse onto the
-same point, and holding a shell closed that a partial move opens. Those are two
-distinct further failure modes, and both have to be answered before the veto can
-be made local.
+The first reading of those two failures was that they are the cost of moving
+some corners and not others, and that the veto is therefore protecting something
+real about partial moves. That reading is **wrong**, and relaxing the veto to
+work around it would have been building on it.
 
-**The order to do it in.** Neither failure is mysterious and both are local:
+Both failures were reproduced and read entity by entity. Neither is about
+*partial* moves. Both are latent defects in what happens when a corner moves at
+all, and the all-or-nothing veto hides them by ensuring that on these coupons no
+corner moves.
 
-1. **Vertex collapse.** Two corners moved onto the same coordinates are two
-   `VERTEX_POINT`s the writer never merged. Either refuse a move that lands on
-   another corner's position, or merge them and re-point the edges - the second
-   is right and the first is cheap.
-2. **The open shell.** Two edges used once. Most likely a face that the fan
-   split while its neighbour did not, so the two no longer share an edge. The
-   fan is already conditional on `split_for_corners`; whatever is inconsistent
-   there is what to find.
-3. Only then the local veto, with both coupons in the kit as the check.
+**Root cause A, the open shell: an edge's geometry is decided twice, once by
+each of its two faces.**
+
+```text
+edge #21826  curve=ELLIPSE  face #22164 on CYLINDRICAL_SURFACE, 1 bound
+edge #24575  curve=LINE     face #24590 on PLANE, 1 bound
+      both from (-3.370953, 19.694450, 37.941337)
+      both to   (-3.901806, 19.615706, 38.007493)
+```
+
+The same boundary, between the same two points, written as the conic by the
+cylinder and as a chord by the plane. Two edges where there should be one, so
+each is used once and the shell is open.
+
+The exporter already knows. It compares the sections that agreed before the
+corners were placed against those that agree after, and warns - *17 plane
+sections agreed before the corners were placed and do not after*. Its own
+comment has the mechanism exactly right: a plane **fitted to mesh facets** does
+not survive the placement, because the corner is moved onto the surface the
+model declared and that is precisely off the facet plane it happened to share
+with a neighbour. A **declared** plane survives, being what the corner was moved
+onto.
+
+So this is an ordering fault: agreement is settled before the move that
+invalidates it, and the warning is raised instead of the decision being retaken.
+
+**Root cause B, the coincident vertices: `get_vertex` is keyed by mesh index.**
+
+```cpp
+auto get_vertex = [&](int ind) {
+  if (step_verts[ind] == nullptr) { ... new Vertex(entities, point); }
+  return step_verts[ind];
+};
+```
+
+One `VERTEX_POINT` per *mesh vertex*, whatever its position. On lid10 the
+placement puts **three** of them on one point - a cylinder-and-plane corner and
+two cone-and-plane corners at (-66.905705, -48.609840, 95.0), which is a real
+junction of those four surfaces - and three vertices are written where the
+geometry has one.
+
+That is not a consequence of moving only some corners either. It is what happens
+whenever a placement maps two mesh vertices onto the same true point, which a
+correct placement *should* do at a junction like this.
+
+#### The root fixes, both with precedent in this file
+
+1. **Decide an edge's geometry once, keyed by the edge.** This is exactly what
+   the crossing curve already does: `crossing_curves` is a map on the vertex
+   pair and both emitters look the edge up in it, so "the two faces name one
+   geometry however the passes are ordered" - and the note on that work records
+   that the earlier revert failed precisely because `decide_sections` rebuilt
+   the map *between* the two emitters. The plane-section pass has no such map;
+   each face decides for its own boundary runs. Giving sections the same
+   treatment makes A impossible by construction rather than detected after the
+   fact, whatever the corner placement did.
+
+2. **Key the written vertex by position, not by mesh index.** Two mesh vertices
+   moved onto one point are one vertex, and the file should say so. Precedent
+   again: `GridSurface` keeps a `lookup` of positions rounded to a grid so
+   membership is a lookup rather than a scan, and its comment points at
+   `VertexSnapper` in `core/FilletNode.cc` as the same problem solved before.
+
+**And the veto is then not the thing to relax.** With A and B fixed at the root,
+the question of whether one bent face should refuse fourteen corners or 1263 can
+be asked again on its own merits, against coupons that no longer break for
+unrelated reasons - and it may not need relaxing at all, because a face bent by
+a move is a face that could be re-planed or fanned once its edges and vertices
+are consistent. Relaxing it first would have been arguing from two defects it
+happened to be concealing.
+
+**Order:** B first - it is small, self-contained, and a defect wherever it
+occurs rather than only under a relaxed veto. Then A, which is the larger
+change and the one that needs the section pass restructured. Then, and only
+then, the veto.
 
 **The fixture gap was the precondition and it is now closed.**
 `export-step-flagship-coupons` exports the band family across `$fn` 24, 48, 64
