@@ -3382,7 +3382,26 @@ void StepKernel::build_tri_body(
       // placement moves a corner onto the surface the model declared, which is
       // exactly off the facet plane it happened to share with a neighbour. A
       // declared plane survives, because that is what the corner was moved onto.
-      // An **error**, not a warning, and unreachable on every coupon measured:
+      // An error in the **exact** tier and a warning in the approximation tier,
+      // which is the difference between the two meanings this condition has.
+      //
+      // Under the approximation flag, losing a section's agreement now costs
+      // exactness and nothing else: both faces keep the chords they agree on,
+      // because a section the far face cannot be handed is no longer written by
+      // the near one either. That is a worse boundary and a correct file.
+      //
+      // In the exact tier it is a correctness fault, because a face was called
+      // exact partly on the strength of a section covering chords which are then
+      // written as chords after all - the face asserts something its boundary no
+      // longer supports.
+      //
+      // It was made an error outright earlier on 2026-09-10, when the far face
+      // could still be left holding chords while the near one wrote a conic; the
+      // fan fix below removed that, and with it the reason for the stronger
+      // reading in the approximation tier. Measured after: f04 under a relaxed
+      // corner placement reaches this and its file is valid.
+      //
+      // Unreachable on every coupon measured either way:
       // the band family at $fn 24, 32, 48, 64 and 96 and both reference parts
       // all report zero. It became reachable exactly once, when the corner
       // placement was relaxed on 2026-09-10, and what it produced was a file
@@ -3395,7 +3414,7 @@ void StepKernel::build_tri_body(
       // is what makes that enforceable rather than merely stated. See open item
       // 11: the fix is to decide an edge's geometry once, keyed by the edge, the
       // way `crossing_curves` already does.
-      LOG(message_group::Export_Error,
+      LOG(approximate ? message_group::Export_Warning : message_group::Export_Error,
           "STEP export: %1$d plane section%2$s agreed before the corners were placed and %3$s not "
           "after, so %4$s boundary is written as chords%5$s",
           int(lost), lost == 1 ? "" : "s", lost == 1 ? "does" : "do",
@@ -3565,6 +3584,10 @@ void StepKernel::build_tri_body(
   }
 
   std::map<std::set<int>, EdgeCurve *> section_edges;
+  // Sections the far face could not be handed, and which are therefore
+  // written as chords by both rather than as a conic by one. Reached only
+  // where a planar loop no longer carries the run - see below.
+  std::size_t section_unshared = 0;
   std::set<std::set<int>> section_subs;  // sections already handed to a planar face
   int sections_declared = 0, sections_fitted = 0;
   auto conic_placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
@@ -3671,6 +3694,62 @@ void StepKernel::build_tri_body(
           const int a = cycle[bs.start], b = cycle[bs.start + bs.count - 1];
           std::set<int> key;
           for (std::size_t k = 0; k < bs.count; k++) key.insert(cycle[bs.start + k]);
+          // Where the section is shared with a planar face, that face has to be
+          // able to take this very edge, and it is handed it by finding this run
+          // of vertices in its loop. That search can fail: a loop fanned into
+          // triangles to follow a moved corner no longer carries the run.
+          //
+          // It used to fail silently, and this wrote the conic anyway. The other
+          // face then wrote the chords it still had, and one boundary came out
+          // as an ELLIPSE from the cylinder and a LINE from the plane - two
+          // edges where the geometry has one, each used once, and the shell
+          // open. That is open item 11's root cause A, seen on the band family
+          // at $fn 64 as `2 edge(s) used by only one face`.
+          //
+          // So the search comes first and it is binding: if the far face cannot
+          // take the edge, this does not write it either, and both sides keep
+          // the chords they agree on. Deciding once means neither side may
+          // decide alone.
+          std::size_t at_j = 0;
+          if (bs.loop >= 0) {
+            // A loop that will be fanned into triangles cannot take this edge at
+            // all, whatever its corners still spell. The fan writes one straight
+            // line per triangle side - it never reads `arc_subs` - and a section
+            // spanning a run of several corners could not be one triangle's side
+            // even if it did. So the handover is impossible, not merely missed,
+            // and writing the conic here would leave the conic on this face and
+            // chords on that one.
+            //
+            // That is open item 11's root cause A: on the band family at $fn 64
+            // with the corner placement relaxed, one boundary came out as an
+            // ELLIPSE from the cylinder and a LINE from the plane beside it, two
+            // edges where the geometry has one. `split_for_corners` is settled
+            // long before any face is written, so this is knowable here.
+            if (split_for_corners.count(std::size_t(bs.loop)) != 0) {
+              section_unshared++;
+              starts_at[i] = -1;  // chords on both sides, which is what agrees
+              continue;
+            }
+            const std::vector<int>& other = loops[bs.loop];
+            const std::size_t m = other.size();
+            const std::size_t span = bs.count - 1;
+            bool shared = false;
+            for (std::size_t j = 0; j < m && !shared; j++) {
+              bool fwd = true, rev = true;
+              for (std::size_t c = 0; c <= span; c++) {
+                fwd = fwd && other[(j + c) % m] == cycle[bs.start + c];
+                rev = rev && other[(j + c) % m] == cycle[bs.start + span - c];
+              }
+              if (!fwd && !rev) continue;
+              shared = true;
+              at_j = j;
+            }
+            if (!shared) {
+              section_unshared++;
+              starts_at[i] = -1;  // chords on both sides, which is what agrees
+              continue;
+            }
+          }
           EdgeCurve *edge = nullptr;
           bool dir = true;
           const auto found = section_edges.find(key);
@@ -3727,20 +3806,11 @@ void StepKernel::build_tri_body(
           // the other way; two faces traversing a shared edge the same way is
           // precisely what leaves a shell open.
           if (bs.loop >= 0 && section_subs.insert(key).second) {
-            const std::vector<int>& other = loops[bs.loop];
-            const std::size_t m = other.size();
+            // `at_j` is where the run sits in that face's loop, found above -
+            // the same search, done once, and binding rather than advisory.
             const std::size_t span = bs.count - 1;
-            for (std::size_t j = 0; j < m; j++) {
-              bool fwd = true, rev = true;
-              for (std::size_t c = 0; c <= span; c++) {
-                fwd = fwd && other[(j + c) % m] == cycle[bs.start + c];
-                rev = rev && other[(j + c) % m] == cycle[bs.start + span - c];
-              }
-              if (!fwd && !rev) continue;
-              if (span == m) rim_of_loop[bs.loop] = {edge, !dir};
-              else arc_subs[bs.loop].push_back({j, span, edge, !dir});
-              break;
-            }
+            if (span == loops[bs.loop].size()) rim_of_loop[bs.loop] = {edge, !dir};
+            else arc_subs[bs.loop].push_back({at_j, span, edge, !dir});
           }
           i = bs.start + bs.count - 1;
           continue;
@@ -4253,6 +4323,13 @@ void StepKernel::build_tri_body(
       "model declared, %4$d on one taken from the mesh",
       sections_declared + sections_fitted, sections_declared + sections_fitted == 1 ? "" : "s",
       sections_declared, sections_fitted);
+    if (section_unshared > 0) {
+      LOG(message_group::Export_Warning,
+          "STEP export: %1$d plane section%2$s written as chords by both faces instead of as the "
+          "conic by one, the face across being fanned into triangles or not carrying the run of "
+          "corners it would have to be handed the edge by",
+          int(section_unshared), section_unshared == 1 ? " is" : "s are");
+    }
     if (!section_misses.empty()) {
       double tilt = 9, off = 9;
       std::size_t parallel = 0;
