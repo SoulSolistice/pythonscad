@@ -428,6 +428,51 @@ One kit run and one refusal column.
 
 ---
 
+## External review, 2026-09-10: what was checked and what it found
+
+A read-only audit of `d3aaafa4` by an outside reviewer, checked here claim by
+claim. Every entry below was reproduced before being accepted — by running the
+code, by a unit test written to fail first, or by reading the implementation —
+and the reviewer's hit rate on the ten claims examined was ten out of ten.
+
+Its scope limits are worth repeating because they bound what the audit can be
+read to say: it never inspected `AnalyticFeatures.cc`, saw `StepKernel.cc` only
+in fragments, ran no tests, and executed no CAD import. Its own closing line —
+that it cannot say what causes fault code 17 — agrees with this document.
+
+### Fixed
+
+| finding | how it was reproduced |
+| --- | --- |
+| **The foot-point residual accepted a point off the end of a patch.** `evaluate` clamps and `project` returns `true` unconditionally, so for a point beyond the patch the foot lands on the boundary and `n . (p - foot)` measures the *tangent plane*, not the surface. A flat grid over the unit square and a point at `(2, 0.5, 0)` gives a residual of **exactly zero** one unit outside. | Read; counterexample exact. Newton keeps `f` and `grad`; every acceptance test now takes the true distance `\|p - foot\|`. Nothing measurable moved — still 498 crossing curves at 9.96e-08 — so the case was not being reached, but the criterion could not have excluded it. |
+| **A mirrored sweep declared different geometry from its mesh.** `SweepSurface::transform` gates on `m^T m == scale^2 I`, which every orthogonal matrix satisfies whatever its determinant, and `evaluate` builds its second radial direction as `normdir x ref` — negated by a reflection. | Unit test written first as `[!shouldfail]`: it reported **20.0 mm**, exactly `2 x radius`, the point on the far side of the axis. Reflections are now refused. |
+| **A rational boundary curve was never held to the surface's weights.** Count and positivity were checked; the values were not compared with the rail they claim to be. | Mutation from the review, run before any fix: the fixture's middle weight changed from 0.70710678 to 0.5 — a parabola where a circular arc was meant — was **accepted**. Now rejected, compared up to a common positive factor so that uniformly rescaled weights still pass. Three mutations added; ten in the harness. |
+| **The corner allowance scaled by distance from the world origin.** `max(1e-7, 1e-8 * extent)` with `extent` the largest `\|p\|`, so translating an unchanged solid relaxed its own acceptance — near 1e9, an allowance near ten coordinate units. | Read. Now the bounding-box diagonal, which is translation invariant. Suite unchanged, so nothing was relying on it. |
+
+### Confirmed and open
+
+| finding | how it was reproduced |
+| --- | --- |
+| **A zero-pitch sweep rejects points its own evaluator made.** `make` refuses `turns == 0` and accepts `pitch == 0`, and `localCoords` then picks the turn from the height, which on a ring says nothing — so `k` is forced to zero and anything past the half turn inverts to a negative `t`. | Unit test: `evaluate(0.75, 0)` on a radius-10 ring is not `onSurface` to 1e-6. Pinned `[!shouldfail]`; the repair is a decision about what `declare_sweep` accepts, not a local edit. |
+| **An empty `DATA` section validates.** All structural checks sit under `if entities:`, so a file with none accumulates no problems. | Ran it: `STEP validation ok (0 entities, 0 faces, 0 shell(s))`, exit 0. |
+| **Shell closure is accounted globally, not per shell.** `check_topology` flattens the faces of every shell into one list and one `edge_dirs` map, so an edge used once in each of two shells satisfies "twice, in opposite directions". | Split a validated cube's single `CLOSED_SHELL` into two three-face halves — neither watertight. Validator: `ok (2 shell(s))`, exit 0. |
+| **`sameSurfaceGeometrically` can merge two different cones.** Slopes are compared in absolute value, justified by "reversing a cone's axis negates it" — but `axesAgree` accepts *parallel* axes too, so two same-direction cones with slopes `+s` and `-s` and a shared refpt compare equal though one widens and the other narrows. | Read. Reachability into a wrong export not established; it changes which branch a junction takes. |
+| **A failed projection is recorded as zero error.** `_off_surface` ends `else 0.0`, so "no projection result" reads as "no deviation". | Read. Fail-open. |
+| **`step_real` rewrites every nonfinite value as `0.`** A failed computation becomes an ordinary-looking coordinate, and the validator's `nan`/`inf` text search cannot see it. | Read. |
+| **Nonuniform scaling drops plane declarations.** `PlaneSurface` has no `transform` override and inherits the similarity-only base, though a plane is representable under any affine map. | Read. A recognition loss, never a wrong solid — which is why it is recorded rather than fixed here: fixing it changes what is written and wants its own re-derivation. |
+| **The round trip requires *at least* `expect_solids`.** Extra bodies pass, and aggregate positive volume does not establish that each body has one. | Read. |
+| **`check_surface_curves` handles only cylinders and cones.** Directly relevant now: the sweep crossing curve writes `SURFACE_CURVE`s on a B-spline face, 498 of them on `f02`, and this validator certifies none of them. | Read. Already recorded as an open item; the new work widened what it does not cover. |
+
+### The one correction worth making to the review
+
+It lists the cone deduplication among "the highest-confidence production
+concerns" alongside the residual, the mirrored sweep and the sweep inversion.
+The first three are demonstrable defects with reproductions; that one is a
+demonstrable *comparison* defect whose effect on an export depends on guards the
+reviewer could not see. Its own body says so. Kept here at that lower weight.
+
+---
+
 ## Parked experiments
 
 All measured, all rejected, reasons in their commit messages. None is a candidate

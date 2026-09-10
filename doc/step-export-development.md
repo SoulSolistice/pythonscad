@@ -1592,6 +1592,34 @@ Each of these cost real time and each will recur.
   exists. Checksum `vertices` at both call sites before reading the code.
 - **A boundary cycle's closing edge is easy to lose.**
 - **A count is not a derivation.**
+- **A validator that finds nothing may have looked at nothing.** Every
+  structural check in `validatestep.py` sits under `if entities:`, so a STEP
+  file with an empty `DATA` section accumulates no problems and prints
+  `validation ok (0 entities, 0 faces, 0 shell(s))`. The same shape of error
+  runs through this whole harness: an absent OCCT turns the round trip into a
+  pass, a failed projection is recorded as zero deviation, and an import error
+  is a skip note rather than a result. Ask what a check *rejects* before quoting
+  what it accepts.
+- **An invariant checked over a whole file is not checked per body.**
+  `check_topology` flattens the faces of every shell into one list and counts
+  edge uses in one map, so "twice, in opposite directions" is satisfied by an
+  edge used once in each of two shells. Demonstrated by splitting a validated
+  cube's single `CLOSED_SHELL` into two three-face halves: neither is
+  watertight and the file validates.
+- **A tolerance must not depend on where the part sits.** The corner allowance
+  scaled by the largest distance from the *world origin*, so translating an
+  unchanged solid relaxed its own acceptance. Anything scaled by position rather
+  than by size has this bug; use the bounding-box diagonal.
+- **Half of a rational curve is its weights.** A boundary curve with the right
+  control points and the wrong weights is a different curve - 0.5 where 0.70710678
+  belongs turns a circular arc into a parabola - and it passed a count check, a
+  positivity check and a control-point-match check. When comparing them, compare
+  up to a common positive factor, because scaling every weight together leaves
+  the curve unchanged.
+- **`m^T m == scale^2 I` does not exclude a reflection.** Every orthogonal matrix
+  satisfies it whatever its determinant. A declaration that reconstructs a
+  direction with a cross product cannot survive one, and `SweepSurface` was
+  accepting mirrors and writing a helix 20 mm from its own mesh.
 - **Do not grep a build log you piped through `tail`.** A `FAILED` line off the
   end of the window is a green result from something that was not looking.
 - **A column that reads zero is not a column that read something.** The interop
