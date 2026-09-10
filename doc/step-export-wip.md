@@ -885,9 +885,43 @@ the relaxed-veto configuration, which is where the defect lives:
 | `lid10` | `VERTEX_POINT #45 and #70 sit on the same coordinates` | **valid**, 830 faces, one shell |
 | `f04` | `2 edge(s) used by only one face` | unchanged, as expected |
 
-So **A is what still stands between the veto and being relaxable**: an edge's
-geometry is decided twice, once by each of its two faces, and the two can
-diverge once a corner moves.
+**A is done too, and the first attempt at it was aimed at the wrong condition.**
+The sharing was never missing - `section_edges` is keyed by the run of corners
+exactly as `crossing_curves` is keyed by the vertex pair, and the quadric pushes
+its EdgeCurve into `arc_subs` so the planar face across uses the same one. What
+was missing is that the far face may be *unable* to take it: a loop fanned into
+triangles is never written as one face, so it never reads `arc_subs`, and a
+section spanning several corners is not any one triangle's side in any case.
+
+Binding on "does that loop still spell the run" was measured and refused the
+hypothesis - it is reached zero times even under the relaxed veto. Binding on
+`split_for_corners`, which is settled long before any face is written, is the
+condition that holds.
+
+| under the relaxed veto | before | after |
+| --- | --- | --- |
+| `f04-band-fn064` | `2 edge(s) used by only one face` | **valid**, 60 faces, one shell, 1198 crossing curves |
+| `r01-lid10` | valid, from B | **valid**, 830 faces, one shell, 589 crossing curves |
+
+#### So the veto can now be asked about on its own merits
+
+Both defects it was concealing are closed, and neither needed it touched. What
+that does *not* establish is that relaxing it is right - a validator passing is
+the same thin evidence that was accepted last time and should not be again.
+What it would take:
+
+1. `export-step-flagship-coupons` green under the relaxation, which is the
+   validator **and** the kernel round trip over all six, not the two measured
+   here by hand.
+2. A SOLIDWORKS run: `f04`, `lid10` and `bayonet` carry a chorded boundary
+   today and code 17 with it, and the whole prediction of item 1 is that a
+   boundary written as the crossing curve is what moves that. `f02` is the one
+   coupon where the veto never fires and the one whose code 17 moved.
+3. Only then the question of whether refusing 14 corners or 1263 is right - and
+   possibly not that at all, since with A and B closed the reason to refuse any
+   of them may be gone.
+
+`export-step-flagship-strict` still fails by design and still says so.
 
 #### Both conditions are now enforced rather than reported
 
