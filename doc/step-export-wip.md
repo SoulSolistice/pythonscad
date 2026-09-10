@@ -200,7 +200,18 @@ boundary was missing, so the measurement means something it did not mean then.
 
 Land it on its own merits — 210 edges made exact is a result — and judge it on
 whether it moves code 17, **not** on the granted slack, which it has already been
-shown not to move. The full record of what was built and why it was reverted is
+shown not to move.
+
+**It now has a second justification that owes nothing to code 17.** Opened in a
+CAD system, the boundary of a declared sweep against the bore is *visibly*
+jagged — a staircase, not a curve. Measured, the turning angle between
+consecutive boundary chords has a median of 5 to 15 degrees and a maximum near
+94 on every member of the family, clean and faulty alike. That is the mesh's
+intersection polyline standing in for a curve neither surface has any reason to
+step along, and the crossing curve is what replaces it. A user sees it before
+any instrument does, which is an argument the slack measurement could not make.
+
+The full record of what was built and why it was reverted is
 in `doc/step-export-development.md`, *Refuted claims*. Two things it must get
 right that the first attempt did not: accept a point that is *on* both surfaces
 to a stated residual rather than one the iteration arrived at, and give the grid
@@ -268,13 +279,27 @@ One kit run and one refusal column.
   imports **clean**: `solid, 9 faces, faults=0`. So does `$fn` 64, and so do 24,
   48 and 96. The whole untapered row is clean, and the 13/30 signature is gone
   with the half of the sweep that used to be left faceted.
-- **The run-out band.** With `$fn` 32 and everything else held, code 17 is on at
-  run-out 0.05, 0.06 and 0.07 and off at 0, 0.08, 0.09 and 0.10, then on again
-  at 0.20 and 0.40. Deterministic — both surprising cells were re-imported twice
-  under different file names. A sharp edge between 0.07 and 0.08, with 19 faces
-  on either side and nothing measurable to tell them apart. This is open item 1
-  seen from its most reproducible end, and `t007` against `t008` is the pair to
-  put in front of a human eye.
+- **The run-out band, and it is the sharpest unexplained result in the file.**
+  With `$fn` 32 and everything else held, code 17 is on at run-out 0.05, 0.06
+  and 0.07 and off at 0, 0.08, 0.09 and 0.10, then on again at 0.20 and 0.40.
+  Deterministic: `t007` faulty three times and `t008` clean three times in one
+  session under six different file names, plus the control.
+
+  **Across that flip the exporter's own report is identical in every count** —
+  claims 607 whole and 64 cut, 12 facets left faceted, 2 smooth regions of 12
+  facets, covers 521 over 218 runs, 3 of the profile's 4 spans, at 0.06, 0.07,
+  0.08 and 0.09 alike. The only quantities that move are smooth monotone drifts
+  that cross nothing: the tessellation band 0.2189 → 0.2083, the typical stray
+  0.0288 → 0.0293. Nor does the boundary's shape: the turning angle between
+  consecutive boundary chords has median 11.586 on `t007` and 11.588 on `t008`,
+  max 94.395 against 94.393, 14 edges over 30 degrees on each.
+
+  Seen by eye the two are "visually rather identical", and on the faulty one
+  **virtually the whole sweep is flagged** — not a region of it. So whatever
+  SOLIDWORKS is keying on is not in any count we produce, not in the boundary's
+  shape, and not local. That is what makes the knit toggle and the crossing
+  curve the two things worth doing next, rather than another measurement of the
+  file we write.
 - **An `ELLIPSE` whose own end vertex is 1.02 mm off it**, on `f01` — a member
   SOLIDWORKS calls **clean**. Computed from the file's own entities with no
   kernel: vertex `#5420` at `(-2.38819, 19.68559, 38.01818)` against an ellipse
@@ -288,7 +313,9 @@ One kit run and one refusal column.
 - **A face on the bore, bounded at the outer wall.** In the untapered wall
   variant at `$fn` 24, four faces are written on the bore cylinder `r = 20` with
   vertices at `r = 23` — their edges are **3.000000 mm** off the surface they
-  claim, exactly the wall thickness. SOLIDWORKS imports it as **half the part**,
+  claim, exactly the wall thickness. Confirmed by eye: *"the entire inner wall
+  is gone; the sweep is looking good but all faces marked as faulty."*
+  SOLIDWORKS imports it as **half the part**,
   10401.67 against its siblings' 20359, with code **16** `swFaceBadVertex` ten
   times on one cylinder and code **21** `swFaceSelfIntersecting` five times on
   each of two 18.9 mm² planes. Not code 17, one cell of the factorial only, and

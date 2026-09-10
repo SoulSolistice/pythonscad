@@ -1839,3 +1839,17 @@ knitted it, which is where the thread now goes.
 **"The sliver is the analytic export's."** The faceted control carries it to
 five decimals — 0.000916 against 0.000938 at `$fn` 32, and twelve identical
 edges at `$fn` 64 — and imports clean at every tessellation. It is the boolean's.
+
+**"The faulty member of the run-out pair has more of its run-in left faceted."**
+An eyeball hypothesis, and a good one — it is the visible difference a reader
+reaches for. Refuted by the exporter's own report, which is **identical in every
+count** at run-out 0.06, 0.07, 0.08 and 0.09: claims 607 whole and 64 cut, 12
+facets left faceted, 2 smooth regions of 12 facets, covers 521 over 218 runs,
+3 of the profile's 4 spans. Two of those four import faulty and two clean.
+
+**"The jagged sweep boundary is what SOLIDWORKS objects to."** The boundary
+*is* jagged — visibly so, and the observation is worth having for its own sake
+(see the crossing curve in `doc/step-export-wip.md`). It is not the trigger: the
+turning angle between consecutive boundary chords is median 11.586 / max 94.395
+on the faulty `t007` and median 11.588 / max 94.393 on the clean `t008`, with 14
+edges over 30 degrees on each.
