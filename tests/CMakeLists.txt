@@ -1216,6 +1216,18 @@ add_test(NAME export-step-flagship-coupons
           --openscad ${OPENSCAD_BINPATH}
 )
 
+# The same coupons, asking additionally that the corner placement never gives up
+# the crossing-curve boundary to protect a planar face. It does today, on four of
+# the six, so this is expected to fail - and that is the point. WILL_FAIL means
+# ctest reports it as a *failure* on the day it starts passing, which is how a
+# fix gets noticed rather than going quiet. Open item 11 is what has to land
+# first; when it does, drop WILL_FAIL and fold --strict into the test above.
+add_test(NAME export-step-flagship-strict
+  COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/step-flagship-check.py
+          --openscad ${OPENSCAD_BINPATH} --strict
+)
+set_tests_properties(export-step-flagship-strict PROPERTIES WILL_FAIL TRUE)
+
 # The same calibration for check_closed_sphere(). A whole sphere is bounded by
 # its seam and nothing else, which is two edges - fewer than any other face of
 # revolution - so teaching validatestep.py that shape is adding an acceptance,

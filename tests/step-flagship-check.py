@@ -69,9 +69,26 @@ def export(binary, source, target, extra):
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
+# Messages the exporter must never emit. `EXPORT-ERROR` is the exporter saying
+# its own output is wrong - today the only one it can raise from this path is two
+# faces contradicting each other about one edge, which opens the shell.
+#
+# The strict list is different in kind: these are reached today, and are here so
+# that the day a fix stops them, something says so. See `--strict`.
+STRICT_MUST_NOT_SAY = [
+    ("corners are left where the mesh put them: moving them would bend",
+     "the plane veto gave up the crossing-curve boundary"),
+]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--openscad", required=True, help="path to the staged pythonscad binary")
+    ap.add_argument("--strict", action="store_true",
+                    help="also require the messages in STRICT_MUST_NOT_SAY to be absent. "
+                         "Registered as a WILL_FAIL test: it is expected to fail today, and "
+                         "when it starts passing ctest reports *that* as the failure, which "
+                         "is how the win gets noticed instead of going quiet.")
     args, _ = ap.parse_known_args()
     binary = os.path.abspath(args.openscad)
     if not os.path.isfile(binary):
@@ -97,6 +114,16 @@ def main():
             print(output, file=sys.stderr)
             failures.append(name)
             continue
+        # The exporter's own verdict on its own output, and it outranks every
+        # check below: a file it calls wrong is wrong whatever a validator makes
+        # of it.
+        errors = [ln for ln in output.splitlines() if "EXPORT-ERROR" in ln]
+        if errors:
+            print("FAIL %-12s the exporter reported an error" % name, file=sys.stderr)
+            for ln in errors:
+                print("       " + ln.strip(), file=sys.stderr)
+            failures.append(name)
+            continue
         if not validateSTEP(target):
             print("FAIL %-12s the export is not valid STEP" % name, file=sys.stderr)
             failures.append(name)
@@ -105,6 +132,12 @@ def main():
             print("FAIL %-12s a kernel could not read it back as a solid" % name, file=sys.stderr)
             failures.append(name)
             continue
+        if args.strict:
+            said = [why for needle, why in STRICT_MUST_NOT_SAY if needle in output]
+            if said:
+                print("FAIL %-12s %s" % (name, "; ".join(said)), file=sys.stderr)
+                failures.append(name)
+                continue
         print("ok   %-12s %s" % (name, os.path.basename(source)), file=sys.stderr)
 
     if failures:

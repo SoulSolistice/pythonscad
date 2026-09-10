@@ -748,6 +748,12 @@ edge is a candidate for the curve its two surfaces cross on.
 | `step-band-family` `$fn` 64 | 1 / 1251 | 1263 corners held |
 | `lid10` | 1 / 623 | the same |
 
+`$fn` 32 is the only coupon measured where the veto does not fire at all. It
+fires on every one of the six the flagship check exports, which is why that
+check's strict half fails on all six rather than on the four first reported -
+an earlier per-coupon measurement lost `-P "New set 1"` to shell quoting and
+exported `lid10` with default parameters.
+
 `$fn` 32 is the only coupon of the four whose code 17 moved. It is also the only
 one where this veto does not fire. That is not a coincidence and it is the whole
 of item 1's `n = 1`.
@@ -863,6 +869,31 @@ happened to be concealing.
 occurs rather than only under a relaxed veto. Then A, which is the larger
 change and the one that needs the section pass restructured. Then, and only
 then, the veto.
+
+#### Both conditions are now enforced rather than reported
+
+Neither of these should ever be reached, and saying so in a comment is not
+saying it. So each is now held to that, at the strength the measurement
+supports.
+
+**Losing a plane section's agreement is an `EXPORT-ERROR`.** It is unreachable
+today - measured zero on the band family at `$fn` 24, 32, 48, 64 and 96 and on
+both reference parts - and it became reachable exactly once, under the relaxed
+veto, where it produced an open shell. That is not a degradation to report and
+live with; it is two faces contradicting each other about one edge, and the file
+is wrong. `step-flagship-check.py` fails on any `EXPORT-ERROR`, so the property
+is enforced rather than stated, and the relaxation would have been caught by it
+at once.
+
+**The veto is an `EXPORT-WARNING` and is asserted never to fire.** It was a plain
+line of information while what it reports is the whole crossing-curve boundary
+being given up. It fires today on **all six** flagship coupons - the band family
+at `$fn` 24, 48, 64 and 96 and both reference parts - so it cannot be an error
+yet - but `export-step-flagship-strict` asserts it never fires and is
+marked `WILL_FAIL`. It is expected to fail, and that is the point: on the day a
+fix stops the veto firing, ctest reports *that* as the failure, so the win
+announces itself instead of going quiet. When it does, drop `WILL_FAIL`, fold
+`--strict` into the main test, and the veto becomes an error like the other.
 
 **The fixture gap was the precondition and it is now closed.**
 `export-step-flagship-coupons` exports the band family across `$fn` 24, 48, 64

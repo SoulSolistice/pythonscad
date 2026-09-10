@@ -2739,11 +2739,19 @@ void StepKernel::build_tri_body(
       // neither coupon is a fixture. So "half a boundary moved is worse than
       // none" carries more than planarity, and what else it carries has to be
       // found before this can be made local. Open item 11.
-      LOG(
-        "STEP export: %1$d corners are left where the mesh put them: moving them would bend "
-        "%2$d face%3$s that keeps a plane, and half a boundary moved is worse than none - of "
-        "those corners %4$d actually touch a bent face, so %5$d are refused for someone else's",
-        int(moves.size()), int(bent), bent == 1 ? "" : "s", int(touched), int(moves.size() - touched));
+      // A warning rather than a line of information, because what it reports is
+      // the whole crossing-curve boundary being given up. It is reached today on
+      // every one of the six flagship coupons and so cannot be an error yet - but it
+      // should never be reached at all: a face bent by a move can be fanned into
+      // triangles, and a triangle is planar wherever its corners are. Item 11
+      // has what stands in the way. `export-step-flagship-strict` is marked
+      // WILL_FAIL and asserts this never fires, so the day it stops, ctest says
+      // so instead of the win going unnoticed.
+      LOG(message_group::Export_Warning,
+          "STEP export: %1$d corners are left where the mesh put them: moving them would bend "
+          "%2$d face%3$s that keeps a plane, and half a boundary moved is worse than none - of "
+          "those corners %4$d actually touch a bent face, so %5$d are refused for someone else's",
+          int(moves.size()), int(bent), bent == 1 ? "" : "s", int(touched), int(moves.size() - touched));
     } else if (analytic_faces > 0) {
       double worst = 0;
       for (const auto& m : moves) {
@@ -3346,7 +3354,20 @@ void StepKernel::build_tri_body(
       // placement moves a corner onto the surface the model declared, which is
       // exactly off the facet plane it happened to share with a neighbour. A
       // declared plane survives, because that is what the corner was moved onto.
-      LOG(message_group::Export_Warning,
+      // An **error**, not a warning, and unreachable on every coupon measured:
+      // the band family at $fn 24, 32, 48, 64 and 96 and both reference parts
+      // all report zero. It became reachable exactly once, when the corner
+      // placement was relaxed on 2026-09-10, and what it produced was a file
+      // whose shell was open - one boundary written as an ELLIPSE by a cylinder
+      // and as a LINE by the plane beside it, two edges where there is one.
+      //
+      // So reaching this is not a degradation to be reported and lived with. It
+      // is two faces contradicting each other about one edge, and the file is
+      // wrong. `tests/step-flagship-check.py` fails on any EXPORT-ERROR, which
+      // is what makes that enforceable rather than merely stated. See open item
+      // 11: the fix is to decide an edge's geometry once, keyed by the edge, the
+      // way `crossing_curves` already does.
+      LOG(message_group::Export_Error,
           "STEP export: %1$d plane section%2$s agreed before the corners were placed and %3$s not "
           "after, so %4$s boundary is written as chords%5$s",
           int(lost), lost == 1 ? "" : "s", lost == 1 ? "does" : "do",

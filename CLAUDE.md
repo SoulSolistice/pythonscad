@@ -164,11 +164,11 @@ pythonscad model.scad -o out.stp \
 rebuild:
 
 ```bash
-ctest --test-dir build -R 'export-step-|mutations'   # 51 tests
+ctest --test-dir build -R 'export-step-|mutations'   # 52 tests
 TEST_GENERATE=1 ctest --test-dir build -R <fixture>
 ```
 
-Use that regex and not `-R step`, which matches 45 of the 51 and drops
+Use that regex and not `-R step`, which matches 45 of the 52 and drops
 `bspline-check-mutations` and `closed-sphere-check-mutations` — the harnesses
 that prove the other tests would fail if the defect came back. A run without
 them is the green suite that never ran the check.
@@ -181,6 +181,14 @@ a change to the corner placement left `$fn` 32 valid, opened the shell at `$fn`
 64 and put two `VERTEX_POINT`s on the same coordinates in `lid10`, and this
 suite passed 50 of 50. It asserts nothing that has to be derived — no face
 counts, no volumes — only what is true of any correct export.
+
+`export-step-flagship-strict` is the same coupons under a stricter question, and
+it is **registered `WILL_FAIL` on purpose**: it asserts the corner placement
+never gives up the crossing-curve boundary to protect a planar face, which it
+does today on all six. So it is expected to fail, and ctest reports it as
+a *failure* on the day it starts passing — which is how that fix gets noticed
+rather than going quiet. Do not "fix" it by deleting it; see open item 11 in
+`doc/step-export-wip.md` for what has to land first.
 
 **The reference part** `examples/step_test/lid10.scad` is not in the suite and
 needs its customizer set; without it you get the default component and every
