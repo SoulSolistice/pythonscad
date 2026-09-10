@@ -346,12 +346,38 @@ bool quadricImplicit(const Surface *surface, const Vector3d& p, double& f, Vecto
   return true;
 }
 
+/*! How far `p` is from the surface, to first order, from its implicit form.
+ *
+ * `f` is the implicit's value and is in the units of whatever the implicit
+ * squares; `|f| / |grad|` is the distance to the level set and is in
+ * millimetres. Asking about that rather than about `f` is what lets one
+ * tolerance mean the same thing on a sphere, a cone and anything else added
+ * later.
+ */
+double implicitDistance(double f, const Vector3d& grad)
+{
+  const double g = grad.norm();
+  return g > 0 ? fabs(f) / g : fabs(f);
+}
+
 /*! Pull a point onto both surfaces at once.
  *
  * Two Newton equations in the two directions that matter - along each surface's
  * own gradient - and nowhere else, so the point slides along the intersection
  * rather than away down it. Fails where the two are tangent, which is where the
  * 2x2 goes singular and where there is no honest answer anyway.
+ *
+ * `tol` is a distance, and the test is that the point *is* on both surfaces to
+ * it - not that the last step was shorter than it. Those differ in exactly the
+ * case this has to serve. A quadric's implicit is exact and Newton on it is
+ * quadratically convergent, so the step collapses to nothing and either test
+ * passes; a surface whose implicit is itself the result of an iteration -
+ * anything answered by `project` rather than by algebra - inherits that
+ * iteration's floor and can sit *on* both surfaces while still taking steps
+ * above it forever. Asked for a step, it never converges and every crossing
+ * curve over such a surface is refused; asked whether it has arrived, it says
+ * yes. That distinction was measured: it is the difference between 93 of 507
+ * crossing curves and all 507.
  */
 bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol)
 {
@@ -359,16 +385,19 @@ bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol
     double fa = 0, fb = 0;
     Vector3d ga, gb;
     if (!quadricImplicit(a, p, fa, ga) || !quadricImplicit(b, p, fb, gb)) return false;
+    if (implicitDistance(fa, ga) <= tol && implicitDistance(fb, gb) <= tol) return true;
     const double aa = ga.dot(ga), ab = ga.dot(gb), bb = gb.dot(gb);
     const double det = aa * bb - ab * ab;
     if (fabs(det) < 1e-18 * std::max(1.0, aa * bb)) return false;  // tangent, or worse
     const double alpha = (-fa * bb + fb * ab) / det;
     const double beta = (-fb * aa + fa * ab) / det;
-    const Vector3d delta = ga * alpha + gb * beta;
-    p += delta;
-    if (delta.norm() <= tol) return true;
+    p += ga * alpha + gb * beta;
   }
-  return false;
+  // One last chance: the loop may have arrived on its final step.
+  double fa = 0, fb = 0;
+  Vector3d ga, gb;
+  if (!quadricImplicit(a, p, fa, ga) || !quadricImplicit(b, p, fb, gb)) return false;
+  return implicitDistance(fa, ga) <= tol && implicitDistance(fb, gb) <= tol;
 }
 
 /*! The arc of the curve where two declared quadrics cross, between two points
