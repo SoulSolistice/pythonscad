@@ -903,16 +903,42 @@ condition that holds.
 | `f04-band-fn064` | `2 edge(s) used by only one face` | **valid**, 60 faces, one shell, 1198 crossing curves |
 | `r01-lid10` | valid, from B | **valid**, 830 faces, one shell, 589 crossing curves |
 
-#### So the veto can now be asked about on its own merits
+#### It was concealing a third defect, and the gate caught it
 
-Both defects it was concealing are closed, and neither needed it touched. What
-that does *not* establish is that relaxing it is right - a validator passing is
-the same thin evidence that was accepted last time and should not be again.
-What it would take:
+With A and B closed the relaxation was put to the whole flagship check -
+validator and kernel round trip over all six coupons, which is step 1 below.
+Five pass. `band-fn024` does not, and on something neither A nor B touches:
 
-1. `export-step-flagship-coupons` green under the relaxation, which is the
-   validator **and** the kernel round trip over all six, not the two measured
-   here by hand.
+```text
+#5561: trimmed CYLINDRICAL_SURFACE is bounded by points up to 3 off it,
+       on a radius of 20
+```
+
+Three millimetres is the wall thickness: the bore at radius 20 and the outer
+wall at 23. These are the 64 corners measured under item 9 whose two provenance
+owners are **coaxial cylinders that never intersect** - Newton correctly finds
+no crossing between them. The veto was holding them still. Released, each is
+placed on one of its owners and ends three millimetres from a face it bounds.
+
+**Why nothing caught it is the same shape as A and B.** The placement checks
+that a move does not bend a *planar* face. Nothing checks that a move does not
+leave a *curved* face's boundary off its own surface, and both faces here are
+cylinders, so the bent-plane test never looks. A guard covering one case of a
+general rule, again.
+
+So that is root cause C, and the veto is load-bearing for more than the two
+things first found behind it. Two coupons measured by hand looked like a green
+light and were not; the gate over all six was what said so.
+
+#### What relaxing it would still take
+
+A validator passing is the thin evidence that was accepted last time and should
+not be again:
+
+1. Root cause C fixed: a corner may not be moved off a curved face it bounds,
+   the same way it may not bend a planar one. Then
+   `export-step-flagship-coupons` green under the relaxation - the validator
+   **and** the kernel round trip over all six, which is the step that found C.
 2. A SOLIDWORKS run: `f04`, `lid10` and `bayonet` carry a chorded boundary
    today and code 17 with it, and the whole prediction of item 1 is that a
    boundary written as the crossing curve is what moves that. `f02` is the one
