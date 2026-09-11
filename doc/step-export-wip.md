@@ -241,6 +241,21 @@ analytic volume cannot depend on `$fn`, and now it nearly does not:
 0.0017% apart, where the old f02 sat 43 mm³ from its own `$fn` 64 sibling. The
 two coupons are the same solid and now say so.
 
+**Re-run 2026-09-11, after root causes A and B.** Both fixes are reasoned to be
+unreachable on today's exports - `section_unshared` is zero and no two corners
+coincide - and that reasoning is two counters reading zero. A CAD system is a
+stronger witness, so the four coupons went through SOLIDWORKS again on the same
+settings.
+
+Every number is identical to the run above: the same face counts, the same
+volumes to four decimals, the same codes, and a `-FaultDetail` table that
+matches the earlier one byte for byte. The control reproduced `faults=2
+faultyfaces=2 codes=17` for the sixth time.
+
+So A and B are confirmed to change nothing an importer sees, by measurement
+rather than by inference, which is what a fix aimed at a latent defect should
+look like.
+
 #### And why the other three coupons did not move
 
 They never got the boundary. Measured on the files themselves:
