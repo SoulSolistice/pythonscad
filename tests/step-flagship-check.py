@@ -33,6 +33,7 @@ and a CAD kernel can read it back as a solid.
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -89,6 +90,11 @@ def main():
                          "Registered as a WILL_FAIL test: it is expected to fail today, and "
                          "when it starts passing ctest reports *that* as the failure, which "
                          "is how the win gets noticed instead of going quiet.")
+    ap.add_argument("--strict-corners", action="store_true",
+                    help="also require every corner of an analytic face to lie on that face's "
+                         "surface, the B-spline allowed the band its fit reported, as the "
+                         "fixtures require. Registered WILL_FAIL on its own, apart from "
+                         "--strict, so each of the two wins announces itself.")
     args, _ = ap.parse_known_args()
     binary = os.path.abspath(args.openscad)
     if not os.path.isfile(binary):
@@ -128,10 +134,41 @@ def main():
             print("FAIL %-12s the export is not valid STEP" % name, file=sys.stderr)
             failures.append(name)
             continue
-        if steproundtrip.available() and not steproundtrip.roundtripSTEP(target):
-            print("FAIL %-12s a kernel could not read it back as a solid" % name, file=sys.stderr)
+        # roundtripSTEP returns (ok, lines), and this read `not (ok, lines)` - a
+        # non-empty tuple, so never true. From the day it landed until
+        # 2026-09-14 no coupon could fail the kernel round trip here, and every
+        # "round trip included" said of these coupons rested on the validator.
+        #
+        # The corners are held apart from the rest. Read properly, every coupon
+        # fails the round trip today, in the normal build and under a relaxed
+        # veto alike, and on one thing only: corners of analytic faces 0.01 to
+        # 0.72 off their surface, the tessellation's slack, against an allowance
+        # near 1e-6. Everything else - one solid, BRepCheck, a positive volume -
+        # passes on all six. So the rest is enforced here, and the corners under
+        # --strict-corners, registered WILL_FAIL for the same reason --strict is.
+        strays = []
+        if steproundtrip.available():
+            bands = [float(b) for b in re.findall(r"tessellation band of ([\d.]+)", output)]
+            solid, report = steproundtrip.roundtripSTEP(
+                target, fitted_band=max(bands) if bands else None, corners_fatal=False)
+            strays = [ln for ln in report if "off the surface it is written on" in ln]
+            if not solid:
+                print("FAIL %-12s a kernel could not read it back as a solid" % name,
+                      file=sys.stderr)
+                for ln in report:
+                    if ln not in strays:
+                        print("       " + ln, file=sys.stderr)
+                failures.append(name)
+                continue
+        if args.strict_corners and strays:
+            print("FAIL %-12s a corner is off the surface its own face is written on" % name,
+                  file=sys.stderr)
+            for ln in strays:
+                print("       " + ln, file=sys.stderr)
             failures.append(name)
             continue
+        for ln in strays:
+            print("note %-12s %s" % (name, ln), file=sys.stderr)
         if args.strict:
             said = [why for needle, why in STRICT_MUST_NOT_SAY if needle in output]
             if said:

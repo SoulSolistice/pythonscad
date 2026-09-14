@@ -1228,6 +1228,18 @@ add_test(NAME export-step-flagship-strict
 )
 set_tests_properties(export-step-flagship-strict PROPERTIES WILL_FAIL TRUE)
 
+# And that every corner of an analytic face lies on the surface that face is
+# written on - the check every fixture's round trip already makes, with a
+# B-spline allowed the band its own fit reported. It fails today on all six
+# coupons, normal build and relaxed veto alike, on the tessellation's slack
+# (0.01 to 0.72). A test of its own rather than a second clause of --strict, so
+# that the veto's fix and this one each flip a test when they land.
+add_test(NAME export-step-flagship-corners
+  COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/step-flagship-check.py
+          --openscad ${OPENSCAD_BINPATH} --strict-corners
+)
+set_tests_properties(export-step-flagship-corners PROPERTIES WILL_FAIL TRUE)
+
 # The same calibration for check_closed_sphere(). A whole sphere is bounded by
 # its seam and nothing else, which is two edges - fewer than any other face of
 # revolution - so teaching validatestep.py that shape is adding an acceptance,

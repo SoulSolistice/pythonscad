@@ -320,8 +320,12 @@ def _invalid_detail(shape, analyzer, limit=5):
 
 def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canonical=None,
                   expect_edges=None, expect_radii=None, expect_volume=None,
-                  expect_tolerance=None, fitted_band=None):
+                  expect_tolerance=None, fitted_band=None, corners_fatal=True):
     """Read `filename` back with OpenCASCADE and report whether it is a solid.
+
+    `corners_fatal=False` still reports every corner off its own face's surface
+    but leaves `ok` to the other checks, for a caller that holds the corners to a
+    different strength than the solid - see step-flagship-check.py.
 
     Returns (ok, lines). `ok` is None when OCCT is not installed, which the
     caller should treat as "not checked" rather than as a pass or a failure.
@@ -517,7 +521,8 @@ def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canoni
                 "a %s face has a corner %.4e off the surface it is written on, against %.4e allowed"
                 % (kind, worst, allow)
             )
-            ok = False
+            if corners_fatal:
+                ok = False
     return ok, lines
 
 
