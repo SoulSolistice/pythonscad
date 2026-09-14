@@ -7,7 +7,8 @@ What is settled lives in `doc/step-export-development.md`; build and test
 mechanics live in `CLAUDE.md`. Read both before this one — several items below
 are one sentence because the reasoning behind them is there.
 
-**Last updated 2026-09-14, for the state at `4c0373a`.**
+**Last updated 2026-09-14, for the state after `6c74a41` (item 11's root cause C)
+and the flagship check's repair that follows it.**
 
 ---
 
@@ -19,22 +20,33 @@ Verify the tree before changing anything, and again after:
 ctest --test-dir build -R 'export-step-|mutations'
 ```
 
-**52 tests**, and it has to be this regex and not `-R step`, which runs 47 and
-drops `bspline-check-mutations` and `closed-sphere-check-mutations` — the
-harnesses whose job is to prove the other tests would fail if the defect came
-back. Measured 2026-09-14. What the 52 are: 33 SCAD fixtures in
-`tests/data/scad/step-export/`, 12 Python in `tests/data/pythonscad-step-export/`,
-the two mutation harnesses, the two flagship tests below, and three
-`*_arg-permutations` tests that have nothing to do with STEP and match
-`mutations` by substring. Run it under the machine's own locale, not
-`LC_ALL=C`, which breaks five UTF-8 filename tests.
+**53 tests**, and it has to be this regex and not `-R step`, which drops
+`bspline-check-mutations` and `closed-sphere-check-mutations` — the harnesses
+whose job is to prove the other tests would fail if the defect came back. What
+the 53 are: 33 SCAD fixtures in `tests/data/scad/step-export/`, 12 Python in
+`tests/data/pythonscad-step-export/`, the two mutation harnesses, the three
+flagship tests below, and three `*_arg-permutations` tests that have nothing to
+do with STEP and match `mutations` by substring. It was 52 until
+`export-step-flagship-corners` was added on 2026-09-14; a build configured
+before that sees 52. Run it under the machine's own locale, not `LC_ALL=C`,
+which breaks five UTF-8 filename tests.
 
-**One of the 52 fails on purpose and reports green.**
-`export-step-flagship-strict` asserts that the plane veto never gives up the
-crossing-curve boundary. It does, on all six flagship coupons, so the test is
-registered `WILL_FAIL`: ctest reports it *passed* while it fails, and will
-report it *failed* on the day it starts passing — which is how that fix gets
-noticed. Do not delete it, and do not read its green as the veto being gone.
+**Two of the 53 fail on purpose and report green**, both registered
+`WILL_FAIL`: ctest reports them *passed* while they fail, and will report each
+*failed* on the day it starts passing — which is how that fix gets noticed. Do
+not delete them, and do not read their green as the defect being gone.
+
+- `export-step-flagship-strict` asserts that the plane veto never gives up the
+  crossing-curve boundary. It does, on all six flagship coupons.
+- `export-step-flagship-corners` asserts that every corner of an analytic face
+  lies on that face's surface, as every fixture's round trip does. It fails on
+  all six coupons, normal build and relaxed veto alike, on the tessellation's
+  slack: 0.01 to 0.72 against an allowance near 1e-6.
+
+**Until 2026-09-14 the flagship check could not fail its round trip.** It read
+`not roundtripSTEP(target)`, and that returns a tuple. Every earlier "flagship
+check green, round trip included" in this file - item 11's "five pass" under the
+relaxation among them - is a validator result. See item 11.
 
 Three things make a green result a lie if they are missing:
 
@@ -68,8 +80,50 @@ correct working tree.
 
 ## Where it stands
 
-**Last measured 2026-09-11, on `claude/solidworks-fault-code-17-b58858`.** Items
-1, 3, 9, 10 and 11 below carry the detail; this is the map.
+**Last measured 2026-09-14, on `claude/solidworks-fault-code-17-b58858`.** Items
+1, 3, 9, 10, 11 and 13 below carry the detail; this is the map.
+
+### Root cause C is closed, and the gate it was holding shut is not what it said
+
+2026-09-14. Item 11 has the five whys; the short of it:
+
+- **C was not coaxial owners that never meet.** At `$fn` 24 provenance names two
+  owners for none of the junctions. The bore's original has 2 whole facets of
+  the 3 ownership needs, so its 48 rim corners got the outer wall as *sole*
+  owner, and the conic placement slid each 3.0 along the cap onto it.
+- **lid10 had the same defect, unrecorded:** 120 chamfer corners slid 0.65 and
+  2.25 onto r = 82.70 - the point root cause B called a real junction. The
+  validator passed it; its bound is 5% of the radius.
+- **It does not need a relaxed veto.** Three primitives - a bore with a frustum
+  subtracted through its length - write the bore 3.0 off itself today.
+- **Fixed at the root** (`6c74a41`): the conic placement keeps a corner on a
+  declared quadric it is already on. **And loud:** no move may take a corner
+  off an analytic face it bounds, an `EXPORT-ERROR`, unreachable on all 45
+  fixtures and 6 coupons with the veto and without it, and fired on exactly
+  `band-fn024` and lid10 when the root fix is removed - which is what makes
+  `export-step-flagship-coupons` fail without it.
+- **The flagship check could never fail its round trip** (`97ce12b`). Read
+  properly, all six coupons fail it in both configurations on corner slack,
+  and pass everything else. That is now its own `WILL_FAIL` test.
+
+**What that does to item 11's gate.** "The flagship check green under the
+relaxation, round trip included" can be measured for the first time, and it
+splits three ways:
+
+- Validator, `EXPORT-ERROR`, one solid, `BRepCheck`, positive volume: **green
+  under the relaxation on all six.**
+- Every corner on its own face: **red on all six in both configurations**, by
+  the same tessellation slack, so "green with the round trip" as written is
+  reachable by no build.
+- **And a fourth defect the veto conceals, which no check asserts** - item 11,
+  root cause D. Under the relaxation lid10 reads back as a valid solid of
+  292144.94 against 227707.04 from the normal build, +28%, and bayonet 225216.89
+  against 238911.27, -6%. Before C's fix the relaxed lid10 read 309176.65, so C
+  was part of it and is not all of it. The band family's volumes move *toward*
+  the model's under the same relaxation.
+
+So the veto stays, for a measured reason and not only a pending decision.
+Nothing was relaxed.
 
 ### Code 17 moved, on the one coupon whose boundary was written
 
@@ -127,29 +181,33 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
 
 ### Open, in the order to take it
 
-1. **Item 11, root cause C.** Under a relaxed veto, `band-fn024` writes a
-   cylinder of radius 20 bounded by points 3 mm off it: corners whose two
-   owners are coaxial cylinders that never meet, placed on one and deserting a
-   face of the other. The placement checks that a move does not bend a planar
-   face and nothing checks that it does not leave a curved face's boundary off
-   its own surface.
-2. **Then the veto itself**, and only through the gate: the flagship check green
-   under the relaxation, round trip included, then SOLIDWORKS on `f04`, lid10
-   and bayonet with the `f02` control in the same session.
-3. **Code 21 on `f02`'s sweep** is new and unexplained.
-4. **lid10's faceted control reads `faults=6 codes=24`**, which weakens lid10 as
+1. **Item 11, root cause D.** Under the relaxation lid10 reads back a valid
+   solid 28% too large and bayonet 6% too small. Every check the flagship
+   coupons have is green on it. Then decide what the veto waits for on corner
+   slack, which is red in both configurations.
+2. **Then the veto itself**, and only through the gate: the flagship check under
+   the relaxation, then SOLIDWORKS on `f04`, lid10 and bayonet with the `f02`
+   control in the same session.
+   The relaxation to use is `b57c8e73b`'s settle loop.
+3. **Item 13: provenance loses an original a boolean cut on every facet.** C was
+   one consequence; corners left with no owner at all are the other, and they
+   are what keeps the three-primitive reproduction of C from being a fixture.
+4. **Item 14: the two-owner placement moves corners off declared surfaces** -
+   240 on lid10, 120 on bayonet - without leaving any face they bound. Unexplained.
+5. **Code 21 on `f02`'s sweep** is new and unexplained.
+6. **lid10's faceted control reads `faults=6 codes=24`**, which weakens lid10 as
    a test until it is understood.
-5. **lid10 exports 810 analytic faces** where 818 and 822 were recorded earlier;
+7. **lid10 exports 810 analytic faces** where 818 and 822 were recorded earlier;
    it moved with this work and has not been re-derived.
-6. **Item 12**, the survey for other should-never-happen counters. No build.
-7. **The last 47 chords on `f02`.** Not the fitter and not the projector, both
+8. **Item 12**, the survey for other should-never-happen counters. No build.
+9. **The last 47 chords on `f02`.** Not the fitter and not the projector, both
    cleared; whether they are the edges touching the 64 coaxial-owner vertices is
    unmeasured.
-8. **Only the sweep side of a sweep-to-bore edge carries a pcurve**, because the
-   two-pcurve writer needs two pushed sides and only the quadric emitter pushes.
-9. **Every plane section on the band family is fitted to a ridge-flank facet**,
-   a plane the model does not have — a plane section written for a cut that is
-   not one.
+10. **Only the sweep side of a sweep-to-bore edge carries a pcurve**, because the
+    two-pcurve writer needs two pushed sides and only the quadric emitter pushes.
+11. **Every plane section on the band family is fitted to a ridge-flank facet**,
+    a plane the model does not have — a plane section written for a cut that is
+    not one.
 
 ### As it stood on 2026-09-08
 
@@ -1058,15 +1116,156 @@ So that is root cause C, and the veto is load-bearing for more than the two
 things first found behind it. Two coupons measured by hand looked like a green
 light and were not; the gate over all six was what said so.
 
+**One correction, found 2026-09-14:** "five pass" above is a validator result.
+The flagship check's round trip could not fail (see *Read this first*), and read
+properly none of the six passes it, in either configuration, on corner slack.
+
+#### Root cause C, chased to the root on 2026-09-14
+
+Reproduced with the relaxation of `b57c8e73b` behind a temporary switch, so one
+binary served both configurations; nothing of the switch was committed.
+
+**Which path moved the corners?** Named before measuring: (H1) the two-owner
+placement, whose acceptance reads only its first owner - Newton's best iterate
+on the far cylinder; (H2) the pass onto a face's own quadric, for a vertex in
+two patches' runs; (H3) the conic placement; (H4) the vouched-plane reroute.
+
+- **H1 refuted at once:** at `$fn` 24 provenance names two owners for **0** of
+  368 junction vertices. The pair branch never runs.
+- **H3, the one predicted uninvolved:** 48 corners at r = 20.0000 exactly, z = 0
+  and 40, single owner the r = 23 cylinder, **3.0000 off it before the move**,
+  moved 3.0000 along the cap with `reach = 40` - the travel bound on that path
+  is the *farthest* vertex of the faces at the corner. Every one bounds the face
+  written on r = 20. H2 and H4 moved none of them.
+
+**Why is the r = 23 wall its only owner?** Named: (W-a) provenance attributes a
+bore-rim vertex to the wall's original through the cap and the bore's original
+owns nothing; (W-b) the owner is right and only the travel bound is loose; (W-c)
+two owners collapsed by deduplication. Measured `ids: id1[0] id3[]` on all 48:
+the bore's original owns **nothing**, so W-a, with W-b in the same chain; W-c
+refuted.
+
+**Why does the bore's original own nothing?** Named: (W2-i) the ridge cuts
+nearly every bore facet, and ownership needs three whole; (W2-ii) the whole-facet
+test rejects a subtracted cylinder; (W2-iii) the record is dropped.
+
+| `$fn` | bore original on r = 20, whole / cut | provenance |
+| --- | --- | --- |
+| 24 | **2** / 344 | one owner for all 368 junctions |
+| 32 | 19 / 324 | two owners for all 704 |
+| 48 | 7 / 679 | two for all 736 |
+| 64 | 85 / 601 | two for all 1406 |
+
+W2-i. W2-ii refuted by the same test claiming the bore at 32, 48 and 64; W2-iii
+by the record being surface 3 in every export. The coaxial pair of the original
+description is the `$fn` 32-and-up population, where the two-owner placement
+correctly finds no crossing and moves nothing; `$fn` 24 is the one member where
+the pair collapses to a single wrong owner.
+
+**The same defect on lid10, unrecorded until now.** Measured over every proposed
+move, before the veto, on all fixtures and coupons: does it take a corner
+further off the surface of an analytic face it bounds?
+
+| export | corner-face pairs leaving the face | worst |
+| --- | --- | --- |
+| `band-fn024` | 60 (48 corners), trimmed quadric | 3.0000 |
+| `lid10` | 240 (120 corners), recognised bands | 1.5877 |
+| every fixture, the other four coupons | 0 | - |
+
+lid10's 120 are the same chain: `id1[0] id2[]`, id2 with 0 whole facets on the
+declared cylinders s6/s7/s8 (r 81.25, 80.45, 82.05, the rims its chamfer cones
+hull between), corners at r = 82.0547 and 80.4547 moved along z = 95 onto
+r = 82.70 with `reach = 164`. That is `(-66.9057, -48.6098, 95.0)`, the point
+root cause B's entry above calls "a real junction of those four surfaces". It is
+not; it is C. OCCT reads the relaxed file's cones at up to 1.5877 off, where
+`validatestep.py` passed it: its bound is 5% of the radius, 4.05 on r = 81 and
+1.0 on the bore, which is the whole reason one of the two was caught. The plane
+corners 5.7057 off in that same relaxed lid10 were C's too, and are gone with it.
+
+**It does not need the veto relaxed.** Three primitives - a tube with a frustum
+subtracted through its whole length, half a step rotated so it crosses every
+bore facet mid-facet - make the bore's and the frustum's originals own nothing,
+and today's build writes the bore 3.0 and the frustum 2.43 off themselves with
+the veto silent. Kept out of the suite for now; see item 13 for why.
+
+**The fix, and the choice in it.** Two rules were measured against every export:
+
+| rule | refuses on `band-fn024` / lid10 | elsewhere |
+| --- | --- | --- |
+| a corner on a declared quadric stays on it, asked by the conic placement | 48 / 120 | 0 |
+| no move off the surface of an analytic face the corner bounds, over every path | 48 / 120 | 0 |
+
+The same corners. The first is the root - the conic placement's premise, "one
+declared surface holds this corner", is false for them, and the pass onto a
+face's own quadric already asks exactly this - and it is what landed in the
+placement. The second is the rule the veto enforces for planes, over every path;
+landed as the backstop, and with the first in place nothing reaches it, so it is
+an `EXPORT-ERROR` that also holds the move.
+
+Asking the first of *every* path was rejected on measurement: it would also
+refuse 240 two-owner moves on lid10 and 120 on bayonet that leave a declared
+surface but no face - item 14, unexplained, and not a reason to widen a fix.
+The triple-point placement shares the premise and moved no corner off a quadric
+anywhere, so it was left alone; the backstop covers it loudly.
+
+A branch not separated: whether a deserting corner can be a sagitta *off* the
+quadric rather than on it, which the first rule would miss and the second
+catch. The model built to separate them - radial gear teeth through the bore -
+never had its bore written analytic, so it said nothing either way.
+
+**Verified where the defect lives.**
+
+| build | `band-fn024` | lid10 | 43 other exports |
+| --- | --- | --- | --- |
+| fix, veto as is | 48 held | 120 held | silent |
+| fix, veto relaxed | 48 held | 120 held | silent |
+| backstop without the root fix | `EXPORT-ERROR` 48, 3.0000 | `EXPORT-ERROR` 120, 1.5877 | silent |
+
+At suite level, with the root fix removed from the working tree and the
+backstop kept, `export-step-flagship-coupons` fails on exactly `band-fn024` and
+lid10; on `777247eb1`, with neither, the suite was 52/52. That failure is the
+suite catching the defect - through the backstop, since no fixture exercises C
+on today's build. The three-primitive model does, and item 13 is what it waits on.
+
 #### What relaxing it would still take
 
 A validator passing is the thin evidence that was accepted last time and should
 not be again:
 
-1. Root cause C fixed: a corner may not be moved off a curved face it bounds,
-   the same way it may not bend a planar one. Then
+1. ~~Root cause C fixed~~ **Done 2026-09-14**, above. Then
    `export-step-flagship-coupons` green under the relaxation - the validator
-   **and** the kernel round trip over all six, which is the step that found C.
+   **and** the kernel round trip over all six. **Measured 2026-09-14, and it
+   splits:** validator, `EXPORT-ERROR`, one solid, `BRepCheck` and a positive
+   volume are green on all six under the relaxation; every corner on its own
+   face is red on all six, relaxed or not, by the same slack
+   (`export-step-flagship-corners`). "Green with the round trip" as written is
+   reachable by no build. And the green half hides root cause D below: a
+   valid solid of the wrong volume is green on every check here.
+
+#### Root cause D: under the relaxation, lid10 and bayonet are the wrong solid
+
+Found 2026-09-14 reading the round trip's volumes rather than its verdict, and
+not chased. OCCT, both flags, lid10's customizer as an argv list:
+
+| export | faces read | volume |
+| --- | --- | --- |
+| lid10, normal build, before and after C's fix | 814 | 227707.039963 |
+| lid10, relaxed veto, before C's fix | 843 | 309176.648762 |
+| lid10, relaxed veto, after C's fix | 843 | 292144.944117 |
+| bayonet, normal build | 82 | 238911.271234 |
+| bayonet, relaxed veto, before and after | 83 | 225216.891998 |
+
+A correct solid cannot move 28% because corners moved by a sagitta, so this is
+a defect and not slack. What SOLIDWORKS read of the normal-build files on
+2026-09-11 - 226032.0463 and 237141.7973 - is within 0.7% of the normal rows.
+Nothing in the suite asserts a flagship volume, and none can be derived for
+these two parts, so the first measurement is the entity-by-entity read that
+found A and B: which of the 29 extra faces carries the volume, and on which
+side of it the solid is.
+
+The band family is not affected the same way - its relaxed volumes, 19512.75 at
+`$fn` 48 and 19506.93 at 96, are closer to the 19511.6-19511.9 the analytic
+exports agree on than the normal build's 19573.08 and 19521.30.
 2. A SOLIDWORKS run: `f04`, `lid10` and `bayonet` carry a chorded boundary
    today and code 17 with it, and the whole prediction of item 1 is that a
    boundary written as the crossing curve is what moves that. `f02` is the one
@@ -1179,6 +1378,116 @@ on everything measured.
 were because the thing concealing them looked like a statistic. This is a read
 of an existing report, it needs no build, and it is the cheapest thing on this
 list.
+
+**Found in passing on 2026-09-14, and each is the survey's kind.**
+
+- **A check that could not fail.** The flagship check's round trip, above; now
+  repaired, and the kind worth grepping the harness for: a function returning
+  `(ok, lines)` tested for truth.
+- **A bound proportional to the radius.** `validatestep.py`'s trimmed-quadric
+  corner check allows 5% of the radius - 4.05 on lid10's chamfers, which let
+  root cause C's 2.25 through. Not changed: tightening it is a validator
+  acceptance, and wants a derivation of what a trimmed quadric's corners may
+  honestly stray (item 13's slack is the same question).
+- **The conic placement's travel bound is the farthest vertex** of the faces at
+  the corner - 40 on a cap, 164 on lid10 - where §4 of the development document
+  says a corner may travel no further than its nearest neighbour, and the triple
+  placement does bound it so. C no longer depends on it; the bound is still not
+  the rule it is documented as.
+- **A faceted export that is not valid.** The tube with a rotated r = 20.05
+  24-gon subtracted over z 5..35 exports *faceted* as `hole 1240 is not directly
+  inside this face - the outer bound of #4246 lies between them`. No analytic
+  flag involved; the model is quoted under item 13.
+- **lid10 and bayonet report identical worst corners** - cone 7.1595e-01,
+  cylinder 1.0349e-01, plane 5.2461e-01, B-spline 8.5764e-02 - over 814 and 82
+  faces. The two parts may share that geometry; not checked.
+
+### 13. Provenance loses an original a boolean cut on every facet
+
+**Filed 2026-09-14, out of item 11's root cause C.** An original owns a surface
+when at least three of its facets lie on it *whole*
+(`export_step.cc`, `least = 3`), and cut facets are deliberately not counted -
+§10 of the development document records why: a facet cut across a seam has two
+corners on the far surface, and counting it made every solid own everything it
+touches. The rule is right about seams and blind to one case: an original whose
+every facet a boolean cut. It then owns nothing, its declared surface drops out
+of the vote at every junction it is part of, and two things follow.
+
+1. **A wrong single owner**, where one other original meets it. That was C, and
+   the conic placement now refuses to act on it. The owner is still wrong; the
+   placement no longer believes it.
+2. **No owner at all**, where the other original is cut the same way. Nothing
+   places those corners, and they stay on the mesh's chords.
+
+The model that shows both, with nothing else wrong in it:
+
+```scad
+difference() {
+  cylinder(r = 23, h = 40, $fn = 24);
+  translate([0, 0, -1]) cylinder(r = 20, h = 42, $fn = 24);
+  translate([0, 0, -1]) rotate([0, 0, 7.5]) cylinder(r1 = 20.6, r2 = 19.4, h = 42, $fn = 24);
+}
+```
+
+The frustum crosses every bore facet mid-facet over the full height, so bore and
+frustum each own 0 whole facets (72 cut apiece) and the outer wall owns 48.
+Provenance: one owner for 48 junctions - the bore's 24 rim corners at z = 40 and
+the frustum's 24 at z = 0, each handed the wall - and none for the 48 where bore
+and frustum cross. Both flags:
+
+| build | validator | worst corner, OCCT |
+| --- | --- | --- |
+| before `6c74a41` | bore 3.0 and frustum 2.43 off themselves | cylinder 3.0000, cone 2.4276 |
+| after | valid | cylinder 0.1711, cone 0.1725 |
+
+The 0.17 left is consequence 2: the unowned crossing corners, a sagitta of the
+r = 20 24-gon, 20(1 - cos(pi/24)) = 0.1711, off the bore and about as much off
+the frustum. That is why this model is not a fixture yet. It would fail the round trip after C's fix for a
+reason C's fix does not touch, and a fixture must pass once its defect is fixed.
+When consequence 2 is fixed it becomes the fixture for both, and its volume is
+derivable: pi (23^2 40 - 20^2 20 - (35/3)((20.6 - 1/35)^3 - 20^3)) = 15485.700931,
+the frustum meeting the bore in the circle at z = 20.
+
+Four models were built on the way to it, and what each refuted is worth keeping:
+
+- a rotated r = 20.05 24-gon subtracted over z 5..35 reproduces C but exports
+  invalid *faceted* as well (item 12):
+
+  ```scad
+  difference() {
+    cylinder(r = 23, h = 40, $fn = 24);
+    translate([0, 0, -1]) cylinder(r = 20, h = 42, $fn = 24);
+    translate([0, 0, 5]) rotate([0, 0, 7.5]) cylinder(r = 20.05, h = 30, $fn = 24);
+  }
+  ```
+
+- a torus bead through the bore leaves the bore whole facets and fires the veto;
+- a ring of square section, r 19..21, cuts the bore only along its own corner
+  lines, so every facet stays whole;
+- the frustum over z 5..35 only leaves the 48 bore facets below z = 5 whole, cut
+  horizontally by the frustum's cap along the bore's own corners.
+
+What counts as ownership is the question, and the seam case in §10 is the
+constraint any answer has to keep.
+
+### 14. The two-owner placement takes corners off declared surfaces, and no face notices
+
+**Filed 2026-09-14, measured and not chased.** While choosing C's fix, every
+proposed move on every export was asked whether it takes a corner off a declared
+exact surface the corner is on to 1e-9, split by path:
+
+| export | two-owner path, off a declared quadric | off a declared plane |
+| --- | --- | --- |
+| `lid10` | 60 | 180 |
+| `bayonet` | 0 | 120 |
+| every fixture, the band family | 0 | 0 |
+
+None of these leaves a face it bounds - that check read zero on both parts - so
+the file is not wrong for it, and C's fix was deliberately not widened to refuse
+them. Either the declared surface is one those corners are on by coincidence
+(an infinite cylinder's record beyond the part, a plane through a rim), or the
+crossing two owners find is not the corner's whole story. The measurement to
+make is the entity read: which declarations, and where the face across is.
 
 ---
 
@@ -1549,12 +1858,15 @@ beside the fault column.
 > Build and test mechanics are in `CLAUDE.md`.
 >
 > The branch should be green. Verify with
-> `ctest --test-dir build -R 'export-step-|mutations'`: **52 tests**, not
-> `-R step`, which runs 47 and drops the mutation harnesses. Run it under the
-> machine's own locale. One of the 52, `export-step-flagship-strict`, fails on
-> purpose and is registered `WILL_FAIL`, so it reports green — do not read that
-> as the veto being gone, and do not delete it. Confirm the round trip actually
-> runs (`cadquery-ocp` 7.x, not 8.0) before trusting any green result.
+> `ctest --test-dir build -R 'export-step-|mutations'`: **53 tests**, not
+> `-R step`, which drops the mutation harnesses. Run it under the machine's own
+> locale. Two of the 53 fail on purpose and are registered `WILL_FAIL`, so they
+> report green: `export-step-flagship-strict` (the plane veto fires) and
+> `export-step-flagship-corners` (corners of analytic faces off their surface
+> by the tessellation's slack). Do not read either as fixed, and do not delete
+> them. Confirm the round trip actually runs (`cadquery-ocp` 7.x, not 8.0)
+> before trusting any green result - and remember the flagship check could not
+> fail its round trip before `97ce12b`.
 >
 > Every STEP export needs `--enable=step-analytic-surfaces
 > --enable=step-approximate-surfaces`; without them it writes facets and passes
@@ -1569,39 +1881,43 @@ beside the fault column.
 > from those three is the plane veto, which fires on all six flagship coupons.
 > That is n = 1, and the work is to make it n = 4 honestly.
 >
-> **Take item 11's root cause C.** The veto was found to be concealing defects
-> rather than protecting against one. A and B are fixed at the root — the written
-> vertex keyed by its final position, and no section edge where the face across
-> will be fanned — and neither needed the veto touched. C is what the six-coupon
-> gate found when the veto was relaxed again: on `band-fn024`, corners whose two
-> owners are coaxial cylinders that never meet get placed on one and end 3 mm off
-> a face of the other. The placement guards against bending a planar face and
-> nothing guards against leaving a curved face's boundary off its own surface.
+> **Take item 11's root cause D.** A, B and C are fixed at the root; C turned
+> out to be provenance handing a corner a single wrong owner, not coaxial owners,
+> and lid10 carried it too. With C closed the veto's gate was measured for the
+> first time and it is not green for a reason no check asserts: under the
+> relaxation lid10 reads back as a valid solid 28% too large (292144.94 against
+> 227707.04) and bayonet 6% too small, while the band family's volumes move
+> toward the model's. Find which of lid10's 29 extra faces carries it, entity by
+> entity, the way A and B were read. Then the decision item 11 leaves open: what
+> the veto waits for on corner slack, which is red in both configurations.
 >
-> **How to work it, which is how A and B were found:**
+> **How to work it, which is how A, B and C were found:**
 >
 > - Five whys with the branches named before each measurement, and the refuted
 >   ones recorded. This investigation has refuted more hypotheses than it has
 >   kept, including two of its own root causes on the first attempt; the
 >   refutations are part of the result.
 > - Fix at the root, not at the gate. Relaxing the veto was proposed on an 89:1
->   ratio and turned out to be holding back three defects. Do not relax it until
->   C is closed, then the flagship check is green under the relaxation with the
->   round trip, then SOLIDWORKS agrees.
+>   ratio and turned out to be holding back four defects. Do not relax it until
+>   D is closed, the flagship check is green under the relaxation - read its
+>   volumes, not only its verdict - and SOLIDWORKS agrees.
 > - Prefer the declaration to a deduction. When a structural fact about a
 >   declared surface is needed, ask the surface — `splineForm`,
 >   `membershipTolerance`, `isDeclaredPoint` — rather than reaching around a
 >   protected member or inferring it by projection.
-> - Verify a latent fix where the defect lives. A and B were no-ops on the normal
->   build and were verified against the relaxed-veto configuration, where they
->   were not. Mutate by writing the working tree with `git show <sha>:<path> >
->   <path>`, never `git checkout <sha> -- <path>`, which stages the file.
+> - Verify a latent fix where the defect lives. A, B and C change nothing the
+>   flagship coupons' normal build writes, and were verified against the
+>   relaxed-veto configuration (`b57c8e73b`'s settle loop), where they do. Mutate
+>   by writing the working tree with `git show <sha>:<path> > <path>`, never
+>   `git checkout <sha> -- <path>`, which stages the file.
 > - A defect the suite did not catch does not land its fix until something in the
 >   suite fails without it. A unit test where the defect is in a solver, derived
 >   and shown to fail; a fixture only where it is visible solely in a whole export.
 > - Anything that should never be reached is loud, at the strength the
 >   measurement supports: `EXPORT-ERROR` if unreachable today, `EXPORT-WARNING`
 >   plus a `WILL_FAIL` assertion if reached today. Item 12 is the survey for more.
+> - Ask what a check rejects before quoting what it accepts: hand it a file known
+>   to be wrong. The flagship round trip passed a 25-shell file for four days.
 >
 > **Standing rules.** Every expectation derived from the model, never captured
 > from a run. Report how much of each sweep was recognised beside any fault

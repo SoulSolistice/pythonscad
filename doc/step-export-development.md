@@ -578,6 +578,26 @@ mesh has 20-unit vertical edges, so that licensed a move of 1.9976 on a radius o
 the surface stands off the middles of the nearby chords that *do* lie on it. A
 declared sweep states the same quantity outright as its band.
 
+**A corner already on a declared quadric stays on it.** Provenance's single
+owner is not a statement about the corner: it is the one surface the originals
+meeting there own, and an original a boolean cut on every facet owns nothing,
+so its surface drops out of the vote. On `band-fn024` the ridge leaves the bore
+2 whole facets of the 3 ownership needs, its 48 rim corners - generated on the
+bore to 1e-14 - get the outer wall as sole owner, and the conic placement slid
+each 3.0 along the cap onto it. The travel bound did not stop it, because that
+path bounds by the *farthest* vertex of the faces at the corner, 40 on a cap. So
+the conic placement asks the declarations first, as the pass onto a face's own
+quadric already did.
+
+**No move may take a corner off the surface of an analytic face it bounds.**
+The veto asks that of a face that keeps a `PLANE`; nothing asked it of a curved
+face, whose corner the file equally asserts is on it. It is now checked over
+every proposed move before the veto, each face judged against its own
+`declaredBand`, and a corner already off is judged only on whether the move
+takes it further. It is an `EXPORT-ERROR` and the move is held: measured
+unreachable on every fixture and flagship coupon, veto or none, and reached by
+exactly the two populations above the moment the rule before it is removed.
+
 ### Telling a cutting plane from a chord
 
 Some planes at a corner are the tessellation's own chords of the very surface
@@ -1641,6 +1661,18 @@ Each of these cost real time and each will recur.
   read `faults=2 faultyfaces=2 codes=17`; without that row nothing else in the
   run means anything, and this project has twice reasoned from a set of clean
   verdicts before establishing that the session could produce a dirty one.
+- **A check whose result is never read passes everything.** `step-flagship-check.py`
+  called `not steproundtrip.roundtripSTEP(target)`, which returns `(ok, lines)`
+  - a non-empty tuple, never false. From the day it landed no flagship coupon
+  could fail the kernel round trip, a 25-shell file included, and every "round
+  trip included" said of those coupons rested on the validator alone. Read
+  properly, all six fail it, on corner slack. The mutation that exposes this
+  kind is not a changed input but a known-bad file handed to the check.
+- **A tolerance proportional to the radius hides the most on the largest part.**
+  `validatestep.py` passes a trimmed quadric whose corners stray under 5% of its
+  radius: 1.0 on the band family's bore, which is why a 3.0 desertion was caught
+  there, and 4.05 on lid10's r = 81 chamfers, where 2.25 went through. The same
+  defect on both parts, and one verdict each.
 - **A run-out is a series, not a switch.** Asking "tapered or untapered" gave a
   clean two-way split that survived two sessions and dissolved the moment the
   run-out was walked continuously — clean at 0, faulty at 0.05 to 0.07, clean at
@@ -1929,3 +1961,23 @@ is enough to fail its face*. 142 edges still fail to fit inside 1e-7 and stay
 chords, so the face SOLIDWORKS objects to has never yet been offered a boundary
 that lies on it. Reporting this as "the crossing curve does not fix code 17"
 would be the same error as reporting a green suite whose round trip never ran.
+
+**"Root cause C is corners whose two owners are coaxial cylinders that never
+meet."** Written into the handover on 2026-09-10 when the relaxed veto put
+`band-fn024`'s bore 3 off itself, and it named the right surfaces and the wrong
+mechanism. At `$fn` 24 provenance names two owners for *none* of the 368
+junction vertices; the coaxial pair is the `$fn` 32-and-up population, where the
+two-owner placement correctly finds no crossing and moves nothing. What moved
+the 48 was the conic placement, handed a single owner because the bore's
+original has 2 whole facets of the 3 ownership needs. Refuted with it: that the
+membership test rejects a subtracted cylinder (it claims the bore at 19, 7 and
+85 whole facets at `$fn` 32, 48, 64) and that the record is dropped (it is
+surface 3 in every export).
+
+**"lid10's (-66.9057, -48.6098, 95.0) is a real junction of four surfaces."**
+Recorded on 2026-09-10 as the point root cause B's three coincident
+`VERTEX_POINT`s legitimately share. It is where C put them: corners generated
+on two chamfer cones, at r = 82.0547 and 80.4547, each handed the r = 82.70
+wall as sole owner and slid along z = 95 onto it, 0.65 and 2.25. B's fix -
+key the written vertex by where the corner ended - is right on its own terms;
+the example that motivated it was a desertion.

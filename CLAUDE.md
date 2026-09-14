@@ -164,11 +164,11 @@ pythonscad model.scad -o out.stp \
 rebuild:
 
 ```bash
-ctest --test-dir build -R 'export-step-|mutations'   # 52 tests
+ctest --test-dir build -R 'export-step-|mutations'   # 53 tests
 TEST_GENERATE=1 ctest --test-dir build -R <fixture>
 ```
 
-Use that regex and not `-R step`, which matches 47 of the 52 and drops
+Use that regex and not `-R step`, which drops
 `bspline-check-mutations` and `closed-sphere-check-mutations` — the harnesses
 that prove the other tests would fail if the defect came back. A run without
 them is the green suite that never ran the check.
@@ -189,6 +189,18 @@ does today on all six. So it is expected to fail, and ctest reports it as
 a *failure* on the day it starts passing — which is how that fix gets noticed
 rather than going quiet. Do not "fix" it by deleting it; see open item 11 in
 `doc/step-export-wip.md` for what has to land first.
+
+`export-step-flagship-corners` is the third, also **`WILL_FAIL` on purpose**: it
+asks that every corner of an analytic face lie on that face's surface, which
+every fixture's round trip already asks, and all six coupons fail it today on
+the tessellation's slack. It is separate from `--strict` so that each fix flips a
+test of its own.
+
+The flagship check's round trip is read, but only since 2026-09-14: it tested
+`not roundtripSTEP(...)`, a tuple, and so passed every file. A green flagship run
+from before that says the validator passed, nothing more. And a green one after
+it still does not say the solid is the right one - no flagship volume is
+asserted, because none of these parts has one to derive.
 
 **The reference part** `examples/step_test/lid10.scad` is not in the suite and
 needs its customizer set; without it you get the default component and every
@@ -620,6 +632,12 @@ almost always:
 | edited an existing source file | `cmake --build build -jN` — never configure |
 | **added** a source file | configure first; sources are found by glob, and the full rebuild is unavoidable |
 | **added** a test or fixture | configure first, or ctest will not see the new test at all |
+
+One measurement against that, not yet explained: on 2026-09-14, in the
+`solidworks-fault-code-17` worktree, `cmake -B build` over an existing cache
+after adding one `add_test` took 19 s and the following build ran 20 ninja steps
+in under a minute. Whether the hour is specific to a changed cache, a fresh
+tree, or another worktree is unmeasured; do not rely on either figure.
 
 Do not put a configure step into a script "to be safe": that quietly turns every
 run into a full rebuild. `scripts/msys2-build.sh` therefore skips it unless the
