@@ -125,6 +125,11 @@ splits three ways:
 So the veto stays, for a measured reason and not only a pending decision.
 Nothing was relaxed.
 
+**And SOLIDWORKS, asked the same day of that relaxation as an experiment** (item
+1, *Run 2026-09-14*): `f04` reads `faults=0`, the sweep kept, where its normal
+build reads code 17 - n = 2. Bayonet's sweep loses its 17 too; lid10's does not,
+and lid10 gains a face SOLIDWORKS reads inside out, the first lead on D.
+
 ### Code 17 moved, on the one coupon whose boundary was written
 
 SOLIDWORKS 34.0, settings read back by the driver: `knit=form-solids`,
@@ -458,6 +463,57 @@ f02 prints no such line. A veto that protects planar faces holds 1263 of 1406
 corners on the mesh, so almost no edge becomes a crossing candidate at all.
 Lifting it is what would replicate this result three more times, and until it
 is, n = 1 is what this is.
+
+#### Run 2026-09-14: `f04` under the relaxed veto reads clean
+
+An experiment, not the gate: C's fix (`6c74a41`) plus `b57c8e73b`'s settle loop
+behind a temporary switch that was not committed, both flags, lid10 and bayonet
+with their customizer as argv lists. SOLIDWORKS 34.0 started by hand; settings
+read back by the driver: `solid+surface=on free-curves=off run-diagnostics=on
+analytical-conversion=on attributes=on step-config-data=off
+multibody-as-parts=off knit=form-solids units=file-units assembly-mapping=default
+check-and-repair=1 custom-tolerance=0`, labelled
+`c17-relaxed-veto-probe-2026-09-14`. Counts first, then `-FaultDetail` over the
+four files with faults; both passes agree.
+
+| file | crossing curves / chords | faces | SW volume | SOLIDWORKS |
+| --- | --- | --- | --- | --- |
+| `f02` control, 2026-09-08, byte-identical | 0 / 640 | 9 | 19555.2696 | `faults=2 codes=17`, 7th time |
+| `f04-band-fn064`, normal build | 1 / 2 | 39 | 19511.5976 | `faults=2 codes=17` |
+| **`f04-band-fn064`, relaxed** | **1198 / 35** | 57 | 19514.0874 | **`faults=0`** |
+| `r01-lid10`, relaxed | 589 / 22 | 799 | 293174.2338 | `faults=1 faultyfaces=8 faultyedges=1 codes=7/17/21` |
+| `r02-bayonet`, relaxed | 589 / 22 | 58 | 235537.9892 | `faults=1 faultyfaces=4 faultyedges=1 codes=7/17/21` |
+
+The sweep's recognition is unchanged by the relaxation: 1212 facets whole and
+128 cut on `f04`, 875 and 125 on lid10 and bayonet. The control and the normal
+`f04` reproduce the 2026-09-10/11 `-FaultDetail` rows to six decimals.
+
+**`f04` is clean, and not by discarding the sweep.** What SOLIDWORKS saved back
+has the normal `f04`'s surface census, B-spline 1 -> 5 and cylinder 9 -> 10, and
+its volume moved 0.03%. So the prediction of item 1 holds on a second coupon, and
+more completely than on `f02`: bore and sweep both lose code 17 once the
+boundary between them is the crossing curve. That is n = 2.
+
+**`-FaultDetail` against the normal build of 2026-09-11**
+(`build/interop-kit-ab/faults.tsv`, same settings):
+
+- **bayonet:** the sweep's B-spline (2422 mm², 17/17) is **gone**. What stays is
+  the same four faces and one edge as the normal build - a 15.16 mm² B-spline
+  (17), a 19287 mm² cone (7), an 850.75 mm² cone (21), a 15.3 mm² plane (7) - all
+  at r ~ 79 near z ~ 0, a feature that is not the sweep-to-bore boundary.
+- **lid10:** the sweep still reads 17/17 (knitted to 6518 mm² now), the same four
+  r ~ 79 faults stand, and three are new: two 1.47 mm² planes (21) and **a plane
+  of negative area, -1159.62 mm², centred on the axis at z = 77.85** - a face
+  SOLIDWORKS finds wound inside out. That is the first entity-level lead on root
+  cause D, and SOLIDWORKS measures this lid10 at 293174, agreeing with OCCT's
+  292145 that it is the wrong solid.
+- lid10 and bayonet carry identical fault entities in both builds, which is also
+  why their worst corners were identical: they share that geometry.
+
+What not to read into it: this is one relaxed configuration behind an
+uncommitted switch, and D still blocks the relaxation. SOLIDWORKS' bayonet
+volume, 235538, is 4.6% from OCCT's 225217 and it dropped 7 cylinders on
+re-export, so the two kernels do not even agree which wrong solid bayonet is.
 
 #### What not to read into it
 
@@ -1243,6 +1299,10 @@ not be again:
    valid solid of the wrong volume is green on every check here.
 
 #### Root cause D: under the relaxation, lid10 and bayonet are the wrong solid
+
+**First lead, from SOLIDWORKS on 2026-09-14:** the relaxed lid10 carries a plane
+of area -1159.62 mm² centred on the axis at z = 77.85, which the normal build
+does not; SOLIDWORKS measures the solid at 293174. Start there.
 
 Found 2026-09-14 reading the round trip's volumes rather than its verdict, and
 not chased. OCCT, both flags, lid10's customizer as an argv list:
