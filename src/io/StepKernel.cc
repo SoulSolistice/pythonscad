@@ -2786,12 +2786,42 @@ void StepKernel::build_tri_body(
     // it. The two numbers reported were the count of faces and the count of
     // *all* moves, and neither said how local the damage was.
     std::set<int> bent_verts;
+    // Which corners a bent face implicates: every corner it is bounded by, its
+    // holes included, for the same reason the test above reads them. Taking the
+    // outer loop alone names corners that are not the ones bending it - on
+    // lid10 three faces bend through their holes and the outer loops name no
+    // moved corner at all, so a refusal keyed on them drops nothing and gives
+    // up on the whole export.
+    auto implicated = [&](std::size_t i) {
+      for (const int w : loops[i]) bent_verts.insert(w);
+      for (std::size_t j = 0; j < loops.size(); j++) {
+        if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
+        for (const int w : loops[j]) bent_verts.insert(w);
+      }
+    };
     std::map<std::size_t, std::size_t> splittable;
     for (std::size_t i = 0; i < loops.size(); i++) {
       if (!loop_valid[i]) continue;
+      // Whether a move touches this face at all - over every bound it has, not
+      // only its outer one. The measurement below already reads the holes,
+      // because a face asserts one plane and its inner bounds are as much a part
+      // of it as its rim; this test did not, so a face bent purely through a
+      // hole was never examined. Measured on lid10, that is a bottom face whose
+      // hole ends 1.8 off its own plane and a z = 75 ring whose hole ends 5.7
+      // off - which OpenCASCADE cannot read as one planar face, so it splits
+      // them into a full disc and a loose loop, seals the cavity between them
+      // and reads the solid 28% too large. The all-or-nothing veto is what kept
+      // that out of today's files, on these two coupons and by luck rather than
+      // by design: the proposal is made in the normal build too.
       bool uses = false;
       for (const int v : loops[i]) {
         if (moves.count(v) != 0) uses = true;
+      }
+      for (std::size_t j = 0; !uses && j < loops.size(); j++) {
+        if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
+        for (const int w : loops[j]) {
+          if (moves.count(w) != 0) uses = true;
+        }
       }
       if (!uses) continue;
       if (consumed[i]) {
@@ -2809,7 +2839,7 @@ void StepKernel::build_tri_body(
       }
       if (after.dot(loop_normals[i]) <= 0) {
         turned++;
-        for (const int w : loops[i]) bent_verts.insert(w);
+        implicated(i);
         continue;
       }
       // Whether it is actually taken out of its plane, rather than whether it
@@ -2851,7 +2881,7 @@ void StepKernel::build_tri_body(
       }
       if (has_hole || loops[i].size() < 4) {
         bent++;
-        for (const int w : loops[i]) bent_verts.insert(w);
+        implicated(i);
         continue;
       }
       // Which corner the fan starts from is not free, and corner 0 is not the
@@ -2887,7 +2917,7 @@ void StepKernel::build_tri_body(
       }
       if (best_worst_ear <= 0) {
         bent++;
-        for (const int w : loops[i]) bent_verts.insert(w);
+        implicated(i);
       } else {
         splittable.emplace(i, best_apex);
       }
@@ -4112,6 +4142,20 @@ void StepKernel::build_tri_body(
 
   // Build the loops, their edges and the carrier planes.
   std::vector<FaceBound *> face_bounds(face_cnt, nullptr);
+  std::size_t planes_off_plane = 0;
+  double worst_plane_off = 0;
+  // What the mesher was entitled to call coplanar, by its own rule - see
+  // coplanarTolerance in GeometryEvaluator.cc, which this has to agree with.
+  double mesh_coplanar_tol = 1e-9;
+  {
+    Vector3d lo = vertices.empty() ? Vector3d(0, 0, 0) : vertices[0];
+    Vector3d hi = lo;
+    for (const auto& v : vertices) {
+      lo = lo.cwiseMin(v);
+      hi = hi.cwiseMax(v);
+    }
+    mesh_coplanar_tol = std::max(1e-9, 1e-8 * (hi - lo).norm());
+  }
   std::vector<Plane *> planes(face_cnt, nullptr);
   int planes_declared = 0;
   std::vector<std::vector<EdgeCurve *>> loop_edges(face_cnt);
@@ -4210,6 +4254,35 @@ void StepKernel::build_tri_body(
     if (ref.norm() < 1e-12) ref = AnalyticFeatures::perpendicular(norm);
     else ref.normalize();
 
+    {
+      // A planar face may not assert a plane one of its own bounds is not in.
+      //
+      // The veto above refuses a move that would bend a face; this is the same
+      // property asked of what is actually written, over every bound the face
+      // carries. It is measured against the mesh's own coplanarity tolerance,
+      // which is what a merged loop is entitled to be warped by:
+      // GeometryEvaluator's coplanarTolerance buckets triangles within
+      // 1e-8 of the model's diagonal, so on lid10 - 248 mm across - ten merged
+      // quads come out warped by up to 2.262e-06 against that 2.48e-06
+      // allowance, and no coupon or fixture exceeds it. Anything further off was
+      // bent by something else, which is a defect in this exporter and not in
+      // the mesh it was given: on lid10 the corner placement bent two faces
+      // through their *holes* by 1.8 and 5.7, which a kernel cannot read as one
+      // planar face at all - it splits them, seals the cavity between, and reads
+      // the solid 28% too large.
+      double off = 0;
+      for (const int w : loop) off = std::max(off, fabs((vertices[w] - on_plane).dot(norm)));
+      for (std::size_t j = 0; j < face_cnt; j++) {
+        if (!loop_valid[j] || loop_is_hole[i] || parents[j] != int(i)) continue;
+        for (const int w : loops[j]) {
+          off = std::max(off, fabs((vertices[w] - on_plane).dot(norm)));
+        }
+      }
+      if (off > mesh_coplanar_tol) {
+        planes_off_plane++;
+        worst_plane_off = std::max(worst_plane_off, off);
+      }
+    }
     auto plane_point = new Point(entities, on_plane);
     auto plane_dir_1 = new Direction(entities, norm);
     auto plane_dir_2 = new Direction(entities, ref);
@@ -4297,11 +4370,17 @@ void StepKernel::build_tri_body(
       singface.push_back(face_bounds[j]);
       edges.insert(edges.end(), loop_edges[j].begin(), loop_edges[j].end());
     }
-
     sfaces.push_back(new Face(entities, singface, planes[i], true));
     face_edges.push_back(edges);
   }
 
+  if (planes_off_plane > 0) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d planar face%2$s assert a plane one of their own bounds is not in, by up "
+        "to %3$.4f against the %4$.2e the mesh's own coplanarity allows - a bound bent by "
+        "something other than the merge",
+        int(planes_off_plane), planes_off_plane == 1 ? "" : "s", worst_plane_off, mesh_coplanar_tol);
+  }
   // the recognised cylinders are faces of the same shell
   for (std::size_t i = 0; i < sfaces_extra.size(); i++) {
     sfaces.push_back(sfaces_extra[i]);
