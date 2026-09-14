@@ -186,10 +186,9 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
 
 ### Open, in the order to take it
 
-1. **Item 11, root cause D.** Under the relaxation lid10 reads back a valid
-   solid 28% too large and bayonet 6% too small. Every check the flagship
-   coupons have is green on it. Then decide what the veto waits for on corner
-   slack, which is red in both configurations.
+1. **The corner slack**, which is what `export-step-flagship-corners` is red on
+   and the last thing between the veto and its gate. Measured 2026-09-14 and it
+   is two populations, not one - item 15.
 2. **Then the veto itself**, and only through the gate: the flagship check under
    the relaxation, then SOLIDWORKS on `f04`, lid10 and bayonet with the `f02`
    control in the same session.
@@ -1298,11 +1297,57 @@ not be again:
    reachable by no build. And the green half hides root cause D below: a
    valid solid of the wrong volume is green on every check here.
 
-#### Root cause D: under the relaxation, lid10 and bayonet are the wrong solid
+#### Root cause D is closed: a face's bounds include its holes
 
-**First lead, from SOLIDWORKS on 2026-09-14:** the relaxed lid10 carries a plane
-of area -1159.62 mm² centred on the axis at z = 77.85, which the normal build
-does not; SOLIDWORKS measures the solid at 293174. Start there.
+**Chased and fixed 2026-09-14, `f218e8af`.** SOLIDWORKS' negative-area plane was
+the thread to pull.
+
+The plane veto measures the bend over every bound a face has, holes included.
+The test deciding *whether to measure a face at all* read only its outer loop,
+so a face bent purely through a hole was never examined. Branches named first:
+(F1) the outer-loop-only test, (F2) the hole is `consumed` and skipped from the
+measurement, (F3) the bend happens after the veto. Measured: F1, and it fires in
+the normal build too - 3 such faces on lid10 and 4 on bayonet, 7 and 8 under the
+relaxation, the worst hole ending **5.7057** off its face's plane. F2 and F3 are
+refuted: the writer reports every hole attached in both configurations, and the
+bend is already there when the veto runs.
+
+What that writes is a broken solid rather than a bent face. OpenCASCADE cannot
+read a planar face whose inner bound is off the plane, so it splits the loops
+into separate faces: lid10's bottom becomes a full disc of radius 81.8 -
+pi*81.8^2 = 21021.15 mm², against the 612.23 mm² ring the normal build writes -
+the cavity behind it is sealed, and the volume reads +28%. The plane area total
+gives it away at a glance: 12762 mm² over 786 planes normally, 54476 over 815
+under the relaxation.
+
+Refuted on the way: that the hole was dropped as `consumed`, as fanned, or by
+the rim substitution - every one of those reads zero in both configurations; and
+that the *inner wall* seen missing in a CAD view is D, which it is not. The
+normal build renders the same way, both files read back as one closed
+BRepCheck-valid shell with the same six cylinder faces, and SOLIDWORKS keeps 799
+of 843 faces (787 of 814 normally): it is a CAD system hiding faces it judges
+faulty, in both builds equally.
+
+The corners a bent face implicates are its holes' too - keyed on the outer loop
+alone, a refusal drops nothing and the settle loop gives up on the whole export.
+
+| under the relaxed veto | before | after |
+| --- | --- | --- |
+| `lid10` | 292144.9441 | **225616.3034** (normal build 227707.0400) |
+| `bayonet` | 225216.8920 | **236835.7818** (normal build 238911.2712) |
+| band family, every `$fn` | - | unchanged |
+
+Every normal-build export is unchanged, on all 45 fixtures and all six coupons,
+so this is latent exactly as A and B were, and the veto is the only reason.
+
+**And it is loud, at a threshold derived rather than chosen.** A planar face may
+not assert a plane one of its own bounds is off by more than *the mesher's own
+coplanarity tolerance* - `coplanarTolerance` in `GeometryEvaluator.cc`, 1e-8 of
+the model's diagonal, which is what a merged loop is entitled to be warped by.
+On lid10 that allowance is 2.53e-06 and the worst merged quad sits at 2.262e-06
+under it; nothing in either configuration exceeds it. With the fix removed it
+fires on relaxed lid10 and bayonet at 1.8000, an `EXPORT-ERROR` the flagship
+check fails on.
 
 Found 2026-09-14 reading the round trip's volumes rather than its verdict, and
 not chased. OCCT, both flags, lid10's customizer as an argv list:
@@ -1461,6 +1506,36 @@ list.
 - **lid10 and bayonet report identical worst corners** - cone 7.1595e-01,
   cylinder 1.0349e-01, plane 5.2461e-01, B-spline 8.5764e-02 - over 814 and 82
   faces. The two parts may share that geometry; not checked.
+
+### 15. The corner slack is two populations, and one of them is where SOLIDWORKS still objects
+
+**Measured 2026-09-14.** `export-step-flagship-corners` fails on all six coupons
+because corners of analytic faces do not lie on the surface those faces are
+written on. Counted per file, corners off by more than 1e-6:
+
+| export | B-spline | cylinder | cone | plane |
+| --- | --- | --- | --- | --- |
+| `band-fn064`, normal | 822 of 1252, worst 0.0310 | 850 of 1412, worst 0.0241 | - | 0 of 236 |
+| `lid10`, normal | 304 of 622, worst 0.0858 | 24 of 160, worst 0.1035 | 290 of 966, worst 0.7159 | 13 of 4306, worst 0.5246 |
+
+**The bulk** is junction vertices a boolean made, sitting on chord planes at
+sagitta scale - which is what the corner placement exists to move and what the
+veto refuses wholesale. Relaxing the veto barely touches it (`f04`'s cylinders
+0.0241 -> 0.0212), so this is mostly item 13: provenance names no owner, so
+nothing places them.
+
+**The outliers are a different animal and they are localised.** lid10's 0.5246
+plane corner sits at (78.6, 10.41, 1.72) and its 0.7159 cone corner nearby -
+r ~ 79, z ~ 0 to 3. That is exactly the cluster SOLIDWORKS objects to in *both*
+builds and in every run since 2026-09-10: the 15.16 mm² B-spline (17/17), the
+19287 mm² cone (7/7), the 850.75 mm² cone (21/21/21), the 15.3 mm² plane (7/7)
+and the faulty edge at (79.3344, 1.0534, 2.5811). bayonet carries the same
+entities, which is why the two parts report identical worst corners.
+
+So the next chase is that feature, not the slack in general: one small region of
+one part, faulty in a CAD system, carrying corner strays five to seven times
+anything else in the file. Read `-FaultDetail` against what the model puts there
+before forming a theory.
 
 ### 13. Provenance loses an original a boolean cut on every facet
 
