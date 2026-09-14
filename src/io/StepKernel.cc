@@ -2251,13 +2251,56 @@ void StepKernel::build_tri_body(
         int(held));
     }
   }
+  // Whether placing corner `v` at `target` would take it off an exact surface the
+  // model declared and the corner is already on - one other than `own`, which is
+  // where it is being placed.
+  //
+  // The placement onto a conic below rests on provenance naming *one* declared
+  // owner, and provenance is per original solid, decided by whole facets: an
+  // original none of whose facets a boolean left whole owns nothing. Its surface
+  // is then invisible to the vote, and a corner on it is handed to whatever the
+  // other original at that junction owns. Measured on step-band-family at $fn
+  // 24, the ridge cuts all but 2 of the bore's facets - three are needed - so
+  // its 48 rim corners, generated on the r = 20 bore to 1e-14, were given the
+  // r = 23 outer wall as sole owner, slid 3.0 along the cap onto it, and left the
+  // bore face they bound 3.0 off its own surface. lid10 does the same to 120
+  // corners of two chamfers, 0.65 and 2.25 along its z = 95 face. On both, only
+  // the plane veto kept it out of the file - and it does not need the flagship
+  // coupons: a bore with a frustum subtracted through its whole length, three
+  // primitives, writes the bore 3.0 off itself with the veto silent.
+  //
+  // So the question is asked of the declarations rather than of the vote: a
+  // corner on a declared quadric stays on it. That is the rule the pass placing
+  // corners onto their own quadric already keeps, and the one the reroute below
+  // is named for. A surface that answers by projecting is not asked - a grid
+  // states a band, not a position, and a corner off it is its fit's business.
+  //
+  // Asked here and not of the triple-point placement, which rests on the same
+  // single owner: across every fixture and flagship coupon it moved no corner
+  // off a quadric, and a guard with nothing to refuse has regressions nothing
+  // would see. The check before the veto below covers it, loudly.
+  auto deserts_exact = [&](int v, const Surface *own, const Vector3d& target) {
+    for (const auto& other : surfaces) {
+      if (other.get() == own || !AnalyticFeatures::isQuadric(other.get())) continue;
+      Vector3d on_now, on_then;
+      if (!AnalyticFeatures::closestOnSurface(other.get(), vertices[v], on_now) ||
+          (on_now - vertices[v]).norm() > 1e-9) {
+        continue;
+      }
+      if (!AnalyticFeatures::closestOnSurface(other.get(), target, on_then) ||
+          (on_then - target).norm() > 1e-9) {
+        return true;
+      }
+    }
+    return false;
+  };
   if (approximate && !singleOwner.empty()) {
     std::map<int, std::vector<std::size_t>> faces_at;
     for (std::size_t i = 0; i < loops.size(); i++) {
       if (!loop_valid[i] || consumed[i] || loops[i].size() < 3) continue;
       for (const int v : loops[i]) faces_at[v].push_back(i);
     }
-    std::size_t placed = 0, triple = 0, placed_triple = 0, plane_gave_up = 0;
+    std::size_t placed = 0, triple = 0, placed_triple = 0, plane_gave_up = 0, held_on_exact = 0;
     // Why the surface-against-line placement gives up, kept apart: these are
     // five unrelated reasons and one number for all of them says nothing about
     // which to work on. `t_offsurf` is the corner's own surface refusing to
@@ -2439,6 +2482,10 @@ void StepKernel::build_tri_body(
         plane_gave_up++;
         continue;
       }
+      if (deserts_exact(v, own, p)) {
+        held_on_exact++;
+        continue;
+      }
       worst_plane = std::max(worst_plane, travel);
       moves.emplace(v, p);
       placed++;
@@ -2471,6 +2518,12 @@ void StepKernel::build_tri_body(
         "the conic where the two cross, moving at most %2$.4f; %3$d do not and stay where the "
         "mesh put them",
         int(placed), worst_plane, int(plane_gave_up));
+    }
+    if (held_on_exact > 0) {
+      LOG(
+        "STEP export: %1$d corners provenance gives one owner are already on another quadric the "
+        "model declared, and stay on it rather than be placed off it",
+        int(held_on_exact));
     }
   }
 
@@ -2622,6 +2675,103 @@ void StepKernel::build_tri_body(
     }
   }
 
+  // No move may take a corner off the surface of an analytic face it bounds.
+  //
+  // The veto below asks that of a face that keeps a PLANE, and nothing asked it
+  // of a curved one: the corner is written as a vertex of that face, and a face
+  // bounded by a point off its own surface is describing a different surface.
+  // Every path above is meant to satisfy this by construction - the crossing
+  // puts a corner on both its owners, the conic and triple placements on their
+  // owner, the pass onto a quadric on the face's own - and one of them did not.
+  // The placement onto a conic trusted provenance's single owner, and where a
+  // boolean cut every facet of a bore, that owner was the wall across the cap:
+  // band-fn024's 48 bore corners were slid 3.0 off the face they bound, lid10's
+  // 120 chamfer corners 0.65 and 2.25, hidden only by the plane veto. That path
+  // now keeps a corner on the quadric it is already on (see deserts_exact), and
+  // this is measured to be reached by no fixture and no flagship coupon, with
+  // the veto and without it.
+  //
+  // So it is an error, not a report: reaching it means a placement has a defect
+  // the file would carry. The move is held, so the file stays right, and the
+  // flagship check fails on the message, so the defect cannot come back quietly.
+  //
+  // Against each face's own declaration: a quadric states where it is, a grid
+  // or patch publishes its band - AnalyticFeatures::declaredBand - and a corner
+  // already that far off is judged only on whether the move takes it further.
+  // A band is not a Surface record, so its cone or cylinder is read off its
+  // axis and rims. A projection that does not answer judges nothing.
+  if (approximate && !moves.empty()) {
+    std::map<int, std::vector<std::pair<const Surface *, std::size_t>>> bounding;
+    const std::size_t NOT_A_BAND = std::size_t(-1);
+    auto bound_by = [&](const std::vector<AnalyticFeatures::Patch>& patches) {
+      for (const auto& patch : patches) {
+        for (const auto& run : patch.runs) {
+          for (const int v : run.verts) {
+            if (moves.count(v) != 0) bounding[v].emplace_back(patch.surface.get(), NOT_A_BAND);
+          }
+        }
+      }
+    };
+    bound_by(quadric_faces);
+    bound_by(grid_faces);
+    bound_by(bezier_patches);
+    for (std::size_t b = 0; b < bands.size(); b++) {
+      if (!bands[b].alive) continue;
+      for (const std::size_t w : bands[b].walls) {
+        for (const int v : loops[w]) {
+          if (moves.count(v) != 0) bounding[v].emplace_back(bands[b].zone.get(), b);
+        }
+      }
+    }
+    // How far `p` is from the surface, and what that surface allows; negative
+    // where it gives no answer.
+    auto off_face = [&](const Surface *s, std::size_t band, const Vector3d& p, double& allowed) {
+      allowed = 1e-9;
+      if (band != NOT_A_BAND && s == nullptr) {
+        const AnalyticFeatures::Band& bd = bands[band];
+        const Vector3d axis = bd.axis.normalized();
+        const Vector3d rel = p - bd.base;
+        const double h = rel.dot(axis);
+        const double slope = bd.height > 0 ? (bd.r_top - bd.r_bottom) / bd.height : 0;
+        return fabs((rel - axis * h).norm() - (bd.r_bottom + slope * h)) / sqrt(1 + slope * slope);
+      }
+      Vector3d q;
+      if (s == nullptr || !AnalyticFeatures::closestOnSurface(s, p, q)) return -1.0;
+      allowed = std::max(AnalyticFeatures::declaredBand(s), 1e-9);
+      return (q - p).norm();
+    };
+    std::size_t deserting = 0;
+    double worst_desertion = 0;
+    for (auto it = moves.begin(); it != moves.end();) {
+      bool deserts = false;
+      const auto faces = bounding.find(it->first);
+      if (faces != bounding.end()) {
+        for (const auto& face : faces->second) {
+          double allowed = 0;
+          const double before = off_face(face.first, face.second, vertices[it->first], allowed);
+          const double after = off_face(face.first, face.second, it->second, allowed);
+          if (before < 0 || after < 0) continue;
+          if (after > allowed && after > before) {
+            deserts = true;
+            worst_desertion = std::max(worst_desertion, after);
+          }
+        }
+      }
+      if (deserts) {
+        it = moves.erase(it);
+        deserting++;
+      } else {
+        ++it;
+      }
+    }
+    if (deserting > 0) {
+      LOG(message_group::Export_Error,
+          "STEP export: %1$d corners would have been moved off the surface of an analytic face they "
+          "bound, by up to %2$.4f, and are held where the mesh put them - a corner placement "
+          "proposed a point its own face is not on",
+          int(deserting), worst_desertion);
+    }
+  }
   // Under the approximation flag only. The exact tier asserts nothing the mesh
   // does not already state, and moving a vertex is such an assertion - without
   // this gate step-bored-cone's analytic export comes out with a PLANE
