@@ -7,7 +7,7 @@ What is settled lives in `doc/step-export-development.md`; build and test
 mechanics live in `CLAUDE.md`. Read both before this one — several items below
 are one sentence because the reasoning behind them is there.
 
-**Last updated for the state at `04a5ad0`, 2026-09-08.**
+**Last updated 2026-09-14, for the state at `4c0373a`.**
 
 ---
 
@@ -19,29 +19,142 @@ Verify the tree before changing anything, and again after:
 ctest --test-dir build -R 'export-step-|mutations'
 ```
 
-That regex picks up the fixtures — 33 SCAD in `tests/data/scad/step-export/` and
-12 Python in `tests/data/pythonscad-step-export/` — plus
-`bspline-check-mutations` and `closed-sphere-check-mutations`, 50 tests in all.
-**It has to be this regex and not `-R step`**, which matches 45 and drops
-precisely those last two: the harnesses whose job is to prove the other tests
-would fail if the defect came back. Measured 2026-09-09, 45 against 50. Run it under the
-machine's own locale: `LC_ALL=C` was used here for a while to
-get past a decimal-comma problem that is now fixed in `export_step.cc`, and it
-breaks five UTF-8 filename tests of its own.
+**52 tests**, and it has to be this regex and not `-R step`, which runs 47 and
+drops `bspline-check-mutations` and `closed-sphere-check-mutations` — the
+harnesses whose job is to prove the other tests would fail if the defect came
+back. Measured 2026-09-14. What the 52 are: 33 SCAD fixtures in
+`tests/data/scad/step-export/`, 12 Python in `tests/data/pythonscad-step-export/`,
+the two mutation harnesses, the two flagship tests below, and three
+`*_arg-permutations` tests that have nothing to do with STEP and match
+`mutations` by substring. Run it under the machine's own locale, not
+`LC_ALL=C`, which breaks five UTF-8 filename tests.
 
-Two things make that result a lie if they are missing:
+**One of the 52 fails on purpose and reports green.**
+`export-step-flagship-strict` asserts that the plane veto never gives up the
+crossing-curve boundary. It does, on all six flagship coupons, so the test is
+registered `WILL_FAIL`: ctest reports it *passed* while it fails, and will
+report it *failed* on the day it starts passing — which is how that fix gets
+noticed. Do not delete it, and do not read its green as the veto being gone.
 
-- **`pip install cadquery-ocp==7.8.1.1.post1`.** `tests/steproundtrip.py` needs
-  `TopTools_IndexedMapOfShape`, which `cadquery-ocp` 8.0 no longer exposes, so it
-  **skips in silence** and the suite goes green with the round trip never run.
-  Whole classes of failure are invisible without it.
-- **lid10 is the blast-radius specimen and is not in the suite.** It needs
-  `-p examples/step_test/lid10.json -P "New set 1"`; without those you get the
-  default component and every number is incomparable.
+Three things make a green result a lie if they are missing:
+
+- **`cadquery-ocp==7.8.1.1.post1`.** `tests/steproundtrip.py` needs
+  `TopTools_IndexedMapOfShape`, which 8.0 no longer exposes, so it **skips in
+  silence** and the suite goes green with the round trip never run. 7.9.3.1.1
+  is what this machine has and it works; 8.0 does not.
+- **Both feature flags.** The analytic path is behind
+  `--enable=step-analytic-surfaces --enable=step-approximate-surfaces`. Without
+  them the exporter writes facets, still prints "3 analytic surfaces available",
+  and every check passes for the wrong reason. That cost a session its first
+  hour on 2026-09-10.
+- **lid10's customizer.** `-p examples/step_test/lid10.json -P "New set 1"`,
+  and pass it as an argv list, never through a shell function: on 2026-09-10 the
+  quoting of `"New set 1"` was lost that way, lid10 exported its default
+  component, and a veto count was reported as 4 of 6 when it is 6 of 6.
+
+`export-step-flagship-coupons` is what covers the coupons this work is about:
+the band family at `$fn` 24, 48, 64 and 96 (the fixture only ever exports its
+declared 32) and both reference parts, through the validator and the kernel
+round trip, failing on any `EXPORT-ERROR`. It exists because a green 50-test
+suite let a broken `$fn` 64 and a broken lid10 past it.
+
+**Mutating a file to prove a check bites:** write the working tree with
+`git show <sha>:<path> > <path>` and restore from a copy. `git checkout <sha> --
+<path>` *stages* the file, and on 2026-09-10 the next `git add -A` swept a
+reverted change back into a commit while every build and test ran against the
+correct working tree.
 
 ---
 
 ## Where it stands
+
+**Last measured 2026-09-11, on `claude/solidworks-fault-code-17-b58858`.** Items
+1, 3, 9, 10 and 11 below carry the detail; this is the map.
+
+### Code 17 moved, on the one coupon whose boundary was written
+
+SOLIDWORKS 34.0, settings read back by the driver: `knit=form-solids`,
+`check-and-repair=1`, `analytical-conversion=on`, `run-diagnostics=on`,
+`solid+surface=on`, units from file. Run on 2026-09-10 and again on 2026-09-11
+after root causes A and B, with every number identical to four decimals and a
+`-FaultDetail` table matching byte for byte.
+
+| coupon, analytic | crossing curves / chords | faces | volume | SOLIDWORKS |
+| --- | --- | --- | --- | --- |
+| `f02` control, 2026-09-08 | 0 / 640 | 9 | 19555.2696 | `faults=2`, bspline **17** + cylinder **17** |
+| **`f02-band-fn032`** | **593 / 47** | 9 | 19511.9331 | `faults=1`, bspline **21**, cylinder **clean** |
+| `f04-band-fn064` | 1 / 1251 | 39 | 19511.5976 | `faults=2`, bspline 17 + cylinder 17 |
+| `r01-lid10` | 1 / 623 | 787 | 226032.0463 | 5 faces + 1 edge, codes 7/17/21 |
+| `r02-bayonet` | 1 / 623 | 58 | 237141.7973 | 5 faces + 1 edge, codes 7/17/21 |
+
+The control has now reproduced `faults=2 faultyfaces=2 codes=17` six times.
+
+Two readings, and the second is the stronger. **The bore cylinder's code 17 is
+gone on the one coupon whose sweep-to-bore boundary is written as the crossing
+curve**, and stands on the three where it is not. And the analytic volume is
+now nearly `$fn`-independent, as a correct solid must be: `f02` and `f04` agree
+to 0.0017%, where the control sat 43 mm³ off its own `$fn` 64 sibling.
+
+That is n = 1 on the positive side. It stays n = 1 until the plane veto stops
+withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
+
+### What landed, 2026-09-10 and 11
+
+- **Corner placement by Newton.** `projectOntoBoth` moved to `AnalyticFeatures`
+  beside `closestOnSurface`, keeps its best iterate rather than its last, and
+  solves to an *absolute* 1e-11 because the acceptance is absolute. Band family
+  at `$fn` 32: junction vertices on the crossing curve 502 → **640** of 704,
+  corners left on one surface 138 → **0**, chords 142 → **47**. lid10: 1082 of
+  1598, none left off.
+- **The surface-against-line placement solves along the line.** No count moved;
+  it can no longer return the far root of a line through a quadric.
+- **`GridSurface::project` descends once per declared profile span** and takes
+  its v derivative inside the span. It had been unable to find a point it had
+  itself evaluated: 0.78 mm out on the band family's ridge, now under 1e-7.
+- **The written vertex is keyed by where the corner ended, not where it began**
+  (item 11, root cause B), and **a section edge is not written where the face
+  across will be fanned into triangles** (root cause A).
+- **Diagnostics that could not be read now can.** The arc fitter says how near it
+  came and how much of the miss is against a surface stated algebraically
+  against one that answers by projecting; the veto says how many of the corners
+  it refuses touch a bent face; cut planes say how near a declaration came.
+- **Should-never-happen is loud.** Losing a plane section's agreement is an
+  `EXPORT-ERROR` in the exact tier and a warning under the approximation flag;
+  the plane veto is an `EXPORT-WARNING` pinned by the `WILL_FAIL` test above.
+- **Unit tests:** seven for the two corner solvers, four of them asserting a
+  refusal, and one asserting a declared grid can find a point it evaluated.
+  Each was shown to fail with its fix removed.
+
+### Open, in the order to take it
+
+1. **Item 11, root cause C.** Under a relaxed veto, `band-fn024` writes a
+   cylinder of radius 20 bounded by points 3 mm off it: corners whose two
+   owners are coaxial cylinders that never meet, placed on one and deserting a
+   face of the other. The placement checks that a move does not bend a planar
+   face and nothing checks that it does not leave a curved face's boundary off
+   its own surface.
+2. **Then the veto itself**, and only through the gate: the flagship check green
+   under the relaxation, round trip included, then SOLIDWORKS on `f04`, lid10
+   and bayonet with the `f02` control in the same session.
+3. **Code 21 on `f02`'s sweep** is new and unexplained.
+4. **lid10's faceted control reads `faults=6 codes=24`**, which weakens lid10 as
+   a test until it is understood.
+5. **lid10 exports 810 analytic faces** where 818 and 822 were recorded earlier;
+   it moved with this work and has not been re-derived.
+6. **Item 12**, the survey for other should-never-happen counters. No build.
+7. **The last 47 chords on `f02`.** Not the fitter and not the projector, both
+   cleared; whether they are the edges touching the 64 coaxial-owner vertices is
+   unmeasured.
+8. **Only the sweep side of a sweep-to-bore edge carries a pcurve**, because the
+   two-pcurve writer needs two pushed sides and only the quadric emitter pushes.
+9. **Every plane section on the band family is fitted to a ridge-flank facet**,
+   a plane the model does not have — a plane section written for a cut that is
+   not one.
+
+### As it stood on 2026-09-08
+
+Kept because the later measurements are read against it. Where item 1 or the
+table above disagrees, they supersede this.
 
 **Landed and measured, 2026-09-08.**
 
@@ -735,7 +848,7 @@ What is left:
    uniform. Worth measuring against the 47 chords that remain.
 3. **B3 to B7**, unchanged, and none of them measured to reach an export.
 
-### 11. The plane veto is blunt by 89 to 1, and it is concealing two defects
+### 11. The plane veto is blunt by 89 to 1, and it is concealing three defects
 
 **Built, measured and reverted on 2026-09-10.** This is the gate that decides
 whether the crossing curve of item 3 fires at all, and it is why the SOLIDWORKS
@@ -1431,45 +1544,70 @@ beside the fault column.
 
 ## A prompt to start the next session with
 
-> Read `doc/step-export-wip.md`, then `doc/step-export-development.md`. Build and
-> test mechanics are in `CLAUDE.md`. The branch should be green; verify with
-> `ctest --test-dir build -R 'export-step-|mutations'` — **not** `-R step`, which
-> drops the two mutation harnesses — and run it under the machine's own locale
-> rather than `LC_ALL=C`, which breaks the UTF-8 filename tests. Confirm
-> `cadquery-ocp==7.8.1.1.post1` is installed, or the round trip skips in silence.
+> Read `doc/step-export-wip.md` — "Read this first" and "Where it stands" before
+> anything else, then open items 11, 1 and 12 — and `doc/step-export-development.md`.
+> Build and test mechanics are in `CLAUDE.md`.
 >
-> Take open item 1. Code 17's *population* is settled — `-FaultDetail` names the
-> swept B-spline and the bore cylinder on every faulty coupon — and every
-> *trigger* proposed for it is refuted, including the two that survived longest,
-> the sliver and the taper. Nothing measurable on our own output separates the
-> faulty files from the clean ones, and the faulty cylinder is nine of our faces
-> knitted into one, so it does not exist until SOLIDWORKS makes it.
+> The branch should be green. Verify with
+> `ctest --test-dir build -R 'export-step-|mutations'`: **52 tests**, not
+> `-R step`, which runs 47 and drops the mutation harnesses. Run it under the
+> machine's own locale. One of the 52, `export-step-flagship-strict`, fails on
+> purpose and is registered `WILL_FAIL`, so it reports green — do not read that
+> as the veto being gone, and do not delete it. Confirm the round trip actually
+> runs (`cadquery-ocp` 7.x, not 8.0) before trusting any green result.
 >
-> Do not open another measurement of code 17 on this side. Twelve mechanisms
-> have been proposed and refuted, the last four in one session — the sliver, the
-> taper, the boundary's jaggedness and the import settings — and the two coupons
-> that differ by 0.01 in one parameter are identical in every count the exporter
-> makes, in SOLIDWORKS' own re-export, and to the eye.
+> Every STEP export needs `--enable=step-analytic-surfaces
+> --enable=step-approximate-surfaces`; without them it writes facets and passes
+> for the wrong reason. lid10 needs `-p examples/step_test/lid10.json -P "New set
+> 1"` passed as an argv list, never through a shell function that can lose the
+> quoting.
 >
-> Open item 3 has landed: a declared sweep is trimmed to the curve where it
-> crosses a quadric, 498 of 640 edges on the band family, shell closed, 50/50.
-> It did **not** move code 17 — and that is not a refutation, because 142 edges
-> still fall back to chords and one chord is enough to fail a face.
+> **Where it stands.** Code 17 moved for the first time: on `f02-band-fn032`,
+> whose sweep-to-bore boundary is 593 crossing curves to 47 chords, the bore
+> cylinder is clean and the sweep reports code 21. On `f04`, lid10 and bayonet —
+> one crossing curve each — code 17 stands. The gate withholding the boundary
+> from those three is the plane veto, which fires on all six flagship coupons.
+> That is n = 1, and the work is to make it n = 4 honestly.
 >
-> So take the 142. Count them by position along the sweep before theorising;
-> the tangent stretch at the shallow end of the ridge is where every other
-> measurement of this boundary has concentrated and where `projectOntoBoth` is
-> documented to fail. If that is where they are, ask whether a crossing curve is
-> the right entity there at all rather than pushing the solver harder.
+> **Take item 11's root cause C.** The veto was found to be concealing defects
+> rather than protecting against one. A and B are fixed at the root — the written
+> vertex keyed by its final position, and no section edge where the face across
+> will be fanned — and neither needed the veto touched. C is what the six-coupon
+> gate found when the veto was relaxed again: on `band-fn024`, corners whose two
+> owners are coaxial cylinders that never meet get placed on one and end 3 mm off
+> a face of the other. The placement guards against bending a planar face and
+> nothing guards against leaving a curved face's boundary off its own surface.
 >
-> Only when all 640 are exact does "is code 17 the boundary?" become a question
-> the answer can be trusted on. Put `f02-band-fn032-analytic.stp` in every
-> interop run as the positive control regardless.
+> **How to work it, which is how A and B were found:**
 >
-> Put `f02-band-fn032-analytic.stp` in **every** interop run as the positive
-> control; it must read `faults=2 faultyfaces=2 codes=17`, or a page of clean
-> rows means nothing. Start SOLIDWORKS by hand and never kill the driver
-> mid-import. Every expectation must be derived from the model and never
-> captured from a run, and report how much of each sweep was recognised beside
-> any fault count — the kit records it now, in `sweep_whole` / `sweep_cut` /
-> `sweep_pct_whole`.
+> - Five whys with the branches named before each measurement, and the refuted
+>   ones recorded. This investigation has refuted more hypotheses than it has
+>   kept, including two of its own root causes on the first attempt; the
+>   refutations are part of the result.
+> - Fix at the root, not at the gate. Relaxing the veto was proposed on an 89:1
+>   ratio and turned out to be holding back three defects. Do not relax it until
+>   C is closed, then the flagship check is green under the relaxation with the
+>   round trip, then SOLIDWORKS agrees.
+> - Prefer the declaration to a deduction. When a structural fact about a
+>   declared surface is needed, ask the surface — `splineForm`,
+>   `membershipTolerance`, `isDeclaredPoint` — rather than reaching around a
+>   protected member or inferring it by projection.
+> - Verify a latent fix where the defect lives. A and B were no-ops on the normal
+>   build and were verified against the relaxed-veto configuration, where they
+>   were not. Mutate by writing the working tree with `git show <sha>:<path> >
+>   <path>`, never `git checkout <sha> -- <path>`, which stages the file.
+> - A defect the suite did not catch does not land its fix until something in the
+>   suite fails without it. A unit test where the defect is in a solver, derived
+>   and shown to fail; a fixture only where it is visible solely in a whole export.
+> - Anything that should never be reached is loud, at the strength the
+>   measurement supports: `EXPORT-ERROR` if unreachable today, `EXPORT-WARNING`
+>   plus a `WILL_FAIL` assertion if reached today. Item 12 is the survey for more.
+>
+> **Standing rules.** Every expectation derived from the model, never captured
+> from a run. Report how much of each sweep was recognised beside any fault
+> count. For SOLIDWORKS: start it by hand, label every run with its import
+> settings, never kill the driver mid-import, write its output to a file rather
+> than through a buffering pipe, and put the 2026-09-08 control
+> `build/interop-kit3/f02-band-fn032-analytic.stp` in the same session — it must
+> read `faults=2 faultyfaces=2 codes=17`, or a page of clean rows means nothing.
+> Read `-FaultDetail` before forming a theory.

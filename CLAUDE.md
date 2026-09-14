@@ -168,7 +168,7 @@ ctest --test-dir build -R 'export-step-|mutations'   # 52 tests
 TEST_GENERATE=1 ctest --test-dir build -R <fixture>
 ```
 
-Use that regex and not `-R step`, which matches 45 of the 52 and drops
+Use that regex and not `-R step`, which matches 47 of the 52 and drops
 `bspline-check-mutations` and `closed-sphere-check-mutations` — the harnesses
 that prove the other tests would fail if the defect came back. A run without
 them is the green suite that never ran the check.
