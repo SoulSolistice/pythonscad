@@ -1537,6 +1537,56 @@ one part, faulty in a CAD system, carrying corner strays five to seven times
 anything else in the file. Read `-FaultDetail` against what the model puts there
 before forming a theory.
 
+### 16. What a CAD view of lid10 shows, and which of it is ours
+
+**Measured 2026-09-14** after three observations from a SOLIDWORKS session on
+`lid10-D-fixed-normal.stp`, the committed build's export.
+
+**"The wall between the thread turns is missing" - not ours.** The same gaps
+appear in the normal build and under the relaxed veto, and on the file itself:
+`free_boundaries` is **0**, `BRepCheck_Analyzer` is valid, the shell is closed,
+and both files carry the same six cylinder faces at 53685 mm². Read back with
+OpenCASCADE, meshed and rendered, the inner wall and the thread are continuous -
+nothing is missing. SOLIDWORKS keeps 799 of our 843 faces (787 of 814 in the
+normal build) and hides what it rejects, which is what the view shows. A
+rendering of our own file is the cheap control for this and it should be the
+first thing done whenever a CAD view suggests missing geometry.
+
+**"The sweep is faulty" - ours, and known.** That is item 1's code 17 on the
+swept B-spline. Under the relaxed veto `f04` reads `faults=0` and bayonet's
+sweep fault disappears; lid10's does not - see the run of 2026-09-14.
+
+**"Stray faces shaped like a double T at the rim" - ours, but the mesher's.**
+The band z in [88, 96] holds 346 faces, 344 of them planes totalling only
+1725 mm²: 112 are hairline, the smallest **0.0003 mm² spread over a 0.089 mm
+diagonal with 8 vertices** - a zero-width zig-zag, which is what a CAD view
+draws as a double T. The four-fold repeats are the bayonet's own symmetry, not
+duplicates. The faceted control carries them too (26 hairline faces against the
+analytic export's 35, same worst aspect 0.002679 over 1.235), so these are the
+boolean's slivers surviving `mergeTriangles`, not something the analytic path
+invents. The exporter's degenerate-face filter passes them because they have
+area; what they have instead is no width.
+
+**And one face OpenCASCADE reads with a negative area**, at r = 79.417,
+z = 1.384 - inside the r ~ 79, z ~ 0..3 cluster of item 15 where SOLIDWORKS
+faults in every run. It is a triangle, and the file's description of it is
+consistent: its three edges pass through the vertices they name to 2e-16, its
+loop traversal winds right-handed about the plane it asserts (dot = +0.9999, and
+`check_face_normals` agrees), and OpenCASCADE builds the right parametric region
+for it, u spanning 2.2008 and v 0.9243. Only the *sign* of the area is negative.
+Unexplained: either a kernel quirk on this geometry - the plane's reference
+direction is parallel to one of the triangle's edges - or something in the file
+that neither the validator nor the loop arithmetic can see. It is the first
+thing to settle in item 15, because a face a kernel reads inside out is a face
+it will refuse.
+
+**A fourth finding, from trying to render it:** `import_step` cannot read this
+exporter's own output. It reports `Unknown Type B_SPLINE_SURFACE_WITH_KNOTS` and
+`B_SPLINE_CURVE_WITH_KNOTS` and then aborts with a `boost::container::length_error`.
+The round-trip oracle in `doc/step-export-development.md` §1 is therefore
+OpenCASCADE only, and our own importer is neither a check nor a viewer for
+anything the analytic path writes. Crashing on input is worth fixing on its own.
+
 ### 13. Provenance loses an original a boolean cut on every facet
 
 **Filed 2026-09-14, out of item 11's root cause C.** An original owns a surface
