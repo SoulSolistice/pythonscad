@@ -7,8 +7,10 @@ What is settled lives in `doc/step-export-development.md`; build and test
 mechanics live in `CLAUDE.md`. Read both before this one — several items below
 are one sentence because the reasoning behind them is there.
 
-**Last updated 2026-09-14, for the state after `6c74a41` (item 11's root cause C)
-and the flagship check's repair that follows it.**
+**Last updated 2026-09-15, for the state at `16f29c5f`** - item 11's root causes
+C and D closed, the flagship check repaired, and item 15 chased to the boundary
+assembly. Everything below was measured on
+`claude/solidworks-fault-code-17-b58858`.
 
 ---
 
@@ -80,8 +82,39 @@ correct working tree.
 
 ## Where it stands
 
-**Last measured 2026-09-14, on `claude/solidworks-fault-code-17-b58858`.** Items
-1, 3, 9, 10, 11 and 13 below carry the detail; this is the map.
+**Last measured 2026-09-15, on `claude/solidworks-fault-code-17-b58858`.** Items
+1, 11, 13, 14, 15 and 16 below carry the detail; this is the map.
+
+### The session of 2026-09-14/15 in one page
+
+Two root causes closed, a check repaired, one CAD verdict moved, and the slack
+turned from a test failure into a named cost:
+
+| | before | after |
+| --- | --- | --- |
+| `f04` in SOLIDWORKS, relaxed veto | code 17 on sweep and bore | **`faults=0`**, sweep kept - n = 2 |
+| lid10, relaxed veto | 292144.94 (+28%), bottom sealed | 225616.30, bottom a 612 mm² ring |
+| lid10's inner wall corners | 290 off their cone | **9** under the relaxation |
+| the flagship round trip | could not fail at all | enforced; corners in their own `WILL_FAIL` test |
+| the suite | 52 tests | 53 |
+
+- **Root cause C** (`6c74a41`): the conic placement trusted provenance's single
+  owner and slid corners off surfaces they were already on - 48 on
+  `band-fn024`, 120 on lid10. Fixed at the root, with an `EXPORT-ERROR` backstop
+  over every path.
+- **Root cause D** (`f218e8af`): the plane veto's "does a move touch this face"
+  test read only the outer loop, so a face bent through a *hole* was never
+  examined. That sealed lid10's bottom and cost +28% of its volume.
+- **The gate itself was unmeasurable** (`97ce12b`): `step-flagship-check.py`
+  tested `not roundtripSTEP(...)`, a tuple, so no coupon could ever fail its
+  round trip.
+- **Item 15 is no longer cosmetic:** the corner slack is why SOLIDWORKS condemns
+  lid10's whole inner wall - one knitted cone, code 7 `swEdgeVertexNotLie` - and
+  relaxing the veto takes those corners from 290 off to 9.
+- **Item 16** separates what a CAD view shows from what our files contain: the
+  "missing wall" is SOLIDWORKS hiding a face it rejects, the "double T" strays
+  are the mesher's slivers (the faceted control has them too), and `import_step`
+  cannot read our own B-spline output at all.
 
 ### Root cause C is closed, and the gate it was holding shut is not what it said
 
@@ -122,8 +155,10 @@ splits three ways:
   was part of it and is not all of it. The band family's volumes move *toward*
   the model's under the same relaxation.
 
-So the veto stays, for a measured reason and not only a pending decision.
-Nothing was relaxed.
+**D is closed since** (`f218e8af`, item 11), so that third clause is spent: the
+relaxed exports now read 225616.30 and 236835.78 against the normal build's
+227707.04 and 238911.27 - under 1%, and in the direction the band family moves.
+What is left of the gate is the corner slack, item 15. Nothing was relaxed.
 
 **And SOLIDWORKS, asked the same day of that relaxation as an experiment** (item
 1, *Run 2026-09-14*): `f04` reads `faults=0`, the sweep kept, where its normal
@@ -146,7 +181,7 @@ after root causes A and B, with every number identical to four decimals and a
 | `r01-lid10` | 1 / 623 | 787 | 226032.0463 | 5 faces + 1 edge, codes 7/17/21 |
 | `r02-bayonet` | 1 / 623 | 58 | 237141.7973 | 5 faces + 1 edge, codes 7/17/21 |
 
-The control has now reproduced `faults=2 faultyfaces=2 codes=17` six times.
+The control has now reproduced `faults=2 faultyfaces=2 codes=17` **nine times**, three of them on 2026-09-14/15.
 
 Two readings, and the second is the stronger. **The bore cylinder's code 17 is
 gone on the one coupon whose sweep-to-bore boundary is written as the crossing
@@ -186,30 +221,37 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
 
 ### Open, in the order to take it
 
-1. **The corner slack**, which is what `export-step-flagship-corners` is red on
-   and the last thing between the veto and its gate. Measured 2026-09-14 and it
-   is two populations, not one - item 15.
-2. **Then the veto itself**, and only through the gate: the flagship check under
-   the relaxation, then SOLIDWORKS on `f04`, lid10 and bayonet with the `f02`
-   control in the same session.
-   The relaxation to use is `b57c8e73b`'s settle loop.
+1. **Item 15's outlier: a written face's loop carries a vertex its claim never
+   accepted.** On lid10's bottom chamfer the claim's worst corner is 0.1089 and
+   the written face has one 0.7159 off, on a vertex provenance never calls a
+   junction. Measure `patchFromFacets` and the loop assembly for that patch:
+   which step adds the vertex, and on whose authority. Root cause A's shape, for
+   vertices.
+2. **Then the veto**, through what is left of its gate. The case for it is now a
+   measured cost rather than a ratio: it holds 290 of lid10's wall corners off
+   their cone and a CAD system rejects the whole wall for it. The relaxation to
+   use is `b57c8e73b`'s settle loop; put `f04`, lid10 and bayonet to SOLIDWORKS
+   with the `f02` control in the same session and read whether the wall's code 7
+   clears.
 3. **Item 13: provenance loses an original a boolean cut on every facet.** C was
    one consequence; corners left with no owner at all are the other, and they
    are what keeps the three-primitive reproduction of C from being a fixture.
 4. **Item 14: the two-owner placement moves corners off declared surfaces** -
    240 on lid10, 120 on bayonet - without leaving any face they bound. Unexplained.
-5. **Code 21 on `f02`'s sweep** is new and unexplained.
-6. **lid10's faceted control reads `faults=6 codes=24`**, which weakens lid10 as
+5. **Item 16's loose ends:** the face OpenCASCADE reads with a negative area at
+   r = 79.417, and `import_step` aborting on this exporter's own output.
+6. **Code 21 on `f02`'s sweep** is new and unexplained.
+7. **lid10's faceted control reads `faults=6 codes=24`**, which weakens lid10 as
    a test until it is understood.
-7. **lid10 exports 810 analytic faces** where 818 and 822 were recorded earlier;
+8. **lid10 exports 810 analytic faces** where 818 and 822 were recorded earlier;
    it moved with this work and has not been re-derived.
-8. **Item 12**, the survey for other should-never-happen counters. No build.
-9. **The last 47 chords on `f02`.** Not the fitter and not the projector, both
+9. **Item 12**, the survey for other should-never-happen counters. No build.
+10. **The last 47 chords on `f02`.** Not the fitter and not the projector, both
    cleared; whether they are the edges touching the 64 coaxial-owner vertices is
    unmeasured.
-10. **Only the sweep side of a sweep-to-bore edge carries a pcurve**, because the
+11. **Only the sweep side of a sweep-to-bore edge carries a pcurve**, because the
     two-pcurve writer needs two pushed sides and only the quadric emitter pushes.
-11. **Every plane section on the band family is fitted to a ridge-flank facet**,
+12. **Every plane section on the band family is fitted to a ridge-flank facet**,
     a plane the model does not have — a plane section written for a cut that is
     not one.
 
@@ -1507,6 +1549,93 @@ list.
   cylinder 1.0349e-01, plane 5.2461e-01, B-spline 8.5764e-02 - over 814 and 82
   faces. The two parts may share that geometry; not checked.
 
+### 13. Provenance loses an original a boolean cut on every facet
+
+**Filed 2026-09-14, out of item 11's root cause C.** An original owns a surface
+when at least three of its facets lie on it *whole*
+(`export_step.cc`, `least = 3`), and cut facets are deliberately not counted -
+§10 of the development document records why: a facet cut across a seam has two
+corners on the far surface, and counting it made every solid own everything it
+touches. The rule is right about seams and blind to one case: an original whose
+every facet a boolean cut. It then owns nothing, its declared surface drops out
+of the vote at every junction it is part of, and two things follow.
+
+1. **A wrong single owner**, where one other original meets it. That was C, and
+   the conic placement now refuses to act on it. The owner is still wrong; the
+   placement no longer believes it.
+2. **No owner at all**, where the other original is cut the same way. Nothing
+   places those corners, and they stay on the mesh's chords.
+
+The model that shows both, with nothing else wrong in it:
+
+```scad
+difference() {
+  cylinder(r = 23, h = 40, $fn = 24);
+  translate([0, 0, -1]) cylinder(r = 20, h = 42, $fn = 24);
+  translate([0, 0, -1]) rotate([0, 0, 7.5]) cylinder(r1 = 20.6, r2 = 19.4, h = 42, $fn = 24);
+}
+```
+
+The frustum crosses every bore facet mid-facet over the full height, so bore and
+frustum each own 0 whole facets (72 cut apiece) and the outer wall owns 48.
+Provenance: one owner for 48 junctions - the bore's 24 rim corners at z = 40 and
+the frustum's 24 at z = 0, each handed the wall - and none for the 48 where bore
+and frustum cross. Both flags:
+
+| build | validator | worst corner, OCCT |
+| --- | --- | --- |
+| before `6c74a41` | bore 3.0 and frustum 2.43 off themselves | cylinder 3.0000, cone 2.4276 |
+| after | valid | cylinder 0.1711, cone 0.1725 |
+
+The 0.17 left is consequence 2: the unowned crossing corners, a sagitta of the
+r = 20 24-gon, 20(1 - cos(pi/24)) = 0.1711, off the bore and about as much off
+the frustum. That is why this model is not a fixture yet. It would fail the round trip after C's fix for a
+reason C's fix does not touch, and a fixture must pass once its defect is fixed.
+When consequence 2 is fixed it becomes the fixture for both, and its volume is
+derivable: pi (23^2 40 - 20^2 20 - (35/3)((20.6 - 1/35)^3 - 20^3)) = 15485.700931,
+the frustum meeting the bore in the circle at z = 20.
+
+Four models were built on the way to it, and what each refuted is worth keeping:
+
+- a rotated r = 20.05 24-gon subtracted over z 5..35 reproduces C but exports
+  invalid *faceted* as well (item 12):
+
+  ```scad
+  difference() {
+    cylinder(r = 23, h = 40, $fn = 24);
+    translate([0, 0, -1]) cylinder(r = 20, h = 42, $fn = 24);
+    translate([0, 0, 5]) rotate([0, 0, 7.5]) cylinder(r = 20.05, h = 30, $fn = 24);
+  }
+  ```
+
+- a torus bead through the bore leaves the bore whole facets and fires the veto;
+- a ring of square section, r 19..21, cuts the bore only along its own corner
+  lines, so every facet stays whole;
+- the frustum over z 5..35 only leaves the 48 bore facets below z = 5 whole, cut
+  horizontally by the frustum's cap along the bore's own corners.
+
+What counts as ownership is the question, and the seam case in §10 is the
+constraint any answer has to keep.
+
+### 14. The two-owner placement takes corners off declared surfaces, and no face notices
+
+**Filed 2026-09-14, measured and not chased.** While choosing C's fix, every
+proposed move on every export was asked whether it takes a corner off a declared
+exact surface the corner is on to 1e-9, split by path:
+
+| export | two-owner path, off a declared quadric | off a declared plane |
+| --- | --- | --- |
+| `lid10` | 60 | 180 |
+| `bayonet` | 0 | 120 |
+| every fixture, the band family | 0 | 0 |
+
+None of these leaves a face it bounds - that check read zero on both parts - so
+the file is not wrong for it, and C's fix was deliberately not widened to refuse
+them. Either the declared surface is one those corners are on by coincidence
+(an infinite cylinder's record beyond the part, a plane through a rim), or the
+crossing two owners find is not the corner's whole story. The measurement to
+make is the entity read: which declarations, and where the face across is.
+
 ### 15. The corner slack is two populations, and one of them is where SOLIDWORKS still objects
 
 **Measured 2026-09-14.** `export-step-flagship-corners` fails on all six coupons
@@ -1636,93 +1765,6 @@ exporter's own output. It reports `Unknown Type B_SPLINE_SURFACE_WITH_KNOTS` and
 The round-trip oracle in `doc/step-export-development.md` §1 is therefore
 OpenCASCADE only, and our own importer is neither a check nor a viewer for
 anything the analytic path writes. Crashing on input is worth fixing on its own.
-
-### 13. Provenance loses an original a boolean cut on every facet
-
-**Filed 2026-09-14, out of item 11's root cause C.** An original owns a surface
-when at least three of its facets lie on it *whole*
-(`export_step.cc`, `least = 3`), and cut facets are deliberately not counted -
-§10 of the development document records why: a facet cut across a seam has two
-corners on the far surface, and counting it made every solid own everything it
-touches. The rule is right about seams and blind to one case: an original whose
-every facet a boolean cut. It then owns nothing, its declared surface drops out
-of the vote at every junction it is part of, and two things follow.
-
-1. **A wrong single owner**, where one other original meets it. That was C, and
-   the conic placement now refuses to act on it. The owner is still wrong; the
-   placement no longer believes it.
-2. **No owner at all**, where the other original is cut the same way. Nothing
-   places those corners, and they stay on the mesh's chords.
-
-The model that shows both, with nothing else wrong in it:
-
-```scad
-difference() {
-  cylinder(r = 23, h = 40, $fn = 24);
-  translate([0, 0, -1]) cylinder(r = 20, h = 42, $fn = 24);
-  translate([0, 0, -1]) rotate([0, 0, 7.5]) cylinder(r1 = 20.6, r2 = 19.4, h = 42, $fn = 24);
-}
-```
-
-The frustum crosses every bore facet mid-facet over the full height, so bore and
-frustum each own 0 whole facets (72 cut apiece) and the outer wall owns 48.
-Provenance: one owner for 48 junctions - the bore's 24 rim corners at z = 40 and
-the frustum's 24 at z = 0, each handed the wall - and none for the 48 where bore
-and frustum cross. Both flags:
-
-| build | validator | worst corner, OCCT |
-| --- | --- | --- |
-| before `6c74a41` | bore 3.0 and frustum 2.43 off themselves | cylinder 3.0000, cone 2.4276 |
-| after | valid | cylinder 0.1711, cone 0.1725 |
-
-The 0.17 left is consequence 2: the unowned crossing corners, a sagitta of the
-r = 20 24-gon, 20(1 - cos(pi/24)) = 0.1711, off the bore and about as much off
-the frustum. That is why this model is not a fixture yet. It would fail the round trip after C's fix for a
-reason C's fix does not touch, and a fixture must pass once its defect is fixed.
-When consequence 2 is fixed it becomes the fixture for both, and its volume is
-derivable: pi (23^2 40 - 20^2 20 - (35/3)((20.6 - 1/35)^3 - 20^3)) = 15485.700931,
-the frustum meeting the bore in the circle at z = 20.
-
-Four models were built on the way to it, and what each refuted is worth keeping:
-
-- a rotated r = 20.05 24-gon subtracted over z 5..35 reproduces C but exports
-  invalid *faceted* as well (item 12):
-
-  ```scad
-  difference() {
-    cylinder(r = 23, h = 40, $fn = 24);
-    translate([0, 0, -1]) cylinder(r = 20, h = 42, $fn = 24);
-    translate([0, 0, 5]) rotate([0, 0, 7.5]) cylinder(r = 20.05, h = 30, $fn = 24);
-  }
-  ```
-
-- a torus bead through the bore leaves the bore whole facets and fires the veto;
-- a ring of square section, r 19..21, cuts the bore only along its own corner
-  lines, so every facet stays whole;
-- the frustum over z 5..35 only leaves the 48 bore facets below z = 5 whole, cut
-  horizontally by the frustum's cap along the bore's own corners.
-
-What counts as ownership is the question, and the seam case in §10 is the
-constraint any answer has to keep.
-
-### 14. The two-owner placement takes corners off declared surfaces, and no face notices
-
-**Filed 2026-09-14, measured and not chased.** While choosing C's fix, every
-proposed move on every export was asked whether it takes a corner off a declared
-exact surface the corner is on to 1e-9, split by path:
-
-| export | two-owner path, off a declared quadric | off a declared plane |
-| --- | --- | --- |
-| `lid10` | 60 | 180 |
-| `bayonet` | 0 | 120 |
-| every fixture, the band family | 0 | 0 |
-
-None of these leaves a face it bounds - that check read zero on both parts - so
-the file is not wrong for it, and C's fix was deliberately not widened to refuse
-them. Either the declared surface is one those corners are on by coincidence
-(an infinite cylinder's record beyond the part, a plane through a rim), or the
-crossing two owners find is not the corner's whole story. The measurement to
-make is the entity read: which declarations, and where the face across is.
 
 ---
 
@@ -2088,20 +2130,21 @@ beside the fault column.
 
 ## A prompt to start the next session with
 
-> Read `doc/step-export-wip.md` — "Read this first" and "Where it stands" before
-> anything else, then open items 11, 1 and 12 — and `doc/step-export-development.md`.
-> Build and test mechanics are in `CLAUDE.md`.
+> Read `doc/step-export-wip.md` - "Read this first" and "Where it stands" before
+> anything else, then open items 15, 11, 13 and 16 - and
+> `doc/step-export-development.md`. Build and test mechanics are in `CLAUDE.md`.
+> Work on `claude/solidworks-fault-code-17-b58858`, which is pushed and green at
+> `16f29c5f`.
 >
 > The branch should be green. Verify with
 > `ctest --test-dir build -R 'export-step-|mutations'`: **53 tests**, not
 > `-R step`, which drops the mutation harnesses. Run it under the machine's own
 > locale. Two of the 53 fail on purpose and are registered `WILL_FAIL`, so they
-> report green: `export-step-flagship-strict` (the plane veto fires) and
-> `export-step-flagship-corners` (corners of analytic faces off their surface
-> by the tessellation's slack). Do not read either as fixed, and do not delete
-> them. Confirm the round trip actually runs (`cadquery-ocp` 7.x, not 8.0)
-> before trusting any green result - and remember the flagship check could not
-> fail its round trip before `97ce12b`.
+> report green: `export-step-flagship-strict` (the plane veto fires on all six
+> coupons) and `export-step-flagship-corners` (corners of analytic faces off
+> their surface). Do not read either green as the defect being gone, and do not
+> delete them. Confirm the round trip actually runs (`cadquery-ocp` 7.x, not
+> 8.0) before trusting any green result.
 >
 > Every STEP export needs `--enable=step-analytic-surfaces
 > --enable=step-approximate-surfaces`; without them it writes facets and passes
@@ -2109,56 +2152,72 @@ beside the fault column.
 > 1"` passed as an argv list, never through a shell function that can lose the
 > quoting.
 >
-> **Where it stands.** Code 17 moved for the first time: on `f02-band-fn032`,
-> whose sweep-to-bore boundary is 593 crossing curves to 47 chords, the bore
-> cylinder is clean and the sweep reports code 21. On `f04`, lid10 and bayonet —
-> one crossing curve each — code 17 stands. The gate withholding the boundary
-> from those three is the plane veto, which fires on all six flagship coupons.
-> That is n = 1, and the work is to make it n = 4 honestly.
+> **Where it stands.** Code 17 has now moved on two coupons. `f02-band-fn032`
+> lost its bore's 17 when its boundary became the crossing curve; on 2026-09-14
+> `f04-band-fn064` read **`faults=0`** in SOLIDWORKS under a relaxed veto, with
+> its swept surface kept rather than discarded, where its normal build still
+> reads 17. Root causes A, B, C and D of item 11 are all closed at the root, and
+> the flagship check - which until 2026-09-14 could not fail its round trip at
+> all - now enforces it.
 >
-> **Take item 11's root cause D.** A, B and C are fixed at the root; C turned
-> out to be provenance handing a corner a single wrong owner, not coaxial owners,
-> and lid10 carried it too. With C closed the veto's gate was measured for the
-> first time and it is not green for a reason no check asserts: under the
-> relaxation lid10 reads back as a valid solid 28% too large (292144.94 against
-> 227707.04) and bayonet 6% too small, while the band family's volumes move
-> toward the model's. Find which of lid10's 29 extra faces carries it, entity by
-> entity, the way A and B were read. Then the decision item 11 leaves open: what
-> the veto waits for on corner slack, which is red in both configurations.
+> **Take item 15's outlier.** The corner slack is not cosmetic: lid10's inner
+> wall between the thread turns is a run of cone faces, SOLIDWORKS knits them
+> into one 19293.86 mm² face and rejects it with code 7 `swEdgeVertexNotLie`, so
+> a CAD user sees the whole wall missing. Relaxing the veto takes those corners
+> from 290 off their cone to 9. What survives is one vertex at
+> (79.5875, 0, 0), 0.7159 off the bottom chamfer - and it is **not** corner
+> placement: provenance never calls it a junction, no path proposes a move for
+> it, and the claim that produced that face has a worst corner of 0.1089 over
+> every facet it took. The written face's loop acquires a vertex the recogniser
+> never accepted. Find which step adds it - `patchFromFacets`, the boundary
+> runs, the writer's loop assembly - and on whose authority. That is root cause
+> A's shape ("a boundary settled in two places") for vertices rather than for
+> edge geometry.
 >
-> **How to work it, which is how A, B and C were found:**
+> **How to work it, which is how A, B, C and D were found:**
 >
 > - Five whys with the branches named before each measurement, and the refuted
 >   ones recorded. This investigation has refuted more hypotheses than it has
->   kept, including two of its own root causes on the first attempt; the
->   refutations are part of the result.
-> - Fix at the root, not at the gate. Relaxing the veto was proposed on an 89:1
->   ratio and turned out to be holding back four defects. Do not relax it until
->   D is closed, the flagship check is green under the relaxation - read its
->   volumes, not only its verdict - and SOLIDWORKS agrees.
-> - Prefer the declaration to a deduction. When a structural fact about a
->   declared surface is needed, ask the surface — `splineForm`,
->   `membershipTolerance`, `isDeclaredPoint` — rather than reaching around a
->   protected member or inferring it by projection.
-> - Verify a latent fix where the defect lives. A, B and C change nothing the
->   flagship coupons' normal build writes, and were verified against the
->   relaxed-veto configuration (`b57c8e73b`'s settle loop), where they do. Mutate
->   by writing the working tree with `git show <sha>:<path> > <path>`, never
->   `git checkout <sha> -- <path>`, which stages the file.
-> - A defect the suite did not catch does not land its fix until something in the
->   suite fails without it. A unit test where the defect is in a solver, derived
->   and shown to fail; a fixture only where it is visible solely in a whole export.
+>   kept - including its own first account of C, and "the missing wall is a
+>   regression" this session - and the refutations are part of the result.
+> - Fix at the root, not at the gate. Do not relax the veto until item 15 is
+>   closed, then the flagship check under the relaxation - read its *volumes*,
+>   not only its verdict - and then SOLIDWORKS, with the `f02` control in the
+>   same session.
+> - Prefer the declaration to a deduction. Ask the surface - `splineForm`,
+>   `membershipTolerance`, `isDeclaredPoint`, `declaredBand` - rather than
+>   reaching around a protected member or inferring by projection. Where a
+>   threshold is needed, derive it: D's backstop uses the mesher's own
+>   `coplanarTolerance` rather than a number someone liked.
+> - Verify a latent fix where the defect lives. A, B, C and D change nothing the
+>   flagship coupons' normal build writes and were verified against the
+>   relaxed-veto configuration (`b57c8e73b`'s settle loop, behind a temporary
+>   switch that is never committed). Mutate by writing the working tree with
+>   `git show <sha>:<path> > <path>`, never `git checkout <sha> -- <path>`,
+>   which stages the file.
+> - A defect the suite did not catch does not land its fix until something in
+>   the suite fails without it. A unit test where the defect is in a solver; a
+>   fixture where it is visible only in a whole export; an `EXPORT-ERROR` the
+>   flagship check fails on where neither reaches.
 > - Anything that should never be reached is loud, at the strength the
 >   measurement supports: `EXPORT-ERROR` if unreachable today, `EXPORT-WARNING`
->   plus a `WILL_FAIL` assertion if reached today. Item 12 is the survey for more.
-> - Ask what a check rejects before quoting what it accepts: hand it a file known
->   to be wrong. The flagship round trip passed a 25-shell file for four days.
+>   plus a `WILL_FAIL` assertion if reached today. Item 12 is the survey for
+>   more.
+> - Ask what a check rejects before quoting what it accepts, by handing it a
+>   file known to be wrong. The flagship round trip passed a 25-shell file for
+>   four days; a debug line printing four decimals hid 2.26e-06 as "0.0000"; and
+>   a report printed before the loop it measures reads zero for ever.
+> - When a CAD view suggests missing geometry, render our own file first. OCCT
+>   plus `free_boundaries` and an STL render settled it in minutes this session,
+>   where the view had suggested a regression that did not exist.
 >
 > **Standing rules.** Every expectation derived from the model, never captured
 > from a run. Report how much of each sweep was recognised beside any fault
 > count. For SOLIDWORKS: start it by hand, label every run with its import
 > settings, never kill the driver mid-import, write its output to a file rather
 > than through a buffering pipe, and put the 2026-09-08 control
-> `build/interop-kit3/f02-band-fn032-analytic.stp` in the same session — it must
+> `build/interop-kit3/f02-band-fn032-analytic.stp` in the same session - it must
 > read `faults=2 faultyfaces=2 codes=17`, or a page of clean rows means nothing.
-> Read `-FaultDetail` before forming a theory.
+> It has now reproduced that nine times. Read `-FaultDetail` before forming a
+> theory, and compare it against the last run's table rather than reading it
+> fresh.
