@@ -1537,6 +1537,56 @@ one part, faulty in a CAD system, carrying corner strays five to seven times
 anything else in the file. Read `-FaultDetail` against what the model puts there
 before forming a theory.
 
+#### Chased 2026-09-15: the bulk is the veto, and it costs a CAD system the whole wall
+
+**What the slack costs, measured rather than assumed.** lid10's inner wall
+between the thread turns is not one cylinder: the lid has a draft, so it is a
+run of *cone* faces (refR 79.402, half angle 1.15 degrees) spanning z 1.2 to 65.
+Sampling the wall confirms it - a point at r = 79.0 lies on one of them at
+0.0000. SOLIDWORKS knits those pieces into a single face of 19293.86 mm², larger
+than any face this exporter writes, and reports it faulty with code **7**,
+`swEdgeVertexNotLie` - a vertex that does not lie where it should. One faulty
+face, and the whole wall between the turns disappears from the view. That is
+what a CAD user sees, and it is item 15's bulk doing it.
+
+**The veto is what holds those corners off the surface.** With the veto relaxed
+(and C and D fixed), the same file's wall corners are almost all placed:
+
+| cone (inner wall) | normal build, corners off / worst | relaxed veto |
+| --- | --- | --- |
+| four of them | 25, 60, 60, 30 / up to 0.036 | **0, 0, 0, 0 / 0.0000** |
+| the two largest | 46 / 0.1075, 48 / 0.1050 | 1 / 0.0200, 1 / 0.1050 |
+| the lowest | 13 / 0.0667 | 1 / 0.0667 |
+| the bottom 45-degree chamfer | 5 / **0.7159** | 4 / **0.7159** |
+
+290 stray corners become 9. So on lid10 - unlike the band family, where it moves
+0.0241 to 0.0212 - relaxing the veto is decisive, and the earlier note that it
+"barely touches" the slack is corrected.
+
+**The outlier is not corner placement at all.** The 0.7159 sits at
+(79.5875, 0, 0), a corner of the bottom chamfer, and following that one vertex
+through the export settles what it is not:
+
+- it belongs to **one original** (`id134`), so provenance never calls it a
+  junction: no two-owner move, no single-owner pass, not welded, no move ever
+  proposed for it, in either configuration;
+- the chamfer it bounds is a **fitted** cone - the exact tier writes no cone of
+  that radius at all - claimed by the trimmed-quadric pass over 6 facets;
+- and that claim's worst corner, over every facet it claimed, is **0.1089**. The
+  0.7159 vertex is not in the claim, not in any of its boundary runs, and not a
+  corner of any facet it took.
+
+So the written face's loop acquires a vertex the recogniser never accepted,
+somewhere between the claim and the writer. That is root cause A's shape - a
+boundary settled in two places - for *vertices* rather than for edge geometry.
+The next measurement is `patchFromFacets` and the loop assembly for that patch:
+which step adds the vertex, and on whose authority.
+
+Four faces meet at it - the fitted cone, a 10-corner fitted B-spline, and two
+planes, one of them the negative-area triangle of item 16 - so the thread
+run-out at theta = 0 is one small neighbourhood carrying three of this file's
+oddities at once.
+
 ### 16. What a CAD view of lid10 shows, and which of it is ours
 
 **Measured 2026-09-14** after three observations from a SOLIDWORKS session on
