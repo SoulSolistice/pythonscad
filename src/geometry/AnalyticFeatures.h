@@ -84,6 +84,13 @@ struct Band {
    * cap spans has to be the one the tessellation leaves, not one a boolean cut. */
   bool pole_closed = false;
 
+  /*! Whether the record this band answers to is one the *model* declared, as
+   * against one the approximation fitted. The caller passes its declarations as
+   * the head of the surface list and says how many; a band matching anything
+   * past that is on a measurement rather than on a statement. Exactness takes
+   * precedence over a fit, and this is what lets a caller hold it. */
+  bool on_declared = true;
+
   Vector3d axis, base;  // base is the centre of the bottom rim
   double r_bottom = 0, r_top = 0;
   double height = 0;
@@ -520,7 +527,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
  * `surfaces` are the analytic surfaces the model declared; with none of them
  * nothing is recognised, by design. `tol` is the modelling tolerance. */
 Result recogniseSurfacesOfRevolution(const Mesh& mesh,
-                                     const std::vector<std::shared_ptr<Surface>>& surfaces, double tol);
+                                     const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
+                                     std::size_t declared_count = std::size_t(-1));
 
 /*! An arbitrary unit vector perpendicular to `norm`. */
 Vector3d perpendicular(const Vector3d& norm);

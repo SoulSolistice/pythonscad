@@ -126,23 +126,43 @@ bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
 static bool describesSameSurface(const Surface& a, const Surface& b)
 {
   if (a.sameAs(b)) return true;
-  const auto *ca = dynamic_cast<const CylinderSurface *>(&a);
-  const auto *cb = dynamic_cast<const CylinderSurface *>(&b);
-  if (ca == nullptr || cb == nullptr) return false;
-  if (fabs(ca->r - cb->r) > 1e-9) return false;
-  if (fabs(fabs(ca->normdir.dot(cb->normdir)) - 1.0) > 1e-9) return false;
-  const Vector3d between = cb->refpt - ca->refpt;
-  return (between - between.dot(ca->normdir) * ca->normdir).norm() <= 1e-9;
+  // The same axis *line*, which is what "infinite along the axis" means: the
+  // two reference points may differ, but only along it.
+  const auto axesAgree = [](const Surface& p, const Surface& q) {
+    const Vector3d u = p.normdir.normalized(), w = q.normdir.normalized();
+    if (fabs(fabs(u.dot(w)) - 1.0) > 1e-9) return false;
+    const Vector3d between = q.refpt - p.refpt;
+    return (between - u * between.dot(u)).norm() <= 1e-9;
+  };
+  if (const auto *ca = dynamic_cast<const CylinderSurface *>(&a)) {
+    const auto *cb = dynamic_cast<const CylinderSurface *>(&b);
+    return cb != nullptr && fabs(ca->r - cb->r) <= 1e-9 && axesAgree(a, b);
+  }
+  // A cone is infinite along its axis too, and its record says the radius at
+  // one height rather than the surface: the same cone measured from two heights
+  // is two records that agree nowhere in their fields. Compared the way
+  // sameSurfaceGeometrically in export_step.cc compares them, so the record
+  // list and the owner count answer this question the same way - the radius at
+  // a shared point, and the slope in absolute value because reversing the axis
+  // negates it and describes the same cone.
+  if (const auto *ca = dynamic_cast<const ConeSurface *>(&a)) {
+    const auto *cb = dynamic_cast<const ConeSurface *>(&b);
+    if (cb == nullptr || !axesAgree(a, b)) return false;
+    return fabs(fabs(ca->slope) - fabs(cb->slope)) <= 1e-9 &&
+           fabs(ca->radiusAt(cb->refpt) - cb->r) <= 1e-9;
+  }
+  return false;
 }
 
-void addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
+bool addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
                       const std::shared_ptr<Surface>& surface)
 {
-  if (surface == nullptr) return;
+  if (surface == nullptr) return false;
   for (const auto& s : list) {
-    if (s != nullptr && describesSameSurface(*s, *surface)) return;
+    if (s != nullptr && describesSameSurface(*s, *surface)) return false;
   }
   list.push_back(surface);
+  return true;
 }
 
 void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,

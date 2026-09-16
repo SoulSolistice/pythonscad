@@ -244,10 +244,12 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
    re-projects a chord's pcurve to v = 1.0221. Either write a boundary it will
    not re-project beside the seam, or leave the seam-side facets of a crossing
    claim unclaimed, which is always a valid export and was measured clean.
-3. **Item 19: the approximation fits cones the model already declared**, because
-   a rim rule refused the declared record first. Measure that the refused bands
-   and the fitted cones are the same regions, which every number so far is
-   consistent with and none proves.
+3. **Item 19's remaining half: the rim rules themselves.** The measurement is
+   done - the refused bands and the fitted cones are the same 120 facets, and the
+   fit gains nothing because the declared record claims them in the
+   trimmed-quadric pass. What is left is why a band is refused for
+   *the rim borders one face per facet* and *the band sharing this rim was
+   dropped*, which is item 10's territory.
 4. **Then the veto**, through what is left of its gate. The case for it is now a
    measured cost rather than a ratio: it holds 290 of lid10's wall corners off
    their cone and a CAD system rejects the whole wall for it. The relaxation to
@@ -2106,6 +2108,69 @@ cones with both flags and 9 with the analytic flag alone.
 Item 10 surveys analytics that stop short and is the right home for the fix; this
 entry records the one case where the shortfall is provable, because the surface
 the approximation fitted is one the model had already stated.
+
+#### Measured 2026-09-16: the refused bands and the fitted cones are the same regions
+
+Facet for facet, and not merely the same radii:
+
+| the approximation's cone fit | the band it was refused as | the rule |
+| --- | --- | --- |
+| 60 facets | r = 75.1, 60 facets | the band sharing this rim was dropped |
+| 60 facets | r = 78.3073, 60 facets | the rim borders one face per facet |
+
+All 120 facets the approximation fitted as cones are facets a band pass refused,
+and the two sets coincide exactly. The chain of item 19 is therefore no longer
+an inference.
+
+**And the fit gains nothing.** Both fitted records duplicate a declared cone, and
+both claim **zero** facets: the 120 are claimed by the *declared* records in the
+trimmed-quadric pass, which spends the tessellation band under the approximation
+flag and so takes what the band pass would not. That is also why lid10 writes 16
+cones with both flags and 9 with the analytic flag alone - the declarations are
+there either way, and only the looser tier can use them here.
+
+So the `2 as cones` in the approximation's report counted work nobody used. It
+now says so:
+
+```text
+EXPORT-WARNING: 2 regions are fitted to a surface the model had already declared,
+so the fit gained nothing - a declaration was refused upstream and re-derived here
+```
+
+`describesSameSurface` covers cones for this, by the rule `sameSurfaceGeometrically`
+already used next door - the same axis line, the slope in absolute value, the
+radius compared at a shared point - so the record list and the owner count answer
+that question the same way. It is item 17's leftover, spent here.
+
+**And a fit the band pass never sees.** The re-run after fitting was conditional
+on `fitted + turned + recovered`, leaving `coned` out: a model whose approximation
+fits only cones added the record and never re-ran, so the fit could not become a
+face at all. Latent on lid10, which fits sixteen rings as well; fixed with the
+rest.
+
+#### Exactness takes precedence, and it is now held rather than assumed
+
+The standing rule: a surface the model declared beats one the approximation
+fitted, in every combination, and a facet claimed under the exact tier is never
+re-offered under a looser one. It is what a commercial kernel refuses - a fit
+spends the tessellation band, a declaration states where the surface is.
+
+The passes walk one list and the first surface to accept a facet takes it, so the
+order *is* the precedence: the declarations are its head and every fit is
+appended after them. Two `EXPORT-ERROR` guards hold it, both measured unreachable
+before being made errors and each mutation-checked:
+
+| guard | mutation | what it reports |
+| --- | --- | --- |
+| the declarations are still the head of the list | a fit inserted at the front | 66 of the model's own surfaces are no longer the first entries |
+| the re-run costs the declarations nothing | every facet marked as claimed beforehand | 1943 facets they had already recognised |
+| ... and moves nothing onto a fit | every band marked as fitted | 536 moved onto a fitted surface |
+
+`Band::on_declared` is what the second reads, set where the recogniser already
+knows it: a band is only accepted when a record describes it, and the caller says
+how many of the records are the model's own. On lid10 536 facets and on the
+bayonet part 628 go into the re-run claimed by a declaration and every one comes
+out still claimed by one.
 
 ## Unexplained, and to be validated
 

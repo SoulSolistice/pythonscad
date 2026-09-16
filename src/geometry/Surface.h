@@ -47,9 +47,14 @@ public:
                                    const std::shared_ptr<Surface>& surface);
 
 /*! Append a surface record unless one describing the same surface is already
- * there. Coaxial cylinders of equal radius count as the same surface; see the
- * definition. */
-void addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
+ * there, and say which happened. Coaxial cylinders of equal radius count as the
+ * same surface, and so do cones on one axis line with one slope through one
+ * radius; see the definition.
+ *
+ * False therefore means "the model already states this surface", which is worth
+ * knowing to a caller that has just *fitted* one: the declaration was there all
+ * along and something refused it. */
+bool addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
                       const std::shared_ptr<Surface>& surface);
 
 /*! Append the records of `from` that `into` does not already hold.

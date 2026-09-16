@@ -1322,7 +1322,8 @@ void StepKernel::build_tri_body(
     mesh.valid = &loop_valid;
     mesh.is_hole = &loop_is_hole;
     mesh.normals = &loop_normals;
-    features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol);
+    features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol,
+                                                              surfaces.size());
 
     // The approximation pass, and the only place in this exporter where a
     // surface is written that the model never declared.
@@ -1348,6 +1349,10 @@ void StepKernel::build_tri_body(
       const std::vector<AnalyticFeatures::SmoothRegion> candidates =
         AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
       std::size_t fitted = 0, recovered = 0, turned = 0, tried = 0, coned = 0;
+      // Fits the model had already declared. A guess that duplicates a declaration
+      // is not a surface gained: it is a declaration something refused, and the
+      // refusal is upstream - see open item 19.
+      std::size_t already_declared = 0;
       std::map<std::string, int> turned_refusals;
       double coarsest = 0;
       for (const auto& region : candidates) {
@@ -1357,7 +1362,7 @@ void StepKernel::build_tri_body(
         if (guess != nullptr) {
           fitted++;
           coarsest = std::max(coarsest, region.band);
-          addSurfaceUnique(effective, guess);
+          if (!addSurfaceUnique(effective, guess)) already_declared++;
           continue;
         }
         // A cone, which is a quadric fitCylinder cannot describe and correctly
@@ -1369,7 +1374,7 @@ void StepKernel::build_tri_body(
         if (guess != nullptr) {
           coned++;
           coarsest = std::max(coarsest, region.band);
-          addSurfaceUnique(effective, guess);
+          if (!addSurfaceUnique(effective, guess)) already_declared++;
           continue;
         }
         // Not a quadric, but perhaps still a sweep. `regularity` is what says
@@ -1418,11 +1423,55 @@ void StepKernel::build_tri_body(
           int(fitted + coned + turned + recovered), int(tried), int(fitted), int(coned), int(turned),
           int(recovered), coarsest);
       }
-      if (fitted + turned + recovered > 0) {
+      if (already_declared > 0) {
+        // Not a degradation in itself - the region is written by whichever pass
+        // can take it - but it says a declaration was refused upstream and the
+        // approximation then re-derived the same surface by measurement. The
+        // rule that refused it is in the band report above. See open item 19.
+        LOG(message_group::Export_Warning,
+            "STEP export: %1$d region%2$s fitted to a surface the model had already declared, so "
+            "the fit gained nothing - a declaration was refused upstream and re-derived here",
+            int(already_declared), already_declared == 1 ? " is" : "s are");
+      }
+      // What the declared surfaces alone had already claimed. The re-run below
+      // starts from scratch with the fits in hand, and an exact declaration has
+      // to keep what it recognised: a fit is a measurement of the mesh, a
+      // declaration is what the model said, and no combination of the two may
+      // end with the measurement holding ground the declaration had.
+      std::vector<char> exact_consumed = features.consumed;
+      // `coned` belongs in this condition as much as the others: a fit the band
+      // pass never sees is a fit that cannot become a face.
+      if (fitted + coned + turned + recovered > 0) {
         // Re-run with the fits in hand. Cheaper than threading them through the
         // pass that has already run, and it means a fitted surface goes through
         // exactly the checks a declared one does.
-        features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol);
+        features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol,
+                                                                  surfaces.size());
+        std::size_t lost = 0, demoted = 0;
+        for (std::size_t f = 0; f < exact_consumed.size() && f < features.consumed.size(); f++) {
+          if (exact_consumed[f] == 0) continue;  // the declared-only pass did not have it
+          if (features.consumed[f] == 0) {
+            lost++;
+            continue;
+          }
+          // It was claimed by a declaration - the first pass had nothing else -
+          // so it has to still be on one.
+          const std::size_t b = features.band_of_loop[f];
+          if (b == AnalyticFeatures::NO_BAND || b >= features.bands.size()) continue;
+          if (!features.bands[b].on_declared) demoted++;
+        }
+        if (lost > 0 || demoted > 0) {
+          // Measured unreachable: on lid10 and the bayonet part, 536 and 628
+          // facets go into the re-run claimed by a declared surface and every
+          // one of them comes out still claimed by one. Reaching this means the
+          // approximation has taken ground away from the model's own statement,
+          // which is the one thing the declaration channel exists to prevent.
+          LOG(message_group::Export_Error,
+              "STEP export: the approximation's re-run cost the declared surfaces %1$d facet%2$s "
+              "they had already recognised and moved %3$d onto a fitted surface - a measurement "
+              "may not displace a declaration",
+              int(lost), lost == 1 ? "" : "s", int(demoted));
+        }
       }
     }
     for (const auto& line : features.report) LOG("STEP export: %1$s", line);
@@ -1435,6 +1484,25 @@ void StepKernel::build_tri_body(
     // that declared none. A patch that is silently not recognised looks exactly
     // like one that was never declared - the same trap the band report exists
     // for.
+    // Every pass below walks `effective` in order and the first surface to accept
+    // a facet takes it, so the order *is* the precedence: the model's own
+    // surfaces are the first `surfaces.size()` entries and every fit is appended
+    // after them. Held rather than assumed, because nothing else in the file
+    // says it and a fit offered first would take facets the declaration states.
+    {
+      std::size_t out_of_order = 0;
+      for (std::size_t i = 0; i < surfaces.size(); i++) {
+        if (i >= effective.size() || effective[i] != surfaces[i]) out_of_order++;
+      }
+      if (out_of_order > 0) {
+        LOG(message_group::Export_Error,
+            "STEP export: %1$d of the model's own surfaces are no longer the first entries of the "
+            "list the passes walk, so a fitted surface can be offered a facet before the "
+            "declaration that states it",
+            int(out_of_order));
+      }
+    }
+
     std::vector<std::string> patch_report;
     std::vector<AnalyticFeatures::Patch> patches =
       AnalyticFeatures::recogniseBezierPatches(mesh, effective, features.consumed, patch_report);

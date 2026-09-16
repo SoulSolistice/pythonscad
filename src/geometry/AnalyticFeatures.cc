@@ -2469,7 +2469,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
 }
 
 Result recogniseSurfacesOfRevolution(const Mesh& mesh,
-                                     const std::vector<std::shared_ptr<Surface>>& surfaces, double tol)
+                                     const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
+                                     std::size_t declared_count)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -2502,13 +2503,18 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
   auto edge_key = [](int a, int b) { return std::make_pair(std::min(a, b), std::max(a, b)); };
 
   // Did the model declare a cylinder of this radius about this axis?
-  auto declared_cylinder = [&](double radius, const Vector3d& axis, const Vector3d& base) {
-    for (const auto& surface : surfaces) {
-      const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
+  // `which` takes the index of the record that matched, so a caller can tell a
+  // surface the model declared from one the approximation fitted - they arrive
+  // in one list, declarations first. See Band::on_declared.
+  auto declared_cylinder = [&](double radius, const Vector3d& axis, const Vector3d& base,
+                               std::size_t *which = nullptr) {
+    for (std::size_t i = 0; i < surfaces.size(); i++) {
+      const auto *cyl = dynamic_cast<const CylinderSurface *>(surfaces[i].get());
       if (cyl == nullptr) continue;
       if (fabs(cyl->r - radius) > 1e-7 * radius) continue;
       if (fabs(fabs(cyl->normdir.normalized().dot(axis)) - 1.0) > 1e-7) continue;
       if (distanceToAxis(cyl->refpt, base, axis) > 1e-7 * radius) continue;
+      if (which != nullptr) *which = i;
       return true;
     }
     return false;
@@ -2521,9 +2527,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
   // taper. A cone that agrees with both rims of an exactly fitted frustum is
   // the frustum, so nothing further is checked.
   auto declared_cone = [&](double r_bottom, double r_top, const Vector3d& axis, const Vector3d& base,
-                           double height) {
+                           double height, std::size_t *which = nullptr) {
     const double scale = std::max(std::max(r_bottom, r_top), 1e-9);
-    for (const auto& surface : surfaces) {
+    for (std::size_t i = 0; i < surfaces.size(); i++) {
+      const auto& surface = surfaces[i];
       const auto *cone = dynamic_cast<const ConeSurface *>(surface.get());
       if (cone == nullptr) continue;
       const Vector3d cone_axis = cone->normdir.normalized();
@@ -2531,6 +2538,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       if (distanceToAxis(cone->refpt, base, axis) > 1e-7 * scale) continue;
       if (fabs(cone->radiusAt(base) - r_bottom) > 1e-7 * scale) continue;
       if (fabs(cone->radiusAt(base + axis * height) - r_top) > 1e-7 * scale) continue;
+      if (which != nullptr) *which = i;
       return true;
     }
     return false;
@@ -2884,6 +2892,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       // between them. Both of its rims matching a declared cylinder is the
       // same statement of intent, made by two primitives instead of one.
       const bool is_cone = fabs(r_bottom - r_top) > 1e-9 * scale;
+      std::size_t matched = 0;
       // A cone cut off-axis gives a conic whose rim has no single radius, and
       // the ellipse written below would be the wrong curve rather than an
       // imprecise one. Only a cylinder may be tilted.
@@ -2895,14 +2904,21 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         // itself. The second way exists because the first cannot state a cone
         // whose far rim is only where a boolean cut it, and asking that trim to
         // declare itself is asking the wrong thing of it.
-        const bool by_rims =
-          declared_cylinder(r_bottom, axis, base) && declared_cylinder(r_top, axis, base);
-        if (!by_rims && !declared_cone(r_bottom, r_top, axis, base, hi - lo)) continue;
-      } else if (!declared_cylinder(r_bottom, axis, base)) {
+        std::size_t which_bottom = 0, which_top = 0, which_cone = 0;
+        const bool by_rims = declared_cylinder(r_bottom, axis, base, &which_bottom) &&
+                             declared_cylinder(r_top, axis, base, &which_top);
+        if (!by_rims && !declared_cone(r_bottom, r_top, axis, base, hi - lo, &which_cone)) continue;
+        matched = by_rims ? std::max(which_bottom, which_top) : which_cone;
+      } else if (!declared_cylinder(r_bottom, axis, base, &matched)) {
         continue;
       }
 
       Band info;
+      // Which record this band answers to, so that a caller can tell a band on
+      // the model's own surface from one on a surface the approximation fitted.
+      // The declarations are the head of the list the caller passes; anything
+      // past `declared_count` is a fit.
+      info.on_declared = matched < declared_count;
       info.walls = walls;
       info.axis = axis;
       info.base = base;
