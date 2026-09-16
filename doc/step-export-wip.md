@@ -12,8 +12,10 @@ fix** - item 11's root causes C and D closed, the flagship check repaired, item
 15's outlier run to ground (it is a reader's repair of a face that crosses its
 surface's seam), claim order measured and refuted as a lever (item 17), and item
 18's 11 mm corner slide fixed at the root on a nine-line model that still breaks
-the approximation tier for a second reason. The suite is green at 53 of 53 on
-this branch; the seam fix is parked on `claude/step-export-seam-fix`. Everything below
+the approximation tier for a second reason. Item 17 is closed - the duplicates
+are deliberate and their consumers already collapse them - leaving item 19, the
+approximation re-fitting a cone the model declared. The suite is green at 53 of
+53 on this branch; the seam fix is parked on `claude/step-export-seam-fix`. Everything below
 was measured on `claude/solidworks-fault-code-17-b58858`.
 
 ---
@@ -240,31 +242,35 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
    re-projects a chord's pcurve to v = 1.0221. Either write a boundary it will
    not re-project beside the seam, or leave the seam-side facets of a crossing
    claim unclaimed, which is always a valid export and was measured clean.
-3. **Then the veto**, through what is left of its gate. The case for it is now a
+3. **Item 19: the approximation fits cones the model already declared**, because
+   a rim rule refused the declared record first. Measure that the refused bands
+   and the fitted cones are the same regions, which every number so far is
+   consistent with and none proves.
+4. **Then the veto**, through what is left of its gate. The case for it is now a
    measured cost rather than a ratio: it holds 290 of lid10's wall corners off
    their cone and a CAD system rejects the whole wall for it. The relaxation to
    use is `b57c8e73b`'s settle loop; put `f04`, lid10 and bayonet to SOLIDWORKS
    with the `f02` control in the same session and read whether the wall's code 7
    clears.
-4. **Item 13: provenance loses an original a boolean cut on every facet.** C was
+5. **Item 13: provenance loses an original a boolean cut on every facet.** C was
    one consequence; corners left with no owner at all are the other, and they
    are what keeps the three-primitive reproduction of C from being a fixture.
-5. **Item 14: the two-owner placement moves corners off declared surfaces** -
+6. **Item 14: the two-owner placement moves corners off declared surfaces** -
    240 on lid10, 120 on bayonet - without leaving any face they bound. Unexplained.
-6. **Item 16's loose ends:** the face OpenCASCADE reads with a negative area at
+7. **Item 16's loose ends:** the face OpenCASCADE reads with a negative area at
    r = 79.417, and `import_step` aborting on this exporter's own output.
-7. **Code 21 on `f02`'s sweep** is new and unexplained.
-8. **lid10's faceted control reads `faults=6 codes=24`**, which weakens lid10 as
+8. **Code 21 on `f02`'s sweep** is new and unexplained.
+9. **lid10's faceted control reads `faults=6 codes=24`**, which weakens lid10 as
    a test until it is understood.
-9. **lid10 exports 810 analytic faces** where 818 and 822 were recorded earlier;
+10. **lid10 exports 810 analytic faces** where 818 and 822 were recorded earlier;
    it moved with this work and has not been re-derived.
-10. **Item 12**, the survey for other should-never-happen counters. No build.
-11. **The last 47 chords on `f02`.** Not the fitter and not the projector, both
+11. **Item 12**, the survey for other should-never-happen counters. No build.
+12. **The last 47 chords on `f02`.** Not the fitter and not the projector, both
    cleared; whether they are the edges touching the 64 coaxial-owner vertices is
    unmeasured.
-12. **Only the sweep side of a sweep-to-bore edge carries a pcurve**, because the
+13. **Only the sweep side of a sweep-to-bore edge carries a pcurve**, because the
     two-pcurve writer needs two pushed sides and only the quadric emitter pushes.
-13. **Every plane section on the band family is fitted to a ridge-flank facet**,
+14. **Every plane section on the band family is fitted to a ridge-flank facet**,
     a plane the model does not have — a plane section written for a cut that is
     not one.
 
@@ -1899,6 +1905,43 @@ by order on anything measured here. Where the recogniser is actually short is
 provenance being silent - item 13 - and that is a question about ownership, not
 about sequence.
 
+#### Closed 2026-09-16: the duplicates are deliberate, and their consumers already collapse them
+
+Two rules exist, and the difference between them is the answer:
+
+- `Surface::sameAs`, with `describesSameSurface` beside it, deduplicates the
+  *record list*, where being wrong loses a surface. It is conservative on
+  purpose and keeps one infinite cylinder referred to from two heights as two
+  entries - its own comment says so.
+- `sameSurfaceGeometrically` in `export_step.cc` answers "how many *distinct
+  surfaces* claim this vertex", and it already covers cones as well as
+  cylinders - same axis line, radius compared at a shared point, slope in
+  absolute value because reversing a cone's axis negates it. Nothing is dropped
+  there, so it can afford to be liberal.
+
+So the place where a duplicate would do harm - counting one surface twice as two
+owners, which is what feeds the pair placement - collapses them already, and has
+since `step-declare-cone`'s 32 junctions were found looking contested. That is
+why applying the record rule on the boolean path changed nothing measurable, and
+it is a reason not to apply it rather than an accident.
+
+**And the duplicates cost nothing downstream.** Measured on lid10, which carries
+588 quadric records, 24 of them declared and the rest guesses the approximation
+pass added:
+
+| duplicate pair | claims |
+| --- | --- |
+| declared cylinder r=80.7 x2 | 0 / 0 |
+| declared cylinder r=78.3073 x2 | 76 / 76 - two separate regions of one infinite cylinder, not a contest |
+| declared cylinder r=82.4 x2 | 0 / 0 |
+| declared cone == **fitted** cone (x2 pairs) | 60 / **0** |
+
+No fitted quadric claims a facet the declared record would have had. Item 17 is
+closed: there is no sharpening here, by ordering or by deduplication.
+
+**What it did turn up** is one thread, filed as item 19: the approximation fitted
+two cones that the model had already declared.
+
 ### 18. A two-owner corner slides 11 mm along the curve its owners cross in
 
 **Found 2026-09-16, while measuring item 17, and not yet chased.** Nine lines,
@@ -2009,6 +2052,39 @@ settled in two places - for *arcs*, where item 11 closed it for plane sections
 by binding on `split_for_corners`. Until that is closed the model stays out of
 the suite, as item 13's does.
 
+
+### 19. The approximation re-fits a cone the model declared, where a rim rule refused it
+
+**Filed 2026-09-16, out of item 17, and not chased.** On lid10 the approximation
+pass reports *took 18 of 35 uncovered regions - 0 as cylinders, 2 as cones, 16 as
+rings of a turned surface*, and the two cones it fitted are the same surfaces as
+declared cones already in the list: #67 is declared #46 with its axis written the
+other way round, and #66 is declared #58 measured from another height. Both
+fitted records claim nothing in the trimmed-quadric pass; the declared ones claim
+60 facets each.
+
+So a region lying on a cone the model declared was left uncovered, and the
+approximation recovered the geometry by *fitting* it. The band pass says why it
+gave up, in its own words, on the same radii:
+
+```text
+r=78.3073 band of 60 facets left faceted: the rim borders one face per facet
+r=78.3073 band of 4 facets left faceted: a shared rim needs both bands to be the same shape
+```
+
+That the refused bands and the fitted cones are the same regions is consistent
+with every number here but was not measured directly; that is the first thing to
+do with this item.
+
+It matters for the exact tier, which has no approximation to fall back on:
+section 2's *a declaration that is not taken is a bug report*, and section 1's
+"the third gate is where the work is" - eleven exact cylinder fits on the bayonet
+lid, every one declared, every one refused by the rim rules. lid10 exports 16
+cones with both flags and 9 with the analytic flag alone.
+
+Item 10 surveys analytics that stop short and is the right home for the fix; this
+entry records the one case where the shortfall is provable, because the surface
+the approximation fitted is one the model had already stated.
 
 ## Unexplained, and to be validated
 
