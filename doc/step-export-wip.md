@@ -28,18 +28,19 @@ Verify the tree before changing anything, and again after:
 ctest --test-dir build -R 'export-step-|mutations'
 ```
 
-**53 tests**, and it has to be this regex and not `-R step`, which drops
+**54 tests**, and it has to be this regex and not `-R step`, which drops
 `bspline-check-mutations` and `closed-sphere-check-mutations` — the harnesses
 whose job is to prove the other tests would fail if the defect came back. What
 the 53 are: 33 SCAD fixtures in `tests/data/scad/step-export/`, 12 Python in
 `tests/data/pythonscad-step-export/`, the two mutation harnesses, the three
 flagship tests below, and three `*_arg-permutations` tests that have nothing to
 do with STEP and match `mutations` by substring. It was 52 until
-`export-step-flagship-corners` was added on 2026-09-14; a build configured
-before that sees 52. Run it under the machine's own locale, not `LC_ALL=C`,
+`export-step-flagship-corners` was added on 2026-09-14 and 53 until
+`step-cap-meets-wall` on 2026-09-16; a build configured before those sees fewer,
+and **a new fixture needs `cmake -B build` before ctest can see it at all**. Run it under the machine's own locale, not `LC_ALL=C`,
 which breaks five UTF-8 filename tests.
 
-**Two of the 53 fail on purpose and report green**, both registered
+**Three of the 54 fail on purpose and report green**, all registered
 `WILL_FAIL`: ctest reports them *passed* while they fail, and will report each
 *failed* on the day it starts passing — which is how that fix gets noticed. Do
 not delete them, and do not read their green as the defect being gone.
@@ -50,6 +51,10 @@ not delete them, and do not read their green as the defect being gone.
   lies on that face's surface, as every fixture's round trip does. It fails on
   all six coupons, normal build and relaxed veto alike, on the tessellation's
   slack: 0.01 to 0.72 against an allowance near 1e-6.
+- `export-step-sanitytest_step-cap-meets-wall` is a fixture of that same slack,
+  nine lines wide: two of its corners sit 3.6e-03 and 4.5e-03 off the analytic
+  faces they bound. The two defects it was built for - item 18's - are fixed,
+  and it is kept as the small reproduction of what is not.
 
 **Until 2026-09-14 the flagship check could not fail its round trip.** It read
 `not roundtripSTEP(target)`, and that returns a tuple. Every earlier "flagship
@@ -227,14 +232,11 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
 
 ### Open, in the order to take it
 
-1. **Item 18's second defect: an arc written against a fanned cap.** The 11 mm
-   slide is closed at the root (the pair placement now asks whether each owner is
-   a surface the corner's makers put there), and what is left of that nine-line
-   model is 25 edges used by one face: the cone writes its top rim as one
-   `CIRCLE` while the cap across it was fanned into triangles and still spells
-   the rim as chords. Root cause A's shape for *arcs*; item 11 closed it for
-   plane sections by binding on `split_for_corners`. Closing it makes the model
-   a fixture.
+1. **The corner slack, now with a nine-line reproduction.** `step-cap-meets-wall`
+   is a `WILL_FAIL` fixture whose two original defects are fixed and whose two
+   remaining stray corners - 3.6254e-03 and 4.5317e-03 off the faces they bound -
+   are items 13 and 15 in miniature. It is the cheapest place to work on that
+   slack, and ctest announces the day it moves.
 2. **Item 15's seam fix, which does not land yet.** The chase is finished - the
    0.7159 is OpenCASCADE repairing a face that holds facets either side of its
    closed profile's seam - and the fix on `claude/step-export-seam-fix` leaves
@@ -2044,13 +2046,32 @@ and bayonet 238846.977158, tolerances 0.124888, same face counts - because their
 veto holds those moves anyway; 300 corners per part are refused the crossing and
 none of them was going to move.
 
-**What is left of this model is a different defect.** It still exports 25 edges
-used by one face, and it did before the fix too: at z = 28 the cone writes its
-top rim as one `CIRCLE` while the cap across it was fanned into triangles and
-still spells that rim as chords. That is root cause A's shape - a boundary
-settled in two places - for *arcs*, where item 11 closed it for plane sections
-by binding on `split_for_corners`. Until that is closed the model stays out of
-the suite, as item 13's does.
+#### The rim is closed too, and the model is a fixture
+
+The 25 edges used by one face were the second defect, and the same shape as the
+first: at z = 28 the cone wrote its top rim as one `CIRCLE` while the cap across
+it, bent by the corner moves, was fanned into triangles and still spelled that
+rim as twenty-four chords. A fan writes one straight line per triangle side and
+never reads `arc_subs`, so the handover was impossible rather than missed - root
+cause A for *arcs*, where item 11 closed it for plane sections by binding on
+`split_for_corners`. The rims never had that guard.
+
+They have it now, and what happens next is better than chords on both sides: the
+rim's edges go back to being ordinary shared edges, and the per-edge promotion
+then writes each of them as the arc it is. 62 arcs become 86, the shell closes,
+and the model reads back as one solid of 4890.790271 against a smooth volume
+derived at 4891.296892.
+
+**It is a fixture now, `step-cap-meets-wall`, registered `WILL_FAIL`.** Both
+defects it was built for are fixed and it still fails its round trip, on a third
+that is not: two corners sit 3.6254e-03 and 4.5317e-03 off the analytic faces
+they bound, against the 3.4814e-07 a kernel allows. That is the slack of items 13
+and 15, and marking the fixture rather than keeping it out of the suite - which
+is what item 13's model still waits for - means the day that slack is fixed,
+ctest reports *this* as the failure. Its two volume figures are derived twice
+over: the smooth solid from the two-circle lens integral, and the mesh from the
+same integral over OpenSCAD's own inscribed 64-gons, which agrees with what the
+mesher reports to six decimals.
 
 
 ### 19. The approximation re-fits a cone the model declared, where a rim rule refused it

@@ -3002,6 +3002,9 @@ void StepKernel::build_tri_body(
   // either rim and the band's two end edges, and needs no seam.
   std::map<std::size_t, std::pair<EdgeCurve *, bool>> rim_of_loop;  // whole loop -> circle
   std::map<std::size_t, std::vector<ArcSubstitution>> arc_subs;     // runs inside a loop
+  // Rims written as chords by both faces because the face across is fanned into
+  // triangles and cannot be handed the arc. See the band writer below.
+  std::size_t rim_unshared = 0;
   std::map<std::set<int>, EdgeCurve *> shared_rim_edges;            // rim vertices -> circle
 
   for (std::size_t i = 0; i < bands.size(); i++) {
@@ -3170,6 +3173,10 @@ void StepKernel::build_tri_body(
     // the rims
     EdgeCurve *rim_edge[2] = {nullptr, nullptr};
     bool rim_sense[2] = {true, true};
+    // The mesh's own chords along a rim, where the arc cannot be handed to the
+    // face across it - see below. Empty whenever the rim is written as the arc
+    // it is, which is every rim on every fixture measured.
+    std::vector<std::pair<EdgeCurve *, bool>> rim_chords[2];
     for (int side = 0; side < 2; side++) {
       const bool bottom = side == 0;
       const AnalyticFeatures::RimRef& rim = bottom ? rims[i].first : rims[i].second;
@@ -3230,6 +3237,45 @@ void StepKernel::build_tri_body(
           // planar loop anywhere along it
           shared_rim_edges.emplace(key, rim_edge[side]);
         } else {
+          // A loop that will be fanned into triangles cannot take this arc. The
+          // fan writes one straight line per triangle side and never reads
+          // `arc_subs`, and a rim spanning a run of corners could not be one
+          // triangle's side even if it did - so the handover is impossible
+          // rather than missed, and writing the arc here leaves the conic on
+          // this face and chords on that one.
+          //
+          // Open item 11's root cause A, which the plane sections have guarded
+          // against since it was closed for them; the rims never did. On the
+          // nine-line model of item 18 a cone's top rim was written as one
+          // CIRCLE while the cap across it was fanned, and the export carried
+          // 25 edges used by one face.
+          //
+          // So the rim is written as the mesh's own chords instead, taken from
+          // the same edge map the fan's triangles use - which is what makes
+          // them the same edges rather than a second set on the same points. A
+          // worse boundary on this one face, and a closed shell.
+          if (!band.closed && split_for_corners.count(rim.loop) != 0) {
+            const std::vector<int>& across = loops[rim.loop];
+            const std::size_t m = across.size();
+            std::vector<int> walk;
+            for (std::size_t k = 0; m > 0 && k <= rim.count; k++) {
+              walk.push_back(across[(rim.start + k) % m]);
+            }
+            if (!walk.empty() && walk.front() != rim.traversalStart()) {
+              std::reverse(walk.begin(), walk.end());
+            }
+            for (std::size_t k = 0; k + 1 < walk.size(); k++) {
+              bool dir = true;
+              EdgeCurve *chord =
+                get_line_from_map(edge_map, walk[k], walk[k + 1], get_vertex(walk[k]),
+                                  get_vertex(walk[k + 1]), dir, merged_edge_cnt);
+              rim_chords[side].emplace_back(chord, dir);
+            }
+            if (!rim_chords[side].empty()) {
+              rim_unshared++;
+              continue;
+            }
+          }
           arc_subs[rim.loop].push_back({rim.start, rim.count, rim_edge[side], !rim.wall_ccw});
         }
       }
@@ -3300,11 +3346,23 @@ void StepKernel::build_tri_body(
                                              get_vertex(t_from), up_dir, merged_edge_cnt);
       EdgeCurve *edge_down = get_line_from_map(edge_map, t_to, b_from, get_vertex(t_to),
                                                get_vertex(b_from), down_dir, merged_edge_cnt);
-      loop.push_back(new OrientedEdge(entities, rim_edge[0], rim_sense[0]));
+      auto walk_rim = [&](int side) {
+        if (rim_chords[side].empty()) {
+          loop.push_back(new OrientedEdge(entities, rim_edge[side], rim_sense[side]));
+          face_edges_here.push_back(rim_edge[side]);
+          return;
+        }
+        for (const auto& chord : rim_chords[side]) {
+          loop.push_back(new OrientedEdge(entities, chord.first, chord.second));
+          face_edges_here.push_back(chord.first);
+        }
+      };
+      walk_rim(0);
       loop.push_back(new OrientedEdge(entities, edge_up, up_dir));
-      loop.push_back(new OrientedEdge(entities, rim_edge[1], rim_sense[1]));
+      walk_rim(1);
       loop.push_back(new OrientedEdge(entities, edge_down, down_dir));
-      face_edges_here = {rim_edge[0], rim_edge[1], edge_up, edge_down};
+      face_edges_here.push_back(edge_up);
+      face_edges_here.push_back(edge_down);
     }
 
     auto edge_loop = new EdgeLoop(entities, loop);
@@ -4508,6 +4566,12 @@ void StepKernel::build_tri_body(
     was_line->vector->dir->live = false;
     was_line->point->live = false;
     arcs_promoted++;
+  }
+  if (rim_unshared > 0) {
+    LOG(message_group::Export_Warning,
+        "STEP export: %1$d band rim%2$s given up as one arc, the face across it being fanned into "
+        "triangles, which cannot be handed an edge - both faces keep the mesh's own edges there",
+        int(rim_unshared), rim_unshared == 1 ? " is" : "s are");
   }
   if (arcs_promoted > 0 || arcs_declined > 0) {
     LOG("STEP export: %1$d edge%2$s written as an arc on the surface it bounds, %3$d left straight",

@@ -1178,6 +1178,17 @@ add_cmdline_test(export-stl-sanitytest  SCRIPT ${STLEXPORTSANITYTEST_PY} SUFFIX 
 # guards a defect the STEP exporter has had; see tests/validatestep.py.
 file(GLOB STEP_EXPORT_FILES ${TEST_STEP_EXPORT_DIR}/*.scad)
 add_cmdline_test(export-step-sanitytest SCRIPT ${STEPEXPORTSANITYTEST_PY} SUFFIX txt FILES ${STEP_EXPORT_FILES} ARGS ${OPENSCAD_EXE_ARG} --trust-python)
+# step-cap-meets-wall is a fixture that does not pass, and is registered so on
+# purpose. It reproduces two defects of the approximation pass in nine lines -
+# a corner placed where two owners cross when one of them is a surface its
+# makers never put there, and a band rim handed to a face that will be fanned
+# into triangles - both of which are fixed, and a third that is not: two of its
+# corners sit 3.6e-03 and 4.5e-03 off the analytic faces they bound, which is
+# the slack of open items 13 and 15. WILL_FAIL means ctest reports it as a
+# *failure* the day that slack is fixed, which is how the win gets noticed
+# rather than going quiet. Drop WILL_FAIL then; the file says what to look at.
+set_tests_properties(export-step-sanitytest_step-cap-meets-wall PROPERTIES WILL_FAIL TRUE)
+
 file(GLOB STEP_EXPORT_PY_FILES ${TEST_STEP_EXPORT_PY_DIR}/*.py)
 add_cmdline_test(export-step-py-sanitytest SCRIPT ${STEPEXPORTSANITYTEST_PY} SUFFIX txt FILES ${STEP_EXPORT_PY_FILES} ARGS ${OPENSCAD_EXE_ARG} --trust-python)
 

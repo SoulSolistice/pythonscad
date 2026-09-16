@@ -164,7 +164,7 @@ pythonscad model.scad -o out.stp \
 rebuild:
 
 ```bash
-ctest --test-dir build -R 'export-step-|mutations'   # 53 tests
+ctest --test-dir build -R 'export-step-|mutations'   # 54 tests
 TEST_GENERATE=1 ctest --test-dir build -R <fixture>
 ```
 
@@ -195,6 +195,15 @@ asks that every corner of an analytic face lie on that face's surface, which
 every fixture's round trip already asks, and all six coupons fail it today on
 the tessellation's slack. It is separate from `--strict` so that each fix flips a
 test of its own.
+
+`export-step-sanitytest_step-cap-meets-wall` is the fourth, and the only
+*fixture* registered `WILL_FAIL`. It reproduces in nine lines two defects of the
+approximation pass that are now fixed - a corner placed where two owners cross
+when one of them is a surface its makers never put there, and a band rim handed
+to a face that will be fanned into triangles - and one that is not: two of its
+corners sit 3.6e-03 and 4.5e-03 off the analytic faces they bound, the same
+slack the flagship corners test fails on. Marking it rather than deleting it is
+what makes that slack announce itself when it moves.
 
 The flagship check's round trip is read, but only since 2026-09-14: it tested
 `not roundtripSTEP(...)`, a tuple, and so passed every file. A green flagship run
