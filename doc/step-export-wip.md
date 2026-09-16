@@ -569,6 +569,37 @@ clean by every check here. And two kernels disagree about `f04`'s volume by
 where they agreed to 0.0006% on `f02`; unexplained, and worth a look before that
 number is used as evidence for anything.
 
+#### Run 2026-09-16, third: the veto is landed, and `f04` is clean by default
+
+The settle loop is no longer an experiment - it is what the exporter does. Same
+session, control imported a twelfth time:
+
+| file | SOLIDWORKS |
+| --- | --- |
+| `f02-band-fn032-analytic`, 2026-09-08 control | `faults=2 faultyfaces=2 codes=17` |
+| `f04-band-fn064-analytic` | **`faults=0`** |
+| `r01-lid10-analytic` | `faults=1 faultyfaces=7 faultyedges=1 codes=7/17/21` |
+| `r02-bayonet-analytic` | `faults=1 faultyfaces=4 faultyedges=1 codes=7/17/21` |
+
+**`f04` needs no switch now.** The band family is clean at `$fn` 64 in the
+committed build, where the same coupon read `faults=2 codes=17` on the swept
+B-spline and the bore this morning.
+
+**What lid10 and the bayonet part still carry is one neighbourhood and the sweep.**
+From `-FaultDetail`, both parts fault on the same four entities - the 19282.95 mm2
+inner-wall cone (7/7), the 15.16 mm2 B-spline (17/17), the 850.75 mm2 cone
+(21/21/21), the 15.33 mm2 plane (7/7) and the edge at (79.3344, 1.0534, 2.5811) -
+which is exactly item 15's cluster at r ~ 79, z ~ 0 to 3, unchanged since
+2026-09-10. lid10 adds its main 6521.23 mm2 sweep at 17/17 and two 1.466 mm2 rim
+planes at 21; the bayonet's sweep is clean.
+
+That the wall cone still reads code 7 with 775 of its corners now placed says the
+wall is not waiting on the veto any more. What lid10's sweep is waiting on is
+its own seam: its worst kernel slack is 1.083252, the signature of the face that
+straddles the closed profile's seam, and that is open item 15's fix - parked on
+`claude/step-export-seam-fix` because it trades that face for one `BRepCheck`
+calls unorientable.
+
 #### And why the other three coupons did not move
 
 They never got the boundary. Measured on the files themselves:
@@ -1167,6 +1198,14 @@ What is left:
 
 ### 11. The plane veto is blunt by 89 to 1, and it is concealing three defects
 
+> **Landed 2026-09-16.** The veto now refuses only the corners a bent face
+> implicates and settles, instead of refusing every move in the model. Root
+> causes A, B, C and D below are what made that safe; the numbers it changes are
+> at the end of this item. What is left of it is the faces that bend and cannot
+> be fanned - 20 corners on lid10, 14 on `f04` - which `export-step-flagship-strict`
+> still asserts against, and still fails on.
+
+
 **Built, measured and reverted on 2026-09-10.** This is the gate that decides
 whether the crossing curve of item 3 fires at all, and it is why the SOLIDWORKS
 run above could only move code 17 on one coupon.
@@ -1619,6 +1658,38 @@ coupons — `band-fn024`, `band-fn064` and `lid10` — and `band-fn024` was not 
 one of the two found by hand. It asserts nothing that has to be derived, so
 coupons still earn face counts and volumes one at a time as fixtures; see item
 7, which asks for that for a different reason.
+
+#### Landed 2026-09-16: refusing the implicated corners, and settling
+
+All-or-nothing was right while a partial move broke the export, and root causes
+A and B were what broke: an edge's geometry decided twice, and a vertex keyed by
+mesh index. Both are closed at the root, so the refusal can be local.
+
+| coupon | all-or-nothing | the settle loop |
+| --- | --- | --- |
+| lid10 | 795 corners refused for 11 bent faces | **20 dropped, 775 placed** |
+| bayonet | the same shape | **20 dropped, 643 placed** |
+| `f04` at `$fn` 64 | 1268 refused for 7 bent faces | **14 dropped, 1254 placed** |
+
+It settles in one round on every coupon - refusals only grow, which is the
+argument the section settle loop already uses.
+
+The gate this item set for itself is met: `export-step-flagship-coupons` is green
+over all six coupons under it, validator and kernel round trip both, with no
+`EXPORT-ERROR`, one solid each and `BRepCheck` clean. The corner slack is still
+red and still its own `WILL_FAIL` test, as it was.
+
+And what it was for: `f04` reads `faults=0` in SOLIDWORKS with its boundary
+written as 1223 crossing curves, where the same binary refusing every move reads
+`faults=2 codes=17` on the swept B-spline and the bore. One model, one session,
+one variable.
+
+**What is left.** 20 corners on lid10 and 14 on `f04` are still held, each
+touching a face that keeps a plane and would bend if it moved. A polygon that
+bends can be fanned into triangles, and one *with a hole* cannot be fanned from a
+single apex - that is the remaining case, and a real triangulation is what it
+wants. `export-step-flagship-strict` asserts no corner is held this way and is
+still `WILL_FAIL`, which is the honest statement: 795 to 20 is not 795 to 0.
 
 ### 12. Survey the rest of the exporter for conditions that should never be reached
 

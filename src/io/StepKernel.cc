@@ -2967,185 +2967,217 @@ void StepKernel::build_tri_body(
       const auto m = moves.find(v);
       return m == moves.end() ? vertices[v] : m->second;
     };
+    // Refuse the corners a bent face implicates, and settle - rather than
+    // refusing every move in the model because one face somewhere would bend.
+    //
+    // All-or-nothing was right while the export could not survive a partial
+    // move, and that is no longer true: root causes A and B of open item 11 -
+    // an edge's geometry decided twice, and a vertex keyed by mesh index -
+    // were what broke under it, and both are closed at the root. Measured
+    // here, on a build where they are:
+    //
+    //   lid10   795 corners refused for 11 bent faces  ->  20 dropped, 775 kept
+    //   f04    1268 corners refused for  7 bent faces  ->  14 dropped, 1254 kept
+    //
+    // and the whole of open item 1 rides on it: a corner that moves is a corner
+    // on both its surfaces, an edge between two such corners is written as the
+    // curve they cross along rather than as a chord, and SOLIDWORKS faults the
+    // chords. With f04's corners freed this way its boundary goes from chords
+    // to 1223 crossing curves and it reads `faults=0` where the same binary
+    // with the all-or-nothing refusal reads `faults=2 codes=17` on the swept
+    // B-spline and the bore - one model, one session, one variable.
+    //
+    // It settles because refusals only grow, which is the argument the section
+    // settle loop already uses; on all six flagship coupons it reaches its
+    // fixpoint in one round.
     std::size_t analytic_faces = 0, bent = 0, turned = 0;
-    // Whose moves the refusal actually costs, as against how many faces caused
-    // it. The two numbers reported were the count of faces and the count of
-    // *all* moves, and neither said how local the damage was.
     std::set<int> bent_verts;
-    // Which corners a bent face implicates: every corner it is bounded by, its
-    // holes included, for the same reason the test above reads them. Taking the
-    // outer loop alone names corners that are not the ones bending it - on
-    // lid10 three faces bend through their holes and the outer loops name no
-    // moved corner at all, so a refusal keyed on them drops nothing and gives
-    // up on the whole export.
-    auto implicated = [&](std::size_t i) {
-      for (const int w : loops[i]) bent_verts.insert(w);
-      for (std::size_t j = 0; j < loops.size(); j++) {
-        if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
-        for (const int w : loops[j]) bent_verts.insert(w);
-      }
-    };
     std::map<std::size_t, std::size_t> splittable;
-    for (std::size_t i = 0; i < loops.size(); i++) {
-      if (!loop_valid[i]) continue;
-      // Whether a move touches this face at all - over every bound it has, not
-      // only its outer one. The measurement below already reads the holes,
-      // because a face asserts one plane and its inner bounds are as much a part
-      // of it as its rim; this test did not, so a face bent purely through a
-      // hole was never examined. Measured on lid10, that is a bottom face whose
-      // hole ends 1.8 off its own plane and a z = 75 ring whose hole ends 5.7
-      // off - which OpenCASCADE cannot read as one planar face, so it splits
-      // them into a full disc and a loose loop, seals the cavity between them
-      // and reads the solid 28% too large. The all-or-nothing veto is what kept
-      // that out of today's files, on these two coupons and by luck rather than
-      // by design: the proposal is made in the normal build too.
-      bool uses = false;
-      for (const int v : loops[i]) {
-        if (moves.count(v) != 0) uses = true;
-      }
-      for (std::size_t j = 0; !uses && j < loops.size(); j++) {
-        if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
-        for (const int w : loops[j]) {
-          if (moves.count(w) != 0) uses = true;
+    std::size_t settle_rounds = 0, settle_dropped = 0;
+    for (;;) {
+      analytic_faces = 0;
+      bent = 0;
+      turned = 0;
+      bent_verts.clear();
+      splittable.clear();
+      // Whose moves the refusal actually costs, as against how many faces caused
+      // it. The two numbers reported were the count of faces and the count of
+      // *all* moves, and neither said how local the damage was.
+      // Which corners a bent face implicates: every corner it is bounded by, its
+      // holes included, for the same reason the test above reads them. Taking the
+      // outer loop alone names corners that are not the ones bending it - on
+      // lid10 three faces bend through their holes and the outer loops name no
+      // moved corner at all, so a refusal keyed on them drops nothing and gives
+      // up on the whole export.
+      auto implicated = [&](std::size_t i) {
+        for (const int w : loops[i]) bent_verts.insert(w);
+        for (std::size_t j = 0; j < loops.size(); j++) {
+          if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
+          for (const int w : loops[j]) bent_verts.insert(w);
         }
-      }
-      if (!uses) continue;
-      if (consumed[i]) {
-        analytic_faces++;
-        continue;
-      }
-      // A triangle stays planar wherever its corners are and can still turn
-      // over: where a corner crosses the line of the opposite edge the winding
-      // reverses, and the face then contradicts the normal the shell was
-      // oriented by. Splitting cannot rescue one - every triangle of a fan
-      // turns with it - so a face that would turn stops the move outright.
-      Vector3d after(0, 0, 0);
-      for (std::size_t k = 0; k < loops[i].size(); k++) {
-        after += at_moved(loops[i][k]).cross(at_moved(loops[i][(k + 1) % loops[i].size()]));
-      }
-      if (after.dot(loop_normals[i]) <= 0) {
-        turned++;
-        implicated(i);
-        continue;
-      }
-      // Whether it is actually taken out of its plane, rather than whether it
-      // has more than three corners. A corner cut by a plane moves *along* that
-      // plane - the conic it lands on lies in it - so its face is not bent at
-      // all, and assuming otherwise declined the whole of step-cut-cone for a
-      // move that could not have touched it.
-      // Against the plane the *face* will assert, which is the outer loop's -
-      // its point and its normal, exactly as written below - and over every
-      // corner that face carries, its holes included.
-      //
-      // Measuring each loop against its own plane is not the same thing and
-      // lets this through: two loops coplanar in the mesh drift apart by a
-      // fraction of the move, and a hole's far corner is then off the outer
-      // loop's plane by that drift times the face's extent. On
-      // step-declare-grid-two-bands that put a corner 1.73e-07 off a disc of
-      // radius 19.2 - outside OpenCASCADE's own Precision::Confusion, so the
-      // face asserted a plane its corner was not on, while every loop was
-      // within 1e-9 of its own.
-      const Vector3d& p0 = at_moved(loops[i][0]);
-      double out_of_plane = 0;
-      for (const int w : loops[i]) {
-        out_of_plane = std::max(out_of_plane, fabs((at_moved(w) - p0).dot(loop_normals[i])));
-      }
-      for (std::size_t j = 0; j < loops.size(); j++) {
-        if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
-        for (const int w : loops[j]) {
+      };
+      for (std::size_t i = 0; i < loops.size(); i++) {
+        if (!loop_valid[i]) continue;
+        // Whether a move touches this face at all - over every bound it has, not
+        // only its outer one. The measurement below already reads the holes,
+        // because a face asserts one plane and its inner bounds are as much a part
+        // of it as its rim; this test did not, so a face bent purely through a
+        // hole was never examined. Measured on lid10, that is a bottom face whose
+        // hole ends 1.8 off its own plane and a z = 75 ring whose hole ends 5.7
+        // off - which OpenCASCADE cannot read as one planar face, so it splits
+        // them into a full disc and a loose loop, seals the cavity between them
+        // and reads the solid 28% too large. The all-or-nothing veto is what kept
+        // that out of today's files, on these two coupons and by luck rather than
+        // by design: the proposal is made in the normal build too.
+        bool uses = false;
+        for (const int v : loops[i]) {
+          if (moves.count(v) != 0) uses = true;
+        }
+        for (std::size_t j = 0; !uses && j < loops.size(); j++) {
+          if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
+          for (const int w : loops[j]) {
+            if (moves.count(w) != 0) uses = true;
+          }
+        }
+        if (!uses) continue;
+        if (consumed[i]) {
+          analytic_faces++;
+          continue;
+        }
+        // A triangle stays planar wherever its corners are and can still turn
+        // over: where a corner crosses the line of the opposite edge the winding
+        // reverses, and the face then contradicts the normal the shell was
+        // oriented by. Splitting cannot rescue one - every triangle of a fan
+        // turns with it - so a face that would turn stops the move outright.
+        Vector3d after(0, 0, 0);
+        for (std::size_t k = 0; k < loops[i].size(); k++) {
+          after += at_moved(loops[i][k]).cross(at_moved(loops[i][(k + 1) % loops[i].size()]));
+        }
+        if (after.dot(loop_normals[i]) <= 0) {
+          turned++;
+          implicated(i);
+          continue;
+        }
+        // Whether it is actually taken out of its plane, rather than whether it
+        // has more than three corners. A corner cut by a plane moves *along* that
+        // plane - the conic it lands on lies in it - so its face is not bent at
+        // all, and assuming otherwise declined the whole of step-cut-cone for a
+        // move that could not have touched it.
+        // Against the plane the *face* will assert, which is the outer loop's -
+        // its point and its normal, exactly as written below - and over every
+        // corner that face carries, its holes included.
+        //
+        // Measuring each loop against its own plane is not the same thing and
+        // lets this through: two loops coplanar in the mesh drift apart by a
+        // fraction of the move, and a hole's far corner is then off the outer
+        // loop's plane by that drift times the face's extent. On
+        // step-declare-grid-two-bands that put a corner 1.73e-07 off a disc of
+        // radius 19.2 - outside OpenCASCADE's own Precision::Confusion, so the
+        // face asserted a plane its corner was not on, while every loop was
+        // within 1e-9 of its own.
+        const Vector3d& p0 = at_moved(loops[i][0]);
+        double out_of_plane = 0;
+        for (const int w : loops[i]) {
           out_of_plane = std::max(out_of_plane, fabs((at_moved(w) - p0).dot(loop_normals[i])));
         }
-      }
-      if (out_of_plane <= 1e-9) continue;
-      // Bent, and a bent polygon can be fanned out into triangles instead of
-      // being left alone: a triangle is planar wherever its corners are. Only
-      // one with a hole cannot, because a fan from one corner triangulates a
-      // simple loop and an inner bound would have to be threaded into it.
-      bool has_hole = false;
-      for (std::size_t j = 0; j < loops.size(); j++) {
-        if (loop_valid[j] && !consumed[j] && parents[j] == int(i)) has_hole = true;
-      }
-      if (has_hole || loops[i].size() < 4) {
-        bent++;
-        implicated(i);
-        continue;
-      }
-      // Which corner the fan starts from is not free, and corner 0 is not the
-      // answer. A fan triangulates the polygon only where every ear it cuts is
-      // wound the way the polygon is; an ear wound the other way lies *outside*
-      // it, and the face written for it contradicts the loop it is bounded by.
-      //
-      // The move is what makes this bite. Before it these polygons are convex
-      // and every corner would do - measured on step-declare-grid-scad, all
-      // seven apexes of the 7-gons. After it, three corners of a bore facet sit
-      // on the trim line the ridge left, nearly in a line, and a fan from one of
-      // them cuts an ear of area -4.0e-05: inverted, and only just. So the apex
-      // is chosen for the ear it leaves worst, and the polygon is split only if
-      // some corner leaves none of them inverted. On the same fixture that is 2
-      // to 3 corners of each polygon, at a worst ear of 0.19 to 0.72 against
-      // corner 0's -4.0e-05.
-      const Vector3d nhat = loop_normals[i].normalized();
-      const std::size_t n = loops[i].size();
-      std::size_t best_apex = 0;
-      double best_worst_ear = -1;
-      for (std::size_t a = 0; a < n; a++) {
-        double worst_ear = std::numeric_limits<double>::max();
-        for (std::size_t k = 1; k + 1 < n; k++) {
-          const Vector3d& q0 = at_moved(loops[i][a]);
-          const Vector3d& q1 = at_moved(loops[i][(a + k) % n]);
-          const Vector3d& q2 = at_moved(loops[i][(a + k + 1) % n]);
-          worst_ear = std::min(worst_ear, 0.5 * (q1 - q0).cross(q2 - q0).dot(nhat));
+        for (std::size_t j = 0; j < loops.size(); j++) {
+          if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
+          for (const int w : loops[j]) {
+            out_of_plane = std::max(out_of_plane, fabs((at_moved(w) - p0).dot(loop_normals[i])));
+          }
         }
-        if (worst_ear > best_worst_ear) {
-          best_worst_ear = worst_ear;
-          best_apex = a;
+        if (out_of_plane <= 1e-9) continue;
+        // Bent, and a bent polygon can be fanned out into triangles instead of
+        // being left alone: a triangle is planar wherever its corners are. Only
+        // one with a hole cannot, because a fan from one corner triangulates a
+        // simple loop and an inner bound would have to be threaded into it.
+        bool has_hole = false;
+        for (std::size_t j = 0; j < loops.size(); j++) {
+          if (loop_valid[j] && !consumed[j] && parents[j] == int(i)) has_hole = true;
+        }
+        if (has_hole || loops[i].size() < 4) {
+          bent++;
+          implicated(i);
+          continue;
+        }
+        // Which corner the fan starts from is not free, and corner 0 is not the
+        // answer. A fan triangulates the polygon only where every ear it cuts is
+        // wound the way the polygon is; an ear wound the other way lies *outside*
+        // it, and the face written for it contradicts the loop it is bounded by.
+        //
+        // The move is what makes this bite. Before it these polygons are convex
+        // and every corner would do - measured on step-declare-grid-scad, all
+        // seven apexes of the 7-gons. After it, three corners of a bore facet sit
+        // on the trim line the ridge left, nearly in a line, and a fan from one of
+        // them cuts an ear of area -4.0e-05: inverted, and only just. So the apex
+        // is chosen for the ear it leaves worst, and the polygon is split only if
+        // some corner leaves none of them inverted. On the same fixture that is 2
+        // to 3 corners of each polygon, at a worst ear of 0.19 to 0.72 against
+        // corner 0's -4.0e-05.
+        const Vector3d nhat = loop_normals[i].normalized();
+        const std::size_t n = loops[i].size();
+        std::size_t best_apex = 0;
+        double best_worst_ear = -1;
+        for (std::size_t a = 0; a < n; a++) {
+          double worst_ear = std::numeric_limits<double>::max();
+          for (std::size_t k = 1; k + 1 < n; k++) {
+            const Vector3d& q0 = at_moved(loops[i][a]);
+            const Vector3d& q1 = at_moved(loops[i][(a + k) % n]);
+            const Vector3d& q2 = at_moved(loops[i][(a + k + 1) % n]);
+            worst_ear = std::min(worst_ear, 0.5 * (q1 - q0).cross(q2 - q0).dot(nhat));
+          }
+          if (worst_ear > best_worst_ear) {
+            best_worst_ear = worst_ear;
+            best_apex = a;
+          }
+        }
+        if (best_worst_ear <= 0) {
+          bent++;
+          implicated(i);
+        } else {
+          splittable.emplace(i, best_apex);
         }
       }
-      if (best_worst_ear <= 0) {
-        bent++;
-        implicated(i);
-      } else {
-        splittable.emplace(i, best_apex);
-      }
+      // A face that turns over cannot be rescued by splitting - every triangle of
+      // the fan turns with it - so it stops the move outright, and so does a
+      // polygon that cannot be split. Otherwise the fans go ahead: all of the
+      // corners move or none of them do.
+      bent += turned;
+      if (bent == 0 || bent_verts.empty()) break;
+      std::size_t dropped_here = 0;
+      for (const int v : bent_verts) dropped_here += moves.erase(v);
+      settle_rounds++;
+      settle_dropped += dropped_here;
+      if (dropped_here == 0 || moves.empty()) break;
     }
-    // A face that turns over cannot be rescued by splitting - every triangle of
-    // the fan turns with it - so it stops the move outright, and so does a
-    // polygon that cannot be split. Otherwise the fans go ahead: all of the
-    // corners move or none of them do.
-    bent += turned;
+    if (settle_dropped > 0) {
+      // Still a boundary given up, and still worth saying so - but the corners
+      // it costs are the ones that actually touch a face which would bend,
+      // rather than every corner in the model. `export-step-flagship-strict`
+      // asserts this never happens and is registered WILL_FAIL: what is left
+      // to close is the faces that bend and cannot be fanned into triangles,
+      // which is a polygon with a hole needing a real triangulation.
+      LOG(message_group::Export_Warning,
+          "STEP export: %1$d corners are held where the mesh put them, each touching a face that "
+          "keeps a plane and would bend if it moved; %2$d corners were placed, and the refusal "
+          "settled in %3$d round%4$s",
+          int(settle_dropped), int(moves.size()), int(settle_rounds), settle_rounds == 1 ? "" : "s");
+    }
     std::size_t touched = 0;
     for (const auto& m : moves) {
       if (bent_verts.count(m.first) != 0) touched++;
     }
     if (bent == 0) split_for_corners = splittable;
     if (bent > 0) {
-      // All of them or none of them, and the ratio below says how blunt that
-      // is: on the band family at $fn 64 it is fourteen corners that touch a
-      // bent face against 1249 held for someone else's problem, and those 1249
-      // are the whole reason that coupon's boundary stays chorded while $fn
-      // 32's does not.
-      //
-      // Refusing only the implicated corners was built and measured on
-      // 2026-09-10, settling until nothing bent. It took f04 from 1 crossing
-      // curve to 1198 and lid10 from 1 to 589 - and broke both: `2 edges used
-      // by only one face` on the one, two VERTEX_POINTs on the same
-      // coordinates on the other, neither caught by the 50-test suite because
-      // neither coupon is a fixture. So "half a boundary moved is worse than
-      // none" carries more than planarity, and what else it carries has to be
-      // found before this can be made local. Open item 11.
-      // A warning rather than a line of information, because what it reports is
-      // the whole crossing-curve boundary being given up. It is reached today on
-      // every one of the six flagship coupons and so cannot be an error yet - but it
-      // should never be reached at all: a face bent by a move can be fanned into
-      // triangles, and a triangle is planar wherever its corners are. Item 11
-      // has what stands in the way. `export-step-flagship-strict` is marked
-      // WILL_FAIL and asserts this never fires, so the day it stops, ctest says
-      // so instead of the win going unnoticed.
+      // Reached only where a face bends and implicates no corner the settle
+      // loop can drop, which the loop above cannot resolve by dropping more.
+      // Measured unreachable on all six flagship coupons and all 45 fixtures;
+      // if it is ever reached the moves are given up wholesale, which is what
+      // this exporter did for every bend until 2026-09-16.
       LOG(message_group::Export_Warning,
-          "STEP export: %1$d corners are left where the mesh put them: moving them would bend "
-          "%2$d face%3$s that keeps a plane, and half a boundary moved is worse than none - of "
-          "those corners %4$d actually touch a bent face, so %5$d are refused for someone else's",
-          int(moves.size()), int(bent), bent == 1 ? "" : "s", int(touched), int(moves.size() - touched));
+          "STEP export: every corner is held where the mesh put them: %1$d face%2$s that keeps a "
+          "plane would bend and names no corner to refuse, so no corner moves at all",
+          int(bent), bent == 1 ? "" : "s");
     } else if (analytic_faces > 0) {
       double worst = 0;
       for (const auto& m : moves) {

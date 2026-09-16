@@ -77,8 +77,10 @@ def export(binary, source, target, extra):
 # The strict list is different in kind: these are reached today, and are here so
 # that the day a fix stops them, something says so. See `--strict`.
 STRICT_MUST_NOT_SAY = [
-    ("corners are left where the mesh put them: moving them would bend",
-     "the plane veto gave up the crossing-curve boundary"),
+    ("corners are held where the mesh put them, each touching a face that keeps a plane",
+     "the corner placement gave up corners to protect a planar face"),
+    ("every corner is held where the mesh put them",
+     "the plane veto gave up the whole crossing-curve boundary"),
 ]
 
 
