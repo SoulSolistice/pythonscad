@@ -2017,6 +2017,53 @@ of the facet test three good facets and the cut it was meant to trigger. And the
 face's orientation taken at that same centroid is equally wrong, though it is
 not what inverts the face - changing it moved nothing.
 
+#### Chased 2026-09-16: every way of *removing* the straddle makes SOLIDWORKS worse
+
+Three variants were built and measured, and they agree with each other on every
+local number and disagree with the one kernel that matters.
+
+| variant | lid10's kernel slack | worst cone corner | `BRepCheck` | SOLIDWORKS |
+| --- | --- | --- | --- | --- |
+| as committed | 1.083252 | 0.7159 | clean | `faultyfaces=7 faultyedges=1`, codes 7/17/21 |
+| cut at the seam + refuse the across facets (`claude/step-export-seam-fix`) | 0.124888 | 0.1075 | **1 face unorientable** | not run |
+| refuse the across facets only | 0.109315 | 0.1050 | clean | `faultyfaces=8 faultyedges=2`, codes **7/13/17/21/30** |
+| refuse them and re-seam the face | 0.109315 | 0.1050 | clean | the same, to the entity |
+
+Every local measure says the last two are better: the slack that OpenCASCADE
+needs falls by a factor of ten, item 15's 0.7159 outlier becomes 0.1050, every
+surface kind's p95 corner is ~1e-13, and the solid is valid and closed. And
+SOLIDWORKS reads *more* faults, including two codes - 13 `swEdgeVerticesTouch`
+and 30 `swTopolNotG1Continuous` - which had been gone from both reference parts
+since 2026-09-08.
+
+**Isolated:** the refusal is what does it, not the re-seam. Refusal-only and
+refusal-plus-re-seam produce the same fault list entity for entity, and the
+re-seam alone changes lid10's volume in its last three digits. Two facets are
+refused per part; what the fault detail then shows is the two sweep faces either
+side of the notch at 13, a new faulty edge at (-77.1776, -11.5773, 64.9951) at
+13, and the small B-spline of the r ~ 79 cluster turning from 17 to 30.
+
+So **dropping the facet that lies across the seam leaves a notch the boundary
+has to route around, and that is worse than the straddle it removes.** The
+control reproduced `codes=17` in every one of these sessions - fourteen times now
+- so the comparison is sound.
+
+**What is left to try, in the order they are exact:**
+
+1. **Split the facet at the seam** rather than dropping it: a triangle spanning
+   the seam becomes two, one per side, and the face keeps its coverage with no
+   notch and no straddle. The exporter already rewrites topology this way when it
+   fans a bent polygon.
+2. **Write the surface periodic in v**, which is what it is - the profile is
+   closed - so that no seam exists in its parameter space at all and a face may
+   wrap without any of this. The bigger change, and the one that would make the
+   whole question disappear.
+
+The re-seam itself - writing a face from the column after an unused span, so its
+facets are contiguous in v - is implemented and harmless, and is kept in
+`build/relax/` rather than committed, because on its own it fixes nothing: what
+needs the seam moved is exactly the facet that straddles it.
+
 ### 16. What a CAD view of lid10 shows, and which of it is ours
 
 **Measured 2026-09-14** after three observations from a SOLIDWORKS session on
