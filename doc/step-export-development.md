@@ -896,6 +896,50 @@ Driven by `scripts/step-interop-solidworks.ps1`; needs SOLIDWORKS running.
   than the API, 32 against 3 and 5 against 2. (An earlier note here sorted the
   codes into "informational" 13/21/30 and "structural" 7/17. Drop that: 21 is
   `swFaceSelfIntersecting`, and the split was never measured.)
+
+  **Measured again on 2026-09-16, and it is worse than a count mismatch.** The
+  dialog showed one faulty face on `f02-band-fn032-analytic` - "General geometry
+  problem", on the bore wall - for a file the API calls valid. All three body
+  checks agree with each other and disagree with the dialog:
+
+  | file | `Check` | `Check2` | `Check3` | `IFace2::Check` | dialog |
+  | --- | --- | --- | --- | --- | --- |
+  | f02 today (three builds of it) | valid=1 | 0 | 0 | 0 faces | **1 face** |
+  | f02 control 2026-09-08 | valid=0 | 2 | 2 | 2 faces, codes 17 | — |
+  | lid10 today | valid=0 | 1 | 1 | **7 faces**, codes 7/17/21 | **2 faces** |
+
+  So neither list contains the other: the dialog sees a fault the API does not on
+  one file, and the API sees five the dialog does not on another. `Check` and
+  `Check2` are marked obsolete and superseded by `Check3` in the API help, and
+  the run above is what says they are also *redundant* - they agree with it
+  everywhere - so the disagreement is between the whole check family and the
+  dialog, not between its members. "General geometry problem" is not a string in
+  `swFaultEntityErrorCode_e` either, which is the other sign that the dialog runs
+  its own analysis.
+
+  **There is no read-only API for the dialog's list.** `IPartDoc::ImportDiagnosis`
+  is its engine but repairs rather than reports, returning only `>= 0` or `-1`;
+  `IBody2::Diagnose` answers for gaps alone (`IDiagnoseResult` has
+  `GetGapsCount` and the co-edges at each gap, and nothing else); and no
+  interface in the assembly exposes a faulty-face list beyond `FaultEntity`.
+
+- **So measure the repair, not the report** - `step-interop-solidworks.ps1
+  -Heal`. It runs `ImportDiagnosis` and records what changed: face count, volume
+  and area before and after, with the document closed unsaved either way. A body
+  SOLIDWORKS alters is a body SOLIDWORKS thinks is wrong, whatever either list
+  says, and unlike a count it can be compared between runs. Measured:
+
+  | file | Δfaces | Δvolume | Δarea |
+  | --- | --- | --- | --- |
+  | f02 control 2026-09-08 | 0 | **−40.9364** | **+7.1597** |
+  | f02 today | 0 | 0 | 0 |
+  | lid10 today | 0 | 0 | 0 |
+
+  The one file it alters is the known-bad control. It declines to touch either
+  current file - including the one whose dialog lists a faulty face, and the one
+  whose API lists seven. This is the same lesson as `c06`, where a clean fault
+  report sat beside a solid 14% wrong and only the volume caught it: what a
+  kernel *does* is a measurement, what it *lists* is a report.
 - **Fault codes.** `swFaultEntityErrorCode_e`, reflected out of the installed
   `api/redist/SolidWorks.Interop.swconst.dll` rather than remembered — the
   neighbours are as informative as the codes themselves:

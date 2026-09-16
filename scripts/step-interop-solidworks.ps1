@@ -140,6 +140,23 @@ param(
     # Off by default because it writes into the kit directory and roughly
     # doubles the run; on for any run whose result will be argued about.
     [switch]$RoundTrip,
+    # Ask SOLIDWORKS's own repair what it thinks is wrong, by letting it run and
+    # measuring what changed.
+    #
+    # There is no read-only API for the Import Diagnostics dialog's list. The
+    # dialog and `IFace2::Check` are different analyses and neither contains the
+    # other: on lid10 the dialog shows 2 faulty faces where the API lists 7, and
+    # on the band family at $fn 32 it shows 1 where the API lists none - which is
+    # the file this project has been calling clean. `IPartDoc::ImportDiagnosis`
+    # is the dialog's engine but it repairs rather than reports, returning only
+    # >= 0 or -1, and `IBody2::Diagnose` answers for gaps alone.
+    #
+    # So this measures the repair instead of the report: face count, volume and
+    # area before and after `ImportDiagnosis`. A body SOLIDWORKS alters is a body
+    # SOLIDWORKS thinks is wrong, whatever either list says, and the size of the
+    # alteration is a number that can be compared between runs. The document is
+    # closed without saving either way, so nothing on disk changes.
+    [switch]$Heal,
     # Restrict the run to coupons whose file name matches, the way the Python
     # kit's --only does. A full kit is 48 imports; re-asking one question of one
     # pair should not cost that.
@@ -275,6 +292,7 @@ public class SwKitRunner
     // One CSV-ish record per file: file,opened,errors,warnings,body_type,
     // solids,surfaces,faces,volume_mm3,area_mm2,note
     public static bool SaveBack;
+    public static bool Heal;
     public static int MaxWalkFaces = 300;
 
     public static string Run(string path)
@@ -297,6 +315,7 @@ public class SwKitRunner
 
             PartDoc part = doc as PartDoc;
             int nSolid = 0, nSheet = 0, faces = 0;
+            int valid = -1, faults2 = 0;
             object[] solids = null, sheets = null;
             if (part != null)
             {
@@ -339,8 +358,20 @@ public class SwKitRunner
                     {
                         Body2 body = b as Body2;
                         if (body == null) continue;
-                        // Check3, not Check/Check2: those are the obsolete forms
-                        // and return a bare count where this returns the faults.
+                        // All three, and that is not belt and braces. Check3
+                        // returns the faults where Check and Check2 return a
+                        // bare valid flag and a bare count - but whether the
+                        // three run the *same* analysis is an assumption this
+                        // script made and never tested, and the file that makes
+                        // it worth testing is the band family at $fn 32: the
+                        // Import Diagnostics dialog shows one faulty face there
+                        // and Check3 reports none. The API docs' own example
+                        // (Check Faces for Faults) calls Check and Check2 beside
+                        // the per-face walk, so they are recorded here too and
+                        // any disagreement between them is visible rather than
+                        // assumed away.
+                        try { valid = body.Check(); } catch { valid = -1; }
+                        try { faults2 += body.Check2(); } catch { }
                         try
                         {
                             FaultEntity bf = body.Check3;
@@ -406,6 +437,9 @@ public class SwKitRunner
                 }
             }
             string codeList = string.Join("/", new List<int>(codes).ConvertAll(x => x.ToString()).ToArray());
+            // Recorded whether or not they agree with Check3, so that the day
+            // they do not is a line in the CSV rather than a surprise.
+            string olderChecks = " valid=" + valid + " faults2=" + faults2;
 
             double volume = 0, area = 0;
             try
@@ -442,9 +476,48 @@ public class SwKitRunner
                 catch (Exception ex) { note = (note + " saveas: " + ex.Message).Trim(); }
             }
 
+            if (Heal)
+            {
+                try
+                {
+                    if (part != null)
+                    {
+                        int healed = part.ImportDiagnosis(true, false, true, 0);
+                        int f2 = 0;
+                        double v2 = 0, a2 = 0;
+                        object[] after = part.GetBodies2((int)swBodyType_e.swSolidBody, true) as object[];
+                        if (after != null)
+                        {
+                            foreach (object b in after)
+                            {
+                                Body2 body = b as Body2;
+                                if (body != null) f2 += body.GetFaceCount();
+                            }
+                        }
+                        try
+                        {
+                            IMassProperty mp2 = doc.Extension.CreateMassProperty();
+                            if (mp2 != null)
+                            {
+                                v2 = mp2.Volume * 1e9;
+                                a2 = mp2.SurfaceArea * 1e6;
+                            }
+                        }
+                        catch { }
+                        note = (note + " heal=" + healed
+                                + " healfaces=" + (f2 - faces)
+                                + " healvol="
+                                + (v2 - volume).ToString("F4", CultureInfo.InvariantCulture)
+                                + " healarea="
+                                + (a2 - area).ToString("F4", CultureInfo.InvariantCulture)).Trim();
+                    }
+                }
+                catch (Exception ex) { note = (note + " heal: " + ex.Message).Trim(); }
+            }
+
             // "not-walked" rather than a zero, because a count nobody looked
             // for is not a measurement. The body-level count beside it is.
-            note = (note + " faults=" + bodyFaults + " gaps=" + gaps
+            note = (note + olderChecks + " faults=" + bodyFaults + " gaps=" + gaps
                     + (skippedWalk ? " faultyfaces=not-walked faultyedges=not-walked"
                                    : " faultyfaces=" + faultyFaces + " faultyedges=" + faultyEdges)
                     + (codeList.Length > 0 ? " codes=" + codeList : "")).Trim();
@@ -608,8 +681,10 @@ $prefs = [SwKitRunner]::Preferences()
 Write-Host ("import options as set:      " + $prefs)
 Write-Host ("import options as labelled: " + $ImportSettings)
 [SwKitRunner]::SaveBack = [bool]$RoundTrip
+[SwKitRunner]::Heal = [bool]$Heal
 [SwKitRunner]::MaxWalkFaces = $MaxWalkFaces
 if ($RoundTrip) { Write-Host "round trip: each coupon will be saved back as <coupon>_SW.STEP" }
+if ($Heal) { Write-Host "heal: each coupon is also measured after ImportDiagnosis, and discarded" }
 Write-Host ""
 
 $rows = @()

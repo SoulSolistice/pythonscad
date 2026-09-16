@@ -242,6 +242,12 @@ powershell -ExecutionPolicy Bypass -File scripts\step-interop-solidworks.ps1 `
   -KitDir build\interop-kit -ImportSettings do-not-knit -RoundTrip
 ```
 
+Add `-Heal` to measure what SOLIDWORKS's own repair changes - face count, volume
+and area before and after `ImportDiagnosis`, document closed unsaved. That is the
+measure to trust: its fault *lists* and the Import Diagnostics dialog's do not
+agree with each other, and neither contains the other. See
+`doc/step-export-development.md`, *Fault codes*.
+
 SOLIDWORKS must already be running, and **every run has to be labelled with its
 import settings** — its verdict depends on Tools > Options > Import, so a result
 recorded without them cannot be compared with another one. Fusion has no
