@@ -7,16 +7,16 @@ What is settled lives in `doc/step-export-development.md`; build and test
 mechanics live in `CLAUDE.md`. Read both before this one — several items below
 are one sentence because the reasoning behind them is there.
 
-**Last updated 2026-09-16, for the state at `819104c5b` plus an uncommitted seam
-fix** - item 11's root causes C and D closed, the flagship check repaired, item
-15's outlier run to ground (it is a reader's repair of a face that crosses its
-surface's seam), claim order measured and refuted as a lever (item 17), and item
-18's 11 mm corner slide fixed at the root on a nine-line model that still breaks
-the approximation tier for a second reason. Item 17 is closed - the duplicates
-are deliberate and their consumers already collapse them - leaving item 19, the
-approximation re-fitting a cone the model declared. The suite is green at 53 of
-53 on this branch; the seam fix is parked on `claude/step-export-seam-fix`. Everything below
-was measured on `claude/solidworks-fault-code-17-b58858`.
+**Last updated 2026-09-16, for the state at `68f831116`** - item 11's root causes
+C and D closed, the flagship check repaired, item 15's outlier run to ground (it
+is a reader's repair of a face that crosses its surface's seam), claim order
+measured and refuted as a lever (item 17), item 18's 11 mm corner slide fixed at
+the root, and item 3 answered and acted on: with its boundary written as the
+crossing curve, **`f02` reads `faults=0` in SOLIDWORKS**, against a control that
+reproduced `codes=17` in the same session for the tenth time. The suite is green
+at 54 of 54 on this branch; the seam fix is parked on
+`claude/step-export-seam-fix`. Everything below was measured on
+`claude/solidworks-fault-code-17-b58858`.
 
 ---
 
@@ -232,13 +232,12 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
 
 ### Open, in the order to take it
 
-1. **Put `f02` to SOLIDWORKS.** Its boundary is 630 crossing curves against 10
-   chords, where the run that produced `faults=2 faultyfaces=2 codes=17` had 498
-   against 142 and the last recorded one 593 against 47, and every corner of its
-   analytic faces is now on the surface that face is written on (p95 3.5e-13
-   against 5.98e-02). That is the strongest form of item 1's question yet, and
-   `f02` is the coupon it can be asked of, the veto holding every other one's
-   corners still.
+1. **The veto, now that the mechanism is demonstrated.** `f02` reads `faults=0`
+   with its boundary written as the crossing curve (item 1, run of 2026-09-16),
+   and it is the only coupon whose corners the plane veto leaves free. Freeing
+   the other four is what would put the same question to `f04`, lid10 and
+   bayonet - which is item 11's gate, and the seam fix parked on
+   `claude/step-export-seam-fix` is part of it.
 2. **Item 15's seam fix, which does not land yet.** The chase is finished - the
    0.7159 is OpenCASCADE repairing a face that holds facets either side of its
    closed profile's seam - and the fix on `claude/step-export-seam-fix` leaves
@@ -497,6 +496,45 @@ faultyfaces=2 codes=17` for the sixth time.
 So A and B are confirmed to change nothing an importer sees, by measurement
 rather than by inference, which is what a fix aimed at a latent defect should
 look like.
+
+#### Run 2026-09-16: `f02` reads `faults=0`, and the two faulty faces were the chorded ones
+
+SOLIDWORKS 34.0, settings read back by the driver - `knit=form-solids`,
+`check-and-repair=1`, `analytical-conversion=on`, `run-diagnostics=on`,
+`solid+surface=on`, units from file - with the 2026-09-08 control in the same
+session:
+
+| file | SOLIDWORKS |
+| --- | --- |
+| `f02-band-fn032-analytic`, 2026-09-08 control | `faults=2 faultyfaces=2 codes=17`, **the tenth reproduction** |
+| `f02-band-fn032-analytic`, today | **`faults=0 faultyfaces=0 faultyedges=0`** |
+
+The control's two faulty faces, from `-FaultDetail`, are the swept B-spline of
+1027.84 mm² and the bore cylinder of 2098.71 mm², both `17/17` - which are
+precisely the two faces that share all 640 of the edges lying on neither of them
+exactly. That was this item's first why, measured on 2026-09-10 and only
+*consistent* with the theory until now.
+
+What changed in the file between those two rows is the boundary and nothing else:
+498 crossing curves and 142 chords became 630 and 10, and every corner of an
+analytic face is on the surface that face is written on - p95 5.98e-02 to
+3.50e-13. Recognition is unchanged at 12 faces over one shell.
+
+**So code 17 on this coupon was the chorded boundary.** It is one coupon, and the
+other four hold their corners still under the plane veto (item 11), so the
+generalisation is not made here - but the mechanism this item was opened to test
+is now demonstrated rather than inferred, against a control that reproduced in
+the same session.
+
+**And a refutation worth keeping:** *one chorded edge is enough to fail its face*,
+this project's own finding from the first attempt, does not hold as stated. Ten
+edges are still chords in the file that reads `faults=0`.
+
+**A second, independent signal.** SOLIDWORKS measures today's solid at
+19510.2905 mm3 where OpenCASCADE reads 19510.181245 from the same file - 0.0006%
+apart. The control's two kernels disagree by 43 mm3 on its own file. Two kernels
+that never saw each other's arithmetic agreeing to six digits is the closest this
+coupon has come to a derived volume.
 
 #### And why the other three coupons did not move
 
