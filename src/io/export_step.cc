@@ -419,6 +419,9 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   // exactly where the nearest-surface rule was guessing, and the mapping helps
   // only if it names one owner there.
   std::vector<std::set<int32_t>> ids_at(ps.vertices.size());
+  // The facets at each vertex, so that an owner can be asked whether its maker
+  // actually contributes that surface here - see contributesHere below.
+  std::vector<std::vector<std::size_t>> tris_at(ps.vertices.size());
   // And how far the mesh itself concedes a vertex might be from the surface it
   // approximates: the longest edge at it. A move further than that is not a cut
   // vertex being put back, it is a vertex belonging to something else.
@@ -427,6 +430,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     for (const int v : ps.indices[t]) {
       if (v < 0 || std::size_t(v) >= ids_at.size()) continue;
       ids_at[v].insert(ps.original_ids[t]);
+      tris_at[v].push_back(t);
       for (const int w : ps.indices[t]) {
         if (w >= 0 && std::size_t(w) < ps.vertices.size()) {
           reach[v] = std::max(reach[v], (ps.vertices[w] - ps.vertices[v]).norm());
@@ -434,6 +438,46 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       }
     }
   }
+  /*! Does this original actually contribute this surface at this corner?
+   *
+   * Ownership is per original solid and not per surface - a cylinder's original
+   * owns its wall, and its cap facets belong to that same original without being
+   * on the wall. So a corner where one solid's *cap* meets another's wall has two
+   * owners named, and the pair placement below then puts it where those two walls
+   * cross, which is nowhere near it: on a nine-line model of two cylinders and a
+   * cone that moved 26 corners by up to 11.0267 on a part of radius 10, and the
+   * shell came apart along them. See open item 18.
+   *
+   * The declaration answers it, by the rule section 4 already uses to tell a
+   * chord facet from a cutting plane: a facet lying *on* a surface is spanned by
+   * directions tangent to it, so its normal is parallel to the surface's own
+   * there, while a cap cuts across and its normal is perpendicular. A
+   * tessellation is no coarser than a hexagon, so a chord facet's normal is
+   * within pi/6 of the surface normal at any corner it carries; anything beyond
+   * that is a facet of something else.
+   *
+   * Measured on that model: the corners this drops are 5.40 to 5.93 off the
+   * owner it drops, where every junction it keeps is within 0.0120 - the 64-gon's
+   * own sagitta, 10(1 - cos(pi/64)). */
+  auto contributesHere = [&](std::size_t j, int32_t id, std::size_t v) {
+    double f = 0;
+    Vector3d grad;
+    if (!AnalyticFeatures::surfaceImplicit(ps.surfaces[j].get(), ps.vertices[v], f, grad)) return true;
+    const double gn = grad.norm();
+    if (!(gn > 0)) return true;  // no opinion, so no veto
+    const Vector3d nsurf = grad / gn;
+    for (const std::size_t t : tris_at[v]) {
+      if (id >= 0 && ps.original_ids[t] != id) continue;
+      const IndexedFace& tri = ps.indices[t];
+      if (tri.size() < 3) continue;
+      const Vector3d n =
+        (ps.vertices[tri[1]] - ps.vertices[tri[0]]).cross(ps.vertices[tri[2]] - ps.vertices[tri[0]]);
+      if (!(n.norm() > 0)) continue;
+      if (fabs(n.normalized().dot(nsurf)) >= cos(M_PI / 6)) return true;
+    }
+    return false;
+  };
+  std::size_t not_contributed = 0;
   std::size_t junctions = 0, single = 0, pair = 0, many = 0, unowned = 0;
   std::size_t guess_wrong = 0, guess_right = 0, on_edge = 0;
   double worst_travel = 0, worst_within = 0, band_used = 0;
@@ -451,6 +495,10 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     // The surfaces owned by the originals meeting here, deduplicated: two ids
     // owning the same record is agreement, not a contest.
     std::vector<std::size_t> candidates;
+    // Which originals named each candidate: the premise test below asks whether
+    // one of *them* has a facet lying on it here, and a wall facet of the solid
+    // across can pass for one where two cylinders run nearly parallel.
+    std::vector<std::vector<int32_t>> named_by;
     for (const int32_t id : ids_at[v]) {
       const auto it = owned.find(id);
       if (it == owned.end()) continue;
@@ -462,13 +510,18 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         // counting those as two owners makes an unambiguous vertex look
         // contested - which it did, on every junction of step-declare-cone.
         bool have = false;
-        for (const std::size_t k : candidates) {
+        for (std::size_t c = 0; c < candidates.size(); c++) {
+          const std::size_t k = candidates[c];
           if (k == j || sameSurfaceGeometrically(ps.surfaces[k].get(), ps.surfaces[j].get())) {
+            named_by[c].push_back(id);
             have = true;
             break;
           }
         }
-        if (!have) candidates.push_back(j);
+        if (!have) {
+          candidates.push_back(j);
+          named_by.push_back({id});
+        }
       }
     }
     if (candidates.empty()) {
@@ -503,6 +556,34 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       if (out_single != nullptr) out_single->emplace(int(v), candidates[0]);
     } else if (candidates.size() == 2) {
       pair++;
+      // Both owners have to be surfaces this corner's makers actually put here.
+      // Provenance names a surface the *original* owns, and an original owns its
+      // wall while contributing its cap at this corner - so a corner where one
+      // solid's cap meets another's wall is named by two walls that cross
+      // somewhere else entirely. Leaving such a corner alone is the ladder's last
+      // rung and always a valid export; placing it on that crossing moved 26
+      // corners of a nine-line model by up to 11.0267 on a part of radius 10,
+      // and took the shell apart. See open item 18.
+      auto contributed = [&](std::size_t c) {
+        for (const int32_t id : named_by[c]) {
+          if (contributesHere(candidates[c], id, v)) return true;
+        }
+        return false;
+      };
+      // Whether this corner may be placed where the two cross at all.
+      //
+      // Asked only where both owners are exact quadrics. Where one of them is a
+      // fit, build_tri_body reconsiders the placement against the planes the
+      // merged mesh carries - it is `ownerSplit` that reaches that reroute, and
+      // a corner where a cap meets a wall is what the reroute exists to place.
+      // Where both are exact nothing downstream looks again, and the crossing
+      // stands however far away it is: on a nine-line model of two cylinders and
+      // a cone, 26 corners each moved up to 11.0267 on a part of radius 10 and
+      // the shell came apart along them. See open item 18.
+      const bool both_exact =
+        dynamic_cast<const GridSurface *>(ps.surfaces[candidates[0]].get()) == nullptr &&
+        dynamic_cast<const GridSurface *>(ps.surfaces[candidates[1]].get()) == nullptr;
+      const bool crossing_is_its_place = !both_exact || (contributed(0) && contributed(1));
       // Two declared owners is not a contest to be broken but the trim curve
       // itself: the vertex belongs to both surfaces and its place is where they
       // cross. Alternating projection finds that point where they cross
@@ -628,7 +709,8 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
             band_used = std::max(band_used, bound);
           }
         }
-        if (travel <= bound) {
+        if (!crossing_is_its_place) not_contributed++;
+        if (crossing_is_its_place && travel <= bound) {
           within_bound++;
           worst_within = std::max(worst_within, travel);
           if (out_moves != nullptr) out_moves->emplace(int(v), exact_here);
@@ -650,6 +732,13 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     "for %10$d",
     int(owned.size()), int(facets.size()), int(named.size()), int(ncurved), ncurved == 1 ? "" : "s",
     int(junctions), int(single), int(pair), int(many), int(unowned));
+  if (not_contributed > 0) {
+    LOG(
+      "STEP export: %1$d corners are left where the mesh put them: one of the two surfaces "
+      "provenance names for them is on no facet at that corner, so the corner is where a cap "
+      "meets something else and not where those two surfaces cross",
+      int(not_contributed));
+  }
   if (single > 0) {
     LOG(
       "STEP export: where provenance names one owner, nearest-surface agrees for %1$d and picks "
