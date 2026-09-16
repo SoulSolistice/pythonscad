@@ -2,10 +2,12 @@
 // neighbour is fanned. Nine lines, and before the two fixes below it exported
 // as three shells.
 //
-// **Registered WILL_FAIL**, and that is the point: it still fails the round
-// trip, on a third defect neither fix touches, and the day that one lands ctest
-// reports *this* as the failure instead of the win going quiet. See the bottom
-// of this comment for which defect, and open item 18 of doc/step-export-wip.md.
+// It was registered WILL_FAIL when it was added, for a third defect neither of
+// those fixes touched - two corners 3.6e-03 and 4.5e-03 off the analytic faces
+// they bound - and ctest duly reported it as a *failure* on the day that stopped
+// being true. What fixed it is the placement that puts a corner where the
+// surfaces of the two analytic faces it bounds cross. See open items 3 and 18
+// of doc/step-export-wip.md.
 //
 // Two defects meet in it, and neither is visible in the exact tier - that one is
 // a clean solid. Both are the approximation pass's.
@@ -49,13 +51,11 @@
 // VOLUME: 4886.180083 +/- 5.116809
 // VOLUME-APPROX: 4886.180083 +/- 5.116809
 //
-// **What it still fails on.** The round trip asks that every corner of an
-// analytic face lie on that face's surface, and two do not: a cone corner
-// 3.6254e-03 off and a cylinder corner 4.5317e-03 off, against the 3.4814e-07 a
-// kernel allows. That is the corner slack of items 13 and 15 - junction corners
-// provenance names no owner for, left on the mesh's chords - and it is the same
-// population `export-step-flagship-corners` fails on across all six coupons.
-// When it is fixed here, drop WILL_FAIL.
+// **What it reads now.** One solid, 4891.033991 with both flags and 4885.633285
+// in the exact tier, worst kernel slack 0.007757, and every corner of every
+// analytic face on the surface that face is written on. The approximation figure
+// is 0.0054% under the smooth solid, which is the boundary that is still chords
+// rather than the curve the two surfaces cross along.
 
 $fn = 64;
 intersection() {

@@ -2233,7 +2233,125 @@ void StepKernel::build_tri_body(
   // surface. Two, and it is a triple point - the cut and the sliver of base a
   // tilted cut leaves behind - which belongs on neither conic and stays.
   std::map<int, Vector3d> moves = cornerMoves;
-  std::size_t on_conic = 0, on_triple = 0, on_own = 0;  // what each path added to `moves`
+  std::size_t on_conic = 0, on_triple = 0, on_own = 0, on_faces = 0;  // what each path added
+
+  // A corner belongs where the surfaces of the analytic faces it bounds cross.
+  //
+  // This is the general statement of what the two placements above do for
+  // special cases, and it is the one the *file* can be held to: whatever
+  // provenance says about which original made a vertex, the faces written on it
+  // assert that the corner lies on their surfaces, and where two of them meet it
+  // asserts both. Provenance cannot answer this on its own - it is per original
+  // solid, so it names a cylinder for a corner sitting on that solid's cap
+  // (open item 18), and it names two coaxial cylinders 3.000 mm apart, which
+  // never meet, for the corners where the band family's sweep crosses its bore.
+  // Both are cases where the owners are not the surfaces the file will assert.
+  //
+  // Measured on `step-band-family` at $fn 32: 47 of its 1234 candidate edges
+  // fall back to chords, and they are exactly the edges whose endpoints are off
+  // the sweep - by 2.2e-02 to 1.0e-01, the 32-gon's own sagitta
+  // 20(1 - cos(pi/32)) = 0.0963, so those ends sit on chord planes and were
+  // never placed at all. A Bezier interpolates its endpoints, so no degree and
+  // no better tracing can rescue an edge whose ends are not on the surface:
+  // placing them is what turns those chords into the curve the two surfaces
+  // actually cross along. See open items 3 and 9.
+  //
+  // Held to the ladder's own rules. The crossing is solved to an absolute
+  // 1e-11, accepted only where the result is on *both* surfaces to 1e-9, and a
+  // corner may travel no further than its nearest neighbouring vertex - which is
+  // section 4's bound, and not the longest edge at it, which is the trap that
+  // licensed a 1.9976 move on step-partial-cylinder.
+  if (approximate) {
+    // The distinct surfaces of the analytic faces at each corner. Bands are
+    // included by the surface their face is written from, which is the same
+    // arithmetic the writer does further down - a band states its axis, its base
+    // and the radius at each rim, and that is the surface.
+    std::map<int, std::vector<std::shared_ptr<const Surface>>> faces_at;
+    auto note = [&](int v, const std::shared_ptr<const Surface>& surface) {
+      if (surface == nullptr || v < 0 || std::size_t(v) >= vertices.size()) return;
+      auto& list = faces_at[v];
+      for (const auto& have : list) {
+        if (have.get() == surface.get() || have->sameAs(*surface)) return;
+      }
+      list.push_back(surface);
+    };
+    auto note_patches = [&](const std::vector<AnalyticFeatures::Patch>& patches) {
+      for (const auto& patch : patches) {
+        if (!patch.alive) continue;
+        for (const auto& run : patch.runs) {
+          for (const int v : run.verts) note(v, patch.surface);
+        }
+      }
+    };
+    note_patches(quadric_faces);
+    note_patches(grid_faces);
+    note_patches(bezier_patches);
+    for (const auto& band : bands) {
+      if (!band.alive) continue;
+      const Vector3d axis = band.axis.normalized();
+      std::shared_ptr<const Surface> surface;
+      if (fabs(band.r_top - band.r_bottom) <= 1e-9 * std::max(1.0, band.r_bottom)) {
+        surface = std::make_shared<CylinderSurface>(band.base, axis, band.r_bottom);
+      } else if (fabs(band.height) > 0) {
+        surface = std::make_shared<ConeSurface>(band.base, axis, band.r_bottom,
+                                                (band.r_top - band.r_bottom) / band.height);
+      }
+      if (surface == nullptr) continue;
+      for (const std::size_t w : band.walls) {
+        if (w >= loops.size()) continue;
+        for (const int v : loops[w]) note(v, surface);
+      }
+    }
+    // How far a corner may travel: to its nearest neighbour and no further.
+    std::map<int, double> nearest;
+    for (std::size_t i = 0; i < loops.size(); i++) {
+      if (!loop_valid[i]) continue;
+      const std::vector<int>& loop = loops[i];
+      for (std::size_t k = 0; k < loop.size(); k++) {
+        const int a = loop[k], b = loop[(k + 1) % loop.size()];
+        const double d = (vertices[a] - vertices[b]).norm();
+        if (!(d > 0)) continue;
+        auto ia = nearest.find(a);
+        if (ia == nearest.end() || d < ia->second) nearest[a] = d;
+        auto ib = nearest.find(b);
+        if (ib == nearest.end() || d < ib->second) nearest[b] = d;
+      }
+    }
+    std::size_t onto_faces = 0;
+    double worst_faces = 0;
+    for (const auto& entry : faces_at) {
+      const int v = entry.first;
+      if (moves.count(v) != 0) continue;
+      if (entry.second.size() != 2) continue;  // one surface, or a triple point
+      const Surface *first = entry.second[0].get();
+      const Surface *second = entry.second[1].get();
+      Vector3d qa, qb;
+      if (!AnalyticFeatures::closestOnSurface(first, vertices[v], qa)) continue;
+      if (!AnalyticFeatures::closestOnSurface(second, vertices[v], qb)) continue;
+      if ((qa - vertices[v]).norm() <= 1e-9 && (qb - vertices[v]).norm() <= 1e-9) continue;
+      Vector3d placed = vertices[v];
+      AnalyticFeatures::projectOntoBoth(first, second, placed, 1e-11);
+      if (!AnalyticFeatures::closestOnSurface(first, placed, qa) || (qa - placed).norm() > 1e-9) {
+        continue;
+      }
+      if (!AnalyticFeatures::closestOnSurface(second, placed, qb) || (qb - placed).norm() > 1e-9) {
+        continue;
+      }
+      const double travel = (placed - vertices[v]).norm();
+      const auto bound = nearest.find(v);
+      if (bound == nearest.end() || travel > bound->second) continue;
+      moves.emplace(v, placed);
+      worst_faces = std::max(worst_faces, travel);
+      onto_faces++;
+    }
+    on_faces = onto_faces;
+    if (onto_faces > 0) {
+      LOG(
+        "STEP export: %1$d corners are placed where the two analytic faces they bound cross, "
+        "moving at most %2$.4f - the surfaces the file asserts them to be on",
+        int(onto_faces), worst_faces);
+    }
+  }
 
   // A corner of a trimmed quadric that nothing else holds goes on that quadric.
   //
@@ -3044,11 +3162,11 @@ void StepKernel::build_tri_body(
       // path checks `moves.count(v)` before inserting.
       LOG(
         "STEP export: %1$d corners moved, by at most %2$.4f - %3$d where two declared owners "
-        "cross, %4$d onto a conic with one plane, %5$d where three exact things meet, %6$d onto "
-        "the quadric their own face is written on; %7$d analytic faces now bound themselves on "
-        "their own surface",
-        int(moves.size()), worst, int(cornerMoves.size()), int(on_conic), int(on_triple), int(on_own),
-        int(analytic_faces));
+        "cross, %4$d onto a conic with one plane, %5$d where three exact things meet, %6$d where "
+        "the two analytic faces they bound cross, %7$d onto the quadric their own face is written "
+        "on; %8$d analytic faces now bound themselves on their own surface",
+        int(moves.size()), worst, int(cornerMoves.size()), int(on_conic), int(on_triple),
+        int(on_faces), int(on_own), int(analytic_faces));
       if (!split_for_corners.empty()) {
         std::size_t added = 0;
         for (const auto& sc : split_for_corners) added += loops[sc.first].size() - 3;

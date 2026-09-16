@@ -40,7 +40,7 @@ do with STEP and match `mutations` by substring. It was 52 until
 and **a new fixture needs `cmake -B build` before ctest can see it at all**. Run it under the machine's own locale, not `LC_ALL=C`,
 which breaks five UTF-8 filename tests.
 
-**Three of the 54 fail on purpose and report green**, all registered
+**Two of the 54 fail on purpose and report green**, both registered
 `WILL_FAIL`: ctest reports them *passed* while they fail, and will report each
 *failed* on the day it starts passing — which is how that fix gets noticed. Do
 not delete them, and do not read their green as the defect being gone.
@@ -51,10 +51,10 @@ not delete them, and do not read their green as the defect being gone.
   lies on that face's surface, as every fixture's round trip does. It fails on
   all six coupons, normal build and relaxed veto alike, on the tessellation's
   slack: 0.01 to 0.72 against an allowance near 1e-6.
-- `export-step-sanitytest_step-cap-meets-wall` is a fixture of that same slack,
-  nine lines wide: two of its corners sit 3.6e-03 and 4.5e-03 off the analytic
-  faces they bound. The two defects it was built for - item 18's - are fixed,
-  and it is kept as the small reproduction of what is not.
+`export-step-sanitytest_step-cap-meets-wall` was the third until 2026-09-16,
+when the placement onto the crossing of the two faces a corner bounds fixed the
+slack it was marked for - ctest reported it as a *failure* that day, which is
+what the marking is for, and it now passes on its own merits.
 
 **Until 2026-09-14 the flagship check could not fail its round trip.** It read
 `not roundtripSTEP(target)`, and that returns a tuple. Every earlier "flagship
@@ -232,11 +232,13 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
 
 ### Open, in the order to take it
 
-1. **The corner slack, now with a nine-line reproduction.** `step-cap-meets-wall`
-   is a `WILL_FAIL` fixture whose two original defects are fixed and whose two
-   remaining stray corners - 3.6254e-03 and 4.5317e-03 off the faces they bound -
-   are items 13 and 15 in miniature. It is the cheapest place to work on that
-   slack, and ctest announces the day it moves.
+1. **Put `f02` to SOLIDWORKS.** Its boundary is 630 crossing curves against 10
+   chords, where the run that produced `faults=2 faultyfaces=2 codes=17` had 498
+   against 142 and the last recorded one 593 against 47, and every corner of its
+   analytic faces is now on the surface that face is written on (p95 3.5e-13
+   against 5.98e-02). That is the strongest form of item 1's question yet, and
+   `f02` is the coupon it can be asked of, the veto holding every other one's
+   corners still.
 2. **Item 15's seam fix, which does not land yet.** The chase is finished - the
    0.7159 is OpenCASCADE repairing a face that holds facets either side of its
    closed profile's seam - and the fix on `claude/step-export-seam-fix` leaves
@@ -755,6 +757,72 @@ the only push site is the quadric emitter, so a sweep-against-cylinder edge
 always has one. It is legal STEP either way — but the pcurve pass exists
 precisely so that a kernel is *told* rather than left to decide, and on these
 two faces it is not.
+
+#### Answered 2026-09-16: the 47 are the edges whose endpoints are not on the sweep
+
+Measured over every candidate edge on `step-band-family` at `$fn` 32:
+
+| | n | p50 | max |
+| --- | --- | --- | --- |
+| endpoint off the quadric | 1234 | 2.2e-13 | 9.6e-12 |
+| endpoint off the sweep | 1234 | 4.4e-16 | **1.0e-01** |
+| **edges whose endpoints miss the sweep by more than 1e-7** | **47** | 8.2e-02 | 1.0e-01 |
+
+Exactly 47, which is the count that fell back to chords. A Bezier interpolates
+its endpoints, so no degree and no better tracing can rescue an edge whose ends
+are not on the surface, and the miss is the 32-gon's own sagitta,
+20(1 - cos(pi/32)) = 0.0963 - those ends sit on chord planes and were never
+placed. That answers this item's open question, and it was the *fitter* and the
+*tracing* that had been suspected.
+
+**Two things had to change, in that order.**
+
+**The tracing, so that a sample is on the sweep by construction.** Newton on two
+implicits converges quadratically against a quadric, whose implicit is algebraic,
+and linearly against a sweep, whose implicit is the tangent plane at a foot
+point - open item 10's A2, *model-starved rather than iteration-starved*.
+Measured: the traced samples sat on the quadric to 2.1e-13 and off the sweep by
+8.2e-02. `crossInParameters` solves instead in the sweep's own parameters,
+
+```text
+F(S(u, v))           = 0     the quadric, stated algebraically
+(S(u, v) - anchor).t = 0     the station along the curve, held
+```
+
+so every iterate is `S(u, v)` and the sweep is satisfied by construction. Samples
+now reach 1e-14 on the quadric and ~0 off the sweep. The station term is not
+optional: zeroing the quadric residual by free movement in the tangent plane lets
+a sample slide along the curve, and that took 593 crossing curves down to 405.
+Where the trace cannot converge - 208 of 15396 samples, the crossing lying off
+the end of the patch - it falls back to the old Newton, which is no worse than
+before.
+
+**Then the endpoints.** A corner is placed where the surfaces of the two analytic
+faces it bounds cross, which is the general statement of what the older rungs do
+for special cases: whatever provenance says about which original made a vertex,
+the faces written on it assert that it lies on their surfaces. Provenance cannot
+answer this - it is per original solid, so it names a cap's cylinder (item 18)
+and it names two coaxial cylinders 3.000 mm apart for these corners, which never
+meet. Held to the ladder's own rules: solved to an absolute 1e-11, accepted only
+where the result is on both surfaces to 1e-9, and no further than the corner's
+nearest neighbour.
+
+| `step-band-family` at `$fn` 32 | before | after |
+| --- | --- | --- |
+| edges written as the crossing curve | 593 | **630** |
+| edges left as chords | 47 | **10** |
+| B-spline corners off their own surface, p95 | 5.98e-02 | **3.50e-13** |
+| the solid | valid, 12 faces | valid, 12 faces |
+| OCCT volume | 19512.721301 | 19510.181245 |
+
+28 corners moved, by 0.23 to 0.96 against nearest-neighbour bounds of 1.13 to
+1.63 - large beside a sagitta, because in the run-out the mesh's own trim sits
+that far from where the two surfaces truly cross. `step-cap-meets-wall`'s two
+stray corners are fixed by the same rung, which is how its `WILL_FAIL` came off.
+
+**Only `$fn` 32 moves**, and that is item 11 again: it is the one coupon where
+the plane veto never fires, so it is the only one whose corners are free to be
+placed at all. The other four hold every move.
 
 #### The measurement to make next
 

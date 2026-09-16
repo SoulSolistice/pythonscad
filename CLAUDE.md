@@ -196,14 +196,15 @@ every fixture's round trip already asks, and all six coupons fail it today on
 the tessellation's slack. It is separate from `--strict` so that each fix flips a
 test of its own.
 
-`export-step-sanitytest_step-cap-meets-wall` is the fourth, and the only
-*fixture* registered `WILL_FAIL`. It reproduces in nine lines two defects of the
-approximation pass that are now fixed - a corner placed where two owners cross
-when one of them is a surface its makers never put there, and a band rim handed
-to a face that will be fanned into triangles - and one that is not: two of its
-corners sit 3.6e-03 and 4.5e-03 off the analytic faces they bound, the same
-slack the flagship corners test fails on. Marking it rather than deleting it is
-what makes that slack announce itself when it moves.
+`export-step-sanitytest_step-cap-meets-wall` was a third, and the only *fixture*
+ever registered `WILL_FAIL`; it passes on its own merits since 2026-09-16 and the
+marking is gone. It reproduces in nine lines three defects of
+the approximation pass, all now fixed: a corner placed where two owners cross
+when one of them is a surface its makers never put there, a band rim handed to a
+face that will be fanned into triangles, and two corners left off the analytic
+faces they bound. Marking it rather than deleting it is what made the third
+announce itself - ctest reported the fixture as a *failure* the day it started
+passing.
 
 The flagship check's round trip is read, but only since 2026-09-14: it tested
 `not roundtripSTEP(...)`, a tuple, and so passed every file. A green flagship run

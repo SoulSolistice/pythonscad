@@ -3879,8 +3879,126 @@ double declaredBand(const Surface *surface)
  * yes. That distinction was measured: it is the difference between 93 of 507
  * crossing curves and all 507.
  */
+/*! The crossing of a surface that answers by projecting with one stated
+ * algebraically, solved in the projecting surface's own parameters.
+ *
+ * Newton on two implicits at once converges quadratically against a quadric,
+ * whose implicit is algebraic, and only linearly against a sweep, whose
+ * "implicit" is the tangent plane at a foot point - `footPointImplicit` says so
+ * itself. Measured on the band family's 47 remaining chords: the traced points
+ * sit on the quadric to 2.1e-13 and off the sweep by 8.2e-02. The fit was never
+ * the problem; it interpolated points that were not on the crossing curve.
+ *
+ * So the sweep is not asked to converge at all. Every iterate is put *on* it by
+ * evaluation - project to (u, v), take S(u, v) - and only the quadric's residual
+ * is solved, by stepping in the surface's own tangent plane:
+ *
+ *     f + grad . (su Tu + sv Tv) = 0,   the shortest such step
+ *
+ * The same shape as the surface-against-line placement, which solves along the
+ * line so that "every candidate is on the line by construction, and the planes
+ * come out exact". Here every candidate is on the sweep by construction, and the
+ * sweep comes out exact: what remains is the projection's own accuracy, not a
+ * convergence rate.
+ *
+ * Returns whether the quadric's residual met `tol`; `p` is left at the best
+ * iterate either way, which is the contract projectOntoBoth already has. */
+template <typename S>
+static bool crossInParameters(const S *surface, const Surface *quadric, Vector3d& p, double tol)
+{
+  // Two equations in the surface's own two parameters:
+  //
+  //     F(S(u, v))            = 0     the quadric, stated algebraically
+  //     (S(u, v) - anchor).t  = 0     the station along the curve, held
+  //
+  // The first is the crossing. The second is what makes the answer *this*
+  // crossing point rather than any other: without it the step is free to slide
+  // along the curve, and it does - zeroing F by walking the tangent plane took
+  // samples far enough along the band family's trim that the Bezier through
+  // them was no curve at all, 593 crossing curves falling to 405. `t` is the
+  // curve's own tangent, the quadric's gradient crossed with the surface's
+  // normal, recomputed each step.
+  //
+  // Every iterate is S(u, v), so the sweep is satisfied by construction rather
+  // than by convergence - which is the whole point, `footPointImplicit` being a
+  // first-order model that leaves Newton linear on a sweep (open item 10, A2).
+  const Vector3d anchor = p;
+  Vector3d best = p;
+  double best_residual = std::numeric_limits<double>::infinity();
+  double u = 0, v = 0;
+  if (!surface->project(p, u, v)) return false;
+  for (int step = 0; step < 64; step++) {
+    const Vector3d here = surface->evaluate(u, v);
+    double f = 0;
+    Vector3d grad;
+    if (!quadricImplicit(quadric, here, f, grad)) break;
+    const double gn = grad.norm();
+    if (!(gn > 0)) break;
+    const double residual = fabs(f) / gn;
+    if (residual < best_residual) {
+      best_residual = residual;
+      best = here;
+    }
+    if (residual <= tol) break;
+    // The tangent plane, differenced inside the parameter square so that a step
+    // never straddles a profile corner - the same reason GridSurface::project
+    // differences within a span.
+    const double h = 1e-5;
+    const double u0 = std::max(0.0, std::min(1.0 - h, u - h)), u1 = std::min(1.0, u0 + 2 * h);
+    const double v0 = std::max(0.0, std::min(1.0 - h, v - h)), v1 = std::min(1.0, v0 + 2 * h);
+    if (!(u1 > u0) || !(v1 > v0)) break;
+    const Vector3d tu = (surface->evaluate(u1, v) - surface->evaluate(u0, v)) / (u1 - u0);
+    const Vector3d tv = (surface->evaluate(u, v1) - surface->evaluate(u, v0)) / (v1 - v0);
+    Vector3d along = grad.cross(tu.cross(tv));
+    const double an = along.norm();
+    if (!(an > 0)) break;  // tangent surfaces: no curve to hold a station on
+    along /= an;
+    Eigen::Matrix2d jac;
+    jac << grad.dot(tu), grad.dot(tv), along.dot(tu), along.dot(tv);
+    const double det = jac.determinant();
+    if (!(fabs(det) > 0)) break;
+    Eigen::Vector2d rhs(-f, -(here - anchor).dot(along));
+    const Eigen::Vector2d d = jac.inverse() * rhs;
+    if (!d.allFinite()) break;
+    const double nu = std::clamp(u + d[0], 0.0, 1.0), nv = std::clamp(v + d[1], 0.0, 1.0);
+    if (fabs(nu - u) < 1e-16 && fabs(nv - v) < 1e-16) break;
+    u = nu;
+    v = nv;
+  }
+  p = best;
+  return best_residual <= tol;
+}
+
 bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol)
 {
+  // Where one of the two answers by projecting and the other states itself
+  // algebraically, the crossing is traced in the first one's parameters - see
+  // crossInParameters. Newton below would land on the quadric and stall on the
+  // other, which is what left the band family with 47 chorded edges.
+  const bool a_quadric = isQuadric(a), b_quadric = isQuadric(b);
+  if (a_quadric != b_quadric) {
+    const Surface *quadric = a_quadric ? a : b;
+    const Surface *other = a_quadric ? b : a;
+    const Vector3d start = p;
+    bool traced = false, met = false;
+    if (const auto *grid = dynamic_cast<const GridSurface *>(other)) {
+      traced = true;
+      met = crossInParameters(grid, quadric, p, tol);
+    } else if (const auto *patch = dynamic_cast<const BezierPatchSurface *>(other)) {
+      traced = true;
+      met = crossInParameters(patch, quadric, p, tol);
+    }
+    if (met) return true;
+    // It does not always converge: where the crossing lies off the end of the
+    // patch, or a step lands in another profile span, the trace has nowhere to
+    // go. Measured on the band family, 208 of 15396 samples end that way against
+    // 13371 reaching 1e-14 with the point *on* the sweep. Those fall back to
+    // Newton on the two implicits, which answers for the quadric and stalls on
+    // the sweep - no worse than this exporter had before, and the fit's own
+    // acceptance is what decides either way.
+    if (traced) p = start;
+  }
+
   // The best point seen, not the last one. Newton's final iterate is not
   // necessarily its closest approach - a step near tangency can throw it
   // further out than where it started - and the caller's acceptance test is a
