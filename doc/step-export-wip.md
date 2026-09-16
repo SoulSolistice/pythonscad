@@ -536,6 +536,39 @@ apart. The control's two kernels disagree by 43 mm3 on its own file. Two kernels
 that never saw each other's arithmetic agreeing to six digits is the closest this
 coupon has come to a derived volume.
 
+#### Run 2026-09-16, second: `f04` isolates the veto, and its faults are the same two faces
+
+Same session, same settings, the control imported again:
+
+| file | boundary | SOLIDWORKS |
+| --- | --- | --- |
+| `f02-band-fn032-analytic`, 2026-09-08 control | 0 curves / 640 chords | `faults=2 faultyfaces=2 codes=17` - **eleventh reproduction** |
+| `f04-band-fn064-analytic`, today, veto as it stands | 1 curve, the rest chords | `faults=2 faultyfaces=2 codes=17` |
+| `f04-band-fn064-analytic`, today, **veto relaxed** | **1223 crossing curves**, 10 chords | **`faults=0 faultyfaces=0 faultyedges=0`** |
+
+`-FaultDetail` gives the same two faces in both faulty files, and they are the
+same two the control has: the swept B-spline (1019.02 mm2 on `f04`, 1027.84 on
+the control) and the bore cylinder (2094.82 and 2098.71), every one `17/17`.
+
+**On `f04` the only variable is the veto.** One binary, one model, one session -
+the relaxation is `STEP_RELAX_VETO`, a switch that refuses only the corners a
+bent face implicates and settles, and it is never committed. So the chain is
+closed on this coupon: the veto holds the corners, the corners hold the
+boundary as chords, and the chords are what SOLIDWORKS faults.
+
+With `f02` reading `faults=0` earlier the same session, that is n = 2 for *a
+boundary written as the curve the two surfaces cross along carries no code 17*,
+against a control that reproduced its own `codes=17` both times.
+
+**What it does not yet settle.** The relaxation is not landable as it stands:
+under it lid10 and the bayonet part are valid STEP and one solid, but
+`BRepCheck` still rejects one face each - the thin seam-side piece of open item
+15, which the corner placement does not rescue. `f04` under the relaxation is
+clean by every check here. And two kernels disagree about `f04`'s volume by
+0.14% (SOLIDWORKS 19513.5059 against OpenCASCADE 19540.5751 on the relaxed file)
+where they agreed to 0.0006% on `f02`; unexplained, and worth a look before that
+number is used as evidence for anything.
+
 #### And why the other three coupons did not move
 
 They never got the boundary. Measured on the files themselves:
