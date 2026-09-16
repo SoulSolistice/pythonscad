@@ -408,10 +408,27 @@ public:
    * columns). A grid of fewer than four rows has no cubic fitted and comes back
    * as the bilinear surface `evaluate` falls back to, which is the same
    * surface, honestly reported at degree 1. */
+  /*! Whether (u, v) is on the seam of a profile declared closed: the column it
+   * starts and ends at, which is v = 0 and v = 1 at once. Always false for an
+   * open profile, which has edges there rather than a seam. */
+  [[nodiscard]] bool onSeam(double u, double v) const;
+
+  /*! Where a closed profile's seam falls, as a parameter shift.
+   *
+   * A face on a closed sweep is written over the rectangle 0 <= v <= 1, so a
+   * boundary that crosses the seam has nowhere to go but the long way round -
+   * and which column the seam sits at is free. Writing the surface from column
+   * `seam_column` puts it there, and this is what that does to a `v` this
+   * surface reports: v' = frac(v - seam_column / spans). A face whose claim
+   * leaves one span of the profile unused can always be written without crossing
+   * a seam by putting it in that span, which costs no face, no refused facet and
+   * no cut. */
+  [[nodiscard]] double seamShift(int seam_column) const;
+
   [[nodiscard]] bool splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
                                 std::vector<Vector3d>& ctrl, std::vector<double>& knots_u,
                                 std::vector<int>& mults_u, std::vector<double>& knots_v,
-                                std::vector<int>& mults_v) const;
+                                std::vector<int>& mults_v, int seam_column = 0) const;
 
   int rows = 0, cols = 0;
   bool closed_v = false;
@@ -435,7 +452,8 @@ private:
   /*! A net with its first column repeated at the end, when the profile is
    * closed - the columns the closing strip needs and the declaration does not
    * carry. Returns the net unchanged otherwise. */
-  [[nodiscard]] std::vector<Vector3d> withClosingColumn(const std::vector<Vector3d>& src) const;
+  [[nodiscard]] std::vector<Vector3d> withClosingColumn(const std::vector<Vector3d>& src,
+                                                        int seam_column = 0) const;
   /*! Interpolate the stations, so that `evaluate` describes the sweep and not
    * only the points it passes through. Runs on construction and after a move. */
   void buildSpline();

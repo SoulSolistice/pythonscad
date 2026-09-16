@@ -682,10 +682,14 @@ int ConeSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
 }
 
 namespace {
+/*! How close two points are before a GridSurface calls them one: the grid it
+ *  indexes its points on, and the distance at which a point is on its seam. */
+constexpr double GRID_RESOLUTION = 1e-9;
+
 /*! The 1e-9 grid a GridSurface indexes its points on. */
 std::tuple<int64_t, int64_t, int64_t> gridKey(const Vector3d& pt)
 {
-  const double res = 1e-9;
+  const double res = GRID_RESOLUTION;
   return {(int64_t)llround(pt[0] / res), (int64_t)llround(pt[1] / res), (int64_t)llround(pt[2] / res)};
 }
 }  // namespace
@@ -833,22 +837,43 @@ void GridSurface::buildSpline()
   }
 }
 
-std::vector<Vector3d> GridSurface::withClosingColumn(const std::vector<Vector3d>& src) const
+std::vector<Vector3d> GridSurface::withClosingColumn(const std::vector<Vector3d>& src,
+                                                     int seam_column) const
 {
   if (!closed_v || cols < 1) return src;
+  const int start = ((seam_column % cols) + cols) % cols;
   std::vector<Vector3d> out;
   out.reserve(src.size() + rows);
   for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < cols; j++) out.push_back(src[std::size_t(i) * cols + j]);
-    out.push_back(src[std::size_t(i) * cols]);
+    for (int j = 0; j < cols; j++) {
+      out.push_back(src[std::size_t(i) * cols + (start + j) % cols]);
+    }
+    out.push_back(src[std::size_t(i) * cols + start]);
   }
   return out;
+}
+
+double GridSurface::seamShift(int seam_column) const
+{
+  const int spans = vspans();
+  if (!closed_v || spans <= 0) return 0.0;
+  return double(((seam_column % cols) + cols) % cols) / double(spans);
+}
+
+bool GridSurface::onSeam(double u, double v) const
+{
+  if (!closed_v) return false;
+  // Asked in space and not of v, because v is where a projection left it: a
+  // corner on the seam is v = 0 and v = 1 at once, and `project` returns either,
+  // or a few ulps off one, depending on which span's descent finished first.
+  const Vector3d at = evaluate(u, v);
+  return std::min((at - evaluate(u, 0.0)).norm(), (at - evaluate(u, 1.0)).norm()) <= GRID_RESOLUTION;
 }
 
 bool GridSurface::splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
                              std::vector<Vector3d>& ctrl, std::vector<double>& knots_u,
                              std::vector<int>& mults_u, std::vector<double>& knots_v,
-                             std::vector<int>& mults_v) const
+                             std::vector<int>& mults_v, int seam_column) const
 {
   if (rows < 2 || cols < 2) return false;
 
@@ -882,12 +907,12 @@ bool GridSurface::splineForm(int& degree_u, int& degree_v, int& rows_out, int& c
       knots_u.push_back(double(i) / (rows - 1));
       mults_u.push_back(i == 0 || i == rows - 1 ? 2 : 1);
     }
-    ctrl = withClosingColumn(net);
+    ctrl = withClosingColumn(net, seam_column);
     return true;
   }
 
   degree_u = GRID_DEGREE;
-  ctrl = withClosingColumn(poles);
+  ctrl = withClosingColumn(poles, seam_column);
   // uknots is the full knot vector, values repeated; a STEP file wants each
   // value once with the count beside it.
   knots_u.clear();

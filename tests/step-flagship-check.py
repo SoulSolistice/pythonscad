@@ -54,6 +54,13 @@ _spec = _ilu.spec_from_file_location(
 vertex_on_curve = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(vertex_on_curve)
 
+_spec = _ilu.spec_from_file_location(
+    "seam_straddle",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "scripts", "step-diagnostics", "seam-straddle.py"))
+seam_straddle = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(seam_straddle)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The analytic path is behind two experimental flags and needs both to be
@@ -200,6 +207,27 @@ def main():
                   file=sys.stderr)
             for ln in strays:
                 print("       " + ln, file=sys.stderr)
+            failures.append(name)
+            continue
+        # No face's loop may cross the seam of a surface closed in `v`. Such a
+        # boundary has nowhere to go but the long way round - a straight line in
+        # (u, v) from 0.0000 to 0.9956 sweeps the whole profile rather than
+        # stepping the 0.0044 across - and a reader repairs the contradiction by
+        # building a seam edge nobody wrote and widening the vertices there until
+        # they merge, 1.08 on lid10. Open item 15. Zero needs no derivation: a
+        # face is either inside its own parameter rectangle or it is not.
+        ents = seam_straddle.voc.parse(target)
+        crossing = []
+        for fid, (fkind, fargs) in sorted(ents.items()):
+            if fkind != "ADVANCED_FACE":
+                continue
+            if not seam_straddle.closed_in_v(ents, seam_straddle.voc.refs(fargs)[-1]):
+                continue
+            if seam_straddle.crossings(ents, fid):
+                crossing.append(fid)
+        if crossing:
+            print("FAIL %-12s %d face(s) have a loop crossing their surface's seam: %s"
+                  % (name, len(crossing), ", ".join("#%d" % f for f in crossing)), file=sys.stderr)
             failures.append(name)
             continue
         for ln in strays:

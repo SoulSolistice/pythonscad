@@ -4273,15 +4273,79 @@ void StepKernel::build_tri_body(
     }
   }
 
+  std::size_t reseamed = 0, reseam_full = 0;
   for (const auto& patch : grid_faces) {
     const auto *grid = dynamic_cast<const GridSurface *>(patch.surface.get());
     if (grid == nullptr) continue;
+
+    // Where to put the seam of a closed profile, which is free to choose.
+    //
+    // A face here is written over the rectangle 0 <= v <= 1, so its boundary
+    // must not cross the seam. One that does has nowhere to go: the pcurve is a
+    // straight line in (u, v), and from v = 0.0000 to v = 0.9956 it sweeps the
+    // whole profile instead of stepping the 0.0044 across. A reader then repairs
+    // a face whose boundary contradicts its own surface - OpenCASCADE builds a
+    // seam edge nobody wrote and widens the vertices there until they merge,
+    // 1.08 on lid10, and the LINE beside it comes back bounded by a point 0.7159
+    // off its own curve. Open item 15.
+    //
+    // A boolean that buries one span of the profile leaves the seam somewhere to
+    // go: written from the column after an unused span, the face's own facets
+    // are contiguous in v and no boundary crosses anything. That costs no face,
+    // no refused facet and no cut - the alternatives this replaces - and it is
+    // exact, the surface being the same one described from another column.
+    //
+    // Which spans a face uses is asked of the facets' corners rather than their
+    // middles: beside the seam the profile is creased, and a facet's centroid
+    // projects onto the flank across the crease - 0.022 on lid10 for one whose
+    // corners are at 0.98 and beyond.
+    int seam_column = 0;
+    const int spans = grid->closed_v ? grid->cols : grid->cols - 1;
+    if (grid->closed_v && spans > 1) {
+      std::vector<char> used(spans, 0);
+      for (const std::size_t f : patch.facets) {
+        if (f >= loops.size()) continue;
+        double lo = 2, hi = -1;
+        for (const int v : loops[f]) {
+          double pu = 0, pv = 0;
+          if (!grid->project(vertices[v], pu, pv)) continue;
+          if (grid->onSeam(pu, pv)) continue;
+          lo = std::min(lo, pv);
+          hi = std::max(hi, pv);
+        }
+        if (hi < lo) continue;
+        const int span = std::clamp(int(((lo + hi) / 2) * spans), 0, spans - 1);
+        used[span] = 1;
+      }
+      for (int k = 0; k < spans; k++) {
+        if (used[k] == 0) {
+          seam_column = (k + 1) % grid->cols;
+          break;
+        }
+      }
+      if (seam_column != 0) reseamed++;
+      else if (std::find(used.begin(), used.end(), 0) == used.end()) reseam_full++;
+    }
+    const double seam_shift = grid->seamShift(seam_column);
+    // Every parameter this face reports is in the surface as it was *written*,
+    // which is the same surface described from another column.
+    auto parameters = [&](const Vector3d& p, double& pu, double& pv) {
+      if (!grid->project(p, pu, pv)) return false;
+      if (seam_shift > 0) {
+        pv -= seam_shift;
+        if (pv < 0) pv += 1.0;
+        if (pv > 1) pv -= 1.0;
+      }
+      return true;
+    };
 
     int du = 0, dv = 0, nu = 0, nv = 0;
     std::vector<Vector3d> ctrl;
     std::vector<double> knots_u, knots_v;
     std::vector<int> mults_u, mults_v;
-    if (!grid->splineForm(du, dv, nu, nv, ctrl, knots_u, mults_u, knots_v, mults_v)) continue;
+    if (!grid->splineForm(du, dv, nu, nv, ctrl, knots_u, mults_u, knots_v, mults_v, seam_column)) {
+      continue;
+    }
 
     std::vector<std::vector<Point *>> net;
     for (int i = 0; i < nu; i++) {
@@ -4316,7 +4380,7 @@ void StepKernel::build_tri_body(
       std::vector<std::pair<double, double>> uv;
       for (const int v : entry.second) {
         double pu = 0, pv = 0;
-        if (!grid->project(vertices[v], pu, pv)) continue;
+        if (!parameters(vertices[v], pu, pv)) continue;
         uv.emplace_back(pu, pv);
       }
       double twice = 0.0;
@@ -4383,8 +4447,8 @@ void StepKernel::build_tri_body(
         // than none.
         [&]() {
           double ua = 0, va = 0, ub = 0, vb = 0;
-          if (!grid->project(edge->vert1->point->pt, ua, va)) return;
-          if (!grid->project(edge->vert2->point->pt, ub, vb)) return;
+          if (!parameters(edge->vert1->point->pt, ua, va)) return;
+          if (!parameters(edge->vert2->point->pt, ub, vb)) return;
           const double su = ub - ua, sv = vb - va;
           const double plen = sqrt(su * su + sv * sv);
           // A DIRECTION has to have a magnitude, and an edge whose ends land on
@@ -5227,6 +5291,13 @@ void StepKernel::build_tri_body(
           "\"vertex does not lie on edge\'s curve\"",
           int(off), off == 1 ? " is" : "es are", strays[strays.size() / 2], worst);
     }
+  }
+  if (reseamed > 0 || reseam_full > 0) {
+    LOG(
+      "STEP export: %1$d sweep face%2$s written from a column that puts the profile's seam in a "
+      "span it does not use, so no boundary of it crosses the seam; %3$d use every span and keep "
+      "the seam where it was",
+      int(reseamed), reseamed == 1 ? " is" : "s are", int(reseam_full));
   }
   if (g_section_trimmed + g_section_dropped > 0) {
     LOG(

@@ -83,6 +83,25 @@ def pcurve_vs(ents, ec, surf):
     return ents[cr[0]][0], out
 
 
+def crossings(ents, face):
+    """How many of a face's pcurves run more than half the profile - the long way
+    round a seam it should have stepped across."""
+    r = voc.refs(ents[face][1])
+    surf = r[-1]
+    found = 0
+    for b in r[:-1]:
+        if b not in ents:
+            continue
+        lp = voc.refs(ents[b][1])[0]
+        for o in voc.refs(ents[lp][1]):
+            ec = voc.refs(ents[o][1])[0]
+            _, runs = pcurve_vs(ents, ec, surf)
+            for run in runs:
+                if max(run) - min(run) > 0.5:
+                    found += 1
+    return found
+
+
 def report(ents, face):
     r = voc.refs(ents[face][1])
     surf = r[-1]
