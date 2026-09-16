@@ -2064,6 +2064,66 @@ facets are contiguous in v - is implemented and harmless, and is kept in
 `build/relax/` rather than committed, because on its own it fixes nothing: what
 needs the seam moved is exactly the facet that straddles it.
 
+#### What the reader builds there, measured 2026-09-16
+
+Chasing the strays that appear only after a kernel has read the file back - the
+ones the written text does not contain - ends here, and it ends with a number
+that says what is wrong in one line. `scripts/step-diagnostics/seam-straddle.py`
+prints the `v` each of a face's own pcurves runs between. For the sweep face of lid10,
+`#1217` on the closed B-spline `#1045`:
+
+```text
+  edge #1054   LINE                       v 0.0000 0.0000
+  edge #1070   LINE                       v 0.0000 0.0371
+  edge #1086   B_SPLINE_CURVE_WITH_KNOTS  v 0.0371 0.0339
+  edge #1103   B_SPLINE_CURVE_WITH_KNOTS  v 0.0339 0.0129
+  edge #1118   LINE                       v 0.0129 0.0127
+  edge #1133   LINE                       v 0.0127 0.0000
+  edge #1148   LINE                       v 0.0000 0.9956     <- crosses the seam
+  edge #1163   LINE                       v 0.9956 0.9866
+  edge #1178   LINE                       v 0.9866 0.9775
+  edge #1193   LINE                       v 0.9775 0.0585     <- crosses the seam
+  edge #1206   LINE                       v 0.0585 0.0000
+```
+
+The loop crosses the seam **twice**, and each crossing is written as a pcurve
+going the *long way*: a straight line in (u, v) from 0.0000 to 0.9956 sweeps the
+entire profile instead of stepping the 0.0044 across the seam. Every control
+point of every row of `#1045` has its first and last the same - the surface is
+closed in v, measured, and its seam sits at (79.5875, 0, 0).
+
+What OpenCASCADE then does with that is all of the rest:
+
+- it **builds a seam edge we never wrote**, a LINE from (79.5875, 0, 0) to
+  (79.5875, 0, 1.0125), and another at (79.2875, 0, 4.6250);
+- it **inflates the vertex tolerance at (79.5875, 0, 0) to 1.08**, which is
+  longer than the whole of our edge `#1206` there, so that everything can be
+  made to meet;
+- and our own `#1206` - a LINE whose two vertices are exactly its two ends, base
+  (79.5173, 0, 1.0827), direction (0.0647, 0, -0.9979), length 1.0850 - then
+  reads back as a vertex 0.7159 off its own curve. That number is the reader's
+  repair, not our geometry. `scripts/step-diagnostics/vertex-on-curve.py` reports
+  nothing for this file, and is right to.
+
+**And it is what SOLIDWORKS has left.** Its remaining code 7 is on one edge, 594
+at (79.3344, 0.9718, 2.6827), which is our ELLIPSE `#14816` from
+(79.3525, 1.9435, 1.1863) to (79.3164, 0, 4.1792) - midpoint matched to 0.0001 -
+with the two faults beside it on the cone and the plane that edge bounds. Both of
+its vertices are on that ellipse **to 1e-11**, so the objection is not our
+arithmetic; what the edge has instead is an endpoint at `y = 0`, on the seam
+plane, in the neighbourhood the reader has just rebuilt. Everything SOLIDWORKS
+still objects to on lid10 touches that seam.
+
+So item 20's residue is this item, and the order of work is settled by it: the
+two exact routes above - split at the seam, or write the surface periodic - are
+no longer alternatives to weigh, they are the only thing left objecting. The
+re-seam parked in `build/relax/` is a third and now looks better than when it was
+shelved: the boundary uses `v` in 0.0000-0.0585 and 0.9775-1.0000 only, so
+**0.0585 to 0.9775 is free** and a seam moved into that gap is crossed by
+nothing. What was refuted on 2026-09-16 was re-seam *together with* the
+across-seam facet refusal, which made SOLIDWORKS worse; re-seam on its own,
+against a boundary that now has this much room, has not been tried.
+
 ### 16. What a CAD view of lid10 shows, and which of it is ours
 
 **Measured 2026-09-14** after three observations from a SOLIDWORKS session on
@@ -2535,9 +2595,12 @@ two LINEs, 0.0137 on a CIRCLE - none of which exist in the file we wrote. The
 reader made them, by splitting faces and rebuilding edges of its own, which is
 the standing warning about kernel agreement in its sharpest form: OpenCASCADE
 reported strays the file does not contain *and* said nothing about the fourteen
-it did. The remaining SOLIDWORKS faults sit in the same neighbourhood as item
-15's seam - faces 19, 41 and edge 594 all around (79, y, z<4) - so the next
-measurement is what a reader *builds* there, not what we wrote.
+it did. That was chased the same day and the answer is in item 15: the sweep
+face's loop crosses its own surface's seam twice, each crossing written the long
+way round, and the reader repairs that by inventing a seam edge and inflating a
+vertex's tolerance to 1.08. Every remaining SOLIDWORKS fault on lid10 touches it,
+including the one code 7 left, which is on an ellipse whose vertices are on it to
+1e-11.
 
 ## Unexplained, and to be validated
 

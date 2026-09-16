@@ -1580,6 +1580,13 @@ drift of 9e167 per cent.
   OpenCASCADE, lid10 showed strays the file does not contain *and* nothing about
   the fourteen it did. `export-step-flagship-coupons` asserts it over all six
   coupons.
+- `scripts/step-diagnostics/seam-straddle.py <file.stp> [face]` — the `v` each of
+  a face's own pcurves runs between, and whether its loop crosses the seam of a
+  surface closed in `v`. A crossing has nowhere to go but the long way round, and
+  is what makes a reader rebuild the face; with no face argument it reports every
+  closed-surface face in the file. lid10 has exactly one such face and it crosses
+  twice, `step-band-family` has none — and those are also the coupon SOLIDWORKS
+  still faults and the one it reads clean.
 - `scripts/step-diagnostics/edge-lengths.py <file.stp>` — the edge-length
   distribution straight out of the STEP text, closed edges counted separately.
   No kernel in the path, so no silent repair: what it reports is what was
