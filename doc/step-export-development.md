@@ -908,6 +908,55 @@ Driven by `scripts/step-interop-solidworks.ps1`; needs SOLIDWORKS running.
   36 swEdgeTouchEdge
   ```
 
+  The names are abbreviations; the API documentation gives each one a sentence,
+  and the sentence is what says which two entities the code is *about*
+  (`swFaultEntityErrorCode_e`, SOLIDWORKS 2026 API help):
+
+  | code | name | what SOLIDWORKS says it means |
+  | --- | --- | --- |
+  | 7 | `swEdgeVertexNotLie` | Vertex does not lie on edge's curve |
+  | 8 | `swEdgeVertexNotLieNominal` | Vertex does not lie on edge's nominal geometry |
+  | 11 | `swEdgeSpcurveOutOfTol` | Spcurve is not within edge's tolerance |
+  | 12 | `swEdgeSpcurveOutOfTolNominal` | Spcurve is not within edge's nominal tolerance |
+  | 13 | `swEdgeVerticesTouch` | Vertices of edge touch |
+  | 16 | `swFaceBadVertex` | Vertex does not lie on face's surface |
+  | 17 | `swFaceBadEdge` | Edge does not lie on face's surface |
+  | 21 | `swFaceSelfIntersecting` | Face is self intersecting |
+  | 30 | `swTopolNotG1Continuous` | Topology's geometry is not G1 continuous |
+
+  Read as sentences rather than as names, the codes split cleanly by *which pair*
+  each one holds against the other, and that is the whole of their diagnostic
+  value:
+
+  - **7 and 8** are a vertex against its own edge's curve. Not against a surface,
+    not against a face — against the curve that edge is written as. So a code 7
+    is the exporter having substituted a curve for a run of chords that does not
+    pass through the run's own endpoints, and nothing else.
+  - **11 and 12** are the 2D pcurve against the 3D curve.
+  - **16 and 17** are a vertex, and an edge, against the *face's surface*.
+  - **13** and **30** are properties of one entity.
+
+  This matters because our instruments did not all measure the same relation. The
+  corner-stray family (`step-occt-strict.py`, `step-corner-stray.py`) measures a
+  corner against the surface its face is written on — which is code **16**, and
+  code 16 has never fired on any file of ours. The faults we actually get are 7
+  and 17, and neither of them is what those scripts report. A green corner-stray
+  run therefore says nothing about a SOLIDWORKS fault; that is not a limitation
+  of the instrument but of reading it as an answer to a question it was never
+  asked. `scripts/step-diagnostics/face-bad-edge.py` is the one that measures all
+  of them, and it is the one to reach for first.
+
+  **The invariant this implies, and it is general.** *A curve substituted for a
+  run of chords must pass through that run's own endpoints.* It binds the ends
+  only: the vertices between them are the chords' own, they are a sagitta off the
+  surface because that is what a tessellation is, and the curve replaces them
+  rather than passing through them. Two things follow, and both are in the code:
+  the corner placement has to put those endpoints on the surfaces the file
+  asserts - which means **planar faces are surfaces of the placement**, since a
+  plane section's endpoints are corners between a plane and a quadric - and the
+  exporter audits every finished `EDGE_CURVE` against its own two vertices before
+  writing. See open item 20 for what it cost to learn and what it did not fix.
+
   SOLIDWORKS has a **separate** code for a bad vertex, a bad edge *order*, bad
   loops, a pcurve out of tolerance and a wire that does not close. So **17 is
   what is left when an edge is individually well formed, correctly ordered,
@@ -1524,6 +1573,13 @@ drift of 9e167 per cent.
   edge, and the wire's closure gap. Printed with the face's kind, area and
   centre in `-FaultDetail`'s own units, so the two lists join. This is what
   narrowed code 17 to a relation between an edge and a face.
+- `scripts/step-diagnostics/vertex-on-curve.py <file.stp> …` — every vertex
+  against the curve its own edge is written as, which is SOLIDWORKS fault code 7
+  and the relation none of the corner-stray scripts measure. Read straight from
+  the text with no kernel in the path, which is the point: read back through
+  OpenCASCADE, lid10 showed strays the file does not contain *and* nothing about
+  the fourteen it did. `export-step-flagship-coupons` asserts it over all six
+  coupons.
 - `scripts/step-diagnostics/edge-lengths.py <file.stp>` — the edge-length
   distribution straight out of the STEP text, closed edges counted separately.
   No kernel in the path, so no silent repair: what it reports is what was

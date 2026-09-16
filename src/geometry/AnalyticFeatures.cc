@@ -3810,6 +3810,19 @@ bool footPointImplicit(const S *surface, const Vector3d& p, double& f, Vector3d&
 bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad,
                      double *true_distance)
 {
+  // A plane states itself algebraically too, and more simply than any quadric:
+  // the residual *is* the distance, because the gradient is a unit normal. It is
+  // here rather than in `quadricImplicit` because a plane is not a quadric and
+  // `isQuadric` decides other things - which pass writes a boundary, and whether
+  // a planar crossing is a conic something else will write exactly.
+  if (const auto *pl = dynamic_cast<const PlaneSurface *>(surface)) {
+    const Vector3d n = pl->normdir.normalized();
+    if (!(n.norm() > 0)) return false;
+    f = n.dot(p - pl->refpt);
+    grad = n;
+    if (true_distance != nullptr) *true_distance = fabs(f);
+    return true;
+  }
   if (quadricImplicit(surface, p, f, grad)) {
     // A quadric's implicit is global - there is no patch to run off - so the
     // Newton distance *is* the distance.

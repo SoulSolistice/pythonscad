@@ -43,6 +43,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from validatestep import validateSTEP  # noqa: E402
 import steproundtrip  # noqa: E402
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "scripts", "step-diagnostics"))
+import importlib.util as _ilu  # noqa: E402
+
+_spec = _ilu.spec_from_file_location(
+    "vertex_on_curve",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "scripts", "step-diagnostics", "vertex-on-curve.py"))
+vertex_on_curve = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(vertex_on_curve)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The analytic path is behind two experimental flags and needs both to be
@@ -134,6 +145,28 @@ def main():
             continue
         if not validateSTEP(target):
             print("FAIL %-12s the export is not valid STEP" % name, file=sys.stderr)
+            failures.append(name)
+            continue
+        # Every vertex against the curve its own edge is written as - SOLIDWORKS
+        # fault code 7, and the one relation no other check here asks. It needs
+        # no derived expectation: zero is what any correct export has, whatever
+        # its face count or its volume. It is read straight from the text, so no
+        # kernel repairs anything on the way in - which is the point, since read
+        # back through OpenCASCADE lid10 shows strays the file does not contain
+        # and hid the ones it did.
+        #
+        # This is not hypothetical. Until 2026-09-16 lid10 was written with 14
+        # ELLIPSE edges whose own endpoints were up to 1.6196 off them: a plane
+        # section of a shallow draft cone, where the section is 940 long and 58
+        # wide and a vertex a sagitta off the cone slides a millimetre and a half
+        # along the major axis. Nothing in this suite said a word.
+        off_curve = vertex_on_curve.offenders(target)
+        if off_curve:
+            print("FAIL %-12s %d vertex/edge pair(s) are off the curve the edge is written as"
+                  % (name, len(off_curve)), file=sys.stderr)
+            for d, ckind, eid, p in off_curve[:6]:
+                print("       %.6f  %-22s #%d at (%.4f %.4f %.4f)"
+                      % (d, ckind, eid, p[0], p[1], p[2]), file=sys.stderr)
             failures.append(name)
             continue
         # roundtripSTEP returns (ok, lines), and this read `not (ok, lines)` - a

@@ -37,7 +37,8 @@ flagship tests below, and three `*_arg-permutations` tests that have nothing to
 do with STEP and match `mutations` by substring. It was 52 until
 `export-step-flagship-corners` was added on 2026-09-14 and 53 until
 `step-cap-meets-wall` on 2026-09-16; a build configured before those sees fewer,
-and **a new fixture needs `cmake -B build` before ctest can see it at all**. Run it under the machine's own locale, not `LC_ALL=C`,
+and **a new fixture needs `cmake -B build` before ctest can see it at all**. Run
+it under the machine's own locale, not `LC_ALL=C`,
 which breaks five UTF-8 filename tests.
 
 **Two of the 54 fail on purpose and report green**, both registered
@@ -1205,7 +1206,6 @@ What is left:
 > be fanned - 20 corners on lid10, 14 on `f04` - which `export-step-flagship-strict`
 > still asserts against, and still fails on.
 
-
 **Built, measured and reverted on 2026-09-10.** This is the gate that decides
 whether the crossing curve of item 3 fires at all, and it is why the SOLIDWORKS
 run above could only move code 17 on one coupon.
@@ -2045,8 +2045,8 @@ side of the notch at 13, a new faulty edge at (-77.1776, -11.5773, 64.9951) at
 
 So **dropping the facet that lies across the seam leaves a notch the boundary
 has to route around, and that is worse than the straddle it removes.** The
-control reproduced `codes=17` in every one of these sessions - fourteen times now
-- so the comparison is sound.
+control reproduced `codes=17` in every one of these sessions, fourteen times
+now, so the comparison is sound.
 
 **What is left to try, in the order they are exact:**
 
@@ -2332,7 +2332,6 @@ over: the smooth solid from the two-circle lens integral, and the mesh from the
 same integral over OpenSCAD's own inscribed 64-gons, which agrees with what the
 mesher reports to six decimals.
 
-
 ### 19. The approximation re-fits a cone the model declared, where a rim rule refused it
 
 **Filed 2026-09-16, out of item 17, and not chased.** On lid10 the approximation
@@ -2428,6 +2427,117 @@ knows it: a band is only accepted when a record describes it, and the caller say
 how many of the records are the model's own. On lid10 536 facets and on the
 bayonet part 628 go into the re-run claimed by a declaration and every one comes
 out still claimed by one.
+
+### 20. A substituted curve must pass through its own run's endpoints - landed
+
+Read the fault codes as sentences rather than as names - the table is in
+`doc/step-export-development.md` - and the two we actually get name two different
+pairs of entities:
+
+- **7** `swEdgeVertexNotLie`, "Vertex does not lie on edge's curve".
+- **17** `swFaceBadEdge`, "Edge does not lie on face's surface".
+
+Neither is what the corner-stray family measures. Those hold a corner against the
+surface its face is written on, which is **16**, "Vertex does not lie on face's
+surface" - and 16 has never fired on a file of ours. Every instrument built
+before this week measured a relation SOLIDWORKS does not complain about.
+
+**What was found.** `scripts/step-diagnostics/vertex-on-curve.py`, which reads
+the STEP text with no kernel in the path, on the committed build's lid10:
+
+```text
+14 vertex/edge pairs off the curve
+  1.619590  ELLIPSE  at (79.1848 3.3298 2.0324)
+  1.141268  ELLIPSE  at (-75.1430 -20.9042 72.9263)
+  ...        (14 ELLIPSE edges, 0.13 to 1.62)
+```
+
+Seventeen ELLIPSE edges in the file, fourteen of them missing their own
+endpoints. The worst is the draft cone, half angle about 1.15deg, cut by a plane
+whose normal makes `|n.axis| = 0.0645` with the axis. The section is a legitimate
+ellipse - `planeSectionEllipse`'s guard is `|n.axis| > sin a ~ 0.020` and it
+passes correctly - but it is **940.3176 x 57.6904**, a grazing cut, and there
+`a ~ b / |n.axis|` amplifies along the major axis: a vertex a sagitta off the
+cone is a millimetre and a half off the curve.
+
+**Root cause, two deep.** `findSections` admitted an edge to a plane on one test
+only - that both endpoints lie *in* the plane. A section's curve is the surface
+met by the plane, so that is half of lying on the curve and the other half was
+never asked. But the endpoints were off the cone because *nothing had put them on
+it*: the corner placement's `faces_at` collected quadric, grid and Bezier patches
+and bands, and **not the planar faces**, so a corner where a plane meets a cone -
+which is every corner of a plane section - had one analytic surface at it and
+never reached the crossing rung at all.
+
+**What landed.**
+
+1. **Planar faces are surfaces of the placement.** A face written as a PLANE
+   asserts its corners lie in that plane exactly as a cone asserts its corners
+   lie on the cone, so a corner between them goes on the conic where the two
+   cross, and a corner between a quadric and *two* planes goes where all three
+   meet (`projectOntoSurfaceAndPlanes`, the same solver the provenance rung
+   uses). The planes come from `section_planes` - the plane of each face across
+   the surface's boundary, with a **declared** plane preferred to the mesh's own
+   - and not from the raw facets. That channel also answers, without a
+   heuristic, which planes at a corner are the quadric's own chords: a chord is
+   not a face across the boundary, so it is not in the list. The angular form of
+   that question, `|n.nsurf| >= cos(pi/6)`, which the conic rung next door uses,
+   reads a plane grazing a shallow cone as a chord - it misread *both* planes at
+   (79.1848, 3.3298, 2.0324) and is why that corner sat 0.1045 inside its own
+   cone.
+2. **The ladder is ordered declared-first.** The new rung runs after the
+   provenance conic and triple-point rungs, not before. Measured on
+   step-exact-trim, where 32 corners are reachable both ways: run first, the new
+   rung claimed all 32 and the declared rung reported none - which the fixture
+   caught, and which is the wrong way round.
+3. **`PlaneSurface` has an implicit.** `surfaceImplicit` had none, so no Newton
+   could cross anything with a plane. It is exact and its residual *is* the
+   distance. It is kept out of `quadricImplicit` because `isQuadric` decides
+   other things.
+4. **The invariant itself, as a backstop.** `findSections` measures every
+   boundary vertex against the surface with the crossing pass's own tolerance and
+   shortens a run whose end is off it, dropping it if fewer than two vertices
+   remain. It binds at the *writer* and not where sections are decided: the
+   decision runs before the placement, on vertices the mesh still holds a sagitta
+   inside their surface, and binding it there dropped every section on lid10 for
+   a staleness the placement then removed.
+5. **The exporter audits itself.** Every `EDGE_CURVE` in the finished entity list
+   is measured against its own two vertices before the file is written, for
+   LINE, CIRCLE, ELLIPSE and B_SPLINE_CURVE alike, and says so as an
+   EXPORT-WARNING. No substitution added later can escape it.
+6. **The suite would fail without the fix.** `export-step-flagship-coupons` now
+   asserts zero offenders over all six coupons, read from the text. It needs no
+   derived expectation - zero is what any correct export has.
+
+**Measured after.** lid10 written by this build: **0** vertex/edge pairs off
+their curve, against 14 before, and 10 ELLIPSE edges still written rather than
+given up. `step-band-family` at `$fn` 32 is 0 both before and after. The 54-test
+suite passes.
+
+**SOLIDWORKS, same session, same import settings, with the 2026-09-08 control.**
+
+| file | verdict |
+| --- | --- |
+| `f02-band-fn032-analytic-control20260908` | `faults=2 faultyfaces=2 codes=17` - the control, reproduced |
+| `f02-band-fn032-analytic` today | `faults=0` |
+| `r01-lid10-analytic` before | `faults=1 faultyfaces=7 faultyedges=1 codes=7/17/21` |
+| `r01-lid10-analytic` after | `faults=1 faultyfaces=7 faultyedges=1 codes=7/17/21` |
+
+**So SOLIDWORKS's verdict on lid10 did not move.** The same seven faces and the
+same edge, by index and by kind; only their centres shift by a millimetre or two.
+That is worth stating plainly rather than filing the fix as a win: the 1.6 mm
+ellipses were real, are gone from the file, and were not what SOLIDWORKS was
+objecting to.
+
+**What that leaves, and where to look next.** Read back through OpenCASCADE the
+*new* lid10 still shows strays - 0.7159 on a LINE at (79.5875, 0, 0), 0.0200 on
+two LINEs, 0.0137 on a CIRCLE - none of which exist in the file we wrote. The
+reader made them, by splitting faces and rebuilding edges of its own, which is
+the standing warning about kernel agreement in its sharpest form: OpenCASCADE
+reported strays the file does not contain *and* said nothing about the fourteen
+it did. The remaining SOLIDWORKS faults sit in the same neighbourhood as item
+15's seam - faces 19, 41 and edge 594 all around (79, y, z<4) - so the next
+measurement is what a reader *builds* there, not what we wrote.
 
 ## Unexplained, and to be validated
 

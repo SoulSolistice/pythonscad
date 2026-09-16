@@ -257,6 +257,7 @@ Licence-free instruments, all Python over OCP:
 | `scripts/step-analytic-probe.py` | replays the recogniser over a faceted export |
 | `scripts/step-interop-crosscheck.py` | derived, OpenCASCADE and CAD volumes side by side |
 | `scripts/step-interop-faultmap.py` | per-entity fault dump |
+| `scripts/step-diagnostics/vertex-on-curve.py` | every vertex against its own edge's curve — SOLIDWORKS fault code 7, no kernel in the path |
 | `scripts/step-interop-sw-roundtrip.py` | what survived a CAD system's re-export |
 
 What each coupon isolates, what the numbers mean and how to read a kernel's

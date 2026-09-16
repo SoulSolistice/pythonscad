@@ -329,6 +329,11 @@ using AnalyticFeatures::surfaceImplicit;
 
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 
+// Scratch, counted over a whole export: how the plane-section pass had to give
+// way to keep a substituted curve through its own run's endpoints.
+std::size_t g_section_trimmed = 0, g_section_dropped = 0;
+double g_section_end_stray = 0;
+
 // Scratch, read straight after a call: the same worst-case split by whether the
 // surface states where it is algebraically or answers by projecting.
 double g_worst_quadric = 0, g_worst_fitted = 0;
@@ -505,6 +510,93 @@ double intersectionArcError(const Surface *a, const Surface *b, const std::vecto
   return worst;
 }
 
+/*! How far a vertex is from the curve its own edge is written as.
+ *
+ * This is SOLIDWORKS fault code 7 - "vertex does not lie on edge's curve" -
+ * asked of our own file before anyone else asks it. Nothing here measured that
+ * relation until 2026-09-16: the corner-stray family measures a corner against
+ * the *surface* its face is written on, which is code 16, and code 16 has never
+ * fired on a file of ours. See doc/step-export-development.md, *Fault codes*.
+ *
+ * Every substitution in this exporter replaces a run of chords with one curve,
+ * and every one of them owes the same thing: the curve has to pass through the
+ * run's own endpoints. A plane section that misses them by 1.6 mm is not a
+ * near miss on a 940 mm ellipse, it is an edge two faces disagree about.
+ *
+ * The distance is exact for a line and a circle, and for a B-spline written
+ * clamped - the endpoints are its first and last control points. An ellipse is
+ * sampled and then refined, which is an upper bound on the true distance, and
+ * an upper bound is the safe direction for a check that has to be believed.
+ */
+double vertexOffCurve(const StepKernel::RoundType *curve, const Vector3d& p)
+{
+  if (const auto *line = dynamic_cast<const StepKernel::Line *>(curve)) {
+    if (line->point == nullptr || line->vector == nullptr || line->vector->dir == nullptr) return 0;
+    const Vector3d base = line->point->pt;
+    Vector3d dir = line->vector->dir->pt;
+    if (dir.norm() < 1e-12) return (p - base).norm();
+    dir.normalize();
+    const Vector3d rel = p - base;
+    return (rel - dir * rel.dot(dir)).norm();
+  }
+  if (const auto *circle = dynamic_cast<const StepKernel::Circle *>(curve)) {
+    if (circle->axis == nullptr || circle->axis->point == nullptr || circle->axis->dir1 == nullptr) {
+      return 0;
+    }
+    const Vector3d centre = circle->axis->point->pt;
+    Vector3d n = circle->axis->dir1->pt;
+    if (n.norm() < 1e-12) return 0;
+    n.normalize();
+    const Vector3d rel = p - centre;
+    const double along = rel.dot(n);
+    const double across = (rel - n * along).norm();
+    return sqrt(along * along + (across - circle->r) * (across - circle->r));
+  }
+  if (const auto *ell = dynamic_cast<const StepKernel::Ellipse *>(curve)) {
+    if (ell->axis == nullptr || ell->axis->point == nullptr || ell->axis->dir1 == nullptr ||
+        ell->axis->dir2 == nullptr) {
+      return 0;
+    }
+    const Vector3d centre = ell->axis->point->pt;
+    Vector3d n = ell->axis->dir1->pt, major = ell->axis->dir2->pt;
+    if (n.norm() < 1e-12 || major.norm() < 1e-12) return 0;
+    n.normalize();
+    major.normalize();
+    const Vector3d minor = n.cross(major);
+    auto at = [&](double t) {
+      return centre + major * (ell->semi_1 * cos(t)) + minor * (ell->semi_2 * sin(t));
+    };
+    double best_t = 0, best = std::numeric_limits<double>::infinity();
+    for (int k = 0; k < 720; k++) {
+      const double t = 2 * M_PI * k / 720.0;
+      const double d = (at(t) - p).norm();
+      if (d < best) {
+        best = d;
+        best_t = t;
+      }
+    }
+    for (double step = 2 * M_PI / 720.0; step > 1e-12; step *= 0.5) {
+      for (const double t : {best_t - step, best_t + step}) {
+        const double d = (at(t) - p).norm();
+        if (d < best) {
+          best = d;
+          best_t = t;
+        }
+      }
+    }
+    return best;
+  }
+  if (const auto *spline = dynamic_cast<const StepKernel::BSplineCurve *>(curve)) {
+    if (spline->pts.empty()) return 0;
+    // Clamped, so it starts at the first control point and ends at the last;
+    // the vertex belongs to whichever end it is nearer.
+    const double a = (spline->pts.front()->pt - p).norm();
+    const double b = (spline->pts.back()->pt - p).norm();
+    return std::min(a, b);
+  }
+  return 0;  // a curve this does not know how to measure is not a finding
+}
+
 /*! The ellipse a plane cuts from a cylinder or a cone.
  *
  * `a` is the semi-axis along `major`, and is the longer of the two - which is
@@ -652,7 +744,7 @@ bool surfaceAxis(const Surface *surface, Vector3d& axis)
 
 void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
                   const std::vector<CutPlane>& planes, BoundaryCycle& cycle,
-                  const std::set<std::pair<int, int>>& spoken_for)
+                  const std::set<std::pair<int, int>>& spoken_for, bool bind_ends)
 {
   cycle.sections.clear();
   Vector3d axis;
@@ -660,6 +752,55 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
   const double floor_tilt = sectionTiltFloor(surface);
   const std::size_t n = cycle.verts.size();
   if (n < 3) return;
+
+  // A curve substituted for a run of chords has to pass through that run's own
+  // endpoints. A section's curve is the surface met by the plane, so a vertex is
+  // on it only if it is on *both* - and being in the plane is the only half this
+  // used to ask. The other half is not a formality: lid10's draft cone is cut at
+  // a hand over a degree past its half angle, where the section is an ellipse
+  // 940 long and 58 wide, and a vertex a sagitta off the cone slides along that
+  // major axis by a millimetre and a half. Measured on the committed build:
+  // 38 edges whose vertices are up to 1.6196 off the curve their own edge is
+  // written as, which is what SOLIDWORKS reports as fault code 7, "vertex does
+  // not lie on edge's curve".
+  //
+  // The tolerance is the one the crossing-arc pass already holds its endpoints
+  // to, and for the same reason: a declared surface owes its own band, and
+  // anything else owes the scale of the point.
+  std::vector<char> on_surface(n, 0);
+  std::vector<double> stray(n, 0);
+  for (std::size_t k = 0; k < n; k++) {
+    const Vector3d& p = vertices[cycle.verts[k]];
+    const double scale = std::max(1.0, p.norm());
+    const double owed = std::max(1e-9 * scale, declaredBand(surface));
+    double f = 0, d = 0;
+    Vector3d g;
+    on_surface[k] = surfaceImplicit(surface, p, f, g, &d) && g.norm() >= 1e-12 && d <= owed;
+    stray[k] = d;
+  }
+
+  // It is the run's *ends* this binds, and only they: the vertices between them
+  // are the chords' own, they are a sagitta off the surface because that is what
+  // a tessellation is, and the curve replaces them rather than passing through
+  // them. So a run whose end is off the surface is shortened until its end is on
+  // it, and dropped if nothing is left. The edges it gives up stay chords, which
+  // is what both faces already have.
+  auto trim = [&](std::size_t& start, std::size_t& count) {
+    if (!bind_ends) return;
+    const std::size_t was = count;
+    while (count >= 2 && !on_surface[start % n]) {
+      g_section_end_stray = std::max(g_section_end_stray, stray[start % n]);
+      start++;
+      count--;
+    }
+    while (count >= 2 && !on_surface[(start + count - 1) % n]) {
+      g_section_end_stray = std::max(g_section_end_stray, stray[(start + count - 1) % n]);
+      count--;
+    }
+    if (count < 2) count = 0;
+    if (count == 0) g_section_dropped++;
+    else if (count < was) g_section_trimmed++;
+  };
 
   // Which of the surface's cutting planes each boundary edge lies in. A plane is
   // only usable if it makes a closed section: perpendicular to the axis it makes
@@ -715,11 +856,14 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
     BoundarySection bs;
     bs.start = e;
     bs.count = count + 1;
+    trim(bs.start, bs.count);
     bs.normal = planes[plane_of[e]].normal;
     bs.on_plane = planes[plane_of[e]].on_plane;
     bs.declared = planes[plane_of[e]].declared;
     bs.loop = cycle.owner[e];
-    cycle.sections.push_back(bs);
+    if (bs.count >= 2) cycle.sections.push_back(bs);
+    // The whole run is spoken for either way: what the trim gave up is a chord
+    // by decision, not something for the fitted fallback below to pick up again.
     for (std::size_t k = 0; k < count; k++) taken_edge[(e + k) % n] = 1;
   }
 
@@ -739,9 +883,10 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
     BoundarySection bs;
     bs.start = st.start;
     bs.count = st.count;
+    trim(bs.start, bs.count);
     bs.normal = st.normal;
     bs.on_plane = on_plane;
-    cycle.sections.push_back(bs);
+    if (bs.count >= 2) cycle.sections.push_back(bs);
     for (std::size_t k = 0; k + 1 < st.count; k++) taken_edge[(st.start + k) % n] = 1;
   }
 }
@@ -775,18 +920,16 @@ std::map<std::size_t, BoundaryCycle> rawBoundaryCycles(const AnalyticFeatures::P
   return out;
 }
 
-std::map<std::size_t, BoundaryCycle> boundaryCycles(const AnalyticFeatures::Patch& patch,
-                                                    const std::vector<Vector3d>& vertices,
-                                                    const std::vector<std::vector<int>>& loops,
-                                                    const std::vector<char>& loop_valid,
-                                                    const std::vector<char>& taken,
-                                                    const std::vector<CutPlane>& planes,
-                                                    const std::set<std::pair<int, int>>& spoken_for)
+std::map<std::size_t, BoundaryCycle> boundaryCycles(
+  const AnalyticFeatures::Patch& patch, const std::vector<Vector3d>& vertices,
+  const std::vector<std::vector<int>>& loops, const std::vector<char>& loop_valid,
+  const std::vector<char>& taken, const std::vector<CutPlane>& planes,
+  const std::set<std::pair<int, int>>& spoken_for, bool bind_ends = false)
 {
   std::map<std::size_t, BoundaryCycle> out = rawBoundaryCycles(patch, loops, loop_valid, taken);
   for (auto& entry : out) {
     BoundaryCycle& cycle = entry.second;
-    findSections(patch.surface.get(), vertices, planes, cycle, spoken_for);
+    findSections(patch.surface.get(), vertices, planes, cycle, spoken_for, bind_ends);
     // Move the seam onto an edge no section covers, so the writer meets each
     // section whole. Cutting at a section's own start is not enough: freeing one
     // that way pushes the next across the new seam wherever two meet end to end,
@@ -810,7 +953,7 @@ std::map<std::size_t, BoundaryCycle> boundaryCycles(const AnalyticFeatures::Patc
     const long roll = long((free_edge + 1) % n);
     std::rotate(cycle.verts.begin(), cycle.verts.begin() + roll, cycle.verts.end());
     std::rotate(cycle.owner.begin(), cycle.owner.begin() + roll, cycle.owner.end());
-    findSections(patch.surface.get(), vertices, planes, cycle, spoken_for);
+    findSections(patch.surface.get(), vertices, planes, cycle, spoken_for, bind_ends);
   }
   return out;
 }
@@ -1322,8 +1465,8 @@ void StepKernel::build_tri_body(
     mesh.valid = &loop_valid;
     mesh.is_hole = &loop_is_hole;
     mesh.normals = &loop_normals;
-    features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol,
-                                                              surfaces.size());
+    features =
+      AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol, surfaces.size());
 
     // The approximation pass, and the only place in this exporter where a
     // surface is written that the model never declared.
@@ -1445,8 +1588,8 @@ void StepKernel::build_tri_body(
         // Re-run with the fits in hand. Cheaper than threading them through the
         // pass that has already run, and it means a fitted surface goes through
         // exactly the checks a declared one does.
-        features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol,
-                                                                  surfaces.size());
+        features =
+          AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol, surfaces.size());
         std::size_t lost = 0, demoted = 0;
         for (std::size_t f = 0; f < exact_consumed.size() && f < features.consumed.size(); f++) {
           if (exact_consumed[f] == 0) continue;  // the declared-only pass did not have it
@@ -2233,210 +2376,9 @@ void StepKernel::build_tri_body(
   // surface. Two, and it is a triple point - the cut and the sliver of base a
   // tilted cut leaves behind - which belongs on neither conic and stays.
   std::map<int, Vector3d> moves = cornerMoves;
-  std::size_t on_conic = 0, on_triple = 0, on_own = 0, on_faces = 0;  // what each path added
+  // what each path added
+  std::size_t on_conic = 0, on_triple = 0, on_own = 0, on_faces = 0, on_plane_face = 0;
 
-  // A corner belongs where the surfaces of the analytic faces it bounds cross.
-  //
-  // This is the general statement of what the two placements above do for
-  // special cases, and it is the one the *file* can be held to: whatever
-  // provenance says about which original made a vertex, the faces written on it
-  // assert that the corner lies on their surfaces, and where two of them meet it
-  // asserts both. Provenance cannot answer this on its own - it is per original
-  // solid, so it names a cylinder for a corner sitting on that solid's cap
-  // (open item 18), and it names two coaxial cylinders 3.000 mm apart, which
-  // never meet, for the corners where the band family's sweep crosses its bore.
-  // Both are cases where the owners are not the surfaces the file will assert.
-  //
-  // Measured on `step-band-family` at $fn 32: 47 of its 1234 candidate edges
-  // fall back to chords, and they are exactly the edges whose endpoints are off
-  // the sweep - by 2.2e-02 to 1.0e-01, the 32-gon's own sagitta
-  // 20(1 - cos(pi/32)) = 0.0963, so those ends sit on chord planes and were
-  // never placed at all. A Bezier interpolates its endpoints, so no degree and
-  // no better tracing can rescue an edge whose ends are not on the surface:
-  // placing them is what turns those chords into the curve the two surfaces
-  // actually cross along. See open items 3 and 9.
-  //
-  // Held to the ladder's own rules. The crossing is solved to an absolute
-  // 1e-11, accepted only where the result is on *both* surfaces to 1e-9, and a
-  // corner may travel no further than its nearest neighbouring vertex - which is
-  // section 4's bound, and not the longest edge at it, which is the trap that
-  // licensed a 1.9976 move on step-partial-cylinder.
-  if (approximate) {
-    // The distinct surfaces of the analytic faces at each corner. Bands are
-    // included by the surface their face is written from, which is the same
-    // arithmetic the writer does further down - a band states its axis, its base
-    // and the radius at each rim, and that is the surface.
-    std::map<int, std::vector<std::shared_ptr<const Surface>>> faces_at;
-    auto note = [&](int v, const std::shared_ptr<const Surface>& surface) {
-      if (surface == nullptr || v < 0 || std::size_t(v) >= vertices.size()) return;
-      auto& list = faces_at[v];
-      for (const auto& have : list) {
-        if (have.get() == surface.get() || have->sameAs(*surface)) return;
-      }
-      list.push_back(surface);
-    };
-    auto note_patches = [&](const std::vector<AnalyticFeatures::Patch>& patches) {
-      for (const auto& patch : patches) {
-        if (!patch.alive) continue;
-        for (const auto& run : patch.runs) {
-          for (const int v : run.verts) note(v, patch.surface);
-        }
-      }
-    };
-    note_patches(quadric_faces);
-    note_patches(grid_faces);
-    note_patches(bezier_patches);
-    for (const auto& band : bands) {
-      if (!band.alive) continue;
-      const Vector3d axis = band.axis.normalized();
-      std::shared_ptr<const Surface> surface;
-      if (fabs(band.r_top - band.r_bottom) <= 1e-9 * std::max(1.0, band.r_bottom)) {
-        surface = std::make_shared<CylinderSurface>(band.base, axis, band.r_bottom);
-      } else if (fabs(band.height) > 0) {
-        surface = std::make_shared<ConeSurface>(band.base, axis, band.r_bottom,
-                                                (band.r_top - band.r_bottom) / band.height);
-      }
-      if (surface == nullptr) continue;
-      for (const std::size_t w : band.walls) {
-        if (w >= loops.size()) continue;
-        for (const int v : loops[w]) note(v, surface);
-      }
-    }
-    // How far a corner may travel: to its nearest neighbour and no further.
-    std::map<int, double> nearest;
-    for (std::size_t i = 0; i < loops.size(); i++) {
-      if (!loop_valid[i]) continue;
-      const std::vector<int>& loop = loops[i];
-      for (std::size_t k = 0; k < loop.size(); k++) {
-        const int a = loop[k], b = loop[(k + 1) % loop.size()];
-        const double d = (vertices[a] - vertices[b]).norm();
-        if (!(d > 0)) continue;
-        auto ia = nearest.find(a);
-        if (ia == nearest.end() || d < ia->second) nearest[a] = d;
-        auto ib = nearest.find(b);
-        if (ib == nearest.end() || d < ib->second) nearest[b] = d;
-      }
-    }
-    std::size_t onto_faces = 0;
-    double worst_faces = 0;
-    for (const auto& entry : faces_at) {
-      const int v = entry.first;
-      if (moves.count(v) != 0) continue;
-      if (entry.second.size() != 2) continue;  // one surface, or a triple point
-      const Surface *first = entry.second[0].get();
-      const Surface *second = entry.second[1].get();
-      Vector3d qa, qb;
-      if (!AnalyticFeatures::closestOnSurface(first, vertices[v], qa)) continue;
-      if (!AnalyticFeatures::closestOnSurface(second, vertices[v], qb)) continue;
-      if ((qa - vertices[v]).norm() <= 1e-9 && (qb - vertices[v]).norm() <= 1e-9) continue;
-      Vector3d placed = vertices[v];
-      AnalyticFeatures::projectOntoBoth(first, second, placed, 1e-11);
-      if (!AnalyticFeatures::closestOnSurface(first, placed, qa) || (qa - placed).norm() > 1e-9) {
-        continue;
-      }
-      if (!AnalyticFeatures::closestOnSurface(second, placed, qb) || (qb - placed).norm() > 1e-9) {
-        continue;
-      }
-      const double travel = (placed - vertices[v]).norm();
-      const auto bound = nearest.find(v);
-      if (bound == nearest.end() || travel > bound->second) continue;
-      moves.emplace(v, placed);
-      worst_faces = std::max(worst_faces, travel);
-      onto_faces++;
-    }
-    on_faces = onto_faces;
-    if (onto_faces > 0) {
-      LOG(
-        "STEP export: %1$d corners are placed where the two analytic faces they bound cross, "
-        "moving at most %2$.4f - the surfaces the file asserts them to be on",
-        int(onto_faces), worst_faces);
-    }
-  }
-
-  // A corner of a trimmed quadric that nothing else holds goes on that quadric.
-  //
-  // The placement above reaches a corner two surfaces made. It does not reach a
-  // corner the *mesh* made in the middle of a facet, which a trim then left on
-  // the boundary of the face written on that quadric: nothing declared it, so
-  // provenance names no owners for it and no crossing curve applies. It is
-  // nonetheless a corner of an analytic face, sitting at the inradius of the
-  // polygon the surface was tessellated as - 20(1 - cos(pi/32)) = 0.0963 inside
-  // the cylinder its own face is written on.
-  //
-  // On step-band-family that is the last 39 corners, at the height where the
-  // ridge tapers to nothing and the trim runs along the bore's own facets
-  // instead of across them. They are moved onto the surface their face names,
-  // and only where no other exact declared surface already holds them - a
-  // corner on two of them belongs where both agree, which is the crossing curve
-  // the paths above compute, not on either one alone.
-  if (approximate) {
-    std::size_t onto_own = 0;
-    double worst_own = 0;
-    for (const auto& patch : quadric_faces) {
-      const Surface *surf = patch.surface.get();
-      if (surf == nullptr) continue;
-      for (const auto& run : patch.runs) {
-        for (const int v : run.verts) {
-          if (v < 0 || std::size_t(v) >= vertices.size()) continue;
-          if (moves.count(v) != 0) continue;
-          Vector3d q;
-          if (!AnalyticFeatures::closestOnSurface(surf, vertices[v], q)) continue;
-          const double off = (q - vertices[v]).norm();
-          if (off <= 1e-9) continue;
-          bool held = false;
-          for (const auto& other : surfaces) {
-            if (other.get() == surf) continue;
-            if (dynamic_cast<const GridSurface *>(other.get()) != nullptr) continue;
-            Vector3d qo;
-            if (AnalyticFeatures::closestOnSurface(other.get(), vertices[v], qo) &&
-                (qo - vertices[v]).norm() <= 1e-9) {
-              held = true;
-              break;
-            }
-          }
-          if (held) continue;
-          moves.emplace(v, q);
-          worst_own = std::max(worst_own, off);
-          onto_own++;
-        }
-      }
-    }
-    on_own = onto_own;
-    if (onto_own > 0) {
-      LOG(
-        "STEP export: %1$d corners of a trimmed quadric that nothing else holds are placed on the "
-        "surface their own face is written on, moving at most %2$.4f",
-        int(onto_own), worst_own);
-    }
-  }
-
-  // A welded vertex stays where it is.
-  //
-  // Those are the insertions that keep the shell conformal: a vertex one face
-  // has on an edge another face spans in one line, added to both so they meet
-  // edge for edge. It therefore sits on the *boundary* of faces whose loops do
-  // not contain it, and the bend gate below - which reads each face's own loop -
-  // cannot see what moving it does to them. On step-declare-grid-two-bands one
-  // such vertex was moved 1.73e-07 off the flat bottom it lies on the rim of,
-  // and every loop in the file was still within 1e-9 of its own plane: the face
-  // asserted a plane a corner of it was off, and nothing internal could tell.
-  {
-    std::size_t held = 0;
-    for (auto it = moves.begin(); it != moves.end();) {
-      if (welded_verts.count(it->first) != 0) {
-        it = moves.erase(it);
-        held++;
-      } else {
-        ++it;
-      }
-    }
-    if (held > 0) {
-      LOG(
-        "STEP export: %1$d corners are left where the mesh put them: they were welded onto an "
-        "edge to keep the shell conformal, and sit on faces whose loops do not name them",
-        int(held));
-    }
-  }
   // Whether placing corner `v` at `target` would take it off an exact surface the
   // model declared and the corner is already on - one other than `own`, which is
   // where it is being placed.
@@ -2713,6 +2655,325 @@ void StepKernel::build_tri_body(
     }
   }
 
+  // Ordered after the two paths above, and that order is the doctrine rather
+  // than a convenience: where the model declared what a corner is on, the
+  // declaration decides, and this general path applies only to what the
+  // declarations left. Every path checks `moves.count(v)` first, so first refusal
+  // is all the ordering does. Measured on step-exact-trim, where 32 corners are
+  // reachable both ways: run first, this claimed all 32 and the declared rung
+  // reported none.
+  // A corner belongs where the surfaces of the analytic faces it bounds cross.
+  //
+  // This is the general statement of what the two placements above do for
+  // special cases, and it is the one the *file* can be held to: whatever
+  // provenance says about which original made a vertex, the faces written on it
+  // assert that the corner lies on their surfaces, and where two of them meet it
+  // asserts both. Provenance cannot answer this on its own - it is per original
+  // solid, so it names a cylinder for a corner sitting on that solid's cap
+  // (open item 18), and it names two coaxial cylinders 3.000 mm apart, which
+  // never meet, for the corners where the band family's sweep crosses its bore.
+  // Both are cases where the owners are not the surfaces the file will assert.
+  //
+  // Measured on `step-band-family` at $fn 32: 47 of its 1234 candidate edges
+  // fall back to chords, and they are exactly the edges whose endpoints are off
+  // the sweep - by 2.2e-02 to 1.0e-01, the 32-gon's own sagitta
+  // 20(1 - cos(pi/32)) = 0.0963, so those ends sit on chord planes and were
+  // never placed at all. A Bezier interpolates its endpoints, so no degree and
+  // no better tracing can rescue an edge whose ends are not on the surface:
+  // placing them is what turns those chords into the curve the two surfaces
+  // actually cross along. See open items 3 and 9.
+  //
+  // Held to the ladder's own rules. The crossing is solved to an absolute
+  // 1e-11, accepted only where the result is on *both* surfaces to 1e-9, and a
+  // corner may travel no further than its nearest neighbouring vertex - which is
+  // section 4's bound, and not the longest edge at it, which is the trap that
+  // licensed a 1.9976 move on step-partial-cylinder.
+  if (approximate) {
+    // The distinct surfaces of the analytic faces at each corner. Bands are
+    // included by the surface their face is written from, which is the same
+    // arithmetic the writer does further down - a band states its axis, its base
+    // and the radius at each rim, and that is the surface.
+    std::map<int, std::vector<std::shared_ptr<const Surface>>> faces_at;
+    auto note = [&](int v, const std::shared_ptr<const Surface>& surface) {
+      if (surface == nullptr || v < 0 || std::size_t(v) >= vertices.size()) return;
+      auto& list = faces_at[v];
+      for (const auto& have : list) {
+        if (have.get() == surface.get() || have->sameAs(*surface)) return;
+      }
+      list.push_back(surface);
+    };
+    auto note_patches = [&](const std::vector<AnalyticFeatures::Patch>& patches) {
+      for (const auto& patch : patches) {
+        if (!patch.alive) continue;
+        for (const auto& run : patch.runs) {
+          for (const int v : run.verts) note(v, patch.surface);
+        }
+      }
+    };
+    note_patches(quadric_faces);
+    note_patches(grid_faces);
+    note_patches(bezier_patches);
+    for (const auto& band : bands) {
+      if (!band.alive) continue;
+      const Vector3d axis = band.axis.normalized();
+      std::shared_ptr<const Surface> surface;
+      if (fabs(band.r_top - band.r_bottom) <= 1e-9 * std::max(1.0, band.r_bottom)) {
+        surface = std::make_shared<CylinderSurface>(band.base, axis, band.r_bottom);
+      } else if (fabs(band.height) > 0) {
+        surface = std::make_shared<ConeSurface>(band.base, axis, band.r_bottom,
+                                                (band.r_top - band.r_bottom) / band.height);
+      }
+      if (surface == nullptr) continue;
+      for (const std::size_t w : band.walls) {
+        if (w >= loops.size()) continue;
+        for (const int v : loops[w]) note(v, surface);
+      }
+    }
+    // ...and the planes, which are faces of the file exactly as much as the
+    // quadrics are. A face written as a PLANE asserts that its corners lie in
+    // that plane, and where such a face meets a cone or a cylinder the curve
+    // between them is a conic - the very curve the plane-section pass writes as
+    // an ELLIPSE. Leaving the planes out of this is what left those corners
+    // where the mesh put them, a sagitta inside the quadric, and an ELLIPSE
+    // through a run whose own endpoints are off it by up to 1.6196 on lid10 -
+    // SOLIDWORKS fault code 7, "vertex does not lie on edge's curve". See open
+    // item 20.
+    //
+    // A merged face that keeps a PLANE *is* a plane, so this is a lookup and
+    // not a fit. What it is not is every plane at the corner: some of those are
+    // the tessellation's own chords of the quadric being placed on, and a chord
+    // is not a constraint - crossing it would place the corner on the chord
+    // rather than on the face. The chord test is the ladder's own, section 4's
+    // chord-vs-cap rule: a facet of an n-gon lies within pi/n of the surface
+    // normal at its corners, nothing coarser than a hexagon is a tessellation,
+    // and so cos(pi/6) admits every chord.
+    // How far a corner may travel: to its nearest neighbour and no further.
+    std::map<int, double> nearest;
+    for (std::size_t i = 0; i < loops.size(); i++) {
+      if (!loop_valid[i]) continue;
+      const std::vector<int>& loop = loops[i];
+      for (std::size_t k = 0; k < loop.size(); k++) {
+        const int a = loop[k], b = loop[(k + 1) % loop.size()];
+        const double d = (vertices[a] - vertices[b]).norm();
+        if (!(d > 0)) continue;
+        auto ia = nearest.find(a);
+        if (ia == nearest.end() || d < ia->second) nearest[a] = d;
+        auto ib = nearest.find(b);
+        if (ib == nearest.end() || d < ib->second) nearest[b] = d;
+      }
+    }
+    std::size_t onto_faces = 0, onto_plane = 0, onto_corner = 0;
+    double worst_faces = 0, worst_plane = 0, worst_corner = 0;
+    for (const auto& entry : faces_at) {
+      const int v = entry.first;
+      if (moves.count(v) != 0) continue;
+      if (entry.second.size() > 2) continue;  // more than two analytic faces: leave it
+      const auto reach = nearest.find(v);
+      if (reach == nearest.end()) continue;
+      const double travel_bound = reach->second;
+
+      // One analytic face here, so whatever else holds the corner has to be a
+      // plane beside it - and those are not taken from the raw facets. They are
+      // the planes the section pass already cuts this surface with:
+      // `section_planes` holds, per surface, the plane of each face across its
+      // boundary, with a declared plane preferred to the mesh's own wherever the
+      // model states one. That channel is what makes this exact and what makes
+      // it agree with the file: the conic the corner is put on is the same conic
+      // the boundary is then written as. It also answers, without a heuristic,
+      // which planes at a corner are the quadric's own chords - a chord is not a
+      // face across the boundary, so it is not in the list. The angular form of
+      // that question, which the conic rung next door uses, reads a plane
+      // grazing a shallow cone as a chord and is wrong for exactly the corners
+      // that cost the most.
+      std::vector<const CutPlane *> planes_here;
+      if (entry.second.size() == 1) {
+        const auto sp = section_planes.find(entry.second[0].get());
+        if (sp == section_planes.end()) continue;
+        const double scale = std::max(1.0, vertices[v].norm());
+        std::vector<const CutPlane *> declared_here;
+        for (const auto& cp : sp->second) {
+          if (fabs((vertices[v] - cp.on_plane).dot(cp.normal)) > 1e-6 * scale) continue;
+          planes_here.push_back(&cp);
+          if (cp.declared) declared_here.push_back(&cp);
+        }
+        // Exactness first, as everywhere else: where the model declared a plane
+        // through this corner, the mesh's own are not consulted at all.
+        if (!declared_here.empty()) planes_here = declared_here;
+        if (planes_here.empty() || planes_here.size() > 2) continue;
+      }
+
+      Vector3d placed = vertices[v];
+      const Surface *first = entry.second[0].get();
+      if (planes_here.size() == 2) {
+        // A quadric and two planes meet in a point, not a curve. The line the
+        // two planes share is crossed with the surface, which is what the
+        // triple-point rung above does from provenance; the difference is only
+        // where the three come from - here, the faces the file writes.
+        Vector3d q;
+        if (!AnalyticFeatures::closestOnSurface(first, vertices[v], q)) continue;
+        bool in_planes = true;
+        for (const auto *cp : planes_here) {
+          if (fabs((vertices[v] - cp->on_plane).dot(cp->normal)) > 1e-9) in_planes = false;
+        }
+        if ((q - vertices[v]).norm() <= 1e-9 && in_planes) continue;  // nothing to do
+        if (!AnalyticFeatures::projectOntoSurfaceAndPlanes(
+              first, planes_here[0]->normal, planes_here[0]->normal.dot(planes_here[0]->on_plane),
+              planes_here[1]->normal, planes_here[1]->normal.dot(planes_here[1]->on_plane), placed,
+              1e-11, travel_bound, nullptr)) {
+          continue;
+        }
+        if (!AnalyticFeatures::closestOnSurface(first, placed, q) || (q - placed).norm() > 1e-9) {
+          continue;
+        }
+        in_planes = true;
+        for (const auto *cp : planes_here) {
+          if (fabs((placed - cp->on_plane).dot(cp->normal)) > 1e-9) in_planes = false;
+        }
+        if (!in_planes) continue;
+        const double travel = (placed - vertices[v]).norm();
+        if (travel > travel_bound) continue;
+        moves.emplace(v, placed);
+        worst_corner = std::max(worst_corner, travel);
+        onto_corner++;
+        continue;
+      }
+      std::shared_ptr<const Surface> plane;  // holds the one built below alive
+      const Surface *second = nullptr;
+      if (planes_here.size() == 1) {
+        plane = std::make_shared<PlaneSurface>(planes_here[0]->on_plane, planes_here[0]->normal);
+        second = plane.get();
+      } else {
+        second = entry.second[1].get();
+      }
+      Vector3d qa, qb;
+      if (!AnalyticFeatures::closestOnSurface(first, vertices[v], qa)) continue;
+      if (!AnalyticFeatures::closestOnSurface(second, vertices[v], qb)) continue;
+      if ((qa - vertices[v]).norm() <= 1e-9 && (qb - vertices[v]).norm() <= 1e-9) continue;
+      AnalyticFeatures::projectOntoBoth(first, second, placed, 1e-11);
+      if (!AnalyticFeatures::closestOnSurface(first, placed, qa) || (qa - placed).norm() > 1e-9) {
+        continue;
+      }
+      if (!AnalyticFeatures::closestOnSurface(second, placed, qb) || (qb - placed).norm() > 1e-9) {
+        continue;
+      }
+      const double travel = (placed - vertices[v]).norm();
+      if (travel > travel_bound) continue;
+      moves.emplace(v, placed);
+      if (plane != nullptr) {
+        worst_plane = std::max(worst_plane, travel);
+        onto_plane++;
+      } else {
+        worst_faces = std::max(worst_faces, travel);
+        onto_faces++;
+      }
+    }
+    on_faces = onto_faces;
+    on_plane_face = onto_plane + onto_corner;
+    if (onto_faces > 0) {
+      LOG(
+        "STEP export: %1$d corners are placed where the two analytic faces they bound cross, "
+        "moving at most %2$.4f - the surfaces the file asserts them to be on",
+        int(onto_faces), worst_faces);
+    }
+    if (onto_plane > 0) {
+      LOG(
+        "STEP export: %1$d corners are placed on the conic where the analytic face they bound "
+        "meets the plane of the face beside it, moving at most %2$.4f - which is the curve that "
+        "boundary is written as",
+        int(onto_plane), worst_plane);
+    }
+    if (onto_corner > 0) {
+      LOG(
+        "STEP export: %1$d corners are placed where an analytic face and the two planes beside it "
+        "meet, moving at most %2$.4f",
+        int(onto_corner), worst_corner);
+    }
+  }
+
+  // A corner of a trimmed quadric that nothing else holds goes on that quadric.
+  //
+  // The placement above reaches a corner two surfaces made. It does not reach a
+  // corner the *mesh* made in the middle of a facet, which a trim then left on
+  // the boundary of the face written on that quadric: nothing declared it, so
+  // provenance names no owners for it and no crossing curve applies. It is
+  // nonetheless a corner of an analytic face, sitting at the inradius of the
+  // polygon the surface was tessellated as - 20(1 - cos(pi/32)) = 0.0963 inside
+  // the cylinder its own face is written on.
+  //
+  // On step-band-family that is the last 39 corners, at the height where the
+  // ridge tapers to nothing and the trim runs along the bore's own facets
+  // instead of across them. They are moved onto the surface their face names,
+  // and only where no other exact declared surface already holds them - a
+  // corner on two of them belongs where both agree, which is the crossing curve
+  // the paths above compute, not on either one alone.
+  if (approximate) {
+    std::size_t onto_own = 0;
+    double worst_own = 0;
+    for (const auto& patch : quadric_faces) {
+      const Surface *surf = patch.surface.get();
+      if (surf == nullptr) continue;
+      for (const auto& run : patch.runs) {
+        for (const int v : run.verts) {
+          if (v < 0 || std::size_t(v) >= vertices.size()) continue;
+          if (moves.count(v) != 0) continue;
+          Vector3d q;
+          if (!AnalyticFeatures::closestOnSurface(surf, vertices[v], q)) continue;
+          const double off = (q - vertices[v]).norm();
+          if (off <= 1e-9) continue;
+          bool held = false;
+          for (const auto& other : surfaces) {
+            if (other.get() == surf) continue;
+            if (dynamic_cast<const GridSurface *>(other.get()) != nullptr) continue;
+            Vector3d qo;
+            if (AnalyticFeatures::closestOnSurface(other.get(), vertices[v], qo) &&
+                (qo - vertices[v]).norm() <= 1e-9) {
+              held = true;
+              break;
+            }
+          }
+          if (held) continue;
+          moves.emplace(v, q);
+          worst_own = std::max(worst_own, off);
+          onto_own++;
+        }
+      }
+    }
+    on_own = onto_own;
+    if (onto_own > 0) {
+      LOG(
+        "STEP export: %1$d corners of a trimmed quadric that nothing else holds are placed on the "
+        "surface their own face is written on, moving at most %2$.4f",
+        int(onto_own), worst_own);
+    }
+  }
+
+  // A welded vertex stays where it is.
+  //
+  // Those are the insertions that keep the shell conformal: a vertex one face
+  // has on an edge another face spans in one line, added to both so they meet
+  // edge for edge. It therefore sits on the *boundary* of faces whose loops do
+  // not contain it, and the bend gate below - which reads each face's own loop -
+  // cannot see what moving it does to them. On step-declare-grid-two-bands one
+  // such vertex was moved 1.73e-07 off the flat bottom it lies on the rim of,
+  // and every loop in the file was still within 1e-9 of its own plane: the face
+  // asserted a plane a corner of it was off, and nothing internal could tell.
+  {
+    std::size_t held = 0;
+    for (auto it = moves.begin(); it != moves.end();) {
+      if (welded_verts.count(it->first) != 0) {
+        it = moves.erase(it);
+        held++;
+      } else {
+        ++it;
+      }
+    }
+    if (held > 0) {
+      LOG(
+        "STEP export: %1$d corners are left where the mesh put them: they were welded onto an "
+        "edge to keep the shell conformal, and sit on faces whose loops do not name them",
+        int(held));
+    }
+  }
   // Keep every exact thing the corner is already on.
   //
   // A corner owned by a declared quadric and a declared sweep was being put
@@ -3195,10 +3456,11 @@ void StepKernel::build_tri_body(
       LOG(
         "STEP export: %1$d corners moved, by at most %2$.4f - %3$d where two declared owners "
         "cross, %4$d onto a conic with one plane, %5$d where three exact things meet, %6$d where "
-        "the two analytic faces they bound cross, %7$d onto the quadric their own face is written "
-        "on; %8$d analytic faces now bound themselves on their own surface",
-        int(moves.size()), worst, int(cornerMoves.size()), int(on_conic), int(on_triple),
-        int(on_faces), int(on_own), int(analytic_faces));
+        "the two analytic faces they bound cross, %7$d where an analytic face meets the plane of "
+        "the face beside it, %8$d onto the quadric their own face is written "
+        "on; %9$d analytic faces now bound themselves on their own surface",
+        int(moves.size()), worst, int(cornerMoves.size()), int(on_conic), int(on_triple), int(on_faces),
+        int(on_plane_face), int(on_own), int(analytic_faces));
       if (!split_for_corners.empty()) {
         std::size_t added = 0;
         for (const auto& sc : split_for_corners) added += loops[sc.first].size() - 3;
@@ -3223,7 +3485,7 @@ void StepKernel::build_tri_body(
   // Rims written as chords by both faces because the face across is fanned into
   // triangles and cannot be handed the arc. See the band writer below.
   std::size_t rim_unshared = 0;
-  std::map<std::set<int>, EdgeCurve *> shared_rim_edges;            // rim vertices -> circle
+  std::map<std::set<int>, EdgeCurve *> shared_rim_edges;  // rim vertices -> circle
 
   for (std::size_t i = 0; i < bands.size(); i++) {
     const AnalyticFeatures::Band& band = bands[i];
@@ -3484,9 +3746,8 @@ void StepKernel::build_tri_body(
             }
             for (std::size_t k = 0; k + 1 < walk.size(); k++) {
               bool dir = true;
-              EdgeCurve *chord =
-                get_line_from_map(edge_map, walk[k], walk[k + 1], get_vertex(walk[k]),
-                                  get_vertex(walk[k + 1]), dir, merged_edge_cnt);
+              EdgeCurve *chord = get_line_from_map(edge_map, walk[k], walk[k + 1], get_vertex(walk[k]),
+                                                   get_vertex(walk[k + 1]), dir, merged_edge_cnt);
               rim_chords[side].emplace_back(chord, dir);
             }
             if (!rim_chords[side].empty()) {
@@ -4057,8 +4318,16 @@ void StepKernel::build_tri_body(
     const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
     const Vector3d base = cyl != nullptr ? cyl->refpt : cone->refpt;
 
-    const std::map<std::size_t, BoundaryCycle> boundary = boundaryCycles(
-      patch, vertices, loops, loop_valid, taken, section_planes[patch.surface.get()], crossing_keys);
+    // The endpoint invariant binds *here* and not where the sections were
+    // decided. The decision runs before the corner placement, on vertices the
+    // mesh still holds a sagitta inside their surface; by the time a face is
+    // written its corners have been put on the surfaces the file asserts, and it
+    // is the written curve the invariant is about. Binding it in the decision
+    // would have dropped every section on lid10 for a staleness that the
+    // placement then removed.
+    const std::map<std::size_t, BoundaryCycle> boundary =
+      boundaryCycles(patch, vertices, loops, loop_valid, taken, section_planes[patch.surface.get()],
+                     crossing_keys, true);
     if (boundary.empty()) continue;
 
     // The reference direction is a radius through the first boundary vertex that
@@ -4794,6 +5063,45 @@ void StepKernel::build_tri_body(
   if (arcs_promoted > 0 || arcs_declined > 0) {
     LOG("STEP export: %1$d edge%2$s written as an arc on the surface it bounds, %3$d left straight",
         arcs_promoted, arcs_promoted == 1 ? "" : "s", arcs_declined);
+  }
+  // Every edge in the file against its own two vertices, which is the one
+  // relation a CAD kernel rejects a substituted curve on and the one nothing
+  // here used to measure. It is asked of the finished entities rather than of
+  // any pass's intermediate state, so no substitution can be added later that
+  // quietly escapes it.
+  {
+    std::size_t off = 0;
+    double worst = 0;
+    std::vector<double> strays;
+    for (const Entity *ent : entities) {
+      const auto *edge = dynamic_cast<const EdgeCurve *>(ent);
+      if (edge == nullptr || edge->round == nullptr) continue;
+      for (const Vertex *v : {edge->vert1, edge->vert2}) {
+        if (v == nullptr || v->point == nullptr) continue;
+        const double d = vertexOffCurve(edge->round, v->point->pt);
+        const double owed = 1e-6 * std::max(1.0, v->point->pt.norm());
+        if (d <= owed) continue;
+        off++;
+        strays.push_back(d);
+        worst = std::max(worst, d);
+      }
+    }
+    if (off > 0) {
+      std::sort(strays.begin(), strays.end());
+      LOG(message_group::Export_Warning,
+          "STEP export: %1$d vertex%2$s not on the curve its own edge is written as, by "
+          "%3$.2e median and %4$.2e at worst - a reader checks exactly this, and calls it "
+          "\"vertex does not lie on edge\'s curve\"",
+          int(off), off == 1 ? " is" : "es are", strays[strays.size() / 2], worst);
+    }
+  }
+  if (g_section_trimmed + g_section_dropped > 0) {
+    LOG(
+      "STEP export: %1$d plane section%2$s shortened and %3$d dropped so that the curve written "
+      "for a run passes through that run's own endpoints - the worst end was %4$.2e off the "
+      "surface the section is cut from",
+      int(g_section_trimmed), g_section_trimmed == 1 ? " was" : "s were", int(g_section_dropped),
+      g_section_end_stray);
   }
   if (crossing_written > 0) {
     LOG(
