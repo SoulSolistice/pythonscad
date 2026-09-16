@@ -597,6 +597,169 @@ double vertexOffCurve(const StepKernel::RoundType *curve, const Vector3d& p)
   return 0;  // a curve this does not know how to measure is not a finding
 }
 
+/*! Triangulate a polygon with holes, in the plane its face asserts.
+ *
+ * The corner placement bends a planar face whenever it moves one of its corners
+ * off the plane the rest of them share, and a bent polygon is not a face any
+ * more - but its triangles are, because three points are coplanar wherever they
+ * are. Fanning from one corner does that for a simple loop and cannot do it for
+ * one with a hole: an inner bound has to be threaded into the outer one first.
+ * So a face with a hole used to refuse the move outright, and on lid10 that is
+ * what held five corners 0.0109 to 0.1089 inside the quadric their own face is
+ * written on.
+ *
+ * Bridged ear clipping, which is the textbook answer and needs no tolerance of
+ * its own: each hole is spliced into the outer ring along a segment between two
+ * mutually visible corners, and the simple ring that leaves is cut ear by ear.
+ * A bridge is traversed once each way, so it ends up an interior diagonal shared
+ * by exactly two triangles, exactly as a fan's diagonals are.
+ *
+ * Returns the triangles as vertex indices, wound the way the outer ring is, or
+ * nothing at all if the rings are degenerate or an ear cannot be found. Nothing
+ * is the honest answer there and the caller treats it as it always treated a
+ * polygon it could not fan: the move is refused.
+ */
+std::vector<std::array<int, 3>> triangulateWithHoles(const std::vector<std::vector<int>>& rings,
+                                                     const std::function<Vector3d(int)>& at,
+                                                     const Vector3d& normal)
+{
+  std::vector<std::array<int, 3>> out;
+  if (rings.empty() || rings[0].size() < 3 || normal.norm() < 1e-12) return out;
+  const Vector3d n = normal.normalized();
+  Vector3d e1 = AnalyticFeatures::perpendicular(n);
+  if (e1.norm() < 1e-12) return out;
+  e1.normalize();
+  const Vector3d e2 = n.cross(e1);
+  auto uv = [&](int v) { return std::make_pair(at(v).dot(e1), at(v).dot(e2)); };
+
+  auto ring_area = [&](const std::vector<int>& ring) {
+    double twice = 0;
+    for (std::size_t k = 0; k < ring.size(); k++) {
+      const auto a = uv(ring[k]), b = uv(ring[(k + 1) % ring.size()]);
+      twice += a.first * b.second - b.first * a.second;
+    }
+    return twice / 2;
+  };
+
+  // The outer ring counter clockwise in this basis, every hole clockwise: that
+  // is what makes a bridge leave one simple ring rather than two.
+  std::vector<int> ring = rings[0];
+  if (ring_area(ring) < 0) std::reverse(ring.begin(), ring.end());
+  std::vector<std::vector<int>> holes;
+  for (std::size_t h = 1; h < rings.size(); h++) {
+    if (rings[h].size() < 3) return out;
+    std::vector<int> hole = rings[h];
+    if (ring_area(hole) > 0) std::reverse(hole.begin(), hole.end());
+    holes.push_back(hole);
+  }
+  // Rightmost first, so a hole is never bridged across one still outside.
+  std::sort(holes.begin(), holes.end(), [&](const std::vector<int>& a, const std::vector<int>& b) {
+    double xa = -std::numeric_limits<double>::max(), xb = xa;
+    for (const int v : a) xa = std::max(xa, uv(v).first);
+    for (const int v : b) xb = std::max(xb, uv(v).first);
+    return xa > xb;
+  });
+
+  auto in_triangle = [&](const std::pair<double, double>& p, const std::pair<double, double>& a,
+                         const std::pair<double, double>& b, const std::pair<double, double>& c) {
+    auto side = [](const std::pair<double, double>& u, const std::pair<double, double>& v,
+                   const std::pair<double, double>& w) {
+      return (v.first - u.first) * (w.second - u.second) - (v.second - u.second) * (w.first - u.first);
+    };
+    const double s1 = side(a, b, p), s2 = side(b, c, p), s3 = side(c, a, p);
+    return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0);
+  };
+
+  for (const auto& hole : holes) {
+    // The hole's rightmost corner, and a ray from it to the right: the first
+    // edge of the ring that ray meets carries the corner to bridge to.
+    std::size_t m = 0;
+    for (std::size_t k = 1; k < hole.size(); k++) {
+      if (uv(hole[k]).first > uv(hole[m]).first) m = k;
+    }
+    const auto M = uv(hole[m]);
+    double best_x = std::numeric_limits<double>::max();
+    std::size_t hit = ring.size();
+    for (std::size_t k = 0; k < ring.size(); k++) {
+      const auto a = uv(ring[k]), b = uv(ring[(k + 1) % ring.size()]);
+      if ((a.second > M.second) == (b.second > M.second)) continue;
+      const double t = (M.second - a.second) / (b.second - a.second);
+      const double x = a.first + t * (b.first - a.first);
+      if (x < M.first || x >= best_x) continue;
+      best_x = x;
+      hit = (uv(ring[k]).first > uv(ring[(k + 1) % ring.size()]).first) ? k : (k + 1) % ring.size();
+    }
+    if (hit >= ring.size()) return out;
+    // A corner of the ring inside the triangle (M, the crossing, the candidate)
+    // would be cut off by the bridge, so the visible one is the best of those.
+    const std::pair<double, double> P(best_x, M.second);
+    std::size_t bridge = hit;
+    double best_angle = std::numeric_limits<double>::max();
+    for (std::size_t k = 0; k < ring.size(); k++) {
+      const auto q = uv(ring[k]);
+      if (q.first < M.first) continue;
+      if (!in_triangle(q, M, P, uv(ring[hit]))) continue;
+      const double dx = q.first - M.first, dy = q.second - M.second;
+      const double len = sqrt(dx * dx + dy * dy);
+      const double angle = len > 0 ? fabs(dy) / len : 0;
+      if (angle < best_angle) {
+        best_angle = angle;
+        bridge = k;
+      }
+    }
+    // Splice: out to the bridge corner, round the hole from its rightmost, back
+    // along the bridge, then on round the ring.
+    std::vector<int> joined;
+    for (std::size_t k = 0; k <= bridge; k++) joined.push_back(ring[k]);
+    for (std::size_t k = 0; k < hole.size(); k++) joined.push_back(hole[(m + k) % hole.size()]);
+    joined.push_back(hole[m]);
+    for (std::size_t k = bridge; k < ring.size(); k++) joined.push_back(ring[k]);
+    ring.swap(joined);
+  }
+
+  // Ear clipping. The scale sets what counts as no area at all; nothing else
+  // here needs a tolerance.
+  double extent = 0;
+  for (std::size_t k = 0; k < ring.size(); k++) {
+    for (std::size_t j = k + 1; j < ring.size(); j++) {
+      const auto a = uv(ring[k]), b = uv(ring[j]);
+      extent = std::max(extent, fabs(a.first - b.first) + fabs(a.second - b.second));
+    }
+  }
+  const double tiny = 1e-12 * std::max(1.0, extent * extent);
+
+  std::vector<int> work = ring;
+  std::size_t guard = work.size() * work.size() + 16;
+  while (work.size() > 3 && guard-- > 0) {
+    bool cut = false;
+    for (std::size_t k = 0; k < work.size(); k++) {
+      const std::size_t kp = (k + work.size() - 1) % work.size();
+      const std::size_t kn = (k + 1) % work.size();
+      const auto a = uv(work[kp]), b = uv(work[k]), c = uv(work[kn]);
+      const double area = 0.5 * ((b.first - a.first) * (c.second - a.second) -
+                                 (b.second - a.second) * (c.first - a.first));
+      if (area <= tiny) continue;  // reflex, or nothing to cut
+      bool clear = true;
+      for (std::size_t j = 0; j < work.size() && clear; j++) {
+        if (j == k || j == kp || j == kn) continue;
+        if (work[j] == work[k] || work[j] == work[kp] || work[j] == work[kn]) continue;
+        if (in_triangle(uv(work[j]), a, b, c)) clear = false;
+      }
+      if (!clear) continue;
+      out.push_back({work[kp], work[k], work[kn]});
+      work.erase(work.begin() + long(k));
+      cut = true;
+      break;
+    }
+    if (!cut) {
+      out.clear();
+      return out;  // no ear anywhere: say so rather than write a wrong face
+    }
+  }
+  if (work.size() == 3) out.push_back({work[0], work[1], work[2]});
+  return out;
+}
+
 /*! The ellipse a plane cuts from a cylinder or a cone.
  *
  * `a` is the semi-axis along `major`, and is the longer of the two - which is
@@ -2334,7 +2497,8 @@ void StepKernel::build_tri_body(
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
   const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;
   const std::vector<char>& consumed = features.consumed;
-  std::map<std::size_t, std::size_t> split_for_corners;  // face -> fan apex, see below
+  // face -> the triangles it is written as, see below
+  std::map<std::size_t, std::vector<std::array<int, 3>>> split_for_corners;
 
   // Put the junction corners on the curve their two owners cross along - but
   // only once it is known which faces are analytic, and only if no face that
@@ -2779,7 +2943,7 @@ void StepKernel::build_tri_body(
     // them says nothing about which to work on.
     std::size_t left_moved = 0, left_many = 0, left_noplane = 0, left_manyplanes = 0;
     std::size_t left_solve = 0, left_far = 0;
-    double left_worst = 0;
+    double left_worst = 0, left_far_travel = 0, left_far_bound = 0;
     auto off_its_faces = [&](int v, const Vector3d& at) {
       double worst = 0;
       const auto have = faces_at.find(v);
@@ -2923,6 +3087,8 @@ void StepKernel::build_tri_body(
       const double travel = (placed - vertices[v]).norm();
       if (travel > travel_bound) {
         note_left(left_far, v, vertices[v]);
+        left_far_travel = std::max(left_far_travel, travel);
+        left_far_bound = std::max(left_far_bound, travel_bound);
         continue;
       }
       moves.emplace(v, placed);
@@ -2944,6 +3110,12 @@ void StepKernel::build_tri_body(
           "%7$d the solve did not reach, %8$d are further than the nearest neighbour",
           int(left_total), left_worst, int(left_moved), int(left_many), int(left_noplane),
           int(left_manyplanes), int(left_solve), int(left_far));
+      if (left_far > 0) {
+        LOG(message_group::Export_Warning,
+            "STEP export:    the ones past the bound wanted %1$.4f where their nearest neighbour "
+            "is %2$.4f",
+            left_far_travel, left_far_bound);
+      }
     }
     on_faces = onto_faces;
     on_plane_face = onto_plane + onto_corner;
@@ -3332,8 +3504,10 @@ void StepKernel::build_tri_body(
     std::size_t analytic_faces = 0, bent = 0, turned = 0;
     std::set<int> bent_verts;
     std::set<int> held_by_veto;  // corners the veto took a placement away from
-    std::map<std::size_t, std::size_t> splittable;
+    std::map<std::size_t, std::vector<std::array<int, 3>>> splittable;
     std::size_t settle_rounds = 0, settle_dropped = 0;
+    std::size_t why_turned = 0, why_triangle = 0, why_notri = 0, why_inverted = 0, why_rings = 0;
+    double why_worst_tri = -std::numeric_limits<double>::max();
     for (;;) {
       analytic_faces = 0;
       bent = 0;
@@ -3398,6 +3572,7 @@ void StepKernel::build_tri_body(
           implicated(i);
           continue;
         }
+        why_turned++;
         // Whether it is actually taken out of its plane, rather than whether it
         // has more than three corners. A corner cut by a plane moves *along* that
         // plane - the conic it lands on lies in it - so its face is not bent at
@@ -3427,55 +3602,64 @@ void StepKernel::build_tri_body(
           }
         }
         if (out_of_plane <= 1e-9) continue;
-        // Bent, and a bent polygon can be fanned out into triangles instead of
-        // being left alone: a triangle is planar wherever its corners are. Only
-        // one with a hole cannot, because a fan from one corner triangulates a
-        // simple loop and an inner bound would have to be threaded into it.
+        // Bent, and a bent polygon is written as triangles instead of being left
+        // alone: a triangle is planar wherever its corners are.
+        //
+        // A hole used to end it here - "a fan from one corner triangulates a
+        // simple loop and an inner bound would have to be threaded into it" -
+        // and threading it in is exactly what `triangulateWithHoles` does, by
+        // bridging each hole into the outer ring before clipping ears. On lid10
+        // that is what held five corners 0.0109 to 0.1089 inside the quadric
+        // their own face is written on, which is a reader's fault code 16.
+        //
+        // A triangle with no hole is not bent and never was. Three points are
+        // coplanar wherever they go, so what this test measured for one was its
+        // tilt away from the normal the *mesh* gave it - which is nothing to do
+        // with whether the face can be written. It can: on the plane its own
+        // three corners are on, which is what the writer now asserts. Measured
+        // on lid10, that is the whole of the veto's remaining refusals - five
+        // triangles, holding five corners 0.0109 to 0.1089 off their quadric.
         bool has_hole = false;
         for (std::size_t j = 0; j < loops.size(); j++) {
           if (loop_valid[j] && !consumed[j] && parents[j] == int(i)) has_hole = true;
         }
-        if (has_hole || loops[i].size() < 4) {
+        if (loops[i].size() < 4 && !has_hole) continue;
+        if (loops[i].size() < 4) {
           bent++;
+          why_triangle++;
           implicated(i);
           continue;
         }
-        // Which corner the fan starts from is not free, and corner 0 is not the
-        // answer. A fan triangulates the polygon only where every ear it cuts is
-        // wound the way the polygon is; an ear wound the other way lies *outside*
-        // it, and the face written for it contradicts the loop it is bounded by.
-        //
-        // The move is what makes this bite. Before it these polygons are convex
-        // and every corner would do - measured on step-declare-grid-scad, all
-        // seven apexes of the 7-gons. After it, three corners of a bore facet sit
-        // on the trim line the ridge left, nearly in a line, and a fan from one of
-        // them cuts an ear of area -4.0e-05: inverted, and only just. So the apex
-        // is chosen for the ear it leaves worst, and the polygon is split only if
-        // some corner leaves none of them inverted. On the same fixture that is 2
-        // to 3 corners of each polygon, at a worst ear of 0.19 to 0.72 against
-        // corner 0's -4.0e-05.
+        // The triangulation is done on the corners *as moved*, because that is
+        // where they will be written, and it is judged by the same rule the fan
+        // was: every triangle has to wind the way the polygon does. One that
+        // does not lies outside the loop bounding it, and the face written for
+        // it would contradict that loop. The move is what makes this bite -
+        // before it these polygons are convex and any apex would do; after it,
+        // three corners of a bore facet sit nearly in a line on the trim the
+        // ridge left, and an ear cut from the wrong one comes out at -4.0e-05.
         const Vector3d nhat = loop_normals[i].normalized();
-        const std::size_t n = loops[i].size();
-        std::size_t best_apex = 0;
-        double best_worst_ear = -1;
-        for (std::size_t a = 0; a < n; a++) {
-          double worst_ear = std::numeric_limits<double>::max();
-          for (std::size_t k = 1; k + 1 < n; k++) {
-            const Vector3d& q0 = at_moved(loops[i][a]);
-            const Vector3d& q1 = at_moved(loops[i][(a + k) % n]);
-            const Vector3d& q2 = at_moved(loops[i][(a + k + 1) % n]);
-            worst_ear = std::min(worst_ear, 0.5 * (q1 - q0).cross(q2 - q0).dot(nhat));
-          }
-          if (worst_ear > best_worst_ear) {
-            best_worst_ear = worst_ear;
-            best_apex = a;
-          }
+        std::vector<std::vector<int>> rings;
+        rings.push_back(loops[i]);
+        for (std::size_t j = 0; j < loops.size(); j++) {
+          if (loop_valid[j] && !consumed[j] && parents[j] == int(i)) rings.push_back(loops[j]);
         }
-        if (best_worst_ear <= 0) {
+        const std::vector<std::array<int, 3>> tris =
+          triangulateWithHoles(rings, at_moved, loop_normals[i]);
+        double worst_tri = tris.empty() ? -1 : std::numeric_limits<double>::max();
+        for (const auto& t : tris) {
+          const Vector3d q0 = at_moved(t[0]), q1 = at_moved(t[1]), q2 = at_moved(t[2]);
+          worst_tri = std::min(worst_tri, 0.5 * (q1 - q0).cross(q2 - q0).dot(nhat));
+        }
+        if (worst_tri <= 0) {
           bent++;
+          if (tris.empty()) why_notri++;
+          else why_inverted++;
+          if (worst_tri > why_worst_tri) why_worst_tri = worst_tri;
+          why_rings = std::max(why_rings, rings.size());
           implicated(i);
         } else {
-          splittable.emplace(i, best_apex);
+          splittable.emplace(i, tris);
         }
       }
       // A face that turns over cannot be rescued by splitting - every triangle of
@@ -3505,6 +3689,12 @@ void StepKernel::build_tri_body(
           "keeps a plane and would bend if it moved; %2$d corners were placed, and the refusal "
           "settled in %3$d round%4$s",
           int(settle_dropped), int(moves.size()), int(settle_rounds), settle_rounds == 1 ? "" : "s");
+      LOG(message_group::Export_Warning,
+          "STEP export:    why: %1$d faces would turn over, %2$d are triangles, %3$d could not be "
+          "triangulated, %4$d triangulate with a piece wound the wrong way (worst %5$.3e, up to "
+          "%6$d rings)",
+          int(why_turned), int(why_triangle), int(why_notri), int(why_inverted),
+          why_worst_tri == -std::numeric_limits<double>::max() ? 0.0 : why_worst_tri, int(why_rings));
       // ...and what that costs, which the line above does not say: a corner held
       // here is a corner of an analytic face too, and holding it leaves that
       // face bounded by a point off its own surface. That is the other half of
@@ -3596,7 +3786,7 @@ void StepKernel::build_tri_body(
         int(on_plane_face), int(on_own), int(analytic_faces));
       if (!split_for_corners.empty()) {
         std::size_t added = 0;
-        for (const auto& sc : split_for_corners) added += loops[sc.first].size() - 3;
+        for (const auto& sc : split_for_corners) added += sc.second.size() - 1;
         LOG(
           "STEP export: %1$d face%2$s that keep%3$s a plane fanned into triangles to follow them, "
           "adding %4$d face%5$s",
@@ -4958,7 +5148,24 @@ void StepKernel::build_tri_body(
     // every vertex a later pass touches. The face's own vertices are unchanged
     // either way - the declaration is only accepted when every one of them is
     // already in it, so this replaces the *coefficients* and nothing else.
+    // The plane the face's corners are on, not the one the mesh gave it before
+    // the corner placement ran. Newell's formula over the loop as written, kept
+    // to the mesh's sense so the face still looks the way the shell is oriented.
+    // For a face the placement did not bend the two agree to 1e-9 by
+    // construction - the veto is what guarantees that - and for a triangle it
+    // tilted they do not, which is the whole reason a tilted triangle used to be
+    // refused a move it could perfectly well take.
     Vector3d norm = loop_normals[i];
+    {
+      Vector3d newell = Vector3d::Zero();
+      for (int j = 0; j < n; j++) {
+        newell += vertices[loop[j]].cross(vertices[loop[(j + 1) % n]]);
+      }
+      if (newell.norm() > 1e-18) {
+        newell.normalize();
+        norm = newell.dot(loop_normals[i]) >= 0 ? newell : Vector3d(-newell);
+      }
+    }
     Vector3d on_plane = vertices[loop[0]];
     {
       double extent = 0;
@@ -5050,11 +5257,9 @@ void StepKernel::build_tri_body(
   // the plane its own three corners lie on, which is the point of the fan -
   // the polygon's plane is the one they no longer all sit on.
   for (const auto& sc : split_for_corners) {
-    const std::size_t i = sc.first, apex = sc.second;
-    const std::vector<int>& loop = loops[i];
-    const std::size_t n = loop.size();
-    for (std::size_t k = 1; k + 1 < n; k++) {
-      const int tri[3] = {loop[apex], loop[(apex + k) % n], loop[(apex + k + 1) % n]};
+    const std::size_t i = sc.first;
+    for (const auto& corner : sc.second) {
+      const int tri[3] = {corner[0], corner[1], corner[2]};
       const Vector3d e1 = vertices[tri[1]] - vertices[tri[0]];
       const Vector3d e2 = vertices[tri[2]] - vertices[tri[0]];
       if (e1.cross(e2).norm() < area_eps) continue;

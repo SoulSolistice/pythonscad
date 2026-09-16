@@ -1224,16 +1224,24 @@ add_test(NAME export-step-flagship-coupons
 )
 
 # The same coupons, asking additionally that the corner placement never gives up
-# the crossing-curve boundary to protect a planar face. It does today, on four of
-# the six, so this is expected to fail - and that is the point. WILL_FAIL means
-# ctest reports it as a *failure* on the day it starts passing, which is how a
-# fix gets noticed rather than going quiet. Open item 11 is what has to land
-# first; when it does, drop WILL_FAIL and fold --strict into the test above.
+# the crossing-curve boundary to protect a planar face.
+#
+# This was registered WILL_FAIL from the day it was written, because it failed on
+# four of the six and the marking is what makes a fix announce itself: ctest
+# reports the test as a *failure* the day it starts passing. On 2026-09-16 it did
+# exactly that, and the marking is gone. It is a live assertion now, and it is
+# kept as a test of its own rather than folded into the coupons above so that the
+# thing it asserts has a name in the report.
+#
+# What had to land first was open item 11, and it was two things rather than the
+# one expected: a bent face with a hole is triangulated by bridging the hole in
+# rather than refused, and a *triangle* is no longer called bent at all - three
+# points are coplanar wherever they go, and what the test measured for one was
+# its tilt away from the normal the mesh gave it before the placement ran.
 add_test(NAME export-step-flagship-strict
   COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/step-flagship-check.py
           --openscad ${OPENSCAD_BINPATH} --strict
 )
-set_tests_properties(export-step-flagship-strict PROPERTIES WILL_FAIL TRUE)
 
 # And that every corner of an analytic face lies on the surface that face is
 # written on - the check every fixture's round trip already makes, with a

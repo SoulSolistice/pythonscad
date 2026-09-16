@@ -233,12 +233,15 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
 
 ### Open, in the order to take it
 
-1. **The veto, now that the mechanism is demonstrated.** `f02` reads `faults=0`
-   with its boundary written as the crossing curve (item 1, run of 2026-09-16),
-   and it is the only coupon whose corners the plane veto leaves free. Freeing
-   the other four is what would put the same question to `f04`, lid10 and
-   bayonet - which is item 11's gate, and the seam fix parked on
-   `claude/step-export-seam-fix` is part of it.
+1. ~~**The veto, now that the mechanism is demonstrated.**~~ **Done 2026-09-16,
+   and it answered the question it was asked.** The veto holds no corners on any
+   coupon now - lid10, the bayonet and the band family at `$fn` 64 all read
+   zero - and `export-step-flagship-strict` came off `WILL_FAIL`. Put to
+   SOLIDWORKS with the `f02` control in the same session, **lid10 and the bayonet
+   come back worse**: codes 13 and 30 return and each gains a faulty edge, on the
+   0.219-long edge running out of the one corner the travel bound still leaves
+   0.105 off its cone. So the veto was a real defect, fixing it was right, and
+   the file a CAD system sees improves only when item 21 lands too.
 2. **Item 15's seam fix, which does not land yet.** The chase is finished - the
    0.7159 is OpenCASCADE repairing a face that holds facets either side of its
    closed profile's seam - and the fix on `claude/step-export-seam-fix` leaves
@@ -252,12 +255,12 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
    trimmed-quadric pass. What is left is why a band is refused for
    *the rim borders one face per facet* and *the band sharing this rim was
    dropped*, which is item 10's territory.
-4. **Then the veto**, through what is left of its gate. The case for it is now a
-   measured cost rather than a ratio: it holds 290 of lid10's wall corners off
-   their cone and a CAD system rejects the whole wall for it. The relaxation to
-   use is `b57c8e73b`'s settle loop; put `f04`, lid10 and bayonet to SOLIDWORKS
-   with the `f02` control in the same session and read whether the wall's code 7
-   clears.
+4. ~~**Then the veto**, through what is left of its gate.~~ **Done, and the
+   wall's code 7 does not clear.** Its cone is still faulty with the veto holding
+   nothing, so what SOLIDWORKS objects to there is not the corner placement. Note
+   also that SOLIDWORKS ships a vertex 0.1015 off its own edge's curve in the
+   file it saves after repairing `f02` by hand, so code 7 is not a claim about
+   the tier we hold ourselves to.
 5. **Item 13: provenance loses an original a boolean cut on every facet.** C was
    one consequence; corners left with no owner at all are the other, and they
    are what keeps the three-primitive reproduction of C from being a fixture.
@@ -1197,7 +1200,72 @@ What is left:
    uniform. Worth measuring against the 47 chords that remain.
 3. **B3 to B7**, unchanged, and none of them measured to reach an export.
 
-### 11. The plane veto is blunt by 89 to 1, and it is concealing three defects
+### 11. The plane veto is blunt by 89 to 1 - closed 2026-09-16
+
+**Closed.** `export-step-flagship-strict` was registered `WILL_FAIL` on the day it
+was written, asserting that the corner placement never gives up the
+crossing-curve boundary to protect a planar face; on 2026-09-16 ctest reported it
+as a *failure*, which is the marking doing its job - the assertion had started
+passing. The marking is off and it is a live test now.
+
+What landed was two things, and only the first was the one this item predicted:
+
+1. **A bent face with a hole is triangulated rather than refused.**
+   `triangulateWithHoles` bridges each hole into the outer ring along a segment
+   between two mutually visible corners and clips ears off what is left. A bridge
+   is traversed once each way, so it ends up an interior diagonal shared by
+   exactly two triangles, as a fan's diagonals are. This was the fix this item
+   asked for, and on lid10 it triangulates 7 faces into 23.
+
+2. **A triangle is not bent, and never was.** Splitting the veto's refusal
+   counter by reason showed the nine corners lid10 still held were held by *five
+   triangles*. Three points are coplanar wherever they go; what the test measured
+   for one was its tilt away from the normal the **mesh** gave it before the
+   placement ran. The writer had the matching flaw - it asserted
+   `loop_normals[i]`, that same stale normal - so a tilted triangle really would
+   have claimed a plane its corners had left, and refusing the move was the only
+   thing keeping the file honest. Both halves are fixed: a triangle with no hole
+   is never bent, and a planar face asserts the plane its own corners are on
+   (Newell over the loop as written, kept to the mesh's sense so the shell's
+   orientation does not change).
+
+Measured, before and after, on the committed build against this one:
+
+| | held by the veto | corners off a face's own surface | worst | code 7 |
+| --- | --- | --- | --- | --- |
+| lid10 before | 9 | 6 | 0.1050 | 0 |
+| lid10 after | **0** | **1** | 0.1050 | 0 |
+| bayonet after | 0 | 1 | 0.1050 | 0 |
+| band family $fn 64 after | 0 | **0** | — | 0 |
+
+The one corner left on lid10 and the bayonet is the same vertex in both - they
+share the feature - at (-77.1194, -11.6539, 65.0000), between the sweep and a
+cone, and it is open item 21.
+
+**And it costs more than it looks, because SOLIDWORKS got worse.** Put to it with
+the 2026-09-08 control in one session, both reference parts gained faults:
+
+| | before | after |
+| --- | --- | --- |
+| lid10 | 7 faces, 1 edge, codes 7/17/21 | 7 faces, **2 edges**, codes **7/13/17/21/30** |
+| bayonet | 4 faces, 1 edge, codes 7/17/21 | **5 faces**, 2 edges, codes 7/13/17/30 |
+
+Code **13** is `swEdgeVerticesTouch`, and it is on edge `curve3001` at
+(-77.1776, -11.5773, 64.9951) in both parts - which is the midpoint of our edge
+`#8275`, a LINE **0.219 long running out of the one corner still 0.105 off its
+cone**. The mechanism is the one this work has been circling all day: a vertex off
+a surface its face is written on forces the reader to widen that vertex until it
+covers the stray, and a short edge at it then reads as having touching vertices.
+Freeing the corner's neighbours is what exposed it - while they sat off their
+surfaces too, the reader's widening covered them all alike.
+
+So the veto fix is right by every measure of our own and it hands SOLIDWORKS a
+worse file, through one corner. That is not an argument for putting the veto
+back; it is what makes item 21 the next thing rather than a footnote.
+
+The original item follows, for the reasoning it records.
+
+#### As it stood before
 
 > **Landed 2026-09-16.** The veto now refuses only the corners a bent face
 > implicates and settles, instead of refusing every move in the model. Root
@@ -2574,6 +2642,22 @@ their curve, against 14 before, and 10 ELLIPSE edges still written rather than
 given up. `step-band-family` at `$fn` 32 is 0 both before and after. The 54-test
 suite passes.
 
+**And what SOLIDWORKS ships itself, which is the calibration this whole chase was
+missing.** Asked to repair `f02-band-fn032-analytic` in the Import Diagnostics
+dialog, it can - and the file it saves has **a vertex 0.1015 off its own edge's
+curve**: edge `#3394`, a clamped cubic (degree 3, four control points,
+multiplicities 4/4, so it starts at its first control point by construction),
+whose start vertex is at (-7.6537, 18.4776, 38.4343) while the curve starts at
+(-7.6919, 18.5704, 38.4197). Verified by hand against the control points. The
+0.000916 sliver at the thread run-in survives its repair untouched as well.
+
+So code 7 is not a statement about exactness at the tier we hold ourselves to:
+SOLIDWORKS tolerates a tenth of a millimetre of it in its own output. Our
+1.6196 ellipses were worth fixing on their own merits and by our own measure -
+but a 0.05 to 0.11 stray is inside what SOLIDWORKS itself ships, so it is not
+what SOLIDWORKS is objecting to either, and the remaining faults on lid10 want a
+different explanation.
+
 **SOLIDWORKS, same session, same import settings, with the 2026-09-08 control.**
 
 | file | verdict |
@@ -2601,6 +2685,32 @@ way round, and the reader repairs that by inventing a seam edge and inflating a
 vertex's tolerance to 1.08. Every remaining SOLIDWORKS fault on lid10 touches it,
 including the one code 7 left, which is on an ellipse whose vertices are on it to
 1e-11.
+
+### 21. One corner is left off its cone by the ladder's own travel bound
+
+lid10 and the bayonet share a feature, and in both the last corner off a surface
+its face is written on is the same vertex: (-77.1194, -11.6539, 65.0000), 0.1050
+off the cone, bounded by two faces - the sweep `#12103` and the cone `#14571` -
+and by two edges, both LINEs on the sweep's pcurve.
+
+Two analytic faces at a corner is the case the general placement exists for, and
+it computes the point. What refuses it is the bound the ladder holds every path
+to: a corner may travel no further than its nearest neighbouring vertex, which
+here is 0.22. The exact crossing of the sweep and the cone is further away than
+that.
+
+The bound is not wrong - it is what stops a corner folding the facet beside it,
+and the trap it was written for (a 1.9976 move on step-partial-cylinder licensed
+by the *longest* edge at the corner) is real. So the question is not whether to
+loosen it but whether a corner whose target is on *both* its surfaces to 1e-9 has
+earned an exception, and what the right bound for that case is - the distance to
+the nearest neighbour is a bound on how far a corner may drag its facet, not on
+how far a correct answer may lie.
+
+Measured: 2 such corners on lid10 and the bayonet (one of them this one, the
+other its mirror), 3 on the band family at `$fn` 64 at 0.0016 - so the size of
+what is refused varies by three orders of magnitude between coupons, and the
+`$fn` 64 ones are inside any tolerance that matters.
 
 ## Unexplained, and to be validated
 

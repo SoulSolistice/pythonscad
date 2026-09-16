@@ -182,13 +182,14 @@ a change to the corner placement left `$fn` 32 valid, opened the shell at `$fn`
 suite passed 50 of 50. It asserts nothing that has to be derived — no face
 counts, no volumes — only what is true of any correct export.
 
-`export-step-flagship-strict` is the same coupons under a stricter question, and
-it is **registered `WILL_FAIL` on purpose**: it asserts the corner placement
-never gives up the crossing-curve boundary to protect a planar face, which it
-does today on all six. So it is expected to fail, and ctest reports it as
-a *failure* on the day it starts passing — which is how that fix gets noticed
-rather than going quiet. Do not "fix" it by deleting it; see open item 11 in
-`doc/step-export-wip.md` for what has to land first.
+`export-step-flagship-strict` is the same coupons under a stricter question: that
+the corner placement never gives up the crossing-curve boundary to protect a
+planar face. It was **registered `WILL_FAIL`** from the day it was written and
+failed on all six coupons; on 2026-09-16 open item 11 landed, ctest reported the
+test as a *failure* because it had started passing, and the marking came off. It
+is a live assertion now. That is the whole point of the marking, and the second
+time it has worked: mark a known defect rather than delete the test, and the fix
+announces itself.
 
 `export-step-flagship-corners` is the third, also **`WILL_FAIL` on purpose**: it
 asks that every corner of an analytic face lie on that face's surface, which
