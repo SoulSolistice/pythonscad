@@ -7,10 +7,14 @@ What is settled lives in `doc/step-export-development.md`; build and test
 mechanics live in `CLAUDE.md`. Read both before this one — several items below
 are one sentence because the reasoning behind them is there.
 
-**Last updated 2026-09-15, for the state at `16f29c5f`** - item 11's root causes
-C and D closed, the flagship check repaired, and item 15 chased to the boundary
-assembly. Everything below was measured on
-`claude/solidworks-fault-code-17-b58858`.
+**Last updated 2026-09-16, for the state at `819104c5b` plus an uncommitted seam
+fix** - item 11's root causes C and D closed, the flagship check repaired, item
+15's outlier run to ground (it is a reader's repair of a face that crosses its
+surface's seam), claim order measured and refuted as a lever (item 17), and item
+18's 11 mm corner slide fixed at the root on a nine-line model that still breaks
+the approximation tier for a second reason. The suite is green at 53 of 53 on
+this branch; the seam fix is parked on `claude/step-export-seam-fix`. Everything below
+was measured on `claude/solidworks-fault-code-17-b58858`.
 
 ---
 
@@ -221,37 +225,46 @@ withholding the boundary from `f04`, lid10 and bayonet — which is item 11.
 
 ### Open, in the order to take it
 
-1. **Item 15's outlier: a written face's loop carries a vertex its claim never
-   accepted.** On lid10's bottom chamfer the claim's worst corner is 0.1089 and
-   the written face has one 0.7159 off, on a vertex provenance never calls a
-   junction. Measure `patchFromFacets` and the loop assembly for that patch:
-   which step adds the vertex, and on whose authority. Root cause A's shape, for
-   vertices.
-2. **Then the veto**, through what is left of its gate. The case for it is now a
+1. **Item 18's second defect: an arc written against a fanned cap.** The 11 mm
+   slide is closed at the root (the pair placement now asks whether each owner is
+   a surface the corner's makers put there), and what is left of that nine-line
+   model is 25 edges used by one face: the cone writes its top rim as one
+   `CIRCLE` while the cap across it was fanned into triangles and still spells
+   the rim as chords. Root cause A's shape for *arcs*; item 11 closed it for
+   plane sections by binding on `split_for_corners`. Closing it makes the model
+   a fixture.
+2. **Item 15's seam fix, which does not land yet.** The chase is finished - the
+   0.7159 is OpenCASCADE repairing a face that holds facets either side of its
+   closed profile's seam - and the fix on `claude/step-export-seam-fix` leaves
+   one face per reference part that `BRepCheck` calls `UnorientableShape`, because the reader
+   re-projects a chord's pcurve to v = 1.0221. Either write a boundary it will
+   not re-project beside the seam, or leave the seam-side facets of a crossing
+   claim unclaimed, which is always a valid export and was measured clean.
+3. **Then the veto**, through what is left of its gate. The case for it is now a
    measured cost rather than a ratio: it holds 290 of lid10's wall corners off
    their cone and a CAD system rejects the whole wall for it. The relaxation to
    use is `b57c8e73b`'s settle loop; put `f04`, lid10 and bayonet to SOLIDWORKS
    with the `f02` control in the same session and read whether the wall's code 7
    clears.
-3. **Item 13: provenance loses an original a boolean cut on every facet.** C was
+4. **Item 13: provenance loses an original a boolean cut on every facet.** C was
    one consequence; corners left with no owner at all are the other, and they
    are what keeps the three-primitive reproduction of C from being a fixture.
-4. **Item 14: the two-owner placement moves corners off declared surfaces** -
+5. **Item 14: the two-owner placement moves corners off declared surfaces** -
    240 on lid10, 120 on bayonet - without leaving any face they bound. Unexplained.
-5. **Item 16's loose ends:** the face OpenCASCADE reads with a negative area at
+6. **Item 16's loose ends:** the face OpenCASCADE reads with a negative area at
    r = 79.417, and `import_step` aborting on this exporter's own output.
-6. **Code 21 on `f02`'s sweep** is new and unexplained.
-7. **lid10's faceted control reads `faults=6 codes=24`**, which weakens lid10 as
+7. **Code 21 on `f02`'s sweep** is new and unexplained.
+8. **lid10's faceted control reads `faults=6 codes=24`**, which weakens lid10 as
    a test until it is understood.
-8. **lid10 exports 810 analytic faces** where 818 and 822 were recorded earlier;
+9. **lid10 exports 810 analytic faces** where 818 and 822 were recorded earlier;
    it moved with this work and has not been re-derived.
-9. **Item 12**, the survey for other should-never-happen counters. No build.
-10. **The last 47 chords on `f02`.** Not the fitter and not the projector, both
+10. **Item 12**, the survey for other should-never-happen counters. No build.
+11. **The last 47 chords on `f02`.** Not the fitter and not the projector, both
    cleared; whether they are the edges touching the 64 coaxial-owner vertices is
    unmeasured.
-11. **Only the sweep side of a sweep-to-bore edge carries a pcurve**, because the
+12. **Only the sweep side of a sweep-to-bore edge carries a pcurve**, because the
     two-pcurve writer needs two pushed sides and only the quadric emitter pushes.
-12. **Every plane section on the band family is fitted to a ridge-flank facet**,
+13. **Every plane section on the band family is fitted to a ridge-flank facet**,
     a plane the model does not have — a plane section written for a cut that is
     not one.
 
@@ -1716,6 +1729,74 @@ planes, one of them the negative-area triangle of item 16 - so the thread
 run-out at theta = 0 is one small neighbourhood carrying three of this file's
 oddities at once.
 
+#### Chased 2026-09-16: the outlier is a reader's repair, and the file's own defect is a seam
+
+**The cone never carries that vertex.** In the written file the chamfer cone's
+two loops have twenty corners, none of them at (79.5875, 0, 0), and the worst is
+0.0770 off. OpenCASCADE reads twenty-one, because it widens three vertices to a
+tolerance of **1.08**, merges them, and rebuilds the wires around them. The
+0.7159 is `1.0125 * cos 45`, the drop from the sweep's corner above to z = 0 -
+a distance in the reader's repaired topology, not in ours.
+
+Refuted on the way, each named before it was measured: the T-junction weld
+(item 16's slivers); `get_vertex` resolving by position, which keys on exact
+coordinates and cannot merge two points 1.02 apart; a run substitution bringing
+in a foreign endpoint; `patch.facets` naming different loops by write time; and
+the corner placement, which in the normal build moves nothing at all - the veto
+holds all 1094. `patchFromFacets` and the boundary runs are innocent: every
+cycle vertex comes from the claim's own facets.
+
+**Why the reader has to repair anything.** A B-spline sweep face holds facets on
+both sides of its closed profile's *seam* - corners at v 0 to 0.037 and at
+v 0.978 to 0.996 - on a surface written as the open rectangle 0 <= v <= 1. Every
+boundary through the seam therefore runs the long way round the profile. Our own
+pcurves say so (v 0.9775 -> 0.0585 against a 3D edge 0.099 long), and withholding
+them changes nothing: OpenCASCADE re-projects the 3D curve and arrives at the
+same place, which is what refuted "the pcurve writer is the defect".
+
+**Why such a face is written.** `recogniseGridPatches` cuts a claim at the seam
+only when it uses *every* span of the profile. lid10's boolean buries one span,
+so the claim crosses the seam without wrapping, and nothing cuts it. A second
+way in: one facet - an ear of the ridge's end cap, corners at the profile's last
+point, first and second - lies across the seam by itself, so no cut could place
+it either.
+
+**Measured, by withholding just the three seam-crossing facets:**
+
+| lid10, normal build | before | after |
+| --- | --- | --- |
+| cone's worst corner | 0.7159 | **0.1075** |
+| OCCT worst tolerance | 1.0833 | **0.1249** (band 0.2527) |
+| vertex at (79.5875, 0, 0) | tol 1.08, on the cone | tol 1e-07, on four planes |
+
+**A fix is written and does not land**, and lives on the branch
+`claude/step-export-seam-fix` rather than on this one, which stays green. Four
+parts: `GridSurface::onSeam` and
+`GridSurface::seamSide`, so the declaration answers where a facet sits against
+its own seam; the recogniser refuses a facet lying across it and cuts any claim
+that crosses it; the writer gives seam corners v = 1 on the closing side and
+raises an `EXPORT-ERROR` for a face still on both sides; and the flagship check
+asserts OCCT's slack stays inside the band the export publishes - all six
+coupons pass that at 0.58 of their band or less, where pre-fix lid10 needs 1.08
+against 0.25.
+
+With it, lid10 and the bayonet part write four sweep faces instead of two, no
+`EXPORT-ERROR`, tolerance 0.1249, cone worst corner 0.1075, volumes 227658.65
+and 238846.98 against 227707.04 and 238911.27 - and **`BRepCheck` rejects one
+face on each**, the thin closing-side piece, as `UnorientableShape`. The file is
+consistent: senses, loop directions and pcurves all check. OpenCASCADE discards
+the straight pcurve of a chord that sags off the helix, re-projects it, and the
+chord's middle lands at **v = 1.0221** - across the seam of a surface it treats
+as v-closed - so the rebuilt 2D wire leaves the rectangle. That is where it
+stands; the suite caught it, and nothing was committed.
+
+Two refutations worth keeping. A facet's *middle* does not say which side of the
+seam it is on: beside the crease the centroid of a closing-strip facet projects
+to v = 0.022 while its corners are at 0.98 to 1.0, which cost the first version
+of the facet test three good facets and the cut it was meant to trigger. And the
+face's orientation taken at that same centroid is equally wrong, though it is
+not what inverts the face - changing it moved nothing.
+
 ### 16. What a CAD view of lid10 shows, and which of it is ours
 
 **Measured 2026-09-14** after three observations from a SOLIDWORKS session on
@@ -1767,6 +1848,167 @@ OpenCASCADE only, and our own importer is neither a check nor a viewer for
 anything the analytic path writes. Crashing on input is worth fixing on its own.
 
 ---
+
+### 17. Claim order is not a lever, and the contest is between duplicate records
+
+**Asked and measured 2026-09-16.** The question was whether claiming in reverse
+construction order - the last boolean's operands first - would sharpen
+recognition. It would not, and the measurement says why.
+
+Today's order is construction order: `mergeSurfaces` appends the left operand's
+declarations and then the right's, and within a pass the first surface to accept
+a facet takes it. Order can therefore only decide a facet **two** declared
+surfaces both accept:
+
+| export | facets offered to the quadric pass | contested | after provenance |
+| --- | --- | --- | --- |
+| `two-cylinders-cone` (below) | 116 | 26 | 26 |
+| `lid10` | 2457 | 257 | 256 |
+| `band-fn64` | 341 | 0 | 0 |
+
+**Every contested group is two records of one surface.** On the model, surface 0
+(r = 10 at z = 0, the first cylinder) against surface 3 (r = 10 at z = 20, the
+cone primitive's bottom rim) - the same infinite cylinder declared twice. On
+lid10, #9/#56 and #39/#43 the same way; #58/#66 a declared cone and a fitted
+guess of it; #46/#67 a declared cone and a fitted guess **with the axis written
+the other way round** (axis -z, slope +1, which is r = 82.4 at z = 75 again).
+
+**So reversing changes nothing.** Behind a temporary switch, all three exported
+both ways: identical face counts, identical volumes (lid10 227658.650755 either
+way), identical tolerances. The files differ only in which record's *placement*
+is written - reverse takes the fitted cone's origin at z = 79.4385 over the
+declared z = 75 - and on the band family only in entity numbering.
+
+It would also invert *declare first, recognise second*: fitted surfaces are
+appended after declared ones, so last-first hands 120 of lid10's facets to a
+guess instead of the declaration it duplicates.
+
+**A declaration-side sharpening was tried and dropped.** `describesSameSurface`
+already states the rule - same axis and radius, reference points differing along
+the axis, one surface - and its comment names this very case, but only
+`addSurfaceUnique` calls it; `containsSurface`, which the boolean path uses,
+compares `refpt` exactly. Wiring it in takes the model from 5 declared surfaces
+to 4 and lid10 from 25 to 22, and changes **nothing else**: same volumes, same
+validity, same faces, and the 11 mm slide of item 18 unaffected. Nothing in the
+suite fails without it, so it did not land. It is still the tidier rule, and the
+cone case (same axis line, same half angle, radius agreeing) is not covered by
+it at all.
+
+**What the measurement leaves.** Which surface a facet lies on is never decided
+by order on anything measured here. Where the recogniser is actually short is
+provenance being silent - item 13 - and that is a question about ownership, not
+about sequence.
+
+### 18. A two-owner corner slides 11 mm along the curve its owners cross in
+
+**Found 2026-09-16, while measuring item 17, and not yet chased.** Nine lines,
+three primitives, and the approximation tier writes a broken shell:
+
+```scad
+$fn = 64;
+intersection() {
+  union() {
+    cylinder(r = 10, h = 20);
+    translate([0, 0, 20]) cylinder(r1 = 10, r2 = 4, h = 8);
+  }
+  translate([6, 0, -1]) cylinder(r = 10, h = 40);
+}
+```
+
+| tier | result |
+| --- | --- |
+| faceted | valid, 1 solid, volume 4881.063273 - the mesh's own 4881.06 |
+| `step-analytic-surfaces` | valid, 1 solid, 70 faces, volume 4885.633285 |
+| both flags | **invalid**: 25 edges used by one face, OCCT reads 0 solids, 3 shells |
+
+The export says `114 corners moved, by at most 11.0267` on a part of radius 10,
+every one of them "where two declared owners cross". The travel test passed them
+because its bound there is the mesh's own edges, and this mesh has 20-unit
+vertical ones - which is the bound section 4 of the development document already
+warns is not a bound.
+
+`projectOntoBoth` steps only in the span of the two gradients, so it cannot
+slide along a crossing curve in one step; two equations in three unknowns leave
+the position along that curve unpinned, and the acceptance test is all that
+stands between a junction vertex and a point on the far side of the part.
+
+Refuted already: that the duplicate records of item 17 cause it. After deduping,
+each original owns exactly one surface, provenance names two owners for 115 of
+117 junction vertices as before, and the same 114 corners still move 11.0267.
+
+Two more things this model is good for. Its exact tier is clean, so the defect
+is the corner placement and nothing earlier. And in a variant where the veto
+fires - the cone declared at `r1 = 9.9`, so no rim duplicates the wall - the
+same model exports valid, the veto again protecting the file by accident, as in
+item 11.
+
+It is a fixture candidate the moment it is fixed, and a much smaller one than
+lid10; see item 13 for why a model that still fails for another reason is kept
+out of the suite until then.
+
+#### Chased 2026-09-16, and the slide is closed at the root
+
+**Which corners, and why.** Traced over every accepted two-owner move on that
+model:
+
+| owner pair | n | start off owner A | start off owner B | worst travel |
+| --- | --- | --- | --- | --- |
+| wall x cone | 25 | 0.0000 | 0.0000 | 0.0000 |
+| cone x wall | 63 | 0.0086 | 0.0120 | 0.0192 |
+| **wall x wall** | 26 | **up to 5.9285** | 0.0000 | **11.0267** |
+
+0.0120 is the 64-gon's own sagitta, 10(1 - cos(pi/64)) - what the mesh concedes
+about a junction vertex. The 26 are 5.93 off an owner they were never on: they
+sit where the second cylinder's wall meets the first cylinder's *bottom plane*,
+and the solver puts them on the line those two walls cross in, x = 3,
+y = +/-9.5394. Newton is not at fault and neither is the bound: M1 (drift along
+the curve), M2 (a distant branch) and M3 (the far line of the pair) are all
+refuted - the crossing it finds is the true one, and the corner simply does not
+belong on it.
+
+**The premise is what fails.** Provenance is per original solid: a cylinder's
+original owns its wall, and its *cap* facets belong to that same original
+without being on it. The header of `Provenance` says as much - "this says which
+surfaces a facet could be on" - and the pair placement reads "two declared
+owners" as "the vertex lies on both".
+
+**Fixed by asking the declaration**, with the rule section 4 already uses to
+tell a chord facet from a cutting plane: a facet lying on a surface has its
+normal parallel to the surface's own there, a cap cuts across and is
+perpendicular, and a tessellation no coarser than a hexagon puts a chord facet's
+normal within pi/6. A surface is an owner *of this corner* only where one of the
+originals that named it has a facet here passing that test.
+
+| the nine-line model | before | after |
+| --- | --- | --- |
+| corners moved | 114, worst **11.0267** | 89, worst **0.0192** |
+| refused | - | 25, each 5.40 to 5.93 off the owner refused |
+| OCCT shells | 3 | 1 |
+
+**Two scopings were measured and both were needed.** Asking "any facet at this
+corner" instead of "a facet of the original that named the surface" passes the
+wall facet of the solid across, because two cylinders 6 apart run nearly
+parallel where they cross: it refused 15 corners and left the 11.0267 standing.
+And the test has to gate the *crossing placement only*, and only where both
+owners are exact quadrics: where one is a fit, `build_tri_body` reroutes the
+corner onto a plane a declaration vouches for, which is exactly what a
+cap-meets-wall corner needs, and vetoing earlier took that reroute away -
+`step-declare-grid-topcap` failed on its own APPROX line, `2 corners are placed
+on a plane a declaration vouches for crossed with their exact owner`.
+
+Every flagship coupon reads back identically after the fix - lid10 227658.650755
+and bayonet 238846.977158, tolerances 0.124888, same face counts - because their
+veto holds those moves anyway; 300 corners per part are refused the crossing and
+none of them was going to move.
+
+**What is left of this model is a different defect.** It still exports 25 edges
+used by one face, and it did before the fix too: at z = 28 the cone writes its
+top rim as one `CIRCLE` while the cap across it was fanned into triangles and
+still spells that rim as chords. That is root cause A's shape - a boundary
+settled in two places - for *arcs*, where item 11 closed it for plane sections
+by binding on `split_for_corners`. Until that is closed the model stays out of
+the suite, as item 13's does.
+
 
 ## Unexplained, and to be validated
 
