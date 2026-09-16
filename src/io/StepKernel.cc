@@ -2728,6 +2728,13 @@ void StepKernel::build_tri_body(
         if (w >= loops.size()) continue;
         for (const int v : loops[w]) note(v, surface);
       }
+      // ...and the rims, which are corners of the band's face exactly as much
+      // as the walls' are. Leaving them out is what left four of lid10's
+      // corners 0.05 to 0.08 inside the cone whose face is written on them:
+      // where a band meets the cap beside it, every vertex of that meeting is a
+      // rim vertex and none of them is in a wall loop.
+      for (const int v : band.bottom_set) note(v, surface);
+      for (const int v : band.top_set) note(v, surface);
     }
     // ...and the planes, which are faces of the file exactly as much as the
     // quadrics are. A face written as a PLANE asserts that its corners lie in
@@ -2764,10 +2771,47 @@ void StepKernel::build_tri_body(
     }
     std::size_t onto_faces = 0, onto_plane = 0, onto_corner = 0;
     double worst_faces = 0, worst_plane = 0, worst_corner = 0;
+    // Corners this pass leaves off a surface whose face is written on them,
+    // counted by the exit they took. A corner is a vertex of every face that
+    // uses it, and each of those faces asserts it lies on that face's surface;
+    // one that does not is what a reader calls fault code 16. The count is kept
+    // per reason because the reasons are unrelated and one number for all of
+    // them says nothing about which to work on.
+    std::size_t left_moved = 0, left_many = 0, left_noplane = 0, left_manyplanes = 0;
+    std::size_t left_solve = 0, left_far = 0;
+    double left_worst = 0;
+    auto off_its_faces = [&](int v, const Vector3d& at) {
+      double worst = 0;
+      const auto have = faces_at.find(v);
+      if (have == faces_at.end()) return worst;
+      for (const auto& sf : have->second) {
+        Vector3d q;
+        if (!AnalyticFeatures::closestOnSurface(sf.get(), at, q)) continue;
+        const double owed = std::max(1e-9 * std::max(1.0, at.norm()), declaredBand(sf.get()));
+        const double d = (q - at).norm();
+        if (d > owed) worst = std::max(worst, d);
+      }
+      return worst;
+    };
+    auto note_left = [&](std::size_t& bucket, int v, const Vector3d& at) {
+      const double d = off_its_faces(v, at);
+      if (d <= 0) return;
+      bucket++;
+      left_worst = std::max(left_worst, d);
+    };
     for (const auto& entry : faces_at) {
       const int v = entry.first;
-      if (moves.count(v) != 0) continue;
-      if (entry.second.size() > 2) continue;  // more than two analytic faces: leave it
+      {
+        const auto have = moves.find(v);
+        if (have != moves.end()) {
+          note_left(left_moved, v, have->second);
+          continue;
+        }
+      }
+      if (entry.second.size() > 2) {  // more than two analytic faces: leave it
+        note_left(left_many, v, vertices[v]);
+        continue;
+      }
       const auto reach = nearest.find(v);
       if (reach == nearest.end()) continue;
       const double travel_bound = reach->second;
@@ -2788,7 +2832,10 @@ void StepKernel::build_tri_body(
       std::vector<const CutPlane *> planes_here;
       if (entry.second.size() == 1) {
         const auto sp = section_planes.find(entry.second[0].get());
-        if (sp == section_planes.end()) continue;
+        if (sp == section_planes.end()) {
+          note_left(left_noplane, v, vertices[v]);
+          continue;
+        }
         const double scale = std::max(1.0, vertices[v].norm());
         std::vector<const CutPlane *> declared_here;
         for (const auto& cp : sp->second) {
@@ -2799,7 +2846,14 @@ void StepKernel::build_tri_body(
         // Exactness first, as everywhere else: where the model declared a plane
         // through this corner, the mesh's own are not consulted at all.
         if (!declared_here.empty()) planes_here = declared_here;
-        if (planes_here.empty() || planes_here.size() > 2) continue;
+        if (planes_here.empty()) {
+          note_left(left_noplane, v, vertices[v]);
+          continue;
+        }
+        if (planes_here.size() > 2) {
+          note_left(left_manyplanes, v, vertices[v]);
+          continue;
+        }
       }
 
       Vector3d placed = vertices[v];
@@ -2820,18 +2874,26 @@ void StepKernel::build_tri_body(
               first, planes_here[0]->normal, planes_here[0]->normal.dot(planes_here[0]->on_plane),
               planes_here[1]->normal, planes_here[1]->normal.dot(planes_here[1]->on_plane), placed,
               1e-11, travel_bound, nullptr)) {
+          note_left(left_solve, v, vertices[v]);
           continue;
         }
         if (!AnalyticFeatures::closestOnSurface(first, placed, q) || (q - placed).norm() > 1e-9) {
+          note_left(left_solve, v, vertices[v]);
           continue;
         }
         in_planes = true;
         for (const auto *cp : planes_here) {
           if (fabs((placed - cp->on_plane).dot(cp->normal)) > 1e-9) in_planes = false;
         }
-        if (!in_planes) continue;
+        if (!in_planes) {
+          note_left(left_solve, v, vertices[v]);
+          continue;
+        }
         const double travel = (placed - vertices[v]).norm();
-        if (travel > travel_bound) continue;
+        if (travel > travel_bound) {
+          note_left(left_far, v, vertices[v]);
+          continue;
+        }
         moves.emplace(v, placed);
         worst_corner = std::max(worst_corner, travel);
         onto_corner++;
@@ -2851,13 +2913,18 @@ void StepKernel::build_tri_body(
       if ((qa - vertices[v]).norm() <= 1e-9 && (qb - vertices[v]).norm() <= 1e-9) continue;
       AnalyticFeatures::projectOntoBoth(first, second, placed, 1e-11);
       if (!AnalyticFeatures::closestOnSurface(first, placed, qa) || (qa - placed).norm() > 1e-9) {
+        note_left(left_solve, v, vertices[v]);
         continue;
       }
       if (!AnalyticFeatures::closestOnSurface(second, placed, qb) || (qb - placed).norm() > 1e-9) {
+        note_left(left_solve, v, vertices[v]);
         continue;
       }
       const double travel = (placed - vertices[v]).norm();
-      if (travel > travel_bound) continue;
+      if (travel > travel_bound) {
+        note_left(left_far, v, vertices[v]);
+        continue;
+      }
       moves.emplace(v, placed);
       if (plane != nullptr) {
         worst_plane = std::max(worst_plane, travel);
@@ -2866,6 +2933,17 @@ void StepKernel::build_tri_body(
         worst_faces = std::max(worst_faces, travel);
         onto_faces++;
       }
+    }
+    const std::size_t left_total =
+      left_moved + left_many + left_noplane + left_manyplanes + left_solve + left_far;
+    if (left_total > 0) {
+      LOG(message_group::Export_Warning,
+          "STEP export: %1$d corners are left off a surface the file writes a face of them on, "
+          "by %2$.4f at worst - %3$d were placed by an earlier path, %4$d have more than two "
+          "analytic faces, %5$d have no plane across their boundary, %6$d have more than two, "
+          "%7$d the solve did not reach, %8$d are further than the nearest neighbour",
+          int(left_total), left_worst, int(left_moved), int(left_many), int(left_noplane),
+          int(left_manyplanes), int(left_solve), int(left_far));
     }
     on_faces = onto_faces;
     on_plane_face = onto_plane + onto_corner;
@@ -3253,6 +3331,7 @@ void StepKernel::build_tri_body(
     // fixpoint in one round.
     std::size_t analytic_faces = 0, bent = 0, turned = 0;
     std::set<int> bent_verts;
+    std::set<int> held_by_veto;  // corners the veto took a placement away from
     std::map<std::size_t, std::size_t> splittable;
     std::size_t settle_rounds = 0, settle_dropped = 0;
     for (;;) {
@@ -3406,7 +3485,10 @@ void StepKernel::build_tri_body(
       bent += turned;
       if (bent == 0 || bent_verts.empty()) break;
       std::size_t dropped_here = 0;
-      for (const int v : bent_verts) dropped_here += moves.erase(v);
+      for (const int v : bent_verts) {
+        if (moves.count(v) != 0) held_by_veto.insert(v);
+        dropped_here += moves.erase(v);
+      }
       settle_rounds++;
       settle_dropped += dropped_here;
       if (dropped_here == 0 || moves.empty()) break;
@@ -3423,6 +3505,57 @@ void StepKernel::build_tri_body(
           "keeps a plane and would bend if it moved; %2$d corners were placed, and the refusal "
           "settled in %3$d round%4$s",
           int(settle_dropped), int(moves.size()), int(settle_rounds), settle_rounds == 1 ? "" : "s");
+      // ...and what that costs, which the line above does not say: a corner held
+      // here is a corner of an analytic face too, and holding it leaves that
+      // face bounded by a point off its own surface. That is the other half of
+      // the trade the veto makes - a plane kept flat, a quadric left unmet - and
+      // it is what a reader calls fault code 16, "vertex does not lie on face's
+      // surface". Measured against the surfaces of the faces that use the
+      // corner, which is what the file will assert about it.
+      std::map<int, std::vector<const Surface *>> at_held;
+      auto hold_note = [&](int v, const Surface *sf) {
+        if (sf == nullptr || held_by_veto.count(v) == 0) return;
+        auto& list = at_held[v];
+        for (const Surface *have : list) {
+          if (have == sf || have->sameAs(*sf)) return;
+        }
+        list.push_back(sf);
+      };
+      auto hold_patches = [&](const std::vector<AnalyticFeatures::Patch>& patches) {
+        for (const auto& patch : patches) {
+          if (!patch.alive) continue;
+          for (const auto& run : patch.runs) {
+            for (const int v : run.verts) hold_note(v, patch.surface.get());
+          }
+        }
+      };
+      hold_patches(quadric_faces);
+      hold_patches(grid_faces);
+      hold_patches(bezier_patches);
+      std::size_t off_faces = 0;
+      double off_worst = 0;
+      for (const auto& entry : at_held) {
+        double worst = 0;
+        for (const Surface *sf : entry.second) {
+          Vector3d q;
+          if (!AnalyticFeatures::closestOnSurface(sf, vertices[entry.first], q)) continue;
+          const double owed =
+            std::max(1e-9 * std::max(1.0, vertices[entry.first].norm()), declaredBand(sf));
+          const double d = (q - vertices[entry.first]).norm();
+          if (d > owed) worst = std::max(worst, d);
+        }
+        if (worst > 0) {
+          off_faces++;
+          off_worst = std::max(off_worst, worst);
+        }
+      }
+      if (off_faces > 0) {
+        LOG(message_group::Export_Warning,
+            "STEP export:    %1$d of them are left off the surface of an analytic face they "
+            "bound, by %2$.4f at worst - the plane keeps its shape and the quadric does not get "
+            "its corner",
+            int(off_faces), off_worst);
+      }
     }
     std::size_t touched = 0;
     for (const auto& m : moves) {
