@@ -923,6 +923,40 @@ Driven by `scripts/step-interop-solidworks.ps1`; needs SOLIDWORKS running.
   `GetGapsCount` and the co-edges at each gap, and nothing else); and no
   interface in the assembly exposes a faulty-face list beyond `FaultEntity`.
 
+### The census: what we write that a reader objects to, and which objection it becomes
+
+`scripts/step-diagnostics/fault-census.py file.stp` is the consolidated form of
+everything learned between 2026-09-14 and 2026-09-17. One table, keyed by the
+SOLIDWORKS fault code each property turns into, measured on the file we wrote
+rather than on what a reader made of it.
+
+| code | property | what it means, and what it cost |
+| --- | --- | --- |
+| **7** | a vertex off the curve its own edge is written as | a curve substituted for a run of chords must pass through that run's own endpoints. lid10 once wrote 14 ELLIPSEs missing theirs by up to **1.6196**, on a grazing section of a 1.15° draft cone where the major axis runs as the reciprocal of the tilt and turns a sagitta into millimetres. |
+| **16** | a vertex off the surface of a face that uses it | the corner placement left it there. On its own it is small; what makes it matter is the next row. |
+| **13** | a short edge at a strayed vertex | *not* a fault in the file - an edge 0.219 long is a good edge. It becomes one because a reader widens a strayed vertex until it covers the stray, and then the edge's two ends are inside one tolerance. lid10 gained `swEdgeVerticesTouch` the day the plane veto stopped holding corners and left **one** behind, on an edge 0.219 long at a vertex 0.105 off its cone. The ratio is what to watch, not either number. |
+| **21** | a loop that visits a vertex more than twice | a pinch, which is what self-intersecting means for a face. The seam of a face on a closed surface legitimately appears twice and is excluded. |
+| **17** | an edge lying off the surface of a face it bounds | a chord where the surface curves. Every B-spline edge we write is exactly on both its surfaces; every straight line on a curved one is not, by up to **0.1089**. The conic a plane cuts is exact and writable - **hyperbola and parabola included**, and on a shallow draft cone it is almost always a hyperbola. |
+| — | a face loop crossing its surface's seam | the pcurve has nowhere to go but the long way round, sweeping the whole profile instead of stepping across. OpenCASCADE repairs it by inventing a seam edge and widening a vertex to **1.08**, and everything touching that vertex is faulty afterwards. |
+
+Two things the table is careful about, because both cost a day when they were
+not:
+
+- **Codes 13 and 21 are second-order.** They are what a reader *produces* out of
+  a stray plus a short edge, or out of a pinch; fixing them directly is fixing a
+  symptom. The census reports the precursor, not the code.
+- **Our own count and a reader's need not agree, in either direction.** lid10's
+  census says one strayed vertex and two short edges at risk, and SOLIDWORKS
+  reports one code 13; it says three pinched loops and SOLIDWORKS reports two
+  code 21. Neither is the other's ground truth. What the census is for is that it
+  measures *our* file, which is the part we can fix.
+
+For calibration: SOLIDWORKS ships a vertex **0.1015** off its own edge's curve in
+the file it saves after repairing `f02` by hand - and that number is our own
+`line-on-bspline` worst for the same file, read back through its writer. So code
+7 is not a claim about exactness at the tier we hold ourselves to. It is a claim
+about what its tolerances could not absorb.
+
 ### How to interrogate a reader, and why the fault list is the last thing to ask
 
 Settled 2026-09-17, after a day in which three fixes measured clean on our side
@@ -1676,6 +1710,9 @@ drift of 9e167 per cent.
   OpenCASCADE, lid10 showed strays the file does not contain *and* nothing about
   the fourteen it did. `export-step-flagship-coupons` asserts it over all six
   coupons.
+- `scripts/step-diagnostics/fault-census.py <file.stp> …` — every property this
+  exporter is known to get wrong, keyed by the fault code it becomes. The first
+  thing to run on a new export and the first thing to compare across a change.
 - `scripts/step-diagnostics/reader-diff.py <a.stp> <b.stp>` — what changed
   between two files whose entity ids do not correspond: faces matched by surface
   and corners, curves by their control points and placements, with the

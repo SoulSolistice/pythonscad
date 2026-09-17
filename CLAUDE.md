@@ -276,6 +276,7 @@ Licence-free instruments, all Python over OCP:
 | `scripts/step-interop-faultmap.py` | per-entity fault dump |
 | `scripts/step-diagnostics/vertex-on-curve.py` | every vertex against its own edge's curve — SOLIDWORKS fault code 7, no kernel in the path |
 | `scripts/step-diagnostics/seam-straddle.py` | whether a face's loop crosses the seam of a surface closed in `v` |
+| `scripts/step-diagnostics/fault-census.py` | every property known to become a CAD fault, keyed by the code it becomes — run this first |
 | `scripts/step-diagnostics/reader-diff.py` | what changed between two STEP files whose ids do not correspond — ours against a reader's, or a reader's before and after its repair |
 | `scripts/step-interop-sw-roundtrip.py` | what survived a CAD system's re-export |
 
