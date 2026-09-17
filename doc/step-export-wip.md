@@ -2712,6 +2712,60 @@ other its mirror), 3 on the band family at `$fn` 64 at 0.0016 - so the size of
 what is refused varies by three orders of magnitude between coupons, and the
 `$fn` 64 ones are inside any tolerance that matters.
 
+### 22. What SOLIDWORKS repairs is a curve off its surface by 1e-4, and ours are off by 0.1
+
+`f04-band-fn064-analytic` reads `valid=1 faults=0 faultyfaces=0` from every API
+check, and the Import Diagnostics dialog shows one faulty face: "General geometry
+problem". On 2026-09-17 that face was repaired by hand and the result saved
+beside the unrepaired import, both with knitting off, so the two differ by the
+repair alone and by nothing else - same writer, same settings, same session.
+
+**What the repair does, measured** (`build/item20/sw-diff.py`,
+`curve-move.py`):
+
+- every face matches by surface *and* by its whole set of corner coordinates, so
+  **no vertex moved and no surface changed**;
+- the entity census is identical - 69 faces, 1273 edges, 1206 vertices, one
+  closed shell - so **no topology changed**;
+- 215 B-spline curves were replaced, and each new one differs from the one it
+  replaced by a median of **4.281e-07** and at most **9.583e-05** on an interior
+  control point, with **both endpoints unmoved to all 9 digits**.
+
+So the "general geometry problem" is a curve lying a ten-thousandth of a
+millimetre off the surface it bounds, and the repair is a re-fit that puts it
+back. Nothing structural is wrong with the face at all.
+
+**And that is the relation we are worst at.** `scripts/step-diagnostics/edge-on-surface.py`
+over our own exports, counting only edges off by more than 1e-4:
+
+| file | line-on-bspline | line-on-cone | line-on-cylinder | line-on-plane |
+| --- | --- | --- | --- | --- |
+| lid10 | 21, worst **0.1089** | 73, worst 0.1068 | 4, worst 0.1070 | 1, 0.0015 |
+| f02 | 10, worst **0.1015** | - | 9, worst 0.0456 | 0 |
+| f04 | 25, worst 0.0304 | - | 29, worst 0.0114 | 0 |
+
+Every *B-spline* edge we write is exactly on both its surfaces - `bspl-on-cyl`
+and `bspl-on-bspl` are 0.000000 over 1223 edges on f04. What is off is straight
+LINEs on curved surfaces, by up to **0.109**, which is a thousand times what
+SOLIDWORKS thought worth repairing on f04 and is word for word what code 17
+says: "edge does not lie on face's surface".
+
+It also explains the oddity recorded in item 20 - that SOLIDWORKS ships a vertex
+0.1015 off its own edge's curve in the file it saves after repairing `f02`. That
+is not SOLIDWORKS being sloppy: **0.101451 is our own `line-on-bspl` worst for
+that file**, re-expressed. It read our chord, wrote its own spline for it, and
+carried our error across.
+
+**What to do about it** is the chord-vs-arc fix, which exists for one case and
+does not cover these. `doc/step-export-development.md` records it for cylinders:
+a ruling lies on a cylinder by construction, so the segments up and down the axis
+need nothing, and the ones running *around* it are chords of a circle and are
+promoted to arcs. What is left is lines on a **cone**, lines on a **sweep**, and
+the cylinder chords that promotion does not reach. The sweep case is the one that
+matters most - it is the largest number on both reference parts - and it is the
+same question the crossing curve answered for edges between two declared
+surfaces: an edge on one surface only still has to lie *on* it.
+
 ## Unexplained, and to be validated
 
 - ~~**Untapered band family at `$fn` 32** trades code 17 for 13/30 with sixteen
