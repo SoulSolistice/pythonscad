@@ -923,6 +923,58 @@ Driven by `scripts/step-interop-solidworks.ps1`; needs SOLIDWORKS running.
   `GetGapsCount` and the co-edges at each gap, and nothing else); and no
   interface in the assembly exposes a faulty-face list beyond `FaultEntity`.
 
+### How to interrogate a reader, and why the fault list is the last thing to ask
+
+Settled 2026-09-17, after a day in which three fixes measured clean on our side
+and moved nothing on the CAD system's, and one afternoon of round trips answered
+what the fault lists could not.
+
+**1. Import raw, always.** Four settings in Tools > Options > Import change what
+is measured rather than how it is reported, and three of them are on by default:
+
+| setting | what it does to the measurement |
+| --- | --- |
+| knit / *Try forming solids* | forms a solid out of surfaces, so a shell with a hole in it still reads `solid` and the face count says nothing |
+| *Automatically run Import Diagnostics* | repairs on import, so the faults counted afterwards are the ones the repair could not fix, not the ones the file has |
+| *Create analytic faces* | re-reads B-splines as quadrics of its own, so a round trip compares the reader's idea of the surface against ours rather than ours against itself |
+| custom tolerance | moves the threshold everything else is judged against |
+
+`step-interop-solidworks.ps1 -Raw` turns all of them off and puts them back
+afterwards; every run is still labelled with what was set, because a result
+recorded without them cannot be compared with another one. Measured cost of not
+doing this: the 2026-09-08 control's volume reads 19555.2696 with the defaults
+and 19554.1241 raw, so analytic conversion had been quietly altering geometry in
+every interop run this project has made.
+
+**2. Round-trip everything.** `-RoundTrip` saves the reader's own model back out
+through the reader's own writer. That file is the only artefact that says what
+the reader *made* of ours rather than what it *says* about it, and it outranks
+every fault list because it can be measured rather than read.
+
+**3. To isolate a repair, round-trip it twice.** `-RoundTrip -Heal` writes
+`<coupon>_SW.STEP` before the repair and `<coupon>_SW_healed.STEP` after it. The
+pair differs by the repair alone - same writer, same settings, same session - and
+`scripts/step-diagnostics/reader-diff.py` compares them by geometry, because the
+ids are renumbered on every save and a text diff is noise.
+
+That is what finally explained SOLIDWORKS's "General geometry problem" on `f04`,
+a fault no API check reports at all: **every face matched on surface and corners,
+the census was identical, and 215 B-spline curves had been re-fitted by a median
+of 4.281e-07 and at most 9.583e-05 with both endpoints unmoved.** Nothing
+structural was wrong; a curve was a ten-thousandth of a millimetre off the
+surface it bounds. Ours were off by 0.1089, which is what open item 22 is about.
+
+**4. A failed repair makes the diagnosis worse, not better.** On the bayonet on
+2026-09-17, `ImportDiagnosis` took a 64-face solid to 2 faces and no volume at
+all - `healfaces=-62 healvol=-235362.4410`. A repair that fails redistributes the
+damage, and faults counted after one are faults of the repair. So the counts in
+a `-Heal` run are taken **before** it, and the heal is reported as a delta beside
+them rather than folded in.
+
+**5. Only then read the fault list**, and read it knowing that `IFace2::Check`
+and the Import Diagnostics dialog are different analyses and neither contains the
+other (see *Fault codes* above).
+
 - **So measure the repair, not the report** - `step-interop-solidworks.ps1
   -Heal`. It runs `ImportDiagnosis` and records what changed: face count, volume
   and area before and after, with the document closed unsaved either way. A body
@@ -1624,6 +1676,11 @@ drift of 9e167 per cent.
   OpenCASCADE, lid10 showed strays the file does not contain *and* nothing about
   the fourteen it did. `export-step-flagship-coupons` asserts it over all six
   coupons.
+- `scripts/step-diagnostics/reader-diff.py <a.stp> <b.stp>` — what changed
+  between two files whose entity ids do not correspond: faces matched by surface
+  and corners, curves by their control points and placements, with the
+  displacement of every replaced curve. For `ours` against `theirs_SW.STEP`, and
+  for `theirs_SW.STEP` against `theirs_SW_healed.STEP`, which isolates a repair.
 - `scripts/step-diagnostics/seam-straddle.py <file.stp> [face]` — the `v` each of
   a face's own pcurves runs between, and whether its loop crosses the seam of a
   surface closed in `v`. A crossing has nowhere to go but the long way round, and

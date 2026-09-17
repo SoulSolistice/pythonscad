@@ -157,6 +157,32 @@ param(
     # alteration is a number that can be compared between runs. The document is
     # closed without saving either way, so nothing on disk changes.
     [switch]$Heal,
+    # Import the file as it is, with everything SOLIDWORKS would otherwise do to
+    # it turned off, and put the settings back afterwards.
+    #
+    # The four levers are in Tools > Options > Import, and three of them change
+    # what is measured rather than how it is reported:
+    #
+    #   * **knit** forms solids out of surfaces, so a shell with a hole in it can
+    #     still come back a solid and the face count says nothing about it;
+    #   * **run diagnostics (healing)** repairs on import, so the faults counted
+    #     afterwards are the ones the repair could not fix, not the ones the file
+    #     has;
+    #   * **create analytic faces** re-reads B-splines as quadrics of its own, so
+    #     a round trip compares SOLIDWORKS's idea of the surface with ours rather
+    #     than ours with itself.
+    #
+    # Each is worth measuring deliberately, and none of them belongs in a
+    # baseline. `-Raw` is that baseline: do-not-knit, diagnostics off, analytic
+    # conversion off, check-and-repair 0. Bodies come back as SURFACE rather than
+    # solid and the volume is not measured - that is the cost, and it is the
+    # honest one, because the volume a knit produces is a volume SOLIDWORKS
+    # invented.
+    #
+    # An earlier note here said the API gives this script no way to set the
+    # import options. That was wrong: ISldWorks has SetUserPreferenceToggle and
+    # SetUserPreferenceIntegerValue, and they take these very enums.
+    [switch]$Raw,
     # Restrict the run to coupons whose file name matches, the way the Python
     # kit's --only does. A full kit is 48 imports; re-asking one question of one
     # pair should not cost that.
@@ -293,6 +319,82 @@ public class SwKitRunner
     // solids,surfaces,faces,volume_mm3,area_mm2,note
     public static bool SaveBack;
     public static bool Heal;
+    public static bool Raw;
+    static int _wasKnit, _wasRepair;
+    static bool _wasDiag, _wasAnalytic, _saved;
+
+    /*! Turn off everything that would change the file on the way in. */
+    public static string GoRaw()
+    {
+        if (_saved) return "";
+        _wasKnit = _sw.GetUserPreferenceIntegerValue(
+            (int)swUserPreferenceIntegerValue_e.swImportNeutral_KnitOption);
+        _wasRepair = _sw.GetUserPreferenceIntegerValue(
+            (int)swUserPreferenceIntegerValue_e.swImportCheckAndRepair);
+        _wasDiag = _sw.GetUserPreferenceToggle(
+            (int)swUserPreferenceToggle_e.swImportNeutralRunDiagnostics);
+        _wasAnalytic = _sw.GetUserPreferenceToggle(
+            (int)swUserPreferenceToggle_e.swImportNeutralAnalyticalConversion);
+        _saved = true;
+        _sw.SetUserPreferenceIntegerValue(
+            (int)swUserPreferenceIntegerValue_e.swImportNeutral_KnitOption, 1);  // do not knit
+        _sw.SetUserPreferenceIntegerValue(
+            (int)swUserPreferenceIntegerValue_e.swImportCheckAndRepair, 0);
+        _sw.SetUserPreferenceToggle(
+            (int)swUserPreferenceToggle_e.swImportNeutralRunDiagnostics, false);
+        _sw.SetUserPreferenceToggle(
+            (int)swUserPreferenceToggle_e.swImportNeutralAnalyticalConversion, false);
+        return Preferences();
+    }
+
+    /*! The reader's own model, written back out by the reader's own writer.
+     *
+     * This is the measurement that outranks every fault list, because it is the
+     * only one that says what SOLIDWORKS *made* of the file rather than what it
+     * says about it. Run once plain and once after a heal and the two differ by
+     * the repair alone - which is how "General geometry problem" was pinned down
+     * to 215 curves re-fitted by at most 9.583e-05 with no vertex, no surface and
+     * no topology touched. `scripts/step-diagnostics/reader-diff.py` does the
+     * comparing; the ids are renumbered on every save, so it matches by geometry.
+     *
+     * A save that fails is recorded rather than thrown: the import result is
+     * still worth having without it. The export options carry the same caveat as
+     * the import ones, which is why the run is labelled.
+     */
+    static string SaveBackAs(IModelDoc2 doc, string path, string suffix)
+    {
+        string outPath = System.IO.Path.Combine(
+            System.IO.Path.GetDirectoryName(path),
+            System.IO.Path.GetFileNameWithoutExtension(path) + suffix + ".STEP");
+        int saveErr = 0, saveWarn = 0;
+        try
+        {
+            bool ok = doc.Extension.SaveAs(outPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                           (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null,
+                                           ref saveErr, ref saveWarn);
+            return ok ? "" : ("saveas" + suffix + " failed err=" + saveErr);
+        }
+        catch (Exception ex) { return "saveas" + suffix + ": " + ex.Message; }
+    }
+
+    /*! And put them back, whatever happened in between. */
+    public static void Restore()
+    {
+        if (!_saved) return;
+        _saved = false;
+        try
+        {
+            _sw.SetUserPreferenceIntegerValue(
+                (int)swUserPreferenceIntegerValue_e.swImportNeutral_KnitOption, _wasKnit);
+            _sw.SetUserPreferenceIntegerValue(
+                (int)swUserPreferenceIntegerValue_e.swImportCheckAndRepair, _wasRepair);
+            _sw.SetUserPreferenceToggle(
+                (int)swUserPreferenceToggle_e.swImportNeutralRunDiagnostics, _wasDiag);
+            _sw.SetUserPreferenceToggle(
+                (int)swUserPreferenceToggle_e.swImportNeutralAnalyticalConversion, _wasAnalytic);
+        }
+        catch { }
+    }
     public static int MaxWalkFaces = 300;
 
     public static string Run(string path)
@@ -454,27 +556,7 @@ public class SwKitRunner
             }
             catch (Exception ex) { note = (note + " massprop: " + ex.Message).Trim(); }
 
-            if (SaveBack)
-            {
-                // Straight back out, with whatever is set in Tools > Options >
-                // Export - the same caveat as the import options, and the same
-                // reason the run has to be labelled. A save that fails is
-                // recorded rather than thrown: the import result is still worth
-                // having without it.
-                string outPath = System.IO.Path.Combine(
-                    System.IO.Path.GetDirectoryName(path),
-                    System.IO.Path.GetFileNameWithoutExtension(path) + "_SW.STEP");
-                int saveErr = 0, saveWarn = 0;
-                try
-                {
-                    bool ok = doc.Extension.SaveAs(outPath,
-                        (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent,
-                        null, ref saveErr, ref saveWarn);
-                    if (!ok) note = (note + " saveas failed err=" + saveErr).Trim();
-                }
-                catch (Exception ex) { note = (note + " saveas: " + ex.Message).Trim(); }
-            }
+            if (SaveBack) note = (note + " " + SaveBackAs(doc, path, "_SW")).Trim();
 
             if (Heal)
             {
@@ -504,6 +586,7 @@ public class SwKitRunner
                             }
                         }
                         catch { }
+                        if (SaveBack) note = (note + " " + SaveBackAs(doc, path, "_SW_healed")).Trim();
                         note = (note + " heal=" + healed
                                 + " healfaces=" + (f2 - faces)
                                 + " healvol="
@@ -677,14 +760,33 @@ catch {
            "window, then run this again. (" + $_.Exception.GetBaseException().Message + ")")
 }
 Write-Host ("attached to SOLIDWORKS revision " + $revision)
-$prefs = [SwKitRunner]::Preferences()
+if ($Raw) {
+    $prefs = [SwKitRunner]::GoRaw()
+    Write-Host "raw: knitting, healing and analytic conversion are off for this run"
+} else {
+    $prefs = [SwKitRunner]::Preferences()
+}
 Write-Host ("import options as set:      " + $prefs)
 Write-Host ("import options as labelled: " + $ImportSettings)
 [SwKitRunner]::SaveBack = [bool]$RoundTrip
 [SwKitRunner]::Heal = [bool]$Heal
+[SwKitRunner]::Raw = [bool]$Raw
 [SwKitRunner]::MaxWalkFaces = $MaxWalkFaces
-if ($RoundTrip) { Write-Host "round trip: each coupon will be saved back as <coupon>_SW.STEP" }
-if ($Heal) { Write-Host "heal: each coupon is also measured after ImportDiagnosis, and discarded" }
+if ($RoundTrip) {
+    Write-Host "round trip: each coupon will be saved back as <coupon>_SW.STEP"
+    if ($Heal) {
+        Write-Host "            and again after the heal as <coupon>_SW_healed.STEP - the pair"
+        Write-Host "            differs by the repair alone, which is the whole point of running both"
+    }
+}
+if ($Heal) {
+    # It is not a diagnosis and it is not always an improvement: on the bayonet
+    # on 2026-09-17 ImportDiagnosis took a 64-face solid to 2 faces and no volume
+    # at all. A repair that fails moves the damage around, and the faults counted
+    # after one are not the faults the file has.
+    Write-Host "heal: each coupon is also measured after ImportDiagnosis, and discarded"
+    Write-Host "      (the faults in this run are counted BEFORE it, which is the only honest place)"
+}
 Write-Host ""
 
 $rows = @()
@@ -706,6 +808,9 @@ foreach ($f in $files) {
         Write-Host ("{0} - {1}" -f $row.opened, $row.note)
     }
 }
+
+[SwKitRunner]::Restore()
+if ($Raw) { Write-Host "raw: the import options are back as they were" }
 
 if ($FaultDetail) {
     $detail = @("file`tentity`tindex`tkind`tarea_mm2`tcentre_mm`tcodes")

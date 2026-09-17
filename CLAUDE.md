@@ -243,6 +243,16 @@ powershell -ExecutionPolicy Bypass -File scripts\step-interop-solidworks.ps1 `
   -KitDir build\interop-kit -ImportSettings do-not-knit -RoundTrip
 ```
 
+**Import raw and round-trip it, as a matter of course.** `-Raw` turns off
+knitting, healing and analytic-face conversion - all on by default, all of which
+change what is measured rather than how it is reported - and restores them
+afterwards. `-RoundTrip` saves the reader's own model back out through its own
+writer, which is the only artefact that says what the reader *made* of the file.
+`-RoundTrip -Heal` writes it twice, before and after a repair, so the pair
+differs by the repair alone; `scripts/step-diagnostics/reader-diff.py` compares
+them by geometry. See `doc/step-export-development.md`, *How to interrogate a
+reader*.
+
 Add `-Heal` to measure what SOLIDWORKS's own repair changes - face count, volume
 and area before and after `ImportDiagnosis`, document closed unsaved. That is the
 measure to trust: its fault *lists* and the Import Diagnostics dialog's do not
@@ -266,6 +276,7 @@ Licence-free instruments, all Python over OCP:
 | `scripts/step-interop-faultmap.py` | per-entity fault dump |
 | `scripts/step-diagnostics/vertex-on-curve.py` | every vertex against its own edge's curve — SOLIDWORKS fault code 7, no kernel in the path |
 | `scripts/step-diagnostics/seam-straddle.py` | whether a face's loop crosses the seam of a surface closed in `v` |
+| `scripts/step-diagnostics/reader-diff.py` | what changed between two STEP files whose ids do not correspond — ours against a reader's, or a reader's before and after its repair |
 | `scripts/step-interop-sw-roundtrip.py` | what survived a CAD system's re-export |
 
 What each coupon isolates, what the numbers mean and how to read a kernel's

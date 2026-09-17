@@ -17,6 +17,26 @@ It is the same argument as `check_bound_enclosure()` and one level further out:
 a kernel agreeing with us proves nothing on its own, because agreement can be
 what its repair pass produced. What it wrote back is not an opinion.
 
+**Two comparisons, and running both is the method** - see
+`doc/step-export-development.md`, *How to interrogate a reader*:
+
+  ours -> its round trip        what it made of what we wrote. Kind-level, with
+                                OpenCASCADE reading both, because the two files
+                                are written by different writers and only the
+                                census and the volume are comparable.
+
+  its round trip -> its healed  what its *repair* changed, and nothing else:
+  round trip                    same writer, same settings, same session, one
+                                repaired. Exact, and geometric rather than by
+                                id, through `reader-diff.py`. Written by
+                                `-RoundTrip -Heal`, and reported here whenever
+                                the second file is present.
+
+The second is the one that answers questions the first cannot. On `f04` it found
+that "General geometry problem" - a fault no API check reports at all - is 215
+curves re-fitted by at most 9.583e-05, with no vertex, no surface and no topology
+touched.
+
 Three things this can find that nothing upstream of it can:
 
   substitution   The coupon's B_SPLINE_SURFACE comes back as a fan of planes.
@@ -35,6 +55,8 @@ Usage:
 
 import argparse
 import csv
+import importlib.util
+import math
 import os
 import sys
 
@@ -168,6 +190,58 @@ def verdict(before, after):
     return "kept"
 
 
+def repair_delta(swfile, healed):
+    """What the reader's own repair changed, measured against its own output.
+
+    Deliberately not through OpenCASCADE: both files come from the same writer,
+    so they can be compared exactly, and the only thing in the way is that every
+    entity is renumbered on each save. `reader-diff.py` matches by geometry
+    instead - faces by surface and corners, curves by their control points.
+    """
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "reader_diff", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "step-diagnostics", "reader-diff.py"))
+        rd = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rd)
+    except Exception as exc:
+        return ["    repair: cannot load reader-diff.py (%s)" % exc]
+
+    out = []
+    try:
+        A, B = rd.faces(swfile), rd.faces(healed)
+        gone = [k for k in A if k not in B]
+        new = [k for k in B if k not in A]
+        moved = [k for k in A if k in B and A[k] != B[k]]
+        ca, cb = rd.curves(swfile), rd.curves(healed)
+        ka = {rd.key_of(kind, pts) for kind, _, pts in ca}
+        kb = {rd.key_of(kind, pts) for kind, _, pts in cb}
+        replaced = [(kind, i, pts) for kind, i, pts in ca if rd.key_of(kind, pts) not in kb]
+        arrived = [(kind, i, pts) for kind, i, pts in cb if rd.key_of(kind, pts) not in ka]
+        worst = 0.0
+        for kind, _, pa in replaced:
+            best = None
+            for kind2, _, pb in arrived:
+                if kind2 != kind or len(pb) != len(pa):
+                    continue
+                d = math.dist(pa[0], pb[0]) + math.dist(pa[-1], pb[-1])
+                if best is None or d < best[0]:
+                    best = (d, pb)
+            if best is not None:
+                worst = max(worst, max(math.dist(x, y) for x, y in zip(pa, best[1])))
+        if not gone and not new and not moved and not replaced:
+            out.append("    repair: changed nothing")
+        else:
+            out.append("    repair: %d faces gone, %d new, %d with corners moved; "
+                       "%d curves replaced, worst %.3e"
+                       % (len(gone), len(new), len(moved), len(replaced), worst))
+            if not gone and not new and not moved and replaced:
+                out.append("            no vertex, no surface and no topology - a re-fit only")
+    except Exception as exc:
+        out.append("    repair: comparison failed (%s)" % exc)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -185,15 +259,17 @@ def main():
         if not name.endswith("_SW.STEP"):
             continue
         original = os.path.join(kitdir, name[: -len("_SW.STEP")] + ".stp")
+        healed = os.path.join(kitdir, name[: -len("_SW.STEP")] + "_SW_healed.STEP")
         if os.path.exists(original):
-            pairs.append((original, os.path.join(kitdir, name)))
+            pairs.append((original, os.path.join(kitdir, name),
+                          healed if os.path.exists(healed) else None))
     if not pairs:
         print("no <coupon>_SW.STEP files in %s - run the PowerShell driver with "
               "-RoundTrip first" % kitdir, file=sys.stderr)
         return 1
 
     rows = []
-    for original, swfile in pairs:
+    for original, swfile, healed in pairs:
         before = read(original)
         after = read(swfile)
         coupon = os.path.basename(original)[:-4]
@@ -204,6 +280,9 @@ def main():
         print("%-34s %s" % (coupon, v))
         if after is not None:
             for line in delta(before, after):
+                print(line)
+        if healed is not None:
+            for line in repair_delta(swfile, healed):
                 print(line)
         rows.append({
             "coupon": coupon,
