@@ -122,6 +122,36 @@ def distance(ents, curve_id, p):
                     best, best_t = d, t
             step *= 0.5
         return best
+    if kind in ("HYPERBOLA", "PARABOLA"):
+        origin, axis, ref = placement(ents, r[0])
+        vals = floats(re.sub(r"#\d+", " ", re.sub(r"'[^']*'", " ", args)))
+        n = unit(axis)
+        major = unit(ref)
+        minor = cross(n, major)
+
+        def pt(t, kind=kind, vals=vals):
+            if kind == "HYPERBOLA":
+                a, b = vals[0], vals[1]
+                return [origin[i] + major[i] * a * math.cosh(t) + minor[i] * b * math.sinh(t)
+                        for i in range(3)]
+            f = vals[0]
+            return [origin[i] + major[i] * f * t * t + minor[i] * 2 * f * t for i in range(3)]
+
+        span = 8.0 if kind == "HYPERBOLA" else 30.0
+        best, best_t = float("inf"), 0.0
+        for k in range(-800, 801):
+            t = span * k / 800.0
+            d = norm(sub(p, pt(t)))
+            if d < best:
+                best, best_t = d, t
+        step = span / 800.0
+        while step > 1e-14:
+            for t in (best_t - step, best_t + step):
+                d = norm(sub(p, pt(t)))
+                if d < best:
+                    best, best_t = d, t
+            step *= 0.5
+        return best
     if kind.startswith("B_SPLINE_CURVE"):
         ctrl = [point(ents, i) for i in refs(args.split("(", 1)[1].split(")", 1)[0])]
         if not ctrl:

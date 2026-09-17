@@ -2756,8 +2756,74 @@ is not SOLIDWORKS being sloppy: **0.101451 is our own `line-on-bspl` worst for
 that file**, re-expressed. It read our chord, wrote its own spline for it, and
 carried our error across.
 
-**What to do about it** is the chord-vs-arc fix, which exists for one case and
-does not cover these. `doc/step-export-development.md` records it for cylinders:
+#### Half of it is done: the conic a plane cuts, whichever conic it is
+
+**Landed 2026-09-17.** The arc promotion asks for a *circle* - both ends at one
+height on the axis and at the surface's radius there - which is the section a
+plane perpendicular to the axis cuts, and the only one it could reach. Every
+other plane cuts a conic that is not a circle, and the chord across it was left
+straight.
+
+`planeSectionConic` answers for all three. The section is found algebraically
+rather than geometrically, because that is the form that classifies itself: a
+cone about `a` through apex `A` with half angle `alpha` is the quadric
+`(X-A)' M (X-A) = 0` for `M = a a' - cos^2(alpha) I`, and substituting
+`X = P + u E1 + v E2` leaves a conic in `(u, v)` whose determinant names it, whose
+centre solves its linear part and whose eigenvectors are its axes.
+
+And the answer is mostly **hyperbolas**. lid10's draft cone has a half angle of
+about 1.15 degrees, so almost any plane down the wall is steeper than that and
+cuts a hyperbola rather than an ellipse - 64 of its 68 promoted chords, against 4
+ellipses. ISO 10303-42 has `HYPERBOLA` and `PARABOLA` entities, so there is no
+reason to approximate either; both are written now, and OpenCASCADE reads the
+file back with `Hyperbola 64` in its own edge census and one solid.
+
+A hyperbola entity describes **one branch** - `a cosh(t)` is never less than `a` -
+so the placement's reference direction has to point at the branch the edge is on.
+The two branches are mirror images and the solver picks one arbitrarily; turning
+it round rather than refusing is the difference between 37 promotions and 68.
+
+Two traps, both caught by checks that already existed:
+
+- **The edge keeps its vertices.** The first version swapped them where the curve
+  ran the other way, which is what the arc promotion does not do - and every
+  `ORIENTED_EDGE` in every loop using that edge was written against the old
+  order, so the loops stopped closing. `validatestep.py` said so outright
+  ("EDGE_LOOP #38502 does not close", two zero-area bounds, a PLANE normal
+  against its winding) and the suite failed three tests. What turns instead is
+  the placement's **axis**: a conic lies in its plane either way round and
+  reversing the normal reverses the direction its parameter runs, which is the
+  same trick `from x to` plays for a circle.
+- **The audit had to learn the new curves first.** `vertexOffCurve` and
+  `vertex-on-curve.py` both returned 0 for a kind they did not know, so writing
+  64 hyperbolas would have made "0 vertices off their curve" vacuous for exactly
+  the edges that had just changed. Both measure `C + a cosh(t) X + b sinh(t) Y`
+  and the parabola now, by sampling and refining.
+
+Measured on lid10, edges off a surface they bound by more than 1e-4:
+
+| | before | after |
+| --- | --- | --- |
+| line-on-cone | 71, worst 0.1068 | **7**, worst 0.1068 |
+| line-on-cylinder | 4 | 2 |
+| line-on-bspline | 21, worst 0.1089 | 21, worst 0.1089 |
+| distinct offending edges | 91 | **23** |
+
+The bayonet promotes 8 the same way. `f02` promotes none, because none of its
+strays is against a plane.
+
+**What is left is the sweep**, and it is a different problem rather than more of
+the same. An edge touching a sweep face carries a PCURVE, so its geometry is a
+`SURFACE_CURVE` wrapping the line rather than the line itself, and the promotion
+skips it - rightly, because replacing the 3D curve while leaving a pcurve that is
+still a straight line in (u, v) would make the two disagree, which is what codes
+11 and 12 are for. The crossing curve `intersectionArc` already computes is the
+right geometry; what it needs is the pcurve to match, and to be decided at the
+writer where the corners are final rather than at recognition time where they are
+not.
+
+**The rest of the original plan**, for the record: the chord-vs-arc fix exists for
+one case and does not cover these. `doc/step-export-development.md` records it for cylinders:
 a ruling lies on a cylinder by construction, so the segments up and down the axis
 need nothing, and the ones running *around* it are chords of a circle and are
 promoted to arcs. What is left is lines on a **cone**, lines on a **sweep**, and

@@ -586,6 +586,77 @@ double vertexOffCurve(const StepKernel::RoundType *curve, const Vector3d& p)
     }
     return best;
   }
+  if (const auto *hyp = dynamic_cast<const StepKernel::Hyperbola *>(curve)) {
+    // C + a cosh(t) X + b sinh(t) Y, one branch. Sampled in t and refined, which
+    // is an upper bound on the distance and so the safe direction for a check.
+    if (hyp->axis == nullptr || hyp->axis->point == nullptr || hyp->axis->dir1 == nullptr ||
+        hyp->axis->dir2 == nullptr) {
+      return 0;
+    }
+    const Vector3d c = hyp->axis->point->pt;
+    Vector3d n = hyp->axis->dir1->pt, major = hyp->axis->dir2->pt;
+    if (n.norm() < 1e-12 || major.norm() < 1e-12) return 0;
+    n.normalize();
+    major.normalize();
+    const Vector3d minor = n.cross(major);
+    auto at = [&](double t) {
+      return c + major * (hyp->semi_axis * cosh(t)) + minor * (hyp->semi_imag * sinh(t));
+    };
+    double best_t = 0, best = std::numeric_limits<double>::infinity();
+    for (int k = -400; k <= 400; k++) {
+      const double t = k * 0.02;
+      const double d = (at(t) - p).norm();
+      if (d < best) {
+        best = d;
+        best_t = t;
+      }
+    }
+    for (double step = 0.02; step > 1e-14; step *= 0.5) {
+      for (const double t : {best_t - step, best_t + step}) {
+        const double d = (at(t) - p).norm();
+        if (d < best) {
+          best = d;
+          best_t = t;
+        }
+      }
+    }
+    return best;
+  }
+  if (const auto *par = dynamic_cast<const StepKernel::Parabola *>(curve)) {
+    // C + F t^2 X + 2 F t Y.
+    if (par->axis == nullptr || par->axis->point == nullptr || par->axis->dir1 == nullptr ||
+        par->axis->dir2 == nullptr) {
+      return 0;
+    }
+    const Vector3d c = par->axis->point->pt;
+    Vector3d n = par->axis->dir1->pt, major = par->axis->dir2->pt;
+    if (n.norm() < 1e-12 || major.norm() < 1e-12) return 0;
+    n.normalize();
+    major.normalize();
+    const Vector3d minor = n.cross(major);
+    auto at = [&](double t) {
+      return c + major * (par->focal_dist * t * t) + minor * (2 * par->focal_dist * t);
+    };
+    double best_t = 0, best = std::numeric_limits<double>::infinity();
+    for (int k = -600; k <= 600; k++) {
+      const double t = k * 0.05;
+      const double d = (at(t) - p).norm();
+      if (d < best) {
+        best = d;
+        best_t = t;
+      }
+    }
+    for (double step = 0.05; step > 1e-14; step *= 0.5) {
+      for (const double t : {best_t - step, best_t + step}) {
+        const double d = (at(t) - p).norm();
+        if (d < best) {
+          best = d;
+          best_t = t;
+        }
+      }
+    }
+    return best;
+  }
   if (const auto *spline = dynamic_cast<const StepKernel::BSplineCurve *>(curve)) {
     if (spline->pts.empty()) return 0;
     // Clamped, so it starts at the first control point and ends at the last;
@@ -830,6 +901,142 @@ bool planeSectionEllipse(const Surface *surface, const Vector3d& normal, const V
   if (b2 <= 0) return false;
   out.b = sqrt(b2);
   return out.a >= out.b;
+}
+
+/*! The conic a plane cuts from a cylinder or a cone, whichever conic it is.
+ *
+ * `planeSectionEllipse` above answers only for the closed case and refuses the
+ * rest, which is right for the pass that writes a *face's* boundary as one
+ * closed curve. It is not right for a single edge: a plane through a cone
+ * steeper than the cone's own half angle cuts a hyperbola, one at exactly that
+ * angle cuts a parabola, and a chord written straight across either of them lies
+ * off the cone. On lid10 that is 64 edges and up to 0.1068, because its draft
+ * cone's half angle is about 1.15 degrees and almost any plane down the wall is
+ * steeper than that.
+ *
+ * Both are ISO 10303-42 entities, so the exact curve can be written and there is
+ * no reason to approximate one.
+ *
+ * The section is found algebraically rather than geometrically, because that is
+ * the form that classifies itself. A cone about `a` through apex `A` with half
+ * angle `alpha` is the quadric (X-A)' M (X-A) = 0 for M = a a' - cos^2(alpha) I,
+ * and a cylinder of radius r about the same line is (X-O)' (I - a a') (X-O) = r^2.
+ * Substituting X = P + u E1 + v E2 for an orthonormal basis of the plane leaves a
+ * conic in (u, v); the sign of the determinant of its quadratic part names it,
+ * its centre solves the linear part, and its eigenvectors are the axes.
+ */
+struct SectionConic {
+  enum Kind { ELLIPSE, HYPERBOLA, PARABOLA } kind = ELLIPSE;
+  Vector3d centre, major, normal;
+  double a = 0, b = 0;  // semi-axes; for a parabola `a` is the focal distance
+};
+
+bool planeSectionConic(const Surface *surface, const Vector3d& normal_in, const Vector3d& on_plane,
+                       SectionConic& out)
+{
+  const Vector3d n = normal_in.normalized();
+  if (!(n.norm() > 0)) return false;
+
+  Eigen::Matrix3d M;
+  Vector3d origin;      // the quadric's own reference point
+  double constant = 0;  // the quadric's form equals this
+  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(surface)) {
+    const Vector3d ax = cyl->normdir.normalized();
+    M = Eigen::Matrix3d::Identity() - ax * ax.transpose();
+    origin = cyl->refpt;
+    constant = cyl->r * cyl->r;
+  } else if (const auto *cone = dynamic_cast<const ConeSurface *>(surface)) {
+    if (fabs(cone->slope) < 1e-12) return false;
+    const Vector3d ax = cone->normdir.normalized();
+    const double cos_a = 1.0 / sqrt(1.0 + cone->slope * cone->slope);
+    M = ax * ax.transpose() - cos_a * cos_a * Eigen::Matrix3d::Identity();
+    origin = cone->refpt + ax * (-cone->r / cone->slope);  // the apex
+    constant = 0;
+  } else {
+    return false;
+  }
+
+  Vector3d e1 = AnalyticFeatures::perpendicular(n);
+  if (e1.norm() < 1e-12) return false;
+  e1.normalize();
+  const Vector3d e2 = n.cross(e1);
+  const Vector3d d = on_plane - origin;
+
+  // q(u, v) = [u v] A [u v]' + 2 [u v] . B + C
+  Eigen::Matrix2d A;
+  A(0, 0) = e1.dot(M * e1);
+  A(0, 1) = e1.dot(M * e2);
+  A(1, 0) = A(0, 1);
+  A(1, 1) = e2.dot(M * e2);
+  Eigen::Vector2d B(e1.dot(M * d), e2.dot(M * d));
+  const double C = d.dot(M * d) - constant;
+
+  const double scale = std::max(fabs(A(0, 0)) + fabs(A(1, 1)), 1e-30);
+  const double det = A(0, 0) * A(1, 1) - A(0, 1) * A(0, 1);
+  const Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> es(A);
+  if (es.info() != Eigen::Success) return false;
+  const Eigen::Vector2d lam = es.eigenvalues();
+  const Eigen::Matrix2d vec = es.eigenvectors();
+
+  auto in_space = [&](const Eigen::Vector2d& uv) { return on_plane + e1 * uv(0) + e2 * uv(1); };
+
+  if (fabs(det) <= 1e-9 * scale * scale) {
+    // Parabolic: one eigenvalue is zero, and the curve has no centre. With the
+    // axes turned onto the eigenvectors, lam_k w^2 + 2(b1 s + b2 w) + C = 0 for
+    // the non-zero lam_k, which is s = -(lam_k w^2 + 2 b2 w + C) / (2 b1) - a
+    // parabola of focal distance |lam_k| / (4 |b1|) about the s direction.
+    const int k = fabs(lam(0)) >= fabs(lam(1)) ? 0 : 1;  // the curved direction
+    const int z = 1 - k;
+    const Eigen::Vector2d ek = vec.col(k), ez = vec.col(z);
+    const double bz = B.dot(ez), bk = B.dot(ek);
+    if (fabs(bz) < 1e-12 * scale) return false;  // degenerate: a line pair, not a parabola
+    const double focal = fabs(lam(k)) / (4 * fabs(bz));
+    if (!(focal > 0) || !std::isfinite(focal)) return false;
+    // The vertex: where the curve turns, at w = -bk / lam_k.
+    const double w0 = -bk / lam(k);
+    const double s0 = -(lam(k) * w0 * w0 + 2 * bk * w0 + C) / (2 * bz);
+    const Eigen::Vector2d vertex = ek * w0 + ez * s0;
+    // The axis of symmetry points the way the curve opens, which is the sign
+    // that makes s grow.
+    const double sense = (lam(k) / bz) < 0 ? 1.0 : -1.0;
+    out.kind = SectionConic::PARABOLA;
+    out.centre = in_space(vertex);
+    out.major = (e1 * ez(0) + e2 * ez(1)) * sense;
+    out.normal = n;
+    out.a = focal;
+    out.b = 0;
+    return out.major.norm() > 0.5;
+  }
+
+  // Centred: A x = -B.
+  const Eigen::Vector2d c = A.ldlt().solve(-B);
+  if (!c.allFinite()) return false;
+  const double cc = C + B.dot(c);                               // the constant at the centre
+  if (fabs(cc) < 1e-15 * std::max(1.0, fabs(C))) return false;  // the degenerate point/line pair
+
+  // lam1 x^2 + lam2 y^2 = -cc, so a semi-axis exists where -cc / lam has the
+  // right sign; an ellipse needs both, a hyperbola takes the one that does.
+  const double r0 = -cc / lam(0), r1 = -cc / lam(1);
+  if (det > 0) {
+    if (r0 <= 0 || r1 <= 0) return false;  // an imaginary ellipse: no real points
+    const double s0 = sqrt(r0), s1 = sqrt(r1);
+    const int big = s0 >= s1 ? 0 : 1;
+    out.kind = SectionConic::ELLIPSE;
+    out.a = std::max(s0, s1);
+    out.b = std::min(s0, s1);
+    out.major = (e1 * vec(0, big) + e2 * vec(1, big)).normalized();
+  } else {
+    const int real = r0 > 0 ? 0 : 1;
+    const int imag = 1 - real;
+    if (-cc / lam(real) <= 0 || -cc / lam(imag) >= 0) return false;
+    out.kind = SectionConic::HYPERBOLA;
+    out.a = sqrt(-cc / lam(real));
+    out.b = sqrt(cc / lam(imag));
+    out.major = (e1 * vec(0, real) + e2 * vec(1, real)).normalized();
+  }
+  out.centre = in_space(c);
+  out.normal = n;
+  return out.a > 0 && std::isfinite(out.a) && std::isfinite(out.b);
 }
 
 /*! How far off perpendicular a plane may tilt and still cut a closed section. */
@@ -5390,6 +5597,181 @@ void StepKernel::build_tri_body(
     return true;
   };
 
+  // Where the section is not a circle it is still a conic, and the chord is
+  // still wrong.
+  //
+  // The arc promotion above asks for a *circle*: both ends at one height on the
+  // axis and at the surface's own radius there. That is the section a plane
+  // perpendicular to the axis cuts, and it is the only one it reaches. A plane
+  // at any other angle cuts an ellipse, and the edge between such a plane and a
+  // cone is a chord of that ellipse - written straight, lying off the cone by up
+  // to 0.0759 on lid10 and off nothing else, because a chord of a plane section
+  // does lie in the plane.
+  //
+  // That is SOLIDWORKS fault code 17 exactly - "edge does not lie on face's
+  // surface" - and it is what its own repair of `f04` does at a thousandth of
+  // the size: it moved no vertex, no surface and no topology, only re-fitting
+  // 215 curves by at most 9.583e-05 onto the surfaces they bound. Ours are off
+  // by 0.1089.
+  //
+  // The section pass writes these as ELLIPSE where it recognises a *run* of them
+  // on a face it is building. This is the same curve for the edges it did not
+  // claim, decided here because here is where the corners are final - the same
+  // reason the endpoint invariant binds at the writer. `planeSectionEllipse` is
+  // the same solver both use.
+  int conics_promoted = 0, conics_declined = 0;
+  int why_noproj = 0, why_offquad = 0, why_offplane = 0, why_nosection = 0, why_shape = 0;
+  int why_branch = 0, conics_ellipse = 0, conics_hyperbola = 0, conics_parabola = 0;
+  double conic_worst_end = 0, why_offplane_worst = 0;
+  auto promote_to_conic = [&](EdgeCurve *edge, const std::vector<Face *>& faces) {
+    auto *was_line = dynamic_cast<Line *>(edge->round);
+    if (was_line == nullptr) return false;
+    const Vector3d p1 = edge->vert1->point->pt;
+    const Vector3d p2 = edge->vert2->point->pt;
+    if ((p1 - p2).norm() < 1e-12) return false;
+
+    // One quadric and one plane, and every other face at the edge has to be
+    // that same plane: a conic lies in exactly one plane, so a second one
+    // through the edge would be asserting a curve it does not contain.
+    std::shared_ptr<Surface> quadric;
+    bool have_plane = false;
+    Vector3d pnorm(0, 0, 0), ppoint(0, 0, 0);
+    for (auto *face : faces) {
+      if (const auto *con = dynamic_cast<const ConicalSurface *>(face->surface)) {
+        if (quadric != nullptr) return false;
+        quadric = std::make_shared<ConeSurface>(con->axis->point->pt, con->axis->dir1->pt, con->r,
+                                                tan(con->half_angle));
+      } else if (const auto *cyl = dynamic_cast<const CylindricalSurface *>(face->surface)) {
+        if (quadric != nullptr) return false;
+        quadric = std::make_shared<CylinderSurface>(cyl->axis->point->pt, cyl->axis->dir1->pt, cyl->r);
+      } else if (const auto *pl = dynamic_cast<const Plane *>(face->surface)) {
+        const Vector3d n = pl->axis->dir1->pt.normalized();
+        const Vector3d o = pl->axis->point->pt;
+        if (have_plane) {
+          if (fabs(fabs(n.dot(pnorm)) - 1) > 1e-9 || fabs((o - ppoint).dot(pnorm)) > tol) return false;
+        } else {
+          have_plane = true;
+          pnorm = n;
+          ppoint = o;
+        }
+      } else {
+        why_shape++;
+        return false;  // a sweep or a patch: its crossing is not a conic
+      }
+    }
+    if (quadric == nullptr || !have_plane) return false;
+
+    // Only a chord that is actually off its quadric. A ruling of a cone lies on
+    // it exactly, and so does any edge the placement already put there; moving
+    // one of those would trade an exact edge for an approximation of itself.
+    Vector3d q;
+    double off = 0;
+    for (const Vector3d *p : {&p1, &p2}) {
+      if (!AnalyticFeatures::closestOnSurface(quadric.get(), *p, q)) return false;
+      off = std::max(off, (q - *p).norm());
+    }
+    const Vector3d mid = (p1 + p2) / 2;
+    if (!AnalyticFeatures::closestOnSurface(quadric.get(), mid, q)) return false;
+    if ((q - mid).norm() <= tol) return false;  // the line is on the surface already
+
+    // The invariant every substitution owes: the curve has to pass through the
+    // run's own endpoints. A point is on the conic when it is in the plane and
+    // on the quadric, and both are asked of both ends.
+    for (const Vector3d *p : {&p1, &p2}) {
+      const double owed = std::max(tol, 1e-9 * std::max(1.0, p->norm()));
+      if (!AnalyticFeatures::closestOnSurface(quadric.get(), *p, q)) {
+        conics_declined++;
+        why_noproj++;
+        return false;
+      }
+      if ((q - *p).norm() > owed) {
+        conics_declined++;
+        why_offquad++;
+        conic_worst_end = std::max(conic_worst_end, (q - *p).norm());
+        return false;
+      }
+      if (fabs((*p - ppoint).dot(pnorm)) > owed) {
+        conics_declined++;
+        why_offplane++;
+        why_offplane_worst = std::max(why_offplane_worst, fabs((*p - ppoint).dot(pnorm)));
+        return false;
+      }
+    }
+
+    SectionConic sec;
+    if (!planeSectionConic(quadric.get(), pnorm, ppoint, sec)) {
+      conics_declined++;
+      why_nosection++;
+      return false;
+    }
+
+    // Whichever conic it is, written as that conic and trimmed by its own two
+    // vertices. The ends are on it already - that was asked above - so all that
+    // is left is which way round the edge runs.
+    // The edge keeps its two vertices in the order it already has them: the
+    // ORIENTED_EDGEs in every loop that uses it were written against that order,
+    // and swapping them leaves those loops not closing. What turns instead is
+    // the *placement's* axis - a conic lies in its plane either way round, and
+    // reversing the normal reverses the direction its parameter runs - which is
+    // the same thing the arc promotion above does by choosing `from x to`.
+    RoundType *curve = nullptr;
+    Vector3d nz = sec.normal.normalized();
+    Vector3d minor = nz.cross(sec.major);
+    if (sec.kind == SectionConic::ELLIPSE) {
+      auto param = [&](const Vector3d& p) {
+        const Vector3d rel = p - sec.centre;
+        return atan2(rel.dot(minor) / sec.b, rel.dot(sec.major) / sec.a);
+      };
+      double d = param(p2) - param(p1);
+      while (d < 0) d += 2 * M_PI;
+      while (d >= 2 * M_PI) d -= 2 * M_PI;
+      // One segment of a tessellated boundary is the shorter of the two arcs, so
+      // if the way round from vert1 to vert2 is the long one, the axis is the
+      // wrong way up.
+      if (d > M_PI) {
+        nz = -nz;
+        minor = -minor;
+      }
+      curve = new Ellipse(entities, "", conic_placement(sec.centre, nz, sec.major), sec.a, sec.b);
+    } else if (sec.kind == SectionConic::HYPERBOLA) {
+      // A HYPERBOLA entity describes one branch, the one the reference direction
+      // points at, and `a cosh(t)` is never less than `a` - so both ends have to
+      // be on that branch or the curve does not contain the edge at all.
+      // ...and which branch is not a property of the section, it is which one
+      // this edge is on: the two are mirror images and the solver's major axis
+      // points at one of them arbitrarily. Turn it round rather than refuse.
+      Vector3d major = sec.major;
+      auto along = [&](const Vector3d& p) { return (p - sec.centre).dot(major); };
+      if (along(p1) < 0 && along(p2) < 0) major = -major;
+      if (along(p1) < sec.a * 0.5 || along(p2) < sec.a * 0.5) {
+        // One end on each branch is not an edge of one conic at all.
+        conics_declined++;
+        why_branch++;
+        return false;
+      }
+      // t increases with the minor coordinate, so the axis points whichever way
+      // makes it increase from vert1 to vert2.
+      if ((p1 - sec.centre).dot(nz.cross(major)) > (p2 - sec.centre).dot(nz.cross(major))) nz = -nz;
+      curve = new Hyperbola(entities, "", conic_placement(sec.centre, nz, major), sec.a, sec.b);
+    } else {
+      if ((p1 - sec.centre).dot(minor) > (p2 - sec.centre).dot(minor)) nz = -nz;
+      curve = new Parabola(entities, "", conic_placement(sec.centre, nz, sec.major), sec.a);
+    }
+    if (curve == nullptr) return false;
+    if (sec.kind == SectionConic::ELLIPSE) conics_ellipse++;
+    else if (sec.kind == SectionConic::HYPERBOLA) conics_hyperbola++;
+    else conics_parabola++;
+
+    edge->round = curve;
+    edge->dir = true;
+    was_line->live = false;
+    was_line->vector->live = false;
+    was_line->vector->dir->live = false;
+    was_line->point->live = false;
+    conics_promoted++;
+    return true;
+  };
+
   int arcs_promoted = 0, arcs_declined = 0;
   for (auto& entry : edge_faces) {
     EdgeCurve *edge = entry.first;
@@ -5409,7 +5791,10 @@ void StepKernel::build_tri_body(
         break;
       }
     }
-    if (!proposed) continue;
+    if (!proposed) {
+      promote_to_conic(edge, entry.second);
+      continue;
+    }
 
     bool agreed = true;
     for (auto *face : entry.second) {
@@ -5427,7 +5812,7 @@ void StepKernel::build_tri_body(
       if (!agreed) break;
     }
     if (!agreed) {
-      arcs_declined++;
+      if (!promote_to_conic(edge, entry.second)) arcs_declined++;
       continue;
     }
 
@@ -5465,6 +5850,22 @@ void StepKernel::build_tri_body(
   if (arcs_promoted > 0 || arcs_declined > 0) {
     LOG("STEP export: %1$d edge%2$s written as an arc on the surface it bounds, %3$d left straight",
         arcs_promoted, arcs_promoted == 1 ? "" : "s", arcs_declined);
+  }
+  if (conics_promoted > 0 || conics_declined > 0) {
+    LOG(
+      "STEP export: %1$d chord%2$s written as the conic the plane cuts from the quadric beside "
+      "it, %3$d left straight - the worst end of those was %4$.2e off the quadric",
+      conics_promoted, conics_promoted == 1 ? " is" : "s are", conics_declined, conic_worst_end);
+    LOG(
+      "STEP export:    of those, %1$d are ellipses, %2$d hyperbolas and %3$d parabolas - a cone "
+      "cut steeper than its own half angle is a hyperbola, and writing a chord for one is what "
+      "leaves an edge off the face it bounds",
+      conics_ellipse, conics_hyperbola, conics_parabola);
+    LOG(
+      "STEP export:    declined: %1$d no projection, %2$d an end off the quadric, %3$d an end off "
+      "the plane (worst %4$.2e), %5$d no conic from that plane, %6$d an end on the far branch, "
+      "%7$d a face that is not one",
+      why_noproj, why_offquad, why_offplane, why_offplane_worst, why_nosection, why_branch, why_shape);
   }
   // Every edge in the file against its own two vertices, which is the one
   // relation a CAD kernel rejects a substituted curve on and the one nothing
@@ -5769,6 +6170,8 @@ void StepKernel::read_step(std::string file_name)
       else if (func_name == "LINE") ent = new Line(entities);
       else if (func_name == "CIRCLE") ent = new Circle(entities);
       else if (func_name == "ELLIPSE") ent = new Ellipse(entities);
+      else if (func_name == "HYPERBOLA") ent = new Hyperbola(entities);
+      else if (func_name == "PARABOLA") ent = new Parabola(entities);
       else if (func_name == "CYLINDRICAL_SURFACE") ent = new CylindricalSurface(entities);
       else if (func_name == "CONICAL_SURFACE") ent = new ConicalSurface(entities);
       else if (func_name == "PCURVE") unimplemented = true;

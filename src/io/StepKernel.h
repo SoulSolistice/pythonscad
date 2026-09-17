@@ -779,6 +779,103 @@ public:
     Axis2Placement *axis;
   };
 
+  /*! The section a plane cuts from a cone when it is steeper than the cone's own
+   * half angle, and from a cylinder when it is parallel to the axis.
+   *
+   * ISO 10303-42 parameterises it as C + a*cosh(t)*X + b*sinh(t)*Y, with X the
+   * placement's reference direction and Y the third axis - so X points at the
+   * branch, and a hyperbola entity describes **one** branch, not both. A section
+   * of a face's boundary lies on one of them, which is the one to point at.
+   */
+  class Hyperbola : public RoundType
+  {
+  public:
+    Hyperbola(std::vector<Entity *>& ent_list) : RoundType(ent_list)
+    {
+      axis = 0;
+      semi_axis = 0;
+      semi_imag = 0;
+    }
+    Hyperbola(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+              double semi_axis_in, double semi_imag_in)
+      : RoundType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      semi_axis = semi_axis_in;
+      semi_imag = semi_imag_in;
+    }
+    virtual ~Hyperbola() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = HYPERBOLA('" << label << "',#" << axis->id << ","
+                << step_real(semi_axis) << "," << step_real(semi_imag) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> semi_axis >> semi_imag;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double semi_axis, semi_imag;
+    Axis2Placement *axis;
+  };
+
+  /*! The section a plane cuts from a cone at exactly its half angle.
+   *
+   * Parameterised as C + focal_dist*(t*t*X + 2*t*Y), so the placement's
+   * reference direction is the axis of symmetry, pointing into the curve.
+   *
+   * It is the knife edge between the ellipse and the hyperbola and a mesh will
+   * rarely sit on it, but a section pass that writes the other two and refuses
+   * this one refuses it for a tolerance rather than for a reason.
+   */
+  class Parabola : public RoundType
+  {
+  public:
+    Parabola(std::vector<Entity *>& ent_list) : RoundType(ent_list)
+    {
+      axis = 0;
+      focal_dist = 0;
+    }
+    Parabola(std::vector<Entity *>& ent_list, std::string name_in, Axis2Placement *axis_in,
+             double focal_in)
+      : RoundType(ent_list)
+    {
+      name = name_in;
+      axis = axis_in;
+      focal_dist = focal_in;
+    }
+    virtual ~Parabola() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = PARABOLA('" << label << "',#" << axis->id << ","
+                << step_real(focal_dist) << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int p_id;
+      ss >> p_id >> focal_dist;
+      axis = dynamic_cast<Axis2Placement *>(ent_map[p_id]);
+    }
+    std::string name;
+    double focal_dist;
+    Axis2Placement *axis;
+  };
+
   class OrientedEdge;
 
   class EdgeLoop : public Entity
