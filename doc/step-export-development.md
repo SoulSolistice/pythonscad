@@ -703,12 +703,80 @@ skipping corners no analytic face uses was written and measured, and dropped
 
 ## 5. What is implemented, and what it is worth
 
-### Entities written
+### Entities: what ISO 10303-42 has, and what we write
 
-`PLANE`, `CYLINDRICAL_SURFACE`, `CONICAL_SURFACE`, `SPHERICAL_SURFACE`,
-`TOROIDAL_SURFACE`, `B_SPLINE_SURFACE_WITH_KNOTS`, `RATIONAL_B_SPLINE_SURFACE`
-(as an ISO 10303-21 complex instance), `CIRCLE`, `ELLIPSE`, `LINE`,
-`B_SPLINE_CURVE_WITH_KNOTS`, `SURFACE_CURVE` with `PCURVE`.
+**The policy, and why it is the right one.** We write the *basic* entities and
+make them exactly right before reaching for the richer ones. A richer entity
+states more intent, and it is also harder to debug: when a `SURFACE_OF_REVOLUTION`
+is rejected the fault could be in the profile, the axis, the trim, or the
+reader's handling of the entity itself, where a rejected `CONICAL_SURFACE` has
+nowhere to hide. So each richer entity is taken on only when the basic ones
+beneath it are measured clean - the conic family is complete because the
+circle was right first, and the hyperbola was added only once a chord across a
+cone was proven to be the fault.
+
+**And SOLIDWORKS's strictness is what keeps that policy honest.** OpenCASCADE
+heals quietly - it widened a vertex to 1.08 and invented a seam edge on lid10
+without a word - so an exporter validated against it alone would have shipped
+chords 0.1 off their surfaces, ellipses 1.6 off their own endpoints and faces
+straddling their own seams, and called the result good. Every one of those was
+found because SOLIDWORKS refused the file. It is a pain to satisfy and it is the
+most valuable reader we have.
+
+#### Curves
+
+| entity | written | notes |
+| --- | --- | --- |
+| `LINE` | yes | the chord; still the most common curve, and the one that lies off a curved surface |
+| `CIRCLE` | yes | a section perpendicular to an axis, and a band's rim |
+| `ELLIPSE` | yes | a plane section of a cylinder or cone within the half angle |
+| `HYPERBOLA` | yes, since 2026-09-17 | a plane steeper than a cone's half angle - almost every plane down a shallow draft cone |
+| `PARABOLA` | yes, since 2026-09-17 | the knife edge between the two; written when the algebra lands on it |
+| `B_SPLINE_CURVE_WITH_KNOTS` | yes, rational as a complex instance | the crossing of two declared surfaces, fitted to 1e-7 of both |
+| `POLYLINE` | no | a chain of chords; nothing to gain over the edges themselves |
+| `TRIMMED_CURVE` | no | we trim by vertices, which is what a B-rep edge is for |
+| `COMPOSITE_CURVE` | no | ditto |
+| `OFFSET_CURVE_3D` | no | no construct produces one |
+| `SURFACE_CURVE` + `PCURVE` | yes | the 3D curve and where it runs across a surface; written on every sweep face |
+| `INTERSECTION_CURVE` | **no** | the subtype that *states* an edge is where two surfaces cross. We write its supertype `SURFACE_CURVE` and leave the intent unsaid |
+| `SEAM_CURVE` | **no** | the standard's own answer for the seam of a closed face. We re-seam into an unused span instead (open item 15); a face that uses its whole profile would need this |
+| `DEGENERATE_PCURVE` | no | a cone's apex; not yet needed |
+
+#### Surfaces
+
+| entity | written | notes |
+| --- | --- | --- |
+| `PLANE` | yes | asserted on the plane its own corners are on since 2026-09-16, not the mesh's normal |
+| `CYLINDRICAL_SURFACE` | yes | |
+| `CONICAL_SURFACE` | yes | |
+| `SPHERICAL_SURFACE` | yes | including a sphere closed on itself |
+| `TOROIDAL_SURFACE` | yes | |
+| `B_SPLINE_SURFACE_WITH_KNOTS` | yes, rational as a complex instance | the sweep, and a fillet's patch |
+| `SURFACE_OF_LINEAR_EXTRUSION` | **no - measured gap** | `linear_extrude` of a scaled circle exports as **192 LINEs and 66 planes**, entirely faceted; STEP states it exactly as an `ELLIPSE` swept along a vector |
+| `SURFACE_OF_REVOLUTION` | **no - measured gap** | `rotate_extrude` of a scaled circle exports as **32 `CONICAL_SURFACE`s**, one per profile segment; STEP states it exactly as one surface |
+| `OFFSET_SURFACE` | no | no construct produces one directly |
+| `RECTANGULAR_TRIMMED_SURFACE` | no | faces are trimmed by their bounds |
+| `CURVE_BOUNDED_SURFACE` | no | ditto |
+| `DEGENERATE_TOROIDAL_SURFACE` | no | a torus whose tube reaches its axis; `rotate_extrude` touching the axis, open in the roadmap |
+
+#### Topology and representation
+
+| entity | written | notes |
+| --- | --- | --- |
+| `VERTEX_POINT`, `EDGE_CURVE`, `ORIENTED_EDGE`, `EDGE_LOOP` | yes | |
+| `FACE_BOUND`, `FACE_OUTER_BOUND`, `ADVANCED_FACE` | yes | `ADVANCED_FACE` requires its geometry to be complete - which is exactly the discipline we want |
+| `CLOSED_SHELL`, `OPEN_SHELL`, `MANIFOLD_SOLID_BREP` | yes | |
+| `SHELL_BASED_SURFACE_MODEL` | yes | for an open result |
+| `BREP_WITH_VOIDS` | no | a solid with an internal cavity; would be needed the day a part has one |
+| `POLY_LOOP`, `VERTEX_LOOP`, `FACETED_BREP` | no | the faceted path writes planar `ADVANCED_FACE`s instead |
+| the CSG branch (`CSG_SOLID`, primitives) | no | a B-rep exporter by design |
+| AP242 tessellated | no | ditto |
+
+The two surface gaps are the ones worth closing, and they are the richer
+entities the policy above is for: both describe exactly the shapes
+`linear_extrude` and `rotate_extrude` make from a curved profile, and both carry
+a profile curve that is one of the conics we now write correctly. They come
+after the basic entities are clean on the shapes that already use them.
 
 ### Constructs, measured one export of a ten-line model each
 
@@ -718,6 +786,8 @@ skipping corners no analytic face uses was written and measured, and dropped
 | `linear_extrude(scale=)`, uniform taper | `CONICAL_SURFACE` + 2 planes |
 | `linear_extrude` of an `offset(r=)` profile | one cylinder per rounded corner |
 | `rotate_extrude` of a circle | **one** `TOROIDAL_SURFACE` for the whole solid |
+| `linear_extrude` of a scaled circle (an elliptical cylinder) | **192 `LINE`s and 66 planes** - faceted; wants `SURFACE_OF_LINEAR_EXTRUSION` |
+| `rotate_extrude` of a scaled circle | **32 `CONICAL_SURFACE`s**, one per profile segment; wants `SURFACE_OF_REVOLUTION` |
 | `rotate_extrude` of a rectangle | 2 cylinders + 2 planes |
 | `rotate_extrude` of a sloped polygon | cone + 2 cylinders + 2 planes |
 | a revolved free-form curve, hollow | 80 exact cones + 2 planes, from 5120 facets |
