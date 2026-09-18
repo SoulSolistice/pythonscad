@@ -7,16 +7,11 @@ What is settled lives in `doc/step-export-development.md`; build and test
 mechanics live in `CLAUDE.md`. Read both before this one — several items below
 are one sentence because the reasoning behind them is there.
 
-**Last updated 2026-09-16, for the state at `68f831116`** - item 11's root causes
-C and D closed, the flagship check repaired, item 15's outlier run to ground (it
-is a reader's repair of a face that crosses its surface's seam), claim order
-measured and refuted as a lever (item 17), item 18's 11 mm corner slide fixed at
-the root, and item 3 answered and acted on: with its boundary written as the
-crossing curve, **`f02` reads `faults=0` in SOLIDWORKS**, against a control that
-reproduced `codes=17` in the same session for the tenth time. The suite is green
-at 54 of 54 on this branch; the seam fix is parked on
-`claude/step-export-seam-fix`. Everything below was measured on
-`claude/solidworks-fault-code-17-b58858`.
+**Last updated 2026-09-18.** The session of 2026-09-16 to 18 is summarised in
+one page under *Where it stands* below, with what it learned about *method* as
+well as what it fixed - start there. The suite is green at 54 of 54 on
+`claude/solidworks-fault-code-17-b58858`, and every SOLIDWORKS number since
+2026-09-17 was taken with `-Raw`.
 
 ---
 
@@ -96,6 +91,65 @@ correct working tree.
 
 **Last measured 2026-09-15, on `claude/solidworks-fault-code-17-b58858`.** Items
 1, 11, 13, 14, 15 and 16 below carry the detail; this is the map.
+
+### The session of 2026-09-16 to 18 in one page
+
+**What it fixed, each measured on our own file first:**
+
+| change | measured on lid10 |
+| --- | --- |
+| a substituted curve passes through its run's own endpoints; planar faces are surfaces of the corner placement | vertices off their own edge's curve (code 7) **14 -> 0**, worst 1.6196 |
+| a band's rims reach the placement | corners the plane veto holds 20 -> 9 |
+| the re-seam: a closed profile's seam goes in a span the face does not use | faces crossing their surface's seam **2 -> 0** |
+| the plane veto: a holed face is triangulated, and a triangle is never "bent" | corners held **9 -> 0**; item 11 closed; `flagship-strict` off WILL_FAIL |
+| the conic a plane cuts, hyperbola and parabola included | edges off a surface they bound **91 -> 23**; 64 hyperbolas written |
+| a chord on a sweep becomes the crossing curve, with a pcurve checked against it | **parked** on `claude/step-sweep-chord-parked` - see item 22 |
+
+SOLIDWORKS moved once: **the bayonet lost codes 7, 17 and 30** with the conic
+promotion. lid10 has not moved, and the plane-veto fix made it *worse* for a
+while (code 13 returned) by leaving one corner behind - item 21.
+
+**What it learned about method, which is worth more than the fixes:**
+
+1. **A fault code is a relation between two entities, and the sentence says
+   which.** 7 is vertex-against-its-edge's-curve, 16 vertex-against-face-surface,
+   17 edge-against-face-surface. Every instrument before this session measured
+   16, which never fires. See *Fault codes* in the development doc.
+2. **Second-order codes are what a reader makes of a first-order defect.** A
+   0.219 edge is a good edge until the reader widens a strayed vertex past its
+   length - then it is code 13. The census reports the precursor, not the code.
+3. **Import raw, round-trip always, round-trip twice to isolate a repair.**
+   Knitting, healing and analytic conversion are on by default and each changes
+   what is measured; analytic conversion had been altering the control's volume
+   by 1.1 mm3 in every run ever made. The plain/healed round-trip pair is what
+   showed SOLIDWORKS's "General geometry problem" to be 215 curves re-fitted by
+   at most 9.6e-05 - nothing structural - when no fault list could.
+4. **A failed repair makes the diagnosis worse.** `ImportDiagnosis` took the
+   bayonet from 64 faces to 2 and no volume. Count faults before any heal.
+5. **The API's fault checks and the Import Diagnostics dialog are different
+   analyses, and neither contains the other.** `Check`, `Check2` and `Check3`
+   agree with each other everywhere; the dialog disagrees with all three.
+6. **Measure against the surface as written, not against its declared band.** A
+   grid's band is its tessellation's sagitta; by that standard a chord 0.1 off
+   the written sweep is "on" it, which hid 19 of 27 sweep chords.
+7. **Kernel agreement is still not proof.** OpenCASCADE reports strays our file
+   does not contain and misses ones it does, because it heals on the way in.
+   Every new check this session reads the STEP text with no kernel in the path.
+8. **SOLIDWORKS's strictness is the asset.** Every defect above was found because
+   it refused a file OpenCASCADE had quietly repaired.
+
+**What it built:** `fault-census.py` (every known defect keyed by the code it
+becomes; validated by the 2026-09-08 control, 2420 chords against 38-62 for
+current files), `vertex-on-curve.py`, `seam-straddle.py`, `reader-diff.py`,
+and `step-interop-solidworks.ps1 -Raw -RoundTrip -Heal`.
+
+**Where to start next.** Item 22's sweep half turned out to be a declaration
+problem, not a curve problem: every plane that failed to cross the sweep is
+**undeclared** - a facet the boolean left, meeting a declared sweep at 3.7 to 20
+degrees, so the crossing is ill-conditioned and not the edge's geometry. The
+next question is what those facets are in the model and why they were not
+claimed, which is provenance territory (items 13 and 14). After that: the three
+pinched loops (code 21, never investigated) and item 21's one corner.
 
 ### The session of 2026-09-14/15 in one page
 
@@ -2821,6 +2875,50 @@ still a straight line in (u, v) would make the two disagree, which is what codes
 right geometry; what it needs is the pcurve to match, and to be decided at the
 writer where the corners are final rather than at recognition time where they are
 not.
+
+#### The sweep half, 2026-09-18: parked, and a declaration problem rather than a curve problem
+
+**Built, then parked** on `claude/step-sweep-chord-parked` (`1de808ff9`), because
+the suite fails on it. A chord on a sweep face whose ends are on both surfaces is
+replaced by the curve the sweep crosses its neighbour along, and its pcurve is
+rebuilt and checked against that curve before either is written - replacing one
+without the other is what codes 11 and 12 are for.
+
+**Why it is parked, which is a gap in the gate and not a malformed file.** It
+writes a combination this exporter never wrote before: a 3D B-spline edge with a
+**2D B-spline PCURVE on a B-spline surface**. That is legal STEP, but
+`tests/validatestep.py`'s pcurve rule maps the 2D curve through the surface's
+*analytic* parametrisation, so it demands a placement and reports "PCURVE's
+surface has no usable placement" on exactly the promoted edges - failing every
+declared-grid fixture and the flagship. The fix is to teach the validator to
+evaluate a tensor-product B-spline surface, so the new case is *checked* before
+it lands. Relaxing the rule around it would be fixing the gate.
+
+**Why it would not help much yet anyway.** On lid10 it promotes 1 of 27 sweep
+chords. Two things stood in the way:
+
+- **The gate measured against the band.** A grid's declared band is its
+  tessellation's sagitta, so by that standard a chord 0.1 off the written sweep
+  is on it; 19 of 27 were judged flat. Measuring against the written surface
+  (kept on the parked branch) brought 21 to the fit.
+- **Then 14 failed to fit, and every one meets an undeclared plane.** The error
+  was all on the sweep side. A probe on one sample each settled it: the
+  projection *succeeds* to 1e-14 but **moves 4.1 to 6.3 mm on an 8 mm chord**,
+  because the two surfaces meet at **3.7 to 20 degrees** where the cones that fit
+  meet at 36 to 41 - and **every one of those planes is undeclared**, a facet the
+  boolean left, fitted to its own corners. A declared sweep crossed with an
+  approximation of something else has no crossing curve worth writing.
+
+Tracing a plane against the sweep in the sweep's own parameters (as a cone
+already is) was tried as a fix for the second point and recovered none of the
+14, as the angles predict; it is inert on the parked branch. The next question
+is what those facets are in the model and why no declaration claimed them.
+
+Of the rest: 6 have an end off the sweep itself - a code 16 on a B-spline
+surface, which the census cannot see because its code-16 row measures analytic
+surfaces only (`point-vs-faces.py` can) - and 3 straddle a crease of the
+profile, where the crossing has a kink and wants a C0 knot rather than one
+Bezier.
 
 **The rest of the original plan**, for the record: the chord-vs-arc fix exists for
 one case and does not cover these. `doc/step-export-development.md` records it for cylinders:
