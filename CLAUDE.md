@@ -265,6 +265,11 @@ recorded without them cannot be compared with another one. Fusion has no
 out-of-process automation; `scripts/fusion/step-interop-fusion.py` runs inside it
 via Utilities → ADD-INS → Scripts and Add-Ins.
 
+**Use the committed loop, not ad-hoc scripts:** `scripts/step-dev.ps1` (or
+`.sh`) `build | test | flagship | export <part> | census <file>`. **Every
+diagnostic is catalogued by the question it answers in
+`scripts/step-diagnostics/README.md`** — read it before writing a new one.
+
 Licence-free instruments, all Python over OCP:
 
 | script | reports |
@@ -875,6 +880,7 @@ smoke testing, JavaScript API (`EmsInitPython` / `EmsEvaluatePython`), and known
 | document | scope |
 | --- | --- |
 | `CLAUDE.md` | this file: environment, build, packaging, running and testing |
+| `doc/step-export-next-session.md` | STEP exporter: a priming prompt for the next session — standing rules, where to start |
 | `doc/step-export-development.md` | STEP exporter: settled design, kernel behaviour, testing doctrine, traps, refuted claims |
 | `doc/step-export-wip.md` | STEP exporter: open items, unexplained results, roadmap, handover |
 | `doc/testing.md` | the test suite in general |

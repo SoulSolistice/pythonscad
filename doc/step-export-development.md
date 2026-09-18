@@ -1096,33 +1096,66 @@ other (see *Fault codes* above).
   whose API lists seven. This is the same lesson as `c06`, where a clean fault
   report sat beside a solid 14% wrong and only the volume caught it: what a
   kernel *does* is a measurement, what it *lists* is a report.
-- **Fault codes.** `swFaultEntityErrorCode_e`, reflected out of the installed
-  `api/redist/SolidWorks.Interop.swconst.dll` rather than remembered — the
-  neighbours are as informative as the codes themselves:
+- **Fault codes.** `swFaultEntityErrorCode_e`, all 36 of them. The number and
+  name of each are reflected out of the installed
+  `api/redist/SolidWorks.Interop.swconst.dll`, and the description is the API
+  help's own sentence (SOLIDWORKS 2026 API help, *swFaultEntityErrorCode_e
+  Enumeration*); the two sources agree member for member, checked 2026-09-18.
+  The sentence is what matters - it says which *two* entities the code is a
+  relation between - so it is quoted exactly rather than paraphrased.
 
-  ```text
-   7 swEdgeVertexNotLie      11 swEdgeSpcurveOutOfTol   13 swEdgeVerticesTouch
-  15 swEdgeBadWire           16 swFaceBadVertex         17 swFaceBadEdge
-  18 swFaceBadEdgeOrder      20 swFaceBadLoops          21 swFaceSelfIntersecting
-  24 swFaceFaceInconsistency 30 swTopolNotG1Continuous  35 swTopolMissingGeometry
-  36 swEdgeTouchEdge
-  ```
+  "Seen" is whether any file of ours has produced the code in a SOLIDWORKS run;
+  "census" is the `fault-census.py` row that watches for its cause in our own
+  file, where there is one.
 
-  The names are abbreviations; the API documentation gives each one a sentence,
-  and the sentence is what says which two entities the code is *about*
-  (`swFaultEntityErrorCode_e`, SOLIDWORKS 2026 API help):
+  | code | name | SOLIDWORKS's description | relates | seen | census / notes |
+  | --- | --- | --- | --- | --- | --- |
+  | 1 | `swBodyCorrupt` | Data structure is corrupt | body | — | — |
+  | 2 | `swBodyInvalidIdentifiers` | Body has invalid or duplicate identifiers | body | — | — |
+  | 3 | `swBodyInsideOut` | Body is inside out | body | — | *`c06` read inside out yet reported clean - volume caught it, no code did* |
+  | 4 | `swBodyRegionsInconsistent` | Regions of body are inconsistent | body | — | — |
+  | 5 | `swEdgeNonPeriodicCurve` | Open or non-periodic curve on ring edge | edge | — | a closed edge whose curve is not closed |
+  | 6 | `swEdgeNonPeriodicNomGeom` | Open or non-periodic nominal geometry on ring edge | edge | — | — |
+  | 7 | `swEdgeVertexNotLie` | Vertex does not lie on edge's curve | vertex / edge curve | **yes** | code 7 row - exact; also produced by a reader merging a strayed vertex (see 16) |
+  | 8 | `swEdgeVertexNotLieNomGeom` | Vertex does not lie on nominal geometry | vertex / edge curve | — | — |
+  | 9 | `swEdgeWrongDir` | Curve in wrong direction for edge | edge / its curve | — | why a conic's *placement* turns rather than its vertices |
+  | 10 | `swEdgeWrongDirNomGeom` | Nominal geometry in wrong direction | edge / its curve | — | — |
+  | 11 | `swEdgeSpcurveOutOfTol` | Spcurve not within edge's tolerance | pcurve / 3D curve | — | why a sweep chord's pcurve is rebuilt and checked with its curve |
+  | 12 | `swEdgeSpcurveOutOfTolNomGeom` | Spcurve not within edge's tolerance of nominal geometry | pcurve / 3D curve | — | — |
+  | 13 | `swEdgeVerticesTouch` | Vertices of edge touch | edge / its two vertices | **yes** | code 13 row - second-order: a short edge at a strayed vertex |
+  | 14 | `swEdgeBadFaceOrder` | On a non-manifold edge, the face order around the edge does not match the order of the faces' surfaces around the edge | edge / its faces | — | non-manifold only |
+  | 15 | `swEdgeBadWire` | Two wireframe edges intersect at a position other than a vertex | wire | — | — |
+  | 16 | `swFaceBadVertex` | Vertex does not lie on face's surface | vertex / face surface | never | code 16 row (analytic surfaces only); what every pre-2026-09-16 instrument measured |
+  | 17 | `swFaceBadEdge` | Edge does not lie on face's surface | edge / face surface | **yes** | code 17 row - a chord where the surface curves |
+  | 18 | `swFaceBadEdgeOrder` | Edge order around the face does not match the order of the edges' curves around the face | face / its loop | — | — |
+  | 19 | `swFaceNoAccomVertex` | A surface singularity has no accompanying vertex | face / surface pole | — | a cone's apex or a sphere's pole inside a face with no vertex there |
+  | 20 | `swFaceBadLoops` | Loops inconsistent | face / its loops | — | — |
+  | 21 | `swFaceSelfIntersecting` | Face is self intersecting | face | **yes** | code 21 row - second-order: a pinched loop |
+  | 22 | `swFaceBadWireframe` | A wireframe edge intersects a face at a position other than a vertex | wire / face | — | — |
+  | 23 | `swFaceCheckerFailure` | Checker failure during face/face check | face / face | — | the checker gave up, not a verdict |
+  | 24 | `swFaceFaceInconsistency` | Inconsistent faces | face / face | yes, faceted control | lid10's *faceted* control reads codes=24 |
+  | 25 | `swGeomStateSelfIntersect` | Geometry is self intersecting | geometry | — | — |
+  | 26 | `swGeomDegenerate` | Geometry degenerated | geometry | — | — |
+  | 27 | `swRegionBadShells` | Inconsistent shells | region / shells | — | — |
+  | 28 | `swShellBadTopologyGeometry` | A topological entity belonging to a shell is not geometrically within the shell | shell | — | — |
+  | 29 | `swShellIntersect` | Shell shell inconsistency | shell / shell | — | — |
+  | 30 | `swTopolNotG1Continuous` | Topology's geometry is not G1 continuous | entity | **yes** | accompanies 13 wherever a reader has merged vertices; no row of its own |
+  | 31 | `swTopolSizeBoxViolation` | Some or all of entity is outside size box | entity | — | — |
+  | 32 | `swTopolStateCheckFail` | Checker failure | entity | — | the checker gave up, not a verdict |
+  | 33 | `swTopolStateNoGeometry` | Missing geometry | entity | — | — |
+  | 34 | `swEntityStateInvalid` | State of entity is invalid | entity | — | — |
+  | 35 | `swTopolMissingGeometry` | Missing geometry | entity | — | — |
+  | 36 | `swEdgeTouchEdge` | Edges touch | edge / edge | — | — |
 
-  | code | name | what SOLIDWORKS says it means |
-  | --- | --- | --- |
-  | 7 | `swEdgeVertexNotLie` | Vertex does not lie on edge's curve |
-  | 8 | `swEdgeVertexNotLieNominal` | Vertex does not lie on edge's nominal geometry |
-  | 11 | `swEdgeSpcurveOutOfTol` | Spcurve is not within edge's tolerance |
-  | 12 | `swEdgeSpcurveOutOfTolNominal` | Spcurve is not within edge's nominal tolerance |
-  | 13 | `swEdgeVerticesTouch` | Vertices of edge touch |
-  | 16 | `swFaceBadVertex` | Vertex does not lie on face's surface |
-  | 17 | `swFaceBadEdge` | Edge does not lie on face's surface |
-  | 21 | `swFaceSelfIntersecting` | Face is self intersecting |
-  | 30 | `swTopolNotG1Continuous` | Topology's geometry is not G1 continuous |
+  Two things the table makes plain. First, the codes we have actually produced
+  are **7, 13, 17, 21, 30** and, on a faceted control, 24 - five of 36, and all
+  but 17 are either a relation the census measures directly (7) or a reader's
+  response to one (13, 21, 30). Second, the relation every instrument measured
+  before this session was **16**, which has never fired on a file of ours.
+
+  "Nominal geometry" (8, 10, 12) is SOLIDWORKS's own term for the exact geometry
+  behind a tolerant edge or vertex; we have never seen those codes and do not
+  write tolerant entities.
 
   Read as sentences rather than as names, the codes split cleanly by *which pair*
   each one holds against the other, and that is the whole of their diagnostic
@@ -1780,6 +1813,28 @@ drift of 9e167 per cent.
   OpenCASCADE, lid10 showed strays the file does not contain *and* nothing about
   the fourteen it did. `export-step-flagship-coupons` asserts it over all six
   coupons.
+- **Locating a fault, once the census has counted it.** Each of these answers
+  one question about one place in a file, and together they are how every
+  finding of 2026-09-16 to 18 was pinned to an entity:
+  - `at-vertex.py <file> x y z [tol]` — what we wrote at a point: the vertex,
+    its edges, and the faces using each.
+  - `near-edge.py <file> x y z [radius]` — our edges whose midpoint is near a
+    point. SOLIDWORKS reports a faulty edge by its centre; this is how that
+    centre is matched back to an entity of ours (to 0.0001 on lid10).
+  - `face-corners.py <file> <face>` — a face's loops, edge by edge, with each
+    edge's curve kind and length.
+  - `vertex-owners.py <file> [x y z]` — every vertex against the surface of every
+    face using it (code 16), analytic surfaces only.
+  - `point-vs-faces.py <file> x y z` (OCP) — one point against every face that
+    uses it, *B-spline surfaces included*, which is the census's blind spot.
+  - `pinched-loops.py <file>` — the faces behind the census's code-21 count,
+    listed; legal seams of closed faces excluded exactly as the census does.
+  - `sweep-chords.py <file>` (OCP) — line edges on a sweep face, split by whether
+    their *ends* are on both surfaces (a crossing curve can replace them) or not
+    (the corner is at fault, not the edge).
+  - `reader-built.py <file>` (OCP) — edges the reader holds that we never wrote,
+    which is how OpenCASCADE's seam edge and 1.08 vertex were shown to be its own
+    construction.
 - `scripts/step-diagnostics/fault-census.py <file.stp> …` — every property this
   exporter is known to get wrong, keyed by the fault code it becomes. The first
   thing to run on a new export and the first thing to compare across a change.
