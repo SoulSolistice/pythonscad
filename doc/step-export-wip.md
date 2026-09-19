@@ -3196,6 +3196,72 @@ plane an edge sits 2.27 off.
 3. **The wrap** for rung A: a claim covering every span of a closed profile
    needs a `SEAM_CURVE`, or a cut, not the re-seam.
 
+#### The three items, taken 2026-09-19: two were one, and the third parks
+
+Work on `claude/step-ladder-precision`, which carries the matrix live
+(`f0aff6156`); the claim work is parked on `claude/step-grid-claim-parked`
+(`2bd2cfdf4`).
+
+**The fan and the coincident corners were one defect: scoring chord planes.**
+Every opened shell and every "fan that cannot be cut" traced to two mesh
+vertices on one point, and the merge built for them was correct - snap corners
+joined by an edge onto one point, key edges on the vertex *entity* rather than
+the mesh index, drop a collapsed side from a loop and from the ring a fan is
+cut from, keep a plane section off a collapsed run. But asked where the pairs
+came from, the mesh had them **1.4e-12 to 1.9 apart**: never a duplicate the
+mesh carried, always two points the solver had put on one root. A far root on a
+bore's vertex line lies on *both* facet planes beside it, so with mesh planes
+scored it outranked the near one. Taking mesh planes out of the arbiter
+(`used = false`) and nothing merges anywhere; the merge was removed unused, and
+is described here for the day a mesh does carry a duplicate. Three more
+precision fixes fell out on the way, all landed:
+
+- a written face on a plane the model declared is a declaration, not a chord -
+  classed as a chord, lid10's z = 95 cap went soft and the corners of its hole
+  were placed 0.65 below it, on the outer wall;
+- a `declare_grid` sweep or a Bezier patch is a declared *interpolant*, below an
+  exact declaration and above a fit;
+- the faces the file writes rank above provenance's owners.
+
+Also tried and removed as changing nothing measurable: recognising a cap as a
+plane perpendicular to a declared quadric's axis (exact, but the fold test
+already keeps those corners on it), and deriving the plane of the circle two
+coaxial surfaces meet in to condition their crossing (the corners it was for are
+not on the sweep at all - below).
+
+**The wrap is solved, and what is left of rung A is a claim question.** With the
+refusal removed, recognition and the writer disagreed about which profile span a
+facet lies over: recognition asked the centroid, which beside the seam projects
+onto the flank across the crease, and the writer asked the corners. Asking the
+corners in both, recognition sees the claim wrap and cuts it into arcs of
+spans, and no face crosses its seam. The cuts run along profile *columns*, and a
+column of a tensor-product B-spline at a knot is itself a B-spline curve - the
+surface's u-knots and that column of its control net - so those edges are
+written as the surface's own curve, exact, where the chord between stations was
+0.1 off it (155 of them on lid10, to 1). What stops it landing is five corners
+at the thread's ends, each exactly on two exact declarations and 0.10 to 0.22
+off the sweep: (79.4, 0, 1.2) is on the ridge's flat *end cap* - the sweep's
+flank at that height is at r = 79.51 - so the facet attaching it to the sweep
+face is not the sweep's, and the refusal was crudely right about it. The
+precise replacement is a claim decided by solvability: a facet belongs to the
+sweep when each of its corners can be placed on the sweep together with the
+other declarations it lies on. That couples recognition to the placement and is
+the next design step.
+
+| code 17 | committed | the matrix | + claim work (parked) |
+| --- | --- | --- | --- |
+| lid10, bayonet | 42 | 42 | 52 |
+| f02 | 8 | 8 | 8 |
+| f04 | 38 | 38 | **8** |
+
+**Two instruments were blind, and one of them was ours.** `vertex-on-curve.py`,
+and through it the census's code-7 row, returned 0 for a `SURFACE_CURVE` - every
+sweep edge - and measured a B-spline only at its end control points. It now
+unwraps the one and evaluates the other by de Boor with its knots; mutation-
+checked. `validatestep.py` rejected any curve that was not one Bezier span; it
+now holds a knotted curve to the contract it already held a grid surface to
+(parked with the claim work, which is the only thing that writes one).
+
 Also noted, not caused here: on the CGAL backend in the analytic-only mode,
 `step-bored-cone` and `step-band-family` already raise "planar faces assert a
 plane one of their own bounds is not in" on the old binary; the arbiter adds
