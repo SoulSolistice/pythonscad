@@ -3262,6 +3262,45 @@ checked. `validatestep.py` rejected any curve that was not one Bezier span; it
 now holds a knotted curve to the contract it already held a grid surface to
 (parked with the claim work, which is the only thing that writes one).
 
+#### SOLIDWORKS, 2026-09-19: codes 7 and 17 are gone from lid10
+
+`claude/step-ladder-precision` at `93cafc572`, kit `build/sw-2026-09-19`,
+SOLIDWORKS revision 34.0.0, `-Raw -RoundTrip -Heal`, labelled "raw (do-not-knit,
+diagnostics off, analytic conversion off)"; the options were restored after.
+The control reads as it must, `faults=2 faultyfaces=2 codes=17`, and is the one
+file its repair alters (Δvolume -37.4145, Δarea +6.3295).
+
+| file | census code 17 | SOLIDWORKS | repair |
+| --- | --- | --- | --- |
+| lid10 | 42 | solid, 803 faces, `faults=1 faultyfaces=3 faultyedges=0 codes=21/30` | 1 face split, nothing re-fitted |
+| bayonet | 42 | solid, 65 faces, `faults=1 faultyfaces=1 faultyedges=0 codes=30` | 1 face split, nothing re-fitted |
+| f02 | 8 | solid, valid, no faults | 34 curves re-fitted, worst 4.761e-05 |
+| f04 | 38 | solid, valid, no faults | 215 curves re-fitted, worst 9.583e-05 |
+
+Against the last recorded lid10 run (`faultyfaces=7 faultyedges=1
+codes=7/17/21`): **codes 7 and 17 are gone, and so is the faulty edge**; faulty
+faces 7 -> 3. What is left is two codes, and each is accounted for:
+
+- **21**, self-intersecting face, on lid10 only - the census's three pinched
+  loops (planes at z = 84.9), still never investigated; the bayonet has none
+  and reports no 21.
+- **30**, not G1 continuous, on both - and the healed pair names it. The repair
+  adds exactly one face and one curve, moves the corners of one B-spline face,
+  and re-fits nothing: SOLIDWORKS **splits a sweep face** at a crease. A
+  `declare_grid` sweep is linear across its profile, so it is only C0 at every
+  profile column, and a face spanning several spans carries a crease inside it.
+  Splitting sweep faces at their profile columns, with the column's own curve as
+  the edge, is exactly what `claude/step-grid-claim-parked` already does for a
+  wrapping claim - a second reason, independent of the wrap, to finish it.
+
+f02 and f04 are clean by every API check, and their repair is the familiar
+re-fit at a ten-thousandth of a millimetre, touching no vertex, surface or
+topology. The volume OpenCASCADE reads from SOLIDWORKS's re-export is 1.04%
+below ours on lid10 and 0.81% on the bayonet, while SOLIDWORKS's own volume for
+lid10 (224483.5622) is 0.06% from what OpenCASCADE reads of ours (224620.2322);
+which side of the second read loses the 1% is not established. The `-FaultDetail`
+TSV was not written.
+
 Also noted, not caused here: on the CGAL backend in the analytic-only mode,
 `step-bored-cone` and `step-band-family` already raise "planar faces assert a
 plane one of their own bounds is not in" on the old binary; the arbiter adds
