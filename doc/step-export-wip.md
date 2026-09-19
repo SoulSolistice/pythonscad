@@ -3112,11 +3112,95 @@ rung has claimed a corner, face or edge first, the more precise answer replaces
 it - the low-precision rungs are historical, and first refusal kept them
 winning. Instances found so far: the provenance rung's two-surface curve point
 blocking the three-surface point, and the one-surface projection holding
-corners the two-face crossing places exactly. Candidates still to survey: the
-mesh-plane triple rung (`StepKernel.cc`, "three exact things meet"), which uses
-the *mesh's* facet planes where declared ones exist; and provenance's owners
-against the faces the file actually writes, which its own comment says can
-disagree.
+corners the two-face crossing places exactly. The rest of the ladder is
+surveyed in item 23, with a matrix that makes the precedence a table.
+
+### 23. The precision ladder: a survey, a matrix, and what stands between it and landing
+
+**Opened 2026-09-19**, under the standing rule that where a less precise rung
+has claimed a corner, face or edge first, the more precise answer replaces it -
+the low-precision rungs are historical, and first refusal kept them winning.
+
+#### The survey
+
+| rung | decides by | the more precise answer |
+| --- | --- | --- |
+| A. grid claim refusal (`recogniseGridPatches`) | 4x the median corner stray | claim, and let the placement put junction corners on the crossing |
+| B. "three exact things meet" (singleOwner block) | the mesh's facet planes, filtered by a `cos(pi/6)` chord heuristic | the faces the file writes, declared planes first |
+| C. conic with one plane | the mesh's plane, alternating projection | a declared section plane |
+| D. provenance two-owner (`reportOwnership`) | the curve two owners share, gated by `travel <= bound` with the grid's tessellation band | every constraint the file asserts, solved together |
+| E. own-quadric projection | one surface only | the crossing of all faces at the corner |
+
+Two instances are fixed in `2b9d05efd` (item 22's last subsection): D holding
+corners the three-surface point places, and E holding corners the two-face
+crossing places.
+
+**A, measured.** Removing the refusal outright, with the placement now precise,
+takes f04's code 17 from 38 to **8** and dissolves the non-manifold fan that
+blocked it when it was first parked. On lid10 it still costs the wrap (both seam
+crossings back: the chamfer exposes the ridge's buried back span, the claim
+covers all four spans, the re-seam cannot apply) and, with mesh planes soft, the
+60 edges used by three faces. Restored until both are fixed.
+
+The lid10 failures of `export-step-flagship-corners` - a cone corner 0.716 off
+and a plane corner 0.0137 off - are **OpenCASCADE's**, not ours: in our text,
+vertex #1049 at (79.5875, 0, 0) is used by the sweep and two planes and no cone
+at all, and OCCT has widened it to 1.08. It is the run-in again, where A's
+refused facets are.
+
+#### The matrix, parked on `claude/step-corner-arbiter-parked` (`4f4411b94`)
+
+Rungs propose instead of claiming; an arbiter chooses. Two tables at the top of
+`StepKernel.cc` decide it, so reordering the ladder is editing a table:
+
+- **`kCornerTiers`** ranks the kinds of constraint on a corner, with two
+  columns. `rank` is precision: declared face, then fitted face, then
+  provenance owner, then mesh plane. `hard` says a candidate that leaves such a
+  constraint, where the corner was on it, is no candidate. Candidates are
+  compared tier by tier from the most precise down - one constraint of a higher
+  tier outweighs any number of a lower one.
+- **`kCornerRungs`** breaks ties between rungs.
+
+What building it taught, each measured:
+
+- **Constraints are not all worth the same, so they cannot be counted.** Mesh
+  planes ranked level with declarations let two chord planes outvote the sweep:
+  61 corners left off on lid10.
+- **What the file writes outranks what provenance says.** Provenance above the
+  fitted faces took 60 lid10 corners off faces the file asserts, and the final
+  check refused them with an EXPORT-ERROR.
+- **Precision and safety are separate columns.** A mesh plane ranks last by
+  precision, but it is held `hard` because the fan cannot yet take what bending
+  it allows: soft, f04 fans 21 faces and opens along 12 edges, and lid10 writes
+  60 edges used by three faces.
+- **A far root is never a fallback.** Two planes and a quadric are solved for
+  both closed-form roots along the planes' line - the implicit is exactly a
+  quadratic in the line parameter, so three evaluations fix it - and within one
+  score only the nearest candidate is eligible.
+
+**Why it is parked.** Against `2b9d05efd`: code 17 on lid10 and the bayonet 42 ->
+46, on f04 38 -> 44, f02 unchanged. The arbiter re-decides corners the old rungs
+left alone, and downstream code tested only with the old moves breaks. On f04
+two corners with the same constraints solve to the same point, 0.014 apart -
+two mesh vertices where the model has one - and the sliver between them has a
+plane an edge sits 2.27 off.
+
+#### What stands between it and landing
+
+1. **The fan** (`split_for_corners`) must survive bending a planar face beside a
+   sweep without reusing an edge the sweep already has, and without opening the
+   shell. Then `MeshPlane.hard` goes false.
+2. **Coincident corners.** Two mesh vertices converging on one point of the
+   model is a topological fact the placement has to act on - merge them - not a
+   placement to refuse.
+3. **The wrap** for rung A: a claim covering every span of a closed profile
+   needs a `SEAM_CURVE`, or a cut, not the re-seam.
+
+Also noted, not caused here: on the CGAL backend in the analytic-only mode,
+`step-bored-cone` and `step-band-family` already raise "planar faces assert a
+plane one of their own bounds is not in" on the old binary; the arbiter adds
+`step-cap-meets-wall` and takes the band family from 11 faces to 13. No test
+gates that mode's EXPORT-ERROR.
 
 ## Unexplained, and to be validated
 
