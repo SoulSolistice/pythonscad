@@ -163,6 +163,12 @@ def main():
         for kind2, j, pb in gained:
             if kind2 != kind or len(pb) != len(pa):
                 continue
+            # A 2D pcurve and a 3D curve are both B-splines with the same number
+            # of control points, and pairing one with the other is what made this
+            # raise rather than report. They are not comparable, so they are not
+            # a candidate pair.
+            if len(pb[0]) != len(pa[0]) or len(pb[-1]) != len(pa[-1]):
+                continue
             d = math.dist(pa[0], pb[0]) + math.dist(pa[-1], pb[-1])
             if best is None or d < best[0]:
                 best = (d, j, pb)

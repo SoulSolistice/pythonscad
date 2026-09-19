@@ -146,10 +146,14 @@ and `step-interop-solidworks.ps1 -Raw -RoundTrip -Heal`.
 **Where to start next.** Item 22's sweep half turned out to be a declaration
 problem, not a curve problem: every plane that failed to cross the sweep is
 **undeclared** - a facet the boolean left, meeting a declared sweep at 3.7 to 20
-degrees, so the crossing is ill-conditioned and not the edge's geometry. The
-next question is what those facets are in the model and why they were not
-claimed, which is provenance territory (items 13 and 14). After that: the three
-pinched loops (code 21, never investigated) and item 21's one corner.
+degrees, so the crossing is ill-conditioned and not the edge's geometry.
+**Answered the same day** (item 22, *The undeclared planes are the thread's own
+facets*): they are the ridge's flank where it dives into the wall, refused by
+the grid claim's outlier rule, and every refused corner is a junction with a
+declared wall. Admitting them is parked on `claude/step-grid-junction-parked`;
+it needs three-surface corners placed first, then a fan and a wrap fixed. After
+that: the three pinched loops (code 21, never investigated) and item 21's one
+corner.
 
 ### The session of 2026-09-14/15 in one page
 
@@ -2929,6 +2933,190 @@ the cylinder chords that promotion does not reach. The sweep case is the one tha
 matters most - it is the largest number on both reference parts - and it is the
 same question the crossing curve answered for edges between two declared
 surfaces: an edge on one surface only still has to lie *on* it.
+
+#### The undeclared planes are the thread's own facets, 2026-09-18
+
+**Answered, and the fix it suggests is parked** on `claude/step-grid-junction-parked`
+(`954a2c7d3`) because the suite fails five tests on it - for three reasons worth
+more than the fix.
+
+**What the planes are.** `scripts/step-diagnostics/planes-at-sweep.py` over lid10:
+13 planes border the sweep, all at the thread's two ends - z 0.5 to 4.5 between
+0 and 15 degrees, z 70 to 72 between 164 and 195 degrees, the ridge stopping at
+918 degrees = 198. Each has every corner but at most one on the sweep to 1e-6,
+the odd one within 0.18, and meets it at 1.4 to 20 degrees. They are not a facet the boolean left of something else:
+an instrumented build matched all 13 to facets the grid claim **refused**, and
+every one of those is a facet of the ridge's own flank. The sagitta that makes
+them look like a second surface is the tessellation's, 79 (1 - cos 3) = 0.109,
+which is the census worst of 0.1089.
+
+**Why the sweep did not take them - five whys, with the branches:**
+
+1. *Planes of an undeclared original, a hull or a polyhedron.* **Refuted**: the
+   instrumented run maps each to a refused facet of original 134, the ridge.
+2. *Refused by corner membership or by the centroid test.* **Refused by
+   neither**: the log's "24 facets of the sweep are left faceted: a corner of each
+   is further off the fit than four times the 0.0229 this claim is typically off,
+   by up to 0.2184" is the outlier rule in `recogniseGridPatches`, and every one
+   of the 13 planes sits on one of those 24. Whether any of the 93 centroid
+   misses also ended up in them was not checked.
+3. *The fit failing at the run-in and run-out, "where a cubic has least
+   support"* - the code's own comment. **Refuted**: every corner the generator
+   declared at the ends is on the fit to 0.0000; only corners the boolean made
+   are off it. Each of the 25 corners more than 0.05 off the fit is nearer
+   another declared surface than the sweep - 8 on a plane to 0.0000, the rest on
+   a cylinder or cone within 0.083, inside its sagitta. They are where the thread
+   dives into the wall: the mouth chamfer, the chamfer's top step at z = 1.2
+   against the taper (r 79.4 and 79.376), the taper-to-bore crease at z = 65,
+   r = 78.1, and the bore's facets near z = 73. On two tessellations, on neither
+   surface. No corner nearer the sweep than any wall is further off than 0.0422,
+   so the split has no overlap.
+4. *The middle is clean because the thread's stations land on the wall's 6
+   degree vertices* (153 steps over 918 degrees is 6.000). **Refuted**: 9 of 278
+   middle corners are on a station. Why the middle stays at a median of 0.019
+   while the ends reach 0.2 is **not explained** - the grazing entry is the
+   obvious candidate and is unmeasured.
+
+**The fix that was tried first, and why it is abandoned.** Excluding a corner
+that is nearer another declaration from the stray measure claims the 24, and 13
+planes bordering the sweep become 2. It is still a *threshold* standing in for a
+computation - it decides by comparing distances what the declarations determine
+outright - and the standing rule is that a magic number or an approximation band
+is the last resort and needs explicit approval. Recorded here because its
+measurement is what found the three defects below, not as the way forward. The
+census gets *worse*:
+
+| lid10 | before | parked |
+| --- | --- | --- |
+| code 17, count and worst | 62, 0.1089 | 67, **0.2615** |
+| faces crossing their seam | 0 | **2** |
+| sweep chords with an end off a surface | 8 | 14 |
+| edges used by more than two faces | 0 | **60** |
+
+and `validatestep.py` rejects lid10 and the bayonet outright. The refusal was
+masking three defects, each its own item:
+
+- **A fan across the sweep.** "Faces that keep a plane fanned into triangles"
+  adds 196 faces where it added 23, and one of them, `#41289`, is a 16.6 mm
+  triangle with all three corners on the taper cone, overlapping the sweep along
+  an edge the sweep and another plane also use. That is the 60.
+- **The claim wraps.** At the run-in the chamfer exposes the ridge's buried back
+  span, so the claim covers all four spans, the re-seam no longer applies and
+  both seam crossings come back.
+- **Three-surface corners no placement reaches.** The worst, (-74.278, -24.134,
+  65.000), is the thread meeting the taper-to-bore crease; the z = 1.2 ones meet
+  the chamfer's step. Each is a junction of the sweep and two walls, left 0.13 to
+  0.22 off the sweep. *Prefer the declaration*: the crease at z = 65 is the
+  bore cylinder's declared cap plane, and the step at z = 1.2 the chamfer's, so
+  each is sweep, plane and wall - well conditioned, where cone against cylinder
+  at 1.15 degrees is not.
+
+Order to take them: the three-surface corners first, since they are what the
+refusal existed for; then the fan, then the wrap. The parked change is the
+measurement that says when they are done - it should turn the table above
+green without anything else changing.
+
+#### Where a corner belongs is a closed form, and two rules were standing in for it
+
+**Measured 2026-09-18, after the above.** A corner is determined by the surfaces
+the file writes faces of it on: three of them meet in a *point*. The ladder had
+no solver for that case and two rules deciding by distance instead.
+
+**First: what lid10 actually leaves off.** Measured after the placement has run,
+against each surface *as written* rather than against the band it publishes:
+**4 corners** of lid10 are off a surface a face of them asserts - the pair of
+item 21 (0.1051, 0.1035, cone and sweep) and two at the taper-to-bore crease
+(0.0367, 0.0215, cone, cylinder and sweep). Not 300: that figure is before the
+placement. The audit could not see the last two at all, because `off_its_faces`
+excused a corner by `declaredBand`, which for a grid is its tessellation's
+sagitta - 0.2527 on this thread. **Measuring against the band is what kept the
+rung that could have placed them from ever being asked.** It now measures
+against the surface.
+
+**`projectOntoThree`, and that the point is real.** Newton on the three
+surfaces' own implicits. On lid10's two crease corners it converges to residuals
+of 0, 0 and 3.0e-14 - the cylinder and the cone exactly, the sweep to rounding -
+and the point is *interior* to the sweep patch (u 0.9923, v 0.0938 against the
+mesh vertex's u 0.9934, v 0.0904), so it is a genuine point of the surface and
+not the patch edge a clamped projection would report as on it.
+
+**The travel bound is direction-blind, and that is measurable.** A corner may
+travel no further than its nearest neighbouring vertex. For the crease corner
+that neighbour is 0.2356 away **perpendicular to the move**, while the first
+vertex *along* the move is 4.64 away - the bound refuses 1.338 mm of travel that
+has 4.6 mm of room. The move is a sixth of one station of the sweep; it is long
+in millimetres only because the thread crosses the crease at **1.6 degrees**
+(0.0367 off / 1.338 along = sin 1.57), the helix running at 2.9 degrees to a
+horizontal crease. The bound is a proxy for "do not fold the facet beside it",
+so ask that instead: for every facet at the corner, the corner stays on the
+inner side of each edge it is not an end of, and the facet keeps its normal.
+Exact, directional, and states no tolerance.
+
+| lid10, census | scalar bound | fold test |
+| --- | --- | --- |
+| 16, vertex off its face's surface | 1, 0.1051 | **0** |
+| 13, short edge at a strayed vertex | 1 | **0** |
+| 17, edge off its face's surface | 62 | **54** |
+
+Item 21's corner is placed by it, moving the 0.5503 that item records as
+refused, and code 13 goes with it - which is the second-order rule working
+forwards for once. The suite stays at 54 of 54.
+
+**The first fold test was wrong, and the band family said so.** As first
+written it moved 7 band-family corners and cost **code 17: 38 -> 46**. Tracing
+each corner's fate under both bounds: 4 corners the scalar bound refused (and a
+later rung then projected onto the cylinder *alone*) were now placed at the
+exact crossing - better - while 3 the scalar bound had placed were now refused.
+Every refusal, on both parts, was on a **consumed** facet: one an analytic face
+absorbed, which is not in the file at all. That includes facet 1591 at lid10's
+crease, so the reading recorded here the day before - that the triple point
+"lies outside the corner's own star" and needs curve-level work - was wrong.
+Where everything round a corner is a surface, nothing folds.
+
+**What the file can actually get wrong** is narrower, and the test now asks
+exactly that: an edge at the corner turning round (the corner passing the vertex
+at its other end, wherever that has been placed), and a facet *written as
+itself* folding or being bent out of its plane.
+
+**And a written plane is a constraint, not an obstacle.** The narrowed test
+then failed three declared-grid fixtures with EXPORT-ERROR "planar faces assert
+a plane one of their own bounds is not in": corners of two analytic faces that
+also belong to a face written as a plane, placed on the curve the two surfaces
+share and off the plane. That is three constraints and one point - the plane
+goes into the solve (`projectOntoThree` with it as the third surface), and two
+written planes at such a corner over-determine it and leave it.
+
+**Measured, 2026-09-19, the old binary against the new, like for like:**
+
+| part | code 16 | code 13 | code 17 (count, worst) |
+| --- | --- | --- | --- |
+| lid10 | 1 -> **0** | 1 -> **0** | 62 -> **42** |
+| bayonet | 1 -> **0** | 1 -> **0** | 62 -> **42** |
+| f02, band family `$fn` 32 | 0 | 0 | 38 -> **8**, worst 0.1015 -> **0.0348** |
+| f04, band family `$fn` 64 | 0 | 0 | 62 -> **38** |
+
+No EXPORT-ERROR on any of them, the exporter's own audit reports **no** corner
+left off a surface on lid10 or the band family, the three-surface rung places
+both crease corners, and the suite is 54 of 54.
+
+`export-step-flagship-corners`, registered WILL_FAIL because it failed on all
+six coupons, now **passes on the four band-family coupons** and fails only on
+lid10 and the bayonet: a cone corner 0.716 off and a plane corner 0.0137 off,
+read through OpenCASCADE. The text census reads code 16 = 0 on both, and 0.72
+is the worst this test recorded before any of this, so it is either OCCT's
+healing or a relation the census does not measure. That is the next thing to pin
+down, and the marking stays until it is.
+
+**The standing rule this came out of** (2026-09-19): wherever a less precise
+rung has claimed a corner, face or edge first, the more precise answer replaces
+it - the low-precision rungs are historical, and first refusal kept them
+winning. Instances found so far: the provenance rung's two-surface curve point
+blocking the three-surface point, and the one-surface projection holding
+corners the two-face crossing places exactly. Candidates still to survey: the
+mesh-plane triple rung (`StepKernel.cc`, "three exact things meet"), which uses
+the *mesh's* facet planes where declared ones exist; and provenance's owners
+against the faces the file actually writes, which its own comment says can
+disagree.
 
 ## Unexplained, and to be validated
 

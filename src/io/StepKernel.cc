@@ -3140,7 +3140,113 @@ void StepKernel::build_tri_body(
         if (ib == nearest.end() || d < ib->second) nearest[b] = d;
       }
     }
-    std::size_t onto_faces = 0, onto_plane = 0, onto_corner = 0;
+    // Which mesh facets each corner belongs to, for the fold test below.
+    std::map<int, std::vector<std::size_t>> mesh_facets_at;
+    for (std::size_t i = 0; i < loops.size(); i++) {
+      if (!loop_valid[i] || loops[i].size() < 3) continue;
+      for (const int v : loops[i]) mesh_facets_at[v].push_back(i);
+    }
+    // Whether moving `v` to `target` would fold a facet it belongs to.
+    //
+    // This is what the travel bound is a proxy for, asked directly. A corner is
+    // refused "further than its nearest neighbour" because a move that passes a
+    // neighbour drags its facet inside out - but distance is not direction, and
+    // the two part company exactly where the answer is furthest. lid10's corner
+    // at the taper-to-bore crease has its nearest neighbour 0.2356 away
+    // *perpendicular* to the move, while the first vertex along the move is
+    // 4.64 away: the scalar bound refuses 1.338 mm of travel that has 4.6 mm of
+    // room. The move is a sixth of one station of the sweep - in the surface's
+    // own parameters it is tiny, and it is long in millimetres only because the
+    // thread crosses the crease at 1.6 degrees.
+    //
+    // The condition itself is exact and states no tolerance, and it asks only
+    // about what the file will contain. Two things can go wrong there: an edge
+    // at the corner turning round, which disorders a boundary run, and a facet
+    // *written as itself* folding. A facet an analytic face absorbed is not in
+    // the file at all - the surface is - so it is not asked. Asking it was the
+    // first version's mistake: every corner it refused on lid10 and the band
+    // family, eight of them, was refused on a consumed facet, and on the band
+    // family that cost code 17 38 -> 46 where the right test takes it to 8.
+    //
+    // For a facet that is written: the corner has to stay on the inner side of
+    // each edge it is not an end of, and the facet has to keep its normal. A
+    // facet that was already degenerate there is not made a reason to refuse.
+    auto folds_a_facet = [&](int v, const Vector3d& target) {
+      const auto at = mesh_facets_at.find(v);
+      if (at == mesh_facets_at.end()) return false;
+      // No edge at the corner may turn round: the corner may not pass the vertex
+      // at its other end, wherever that vertex has itself been placed. This is
+      // what keeps a boundary run in order when its corners slide along the
+      // curve two surfaces cross in, and it holds for every edge, written or not.
+      for (const std::size_t i : at->second) {
+        const std::vector<int>& lp = loops[i];
+        for (std::size_t k = 0; k < lp.size(); k++) {
+          if (lp[k] != v) continue;
+          for (const int w : {lp[(k + 1) % lp.size()], lp[(k + lp.size() - 1) % lp.size()]}) {
+            const auto mw = moves.find(w);
+            const Vector3d& wp = mw != moves.end() ? mw->second : vertices[w];
+            if ((target - wp).dot(vertices[v] - vertices[w]) <= 0) return true;
+          }
+        }
+      }
+      for (const std::size_t i : at->second) {
+        // A facet an analytic face has absorbed is never written - the surface
+        // is - so it cannot fold in the file however far its corner moves.
+        // Asking it anyway is what refused every corner this test refused on
+        // lid10 and the band family: all eight were on consumed facets.
+        if (consumed[i]) continue;
+        const std::vector<int>& lp = loops[i];
+        // A written facet asserts its plane, so a corner of it may not leave it.
+        // Callers put the plane into their solve where there is one; this is the
+        // guard that keeps one that did not from bending the face.
+        {
+          const Vector3d nh = loop_normals[i].normalized();
+          if (fabs(nh.dot(target - vertices[lp[0]])) > 1e-9 * std::max(1.0, target.norm())) return true;
+        }
+        const Vector3d n = loop_normals[i];
+        Vector3d after = Vector3d::Zero();  // Newell's normal with the corner moved
+        for (std::size_t k = 0; k < lp.size(); k++) {
+          const Vector3d& a = lp[k] == v ? target : vertices[lp[k]];
+          const Vector3d& b = lp[(k + 1) % lp.size()] == v ? target : vertices[lp[(k + 1) % lp.size()]];
+          after += a.cross(b);
+        }
+        bool folds = after.dot(n) <= 0;
+        for (std::size_t k = 0; k < lp.size() && !folds; k++) {
+          const int a = lp[k], b = lp[(k + 1) % lp.size()];
+          if (a == v || b == v) continue;
+          const Vector3d e = vertices[b] - vertices[a];
+          const double was = e.cross(vertices[v] - vertices[a]).dot(n);
+          const double now = e.cross(target - vertices[a]).dot(n);
+          if (was > 0 && now <= 0) folds = true;
+        }
+        if (folds) return true;
+      }
+      return false;
+    };
+    // The distinct planes of the facets at a corner that are written as
+    // themselves - each a constraint on the corner exactly as an analytic face
+    // is. A corner of two analytic faces and one such plane is determined by all
+    // three; placing it on the curve the two surfaces share and ignoring the
+    // plane is the less precise answer, and bends the planar face.
+    auto written_planes_at = [&](int v) {
+      std::vector<std::pair<Vector3d, double>> planes;
+      const auto at = mesh_facets_at.find(v);
+      if (at == mesh_facets_at.end()) return planes;
+      for (const std::size_t i : at->second) {
+        if (consumed[i]) continue;
+        const Vector3d n = loop_normals[i].normalized();
+        if (!(n.norm() > 0)) continue;
+        const double d = n.dot(vertices[loops[i][0]]);
+        bool have = false;
+        for (const auto& p : planes) {
+          if ((p.first - n).norm() <= 1e-9 && fabs(p.second - d) <= 1e-9 * std::max(1.0, fabs(d)))
+            have = true;
+        }
+        if (!have) planes.emplace_back(n, d);
+      }
+      return planes;
+    };
+    std::size_t onto_faces = 0, onto_plane = 0, onto_corner = 0, onto_triple_faces = 0;
     double worst_faces = 0, worst_plane = 0, worst_corner = 0;
     // Corners this pass leaves off a surface whose face is written on them,
     // counted by the exit they took. A corner is a vertex of every face that
@@ -3158,7 +3264,13 @@ void StepKernel::build_tri_body(
       for (const auto& sf : have->second) {
         Vector3d q;
         if (!AnalyticFeatures::closestOnSurface(sf.get(), at, q)) continue;
-        const double owed = std::max(1e-9 * std::max(1.0, at.norm()), declaredBand(sf.get()));
+        // Against the surface as written, not against the band the declaration
+        // publishes. A grid's band is its tessellation's sagitta - 0.2527 on
+        // lid10's thread - and the file asserts the corner is on the *surface*,
+        // not within a sagitta of it. Measuring against the band is what let two
+        // corners 0.0367 and 0.0215 off the sweep go unreported while the rung
+        // that could have placed them was never asked.
+        const double owed = 1e-9 * std::max(1.0, at.norm());
         const double d = (q - at).norm();
         if (d > owed) worst = std::max(worst, d);
       }
@@ -3172,20 +3284,70 @@ void StepKernel::build_tri_body(
     };
     for (const auto& entry : faces_at) {
       const int v = entry.first;
-      {
-        const auto have = moves.find(v);
-        if (have != moves.end()) {
-          note_left(left_moved, v, have->second);
+      const auto reach = nearest.find(v);
+      const bool already = moves.count(v) != 0;
+      // Three faces are asked before an earlier placement is honoured, and that
+      // is the one place in the ladder where first refusal is not the rule.
+      // Every other rung answers a question no earlier rung could; this one
+      // answers the *same* question better. The provenance rung crosses the two
+      // surfaces provenance names and lands on the curve they share, which
+      // leaves the corner free along that curve (open item 18) and off any third
+      // face using it - lid10's two corners at the taper-to-bore crease were
+      // placed there and left 0.0367 and 0.0215 off the sweep. Three faces meet
+      // in a point, and a point satisfies all three by construction.
+      if (entry.second.size() != 3 && already) {
+        note_left(left_moved, v, moves.find(v)->second);
+        continue;
+      }
+      if (reach == nearest.end()) continue;
+      const double travel_bound = reach->second;
+
+      // Three analytic faces meet in a point, which is the best determined a
+      // corner ever is - two of them leave it free to slide along the curve they
+      // cross in, which is open item 18. This used to be declined outright, and
+      // that left lid10's two corners where the thread runs into the crease
+      // between the taper and the bore sitting on the crease circle and 0.0367
+      // and 0.0215 off the sweep their own face is written on.
+      //
+      // Held to the same rules as every other rung: solved to 1e-11, accepted
+      // only where the answer is on all three to 1e-9, and never travelling
+      // further than the nearest neighbouring vertex.
+      if (entry.second.size() == 3) {
+        Vector3d p3 = vertices[v];
+        // Unconfined, because the fold test below is the bound. Where three
+        // declared surfaces cross there is one point, and the reason to refuse
+        // it is that the mesh cannot be moved there without turning a facet
+        // inside out - not that it is further away than some other vertex.
+        bool got = AnalyticFeatures::projectOntoThree(entry.second[0].get(), entry.second[1].get(),
+                                                      entry.second[2].get(), p3, 1e-11, 0);
+        for (const auto& sf : entry.second) {
+          Vector3d q;
+          if (!got) break;
+          if (!AnalyticFeatures::closestOnSurface(sf.get(), p3, q) || (q - p3).norm() > 1e-9)
+            got = false;
+        }
+        if (!got) {
+          note_left(already ? left_moved : left_many, v, already ? moves.find(v)->second : vertices[v]);
           continue;
         }
+        const double travel = (p3 - vertices[v]).norm();
+        if (folds_a_facet(v, p3)) {
+          note_left(already ? left_moved : left_far, v, already ? moves.find(v)->second : vertices[v]);
+          if (!already) {
+            left_far_travel = std::max(left_far_travel, travel);
+            left_far_bound = std::max(left_far_bound, travel_bound);
+          }
+          continue;
+        }
+        moves[v] = p3;
+        worst_corner = std::max(worst_corner, travel);
+        onto_triple_faces++;
+        continue;
       }
-      if (entry.second.size() > 2) {  // more than two analytic faces: leave it
+      if (entry.second.size() > 3) {  // more than three analytic faces: leave it
         note_left(left_many, v, vertices[v]);
         continue;
       }
-      const auto reach = nearest.find(v);
-      if (reach == nearest.end()) continue;
-      const double travel_bound = reach->second;
 
       // One analytic face here, so whatever else holds the corner has to be a
       // plane beside it - and those are not taken from the raw facets. They are
@@ -3261,7 +3423,7 @@ void StepKernel::build_tri_body(
           continue;
         }
         const double travel = (placed - vertices[v]).norm();
-        if (travel > travel_bound) {
+        if (folds_a_facet(v, placed)) {
           note_left(left_far, v, vertices[v]);
           continue;
         }
@@ -3282,7 +3444,28 @@ void StepKernel::build_tri_body(
       if (!AnalyticFeatures::closestOnSurface(first, vertices[v], qa)) continue;
       if (!AnalyticFeatures::closestOnSurface(second, vertices[v], qb)) continue;
       if ((qa - vertices[v]).norm() <= 1e-9 && (qb - vertices[v]).norm() <= 1e-9) continue;
-      AnalyticFeatures::projectOntoBoth(first, second, placed, 1e-11);
+      // Two analytic faces and a face written as a plane: three constraints, one
+      // point. Two such planes, or a plane beside a corner already held by one,
+      // and the corner is over-determined and stays.
+      std::shared_ptr<const Surface> third;
+      if (planes_here.empty()) {
+        const auto written = written_planes_at(v);
+        if (written.size() > 1) {
+          note_left(left_manyplanes, v, vertices[v]);
+          continue;
+        }
+        if (written.size() == 1) {
+          third = std::make_shared<PlaneSurface>(written[0].first * written[0].second, written[0].first);
+        }
+      }
+      if (third != nullptr) {
+        if (!AnalyticFeatures::projectOntoThree(first, second, third.get(), placed, 1e-11, 0)) {
+          note_left(left_solve, v, vertices[v]);
+          continue;
+        }
+      } else {
+        AnalyticFeatures::projectOntoBoth(first, second, placed, 1e-11);
+      }
       if (!AnalyticFeatures::closestOnSurface(first, placed, qa) || (qa - placed).norm() > 1e-9) {
         note_left(left_solve, v, vertices[v]);
         continue;
@@ -3292,7 +3475,7 @@ void StepKernel::build_tri_body(
         continue;
       }
       const double travel = (placed - vertices[v]).norm();
-      if (travel > travel_bound) {
+      if (folds_a_facet(v, placed)) {
         note_left(left_far, v, vertices[v]);
         left_far_travel = std::max(left_far_travel, travel);
         left_far_bound = std::max(left_far_bound, travel_bound);
@@ -3312,20 +3495,27 @@ void StepKernel::build_tri_body(
     if (left_total > 0) {
       LOG(message_group::Export_Warning,
           "STEP export: %1$d corners are left off a surface the file writes a face of them on, "
-          "by %2$.4f at worst - %3$d were placed by an earlier path, %4$d have more than two "
-          "analytic faces, %5$d have no plane across their boundary, %6$d have more than two, "
-          "%7$d the solve did not reach, %8$d are further than the nearest neighbour",
+          "by %2$.4f at worst - %3$d were placed by an earlier path, %4$d have three or more "
+          "analytic faces the solve could not place, %5$d have no plane across their boundary, %6$d "
+          "have more than two, "
+          "%7$d the solve did not reach, %8$d would fold a face or turn an edge round",
           int(left_total), left_worst, int(left_moved), int(left_many), int(left_noplane),
           int(left_manyplanes), int(left_solve), int(left_far));
       if (left_far > 0) {
         LOG(message_group::Export_Warning,
-            "STEP export:    the ones past the bound wanted %1$.4f where their nearest neighbour "
+            "STEP export:    the ones refused wanted %1$.4f, where their nearest neighbour "
             "is %2$.4f",
             left_far_travel, left_far_bound);
       }
     }
     on_faces = onto_faces;
     on_plane_face = onto_plane + onto_corner;
+    if (onto_triple_faces > 0) {
+      LOG(
+        "STEP export: %1$d corners are placed where the three analytic faces they bound meet - a "
+        "point, where two faces leave a curve",
+        int(onto_triple_faces));
+    }
     if (onto_faces > 0) {
       LOG(
         "STEP export: %1$d corners are placed where the two analytic faces they bound cross, "

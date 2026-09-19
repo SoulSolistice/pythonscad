@@ -4048,6 +4048,87 @@ bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol
   return best_residual <= tol;
 }
 
+/*! The point three surfaces meet in, nearest to a given start.
+ *
+ * Three surfaces meet in a *point*, where two meet in a curve - so this is the
+ * best determined a corner ever is, and the one case the ladder used to decline
+ * outright ("more than two analytic faces: leave it"). A corner where a sweep
+ * runs into the crease between a cone and the bore beside it is exactly this,
+ * and leaving it put it where the mesh had it, off the sweep its own face is
+ * written on.
+ *
+ * Newton on all three residuals at once, the Jacobian being the three surfaces'
+ * own gradients. For quadrics and planes those are exact and it converges
+ * quadratically; a grid answers with its foot-point plane, which is first order,
+ * so it converges linearly there and the acceptance test is what decides either
+ * way. No tolerance is invented here: the caller asks for a residual and checks
+ * the answer against the same 1e-9 the two-surface rung does.
+ *
+ * `projectOntoSurfaceAndPlanes` stays the route for a surface and two planes,
+ * because solving *along* their shared line leaves the planes exact to rounding
+ * and finds the near root of the two a line meets a quadric in. This is the
+ * general case that has no such line.
+ *
+ * `travel` confines the search to a ball of that radius about the start, for the
+ * same reason the line solver confines its window: a far root is a true solution
+ * that is the wrong answer to the question. Where two of the three meet at a
+ * grazing angle the answer is also far - lid10's thread crosses the crease at
+ * the taper at 1.6 degrees, so the tessellation's own 0.037 displaces the exact
+ * triple point 1.338 along the crease. Saying no root is near is the answer
+ * there, not a failure to converge, and the caller reports it.
+ */
+bool projectOntoThree(const Surface *a, const Surface *b, const Surface *c, Vector3d& p, double tol,
+                      double travel)
+{
+  const Surface *s[3] = {a, b, c};
+  const Vector3d start = p;
+  Vector3d best = p;
+  double best_residual = std::numeric_limits<double>::infinity();
+  for (int step = 0; step <= 128; step++) {
+    Eigen::Matrix3d J;
+    Vector3d f;
+    double residual = 0;
+    bool ok = true;
+    for (int i = 0; i < 3; i++) {
+      double fi = 0, di = 0;
+      Vector3d gi;
+      if (!surfaceImplicit(s[i], p, fi, gi, &di)) {
+        ok = false;
+        break;
+      }
+      f[i] = fi;
+      J.row(i) = gi.transpose();
+      residual = std::max(residual, di);
+    }
+    if (!ok) break;
+    if (residual < best_residual) {
+      best_residual = residual;
+      best = p;
+    }
+    if (residual <= tol || step == 128) break;
+    // Three surfaces crossing in a point have three independent normals there.
+    // A singular Jacobian says they do not - two of them are tangent, or all
+    // three share a direction - and then there is no point to find rather than
+    // a step to take.
+    const Eigen::FullPivLU<Eigen::Matrix3d> lu(J);
+    if (!lu.isInvertible()) break;
+    const Vector3d stepv = lu.solve(-f);
+    if (!stepv.allFinite()) break;
+    p += stepv;
+    if (!p.allFinite()) break;
+    // Confined rather than clipped, as the line solver does it: a step leaving
+    // the window is walked to its edge, so the whole of what is allowed is still
+    // explored.
+    if (travel > 0) {
+      const Vector3d off = p - start;
+      if (off.norm() > travel) p = start + off.normalized() * travel;
+    }
+  }
+  if (!std::isfinite(best_residual)) return false;
+  p = best;
+  return best_residual <= tol && (travel <= 0 || (best - start).norm() <= travel);
+}
+
 /*! The point where a surface meets the line two planes cross in, nearest to a
  *  given start.
  *

@@ -42,6 +42,7 @@ other's output files, so neither result means anything.
 | `pinched-loops.py <file>` | 21 | the faces behind the census's code-21 count, listed; legal seams of closed faces excluded |
 | `edge-on-surface.py <file>…` (OCP) | 17 | every edge sampled along its length against both faces, by curve-on-surface pair |
 | `sweep-chords.py <file>` (OCP) | 17 | line edges on a sweep face, split by whether their *ends* are on both surfaces (a crossing curve can replace them) or not (the corner is at fault) |
+| `planes-at-sweep.py <file>` (OCP) | 17 | every plane bordering a sweep face: corners on the sweep, the angle they meet at — a plane at a few degrees with every corner on the sweep is the sweep's own facet left unclaimed, which is a claim question and not a curve one |
 | `seam-straddle.py <file> [face]` | — | whether a face's loop crosses the seam of a surface closed in `v` — the long-way-round pcurve a reader has to repair |
 | `edge-lengths.py <file>…` | 13 | edge-length distribution, closed edges apart; short edges are what a strayed vertex turns into code 13 |
 | `face-bad-edge.py <file>` (OCP) | 11, 16, 17 | per face, every quantity SOLIDWORKS has a separate code for, with kind, area and centre in `-FaultDetail`'s units |

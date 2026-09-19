@@ -572,6 +572,18 @@ bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vecto
  * there, and where either surface has no implicit form. */
 bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol);
 
+/*! The point three surfaces meet in, nearest to `p`, by Newton on all three.
+ *
+ * Two surfaces meet in a curve and leave a corner free to slide along it; three
+ * meet in a point. `travel` confines the search to a ball of that radius about
+ * `p`, so a root further off - which a grazing crossing puts there - is reported
+ * as no near root rather than taken. Returns false where their normals are not
+ * independent there - two tangent, or all three sharing a direction - and where
+ * any of them has no implicit form. See the definition for why a surface and two *planes* go
+ * through `projectOntoSurfaceAndPlanes` instead. */
+bool projectOntoThree(const Surface *a, const Surface *b, const Surface *c, Vector3d& p, double tol,
+                      double travel);
+
 /*! The point where a surface meets the line two planes cross in, nearest to
  * `p`, searched within `travel` millimetres of it along that line.
  *
