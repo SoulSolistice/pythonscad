@@ -387,9 +387,13 @@ static int cornerRungRank(CornerRung rung)
  * lets it tell a declared cylinder from the chord a bore facet lies on - both
  * pass through the same corner, and only one is the model's statement.
  *
- *   DeclaredFace     the surface of an analytic face written at the corner,
- *                    where the model declared it, and a plane the model declared
- *                    across that face's boundary
+ *   DeclaredFace     an exact declaration at the corner: the surface of an
+ *                    analytic face the model declared as a quadric or a closed-
+ *                    form sweep, and a plane the model declared, whether across
+ *                    that face's boundary or as a face written at the corner
+ *   DeclaredInterpolant  a declare_grid sweep or a Bezier patch: declared, but
+ *                    interpolated through the model's stations, publishing a
+ *                    band - exactness takes precedence over it
  *   FittedFace       the surface of an analytic face the approximation fitted.
  *                    Less precise than a declaration, but the file asserts it:
  *                    a corner off it is a vertex off its own face's surface
@@ -405,32 +409,45 @@ static int cornerRungRank(CornerRung rung)
  *
  * Reordering the tiers is editing this table and nothing else. Lower wins.
  */
-enum class ConstraintTier : int { DeclaredFace, FittedFace, ProvenanceOwner, MeshPlane };
-constexpr std::size_t kConstraintTierCount = 4;
+enum class ConstraintTier : int {
+  DeclaredFace,
+  DeclaredInterpolant,
+  FittedFace,
+  ProvenanceOwner,
+  MeshPlane
+};
+constexpr std::size_t kConstraintTierCount = 5;
 struct ConstraintTierSpec {
   ConstraintTier tier;
   std::size_t rank;  // an index into the score, 0 the most precise
   bool hard;         // leaving it, where the corner was on it, disqualifies a candidate
+  bool used;         // whether it enters the arbiter at all
 };
-// Two columns, because precision and safety are different questions. `rank` is
-// where a kind of constraint stands by precision; `hard` says a candidate that
-// takes the corner off such a constraint, when the corner was on it, is not a
-// candidate at all.
+// Three columns, because precision, safety and relevance are different
+// questions. `rank` is where a kind of constraint stands by precision; `hard`
+// says a candidate that takes the corner off such a constraint, when the corner
+// was on it, is not a candidate at all; `used` says whether it enters the
+// arbiter in the first place.
 //
-// MeshPlane ranks last, which is its precision: a mesh plane is the
-// tessellation's chord, and the writer fans a planar face whose corners are
-// bent. But it is held hard, because the fan does not yet survive what bending
-// lets the placement do - with it soft, f04 fans 21 faces and its shell opens
-// along 12 edges, and lid10 writes 60 edges used by three faces (open item 23).
-// Ranking it level with a declaration instead is not the same thing and is
-// worse: two chord planes then outvote the sweep, and lid10 leaves 61 corners
-// off their faces. When the fan is fixed, `hard` goes false and nothing else
-// changes.
+// MeshPlane is not used. A mesh plane is the tessellation's chord: it says
+// nothing about where a point of the model is, and the writer fans a planar
+// face whose corners the placement bends. Each other setting was measured and
+// each was wrong:
+//   - hard, as it was before the arbiter: corners held on chords, 0.096 inside
+//     the declared bore on step-declare-grid-scad;
+//   - ranked level with a declaration: two chord planes outvote the sweep, and
+//     lid10 leaves 61 corners off their faces;
+//   - ranked last but used: a far root on a vertex line of the bore lies on
+//     *both* facet planes beside it, so it outscores the near one, and
+//     step-declare-grid-scad moved a corner 1.9 onto its neighbour's point.
+// Every defect met while mesh planes were used traced back to that scoring: the
+// shells opened along edges between two corners the solver had put on one root,
+// 1.4e-12 to 1.9 apart in the mesh, and a fan could not cut a ring with a side
+// of no length. Unused, none of that occurs (open item 23).
 constexpr ConstraintTierSpec kCornerTiers[kConstraintTierCount] = {
-  {ConstraintTier::DeclaredFace, 0, false},
-  {ConstraintTier::FittedFace, 1, false},
-  {ConstraintTier::ProvenanceOwner, 2, false},
-  {ConstraintTier::MeshPlane, 3, true},
+  {ConstraintTier::DeclaredFace, 0, false, true}, {ConstraintTier::DeclaredInterpolant, 1, false, true},
+  {ConstraintTier::FittedFace, 2, false, true},   {ConstraintTier::ProvenanceOwner, 3, false, true},
+  {ConstraintTier::MeshPlane, 4, false, false},
 };
 static std::size_t tierRank(ConstraintTier tier)
 {
@@ -438,6 +455,13 @@ static std::size_t tierRank(ConstraintTier tier)
     if (spec.tier == tier) return spec.rank;
   }
   return kConstraintTierCount - 1;
+}
+static bool tierUsed(ConstraintTier tier)
+{
+  for (const auto& spec : kCornerTiers) {
+    if (spec.tier == tier) return spec.used;
+  }
+  return false;
 }
 static bool tierHard(ConstraintTier tier)
 {
@@ -3401,6 +3425,7 @@ void StepKernel::build_tri_body(
       std::vector<Constraint> constraints;
       std::vector<std::shared_ptr<const Surface>> keep_alive;
       auto add = [&](const Surface *sf, ConstraintTier tier) {
+        if (!tierUsed(tier)) return;
         for (auto& c : constraints) {
           if (c.surface == sf || c.surface->sameAs(*sf)) {
             if (tierRank(tier) < tierRank(c.tier)) c.tier = tier;
@@ -3409,8 +3434,15 @@ void StepKernel::build_tri_body(
         }
         constraints.push_back({sf, tier});
       };
+      auto interpolant = [](const Surface *sf) {
+        if (dynamic_cast<const SweepSurface *>(sf) != nullptr) return false;  // closed form
+        return dynamic_cast<const GridSurface *>(sf) != nullptr ||
+               dynamic_cast<const BezierPatchSurface *>(sf) != nullptr;
+      };
       for (const auto& sf : entry.second) {
-        add(sf.get(), is_declared(sf.get()) ? ConstraintTier::DeclaredFace : ConstraintTier::FittedFace);
+        add(sf.get(), !is_declared(sf.get())  ? ConstraintTier::FittedFace
+                      : interpolant(sf.get()) ? ConstraintTier::DeclaredInterpolant
+                                              : ConstraintTier::DeclaredFace);
       }
       const double scale = std::max(1.0, vertices[v].norm());
       for (const auto& sf : entry.second) {
@@ -3436,7 +3468,27 @@ void StepKernel::build_tri_body(
             if (consumed[i]) continue;
             const Vector3d n = loop_normals[i].normalized();
             if (!(n.norm() > 0)) continue;
-            keep_alive.push_back(std::make_shared<PlaneSurface>(vertices[loops[i][0]], n));
+            // A written face on a plane the model declared is a declaration, not
+            // the tessellation's chord. Classing every written plane as a chord
+            // let lid10's z = 95 cap - declared by the cylinder whose top it is -
+            // go soft, and the corners of its hole were placed 0.65 below it on
+            // the outer wall, leaving an annulus of no width no fan could cut.
+            const Vector3d on = vertices[loops[i][0]];
+            const PlaneSurface *declared = nullptr;
+            for (const auto& d : surfaces) {
+              const auto *pl = dynamic_cast<const PlaneSurface *>(d.get());
+              if (pl == nullptr) continue;
+              const Vector3d dn = pl->normdir.normalized();
+              if (fabs(fabs(dn.dot(n)) - 1) > 1e-9) continue;
+              if (fabs(dn.dot(on - pl->refpt)) > 1e-9 * std::max(1.0, on.norm())) continue;
+              declared = pl;
+              break;
+            }
+            if (declared != nullptr) {
+              add(declared, ConstraintTier::DeclaredFace);
+              continue;
+            }
+            keep_alive.push_back(std::make_shared<PlaneSurface>(on, n));
             add(keep_alive.back().get(), ConstraintTier::MeshPlane);
           }
         }
@@ -4134,10 +4186,10 @@ void StepKernel::build_tri_body(
         }
         if (after.dot(loop_normals[i]) <= 0) {
           turned++;
+          why_turned++;  // counted where it happens: it used to count the faces that did *not* turn
           implicated(i);
           continue;
         }
-        why_turned++;
         // Whether it is actually taken out of its plane, rather than whether it
         // has more than three corners. A corner cut by a plane moves *along* that
         // plane - the conic it lands on lies in it - so its face is not bent at
@@ -5706,7 +5758,6 @@ void StepKernel::build_tri_body(
         oriented_edges.push_back(new OrientedEdge(entities, edge_curve, edge_dir));
         loop_edges[i].push_back(edge_curve);
       }
-
     // create the plane. Where the model declared one that this face lies in,
     // that is the plane: a declaration cannot drift, and a fit to mesh vertices
     // moves with the tessellation, with whatever a boolean left behind, and with

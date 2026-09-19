@@ -37,10 +37,19 @@ derivations; they are not repeated.
 # APPROX: 2 declared sweeps written as one face each, replacing 299 facets
 # APPROX: 5 trimmed quadrics written as one face each, replacing 231 facets
 #
-# The cap survives as one face. Written as the count rather than as prose
-# because the failure is silent in every other measure this suite takes: the
-# fanned export is valid, closed, and exact at every corner.
-# APPROX: 2 corners are placed on a plane a declaration vouches for crossed with their exact owner
+# The cap survives as one face. Written as an assertion of its own because the
+# failure is silent in every other measure this suite takes: the fanned export
+# is valid, closed, and exact at every corner.
+#
+# This used to be asserted as the report of the rung that did it - "2 corners
+# are placed on a plane a declaration vouches for crossed with their exact
+# owner" - which pinned *which* rung placed the corners rather than what the
+# file must be. Since 2026-09-19 the corner arbiter decides first, and the fold
+# test keeps those two corners on the cap: that rung is no longer reached. What
+# must hold is that nothing is fanned - stated here - and the kernel reading
+# Plane=4 below, which is the assertion that discriminates: mutated so the
+# fold test lets a corner of the cap go, this fixture fails its round trip.
+# APPROX-NOT: faces that keep a plane fanned into triangles
 #
 # The kernel's view, identical to the twin's. Plane=4 is the assertion that
 # matters: bottom cap, top cap, and the ridge's two end caps. Fanning the cap
