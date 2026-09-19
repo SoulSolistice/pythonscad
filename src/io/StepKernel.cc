@@ -329,6 +329,124 @@ using AnalyticFeatures::surfaceImplicit;
 
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 
+/*! The rungs of the corner placement, and the precision they rank at.
+ *
+ * Every rung that places a corner used to *claim* it: whichever ran first held
+ * the corner, and every later rung skipped it. So the ladder's order was its
+ * precision ranking, fixed in control flow, and the rungs written first - the
+ * least precise, because they came before the exact ones existed - kept
+ * winning. On lid10 the provenance rung held two corners on the curve two
+ * surfaces share, while the point all three of their faces meet was one solve
+ * away; on step-exact-trim, 32 corners reachable by two rungs went to whichever
+ * ran first.
+ *
+ * Now a rung only *proposes*, and the arbiter in the file-faces pass decides.
+ * It measures each candidate against every constraint the file asserts at the
+ * corner - each analytic face's surface and each plane written there - and
+ * takes the one satisfying the most, to the ladder's exactness floor of 1e-9.
+ * That measurement is what enforces precision, and a table cannot overrule it:
+ * a candidate on three of the corner's faces beats one on two, whatever its
+ * rank.
+ *
+ * The rank below decides only between candidates that satisfy equally many -
+ * two answers equally exact by the file's own standard. Reordering the ladder
+ * is editing this table and nothing else. Lower wins.
+ */
+enum class CornerRung : int {
+  FileFaces,   // every face the file writes at the corner, solved together
+  Provenance,  // the two surfaces provenance names for the corner's originals
+  MeshTriple,  // a declared surface and two of the mesh's facet planes
+  MeshConic,   // a declared surface and one of the mesh's facet planes
+  Mesh,        // where the mesh put it: no move at all
+};
+struct CornerRungSpec {
+  CornerRung rung;
+  int rank;
+  const char *name;
+};
+constexpr CornerRungSpec kCornerRungs[] = {
+  {CornerRung::FileFaces, 0, "every face the file writes there"},
+  {CornerRung::Provenance, 1, "the two surfaces provenance names"},
+  {CornerRung::MeshTriple, 2, "a declared surface and two mesh planes"},
+  {CornerRung::MeshConic, 3, "a declared surface and one mesh plane"},
+  {CornerRung::Mesh, 4, "where the mesh put it"},
+};
+static int cornerRungRank(CornerRung rung)
+{
+  for (const auto& spec : kCornerRungs) {
+    if (spec.rung == rung) return spec.rank;
+  }
+  return std::numeric_limits<int>::max();
+}
+
+/*! The constraints on a corner, and the precision each kind ranks at.
+ *
+ * Not all constraints are worth the same, so the arbiter does not count them:
+ * it compares candidates tier by tier, from the most precise down, and a single
+ * constraint of a higher tier outweighs any number of a lower one. That is what
+ * lets it tell a declared cylinder from the chord a bore facet lies on - both
+ * pass through the same corner, and only one is the model's statement.
+ *
+ *   DeclaredFace     the surface of an analytic face written at the corner,
+ *                    where the model declared it, and a plane the model declared
+ *                    across that face's boundary
+ *   FittedFace       the surface of an analytic face the approximation fitted.
+ *                    Less precise than a declaration, but the file asserts it:
+ *                    a corner off it is a vertex off its own face's surface
+ *   ProvenanceOwner  a declared surface the corner's makers put there, whether
+ *                    or not a face of it is written at the corner - only owners
+ *                    that contributed a facet at the corner are passed on, which
+ *                    is the filter for provenance's known false owners. A hint
+ *                    about the model, and below anything the file writes: ranked
+ *                    above the fitted faces it took lid10 60 corners off them
+ *   MeshPlane        the plane of a facet written as itself: the tessellation's
+ *                    chord unless something above says otherwise, and a face the
+ *                    corner placement is allowed to bend, since the writer fans it
+ *
+ * Reordering the tiers is editing this table and nothing else. Lower wins.
+ */
+enum class ConstraintTier : int { DeclaredFace, FittedFace, ProvenanceOwner, MeshPlane };
+constexpr std::size_t kConstraintTierCount = 4;
+struct ConstraintTierSpec {
+  ConstraintTier tier;
+  std::size_t rank;  // an index into the score, 0 the most precise
+  bool hard;         // leaving it, where the corner was on it, disqualifies a candidate
+};
+// Two columns, because precision and safety are different questions. `rank` is
+// where a kind of constraint stands by precision; `hard` says a candidate that
+// takes the corner off such a constraint, when the corner was on it, is not a
+// candidate at all.
+//
+// MeshPlane ranks last, which is its precision: a mesh plane is the
+// tessellation's chord, and the writer fans a planar face whose corners are
+// bent. But it is held hard, because the fan does not yet survive what bending
+// lets the placement do - with it soft, f04 fans 21 faces and its shell opens
+// along 12 edges, and lid10 writes 60 edges used by three faces (open item 23).
+// Ranking it level with a declaration instead is not the same thing and is
+// worse: two chord planes then outvote the sweep, and lid10 leaves 61 corners
+// off their faces. When the fan is fixed, `hard` goes false and nothing else
+// changes.
+constexpr ConstraintTierSpec kCornerTiers[kConstraintTierCount] = {
+  {ConstraintTier::DeclaredFace, 0, false},
+  {ConstraintTier::FittedFace, 1, false},
+  {ConstraintTier::ProvenanceOwner, 2, false},
+  {ConstraintTier::MeshPlane, 3, true},
+};
+static std::size_t tierRank(ConstraintTier tier)
+{
+  for (const auto& spec : kCornerTiers) {
+    if (spec.tier == tier) return spec.rank;
+  }
+  return kConstraintTierCount - 1;
+}
+static bool tierHard(ConstraintTier tier)
+{
+  for (const auto& spec : kCornerTiers) {
+    if (spec.tier == tier) return spec.hard;
+  }
+  return false;
+}
+
 // Scratch, counted over a whole export: how the plane-section pass had to give
 // way to keep a substituted curve through its own run's endpoints.
 std::size_t g_section_trimmed = 0, g_section_dropped = 0;
@@ -1373,7 +1491,8 @@ void StepKernel::build_tri_body(
   const std::map<int, Vector3d>& cornerMoves, const std::map<int, std::size_t>& singleOwner,
   const std::map<int, std::pair<std::size_t, std::size_t>>& ownerSplit,
   const std::map<int32_t, std::vector<std::size_t>>& owned, const std::vector<int>& faceParents,
-  const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate)
+  const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate,
+  const std::map<int, std::vector<std::size_t>>& cornerOwners)
 {
   // A working copy, because the corner placement below moves junction corners
   // onto the curve their two declared owners cross along, once recognition has
@@ -2747,6 +2866,10 @@ void StepKernel::build_tri_body(
   // surface. Two, and it is a triple point - the cut and the sliver of base a
   // tilted cut leaves behind - which belongs on neither conic and stays.
   std::map<int, Vector3d> moves = cornerMoves;
+  // Which rung placed each move, so the arbiter below can weigh it against the
+  // others. See kCornerRungs.
+  std::map<int, CornerRung> move_rung;
+  for (const auto& m : cornerMoves) move_rung[m.first] = CornerRung::Provenance;
   // what each path added
   std::size_t on_conic = 0, on_triple = 0, on_own = 0, on_faces = 0, on_plane_face = 0;
 
@@ -2944,6 +3067,7 @@ void StepKernel::build_tri_body(
         }
         worst_triple = std::max(worst_triple, (p3 - vertices[v]).norm());
         moves.emplace(v, p3);
+        move_rung[v] = CornerRung::MeshTriple;
         placed_triple++;
         continue;
       }
@@ -2987,6 +3111,7 @@ void StepKernel::build_tri_body(
       }
       worst_plane = std::max(worst_plane, travel);
       moves.emplace(v, p);
+      move_rung[v] = CornerRung::MeshConic;
       placed++;
     }
     on_conic = placed;
@@ -3196,13 +3321,6 @@ void StepKernel::build_tri_body(
         // lid10 and the band family: all eight were on consumed facets.
         if (consumed[i]) continue;
         const std::vector<int>& lp = loops[i];
-        // A written facet asserts its plane, so a corner of it may not leave it.
-        // Callers put the plane into their solve where there is one; this is the
-        // guard that keeps one that did not from bending the face.
-        {
-          const Vector3d nh = loop_normals[i].normalized();
-          if (fabs(nh.dot(target - vertices[lp[0]])) > 1e-9 * std::max(1.0, target.norm())) return true;
-        }
         const Vector3d n = loop_normals[i];
         Vector3d after = Vector3d::Zero();  // Newell's normal with the corner moved
         for (std::size_t k = 0; k < lp.size(); k++) {
@@ -3223,29 +3341,6 @@ void StepKernel::build_tri_body(
       }
       return false;
     };
-    // The distinct planes of the facets at a corner that are written as
-    // themselves - each a constraint on the corner exactly as an analytic face
-    // is. A corner of two analytic faces and one such plane is determined by all
-    // three; placing it on the curve the two surfaces share and ignoring the
-    // plane is the less precise answer, and bends the planar face.
-    auto written_planes_at = [&](int v) {
-      std::vector<std::pair<Vector3d, double>> planes;
-      const auto at = mesh_facets_at.find(v);
-      if (at == mesh_facets_at.end()) return planes;
-      for (const std::size_t i : at->second) {
-        if (consumed[i]) continue;
-        const Vector3d n = loop_normals[i].normalized();
-        if (!(n.norm() > 0)) continue;
-        const double d = n.dot(vertices[loops[i][0]]);
-        bool have = false;
-        for (const auto& p : planes) {
-          if ((p.first - n).norm() <= 1e-9 && fabs(p.second - d) <= 1e-9 * std::max(1.0, fabs(d)))
-            have = true;
-        }
-        if (!have) planes.emplace_back(n, d);
-      }
-      return planes;
-    };
     std::size_t onto_faces = 0, onto_plane = 0, onto_corner = 0, onto_triple_faces = 0;
     double worst_faces = 0, worst_plane = 0, worst_corner = 0;
     // Corners this pass leaves off a surface whose face is written on them,
@@ -3254,9 +3349,8 @@ void StepKernel::build_tri_body(
     // one that does not is what a reader calls fault code 16. The count is kept
     // per reason because the reasons are unrelated and one number for all of
     // them says nothing about which to work on.
-    std::size_t left_moved = 0, left_many = 0, left_noplane = 0, left_manyplanes = 0;
     std::size_t left_solve = 0, left_far = 0;
-    double left_worst = 0, left_far_travel = 0, left_far_bound = 0;
+    double left_worst = 0;
     auto off_its_faces = [&](int v, const Vector3d& at) {
       double worst = 0;
       const auto have = faces_at.find(v);
@@ -3282,230 +3376,304 @@ void StepKernel::build_tri_body(
       bucket++;
       left_worst = std::max(left_worst, d);
     };
+    // The arbiter. For each corner of an analytic face: every constraint on it,
+    // every candidate position any rung proposed or the constraints themselves
+    // determine, and the candidate that satisfies the most precise constraints
+    // wins. Two tables decide it, both at the top of this file: kCornerTiers
+    // ranks the constraints, kCornerRungs breaks the ties between rungs.
+    std::size_t overruled = 0;  // corners an earlier, less precise rung had held
+    std::map<CornerRung, std::size_t> won_by;
+    auto is_declared = [&](const Surface *sf) {
+      for (const auto& d : surfaces) {
+        if (d.get() == sf || d->sameAs(*sf)) return true;
+      }
+      return false;
+    };
     for (const auto& entry : faces_at) {
       const int v = entry.first;
       const auto reach = nearest.find(v);
-      const bool already = moves.count(v) != 0;
-      // Three faces are asked before an earlier placement is honoured, and that
-      // is the one place in the ladder where first refusal is not the rule.
-      // Every other rung answers a question no earlier rung could; this one
-      // answers the *same* question better. The provenance rung crosses the two
-      // surfaces provenance names and lands on the curve they share, which
-      // leaves the corner free along that curve (open item 18) and off any third
-      // face using it - lid10's two corners at the taper-to-bore crease were
-      // placed there and left 0.0367 and 0.0215 off the sweep. Three faces meet
-      // in a point, and a point satisfies all three by construction.
-      if (entry.second.size() != 3 && already) {
-        note_left(left_moved, v, moves.find(v)->second);
-        continue;
-      }
-      if (reach == nearest.end()) continue;
-      const double travel_bound = reach->second;
+      const double travel_bound = reach != nearest.end() ? reach->second : 0.0;
 
-      // Three analytic faces meet in a point, which is the best determined a
-      // corner ever is - two of them leave it free to slide along the curve they
-      // cross in, which is open item 18. This used to be declined outright, and
-      // that left lid10's two corners where the thread runs into the crease
-      // between the taper and the bore sitting on the crease circle and 0.0367
-      // and 0.0215 off the sweep their own face is written on.
-      //
-      // Held to the same rules as every other rung: solved to 1e-11, accepted
-      // only where the answer is on all three to 1e-9, and never travelling
-      // further than the nearest neighbouring vertex.
-      if (entry.second.size() == 3) {
-        Vector3d p3 = vertices[v];
-        // Unconfined, because the fold test below is the bound. Where three
-        // declared surfaces cross there is one point, and the reason to refuse
-        // it is that the mesh cannot be moved there without turning a facet
-        // inside out - not that it is further away than some other vertex.
-        bool got = AnalyticFeatures::projectOntoThree(entry.second[0].get(), entry.second[1].get(),
-                                                      entry.second[2].get(), p3, 1e-11, 0);
-        for (const auto& sf : entry.second) {
-          Vector3d q;
-          if (!got) break;
-          if (!AnalyticFeatures::closestOnSurface(sf.get(), p3, q) || (q - p3).norm() > 1e-9)
-            got = false;
-        }
-        if (!got) {
-          note_left(already ? left_moved : left_many, v, already ? moves.find(v)->second : vertices[v]);
-          continue;
-        }
-        const double travel = (p3 - vertices[v]).norm();
-        if (folds_a_facet(v, p3)) {
-          note_left(already ? left_moved : left_far, v, already ? moves.find(v)->second : vertices[v]);
-          if (!already) {
-            left_far_travel = std::max(left_far_travel, travel);
-            left_far_bound = std::max(left_far_bound, travel_bound);
+      struct Constraint {
+        const Surface *surface;
+        ConstraintTier tier;
+      };
+      std::vector<Constraint> constraints;
+      std::vector<std::shared_ptr<const Surface>> keep_alive;
+      auto add = [&](const Surface *sf, ConstraintTier tier) {
+        for (auto& c : constraints) {
+          if (c.surface == sf || c.surface->sameAs(*sf)) {
+            if (tierRank(tier) < tierRank(c.tier)) c.tier = tier;
+            return;
           }
-          continue;
         }
-        moves[v] = p3;
-        worst_corner = std::max(worst_corner, travel);
-        onto_triple_faces++;
-        continue;
+        constraints.push_back({sf, tier});
+      };
+      for (const auto& sf : entry.second) {
+        add(sf.get(), is_declared(sf.get()) ? ConstraintTier::DeclaredFace : ConstraintTier::FittedFace);
       }
-      if (entry.second.size() > 3) {  // more than three analytic faces: leave it
-        note_left(left_many, v, vertices[v]);
-        continue;
-      }
-
-      // One analytic face here, so whatever else holds the corner has to be a
-      // plane beside it - and those are not taken from the raw facets. They are
-      // the planes the section pass already cuts this surface with:
-      // `section_planes` holds, per surface, the plane of each face across its
-      // boundary, with a declared plane preferred to the mesh's own wherever the
-      // model states one. That channel is what makes this exact and what makes
-      // it agree with the file: the conic the corner is put on is the same conic
-      // the boundary is then written as. It also answers, without a heuristic,
-      // which planes at a corner are the quadric's own chords - a chord is not a
-      // face across the boundary, so it is not in the list. The angular form of
-      // that question, which the conic rung next door uses, reads a plane
-      // grazing a shallow cone as a chord and is wrong for exactly the corners
-      // that cost the most.
-      std::vector<const CutPlane *> planes_here;
-      if (entry.second.size() == 1) {
-        const auto sp = section_planes.find(entry.second[0].get());
-        if (sp == section_planes.end()) {
-          note_left(left_noplane, v, vertices[v]);
-          continue;
-        }
-        const double scale = std::max(1.0, vertices[v].norm());
-        std::vector<const CutPlane *> declared_here;
+      const double scale = std::max(1.0, vertices[v].norm());
+      for (const auto& sf : entry.second) {
+        const auto sp = section_planes.find(sf.get());
+        if (sp == section_planes.end()) continue;
         for (const auto& cp : sp->second) {
+          if (!cp.declared) continue;
           if (fabs((vertices[v] - cp.on_plane).dot(cp.normal)) > 1e-6 * scale) continue;
-          planes_here.push_back(&cp);
-          if (cp.declared) declared_here.push_back(&cp);
-        }
-        // Exactness first, as everywhere else: where the model declared a plane
-        // through this corner, the mesh's own are not consulted at all.
-        if (!declared_here.empty()) planes_here = declared_here;
-        if (planes_here.empty()) {
-          note_left(left_noplane, v, vertices[v]);
-          continue;
-        }
-        if (planes_here.size() > 2) {
-          note_left(left_manyplanes, v, vertices[v]);
-          continue;
+          keep_alive.push_back(std::make_shared<PlaneSurface>(cp.on_plane, cp.normal));
+          add(keep_alive.back().get(), ConstraintTier::DeclaredFace);
         }
       }
+      const auto owners = cornerOwners.find(v);
+      if (owners != cornerOwners.end()) {
+        for (const std::size_t j : owners->second) {
+          if (j < surfaces.size()) add(surfaces[j].get(), ConstraintTier::ProvenanceOwner);
+        }
+      }
+      {
+        const auto at = mesh_facets_at.find(v);
+        if (at != mesh_facets_at.end()) {
+          for (const std::size_t i : at->second) {
+            if (consumed[i]) continue;
+            const Vector3d n = loop_normals[i].normalized();
+            if (!(n.norm() > 0)) continue;
+            keep_alive.push_back(std::make_shared<PlaneSurface>(vertices[loops[i][0]], n));
+            add(keep_alive.back().get(), ConstraintTier::MeshPlane);
+          }
+        }
+      }
+      const std::size_t n_all = constraints.size();
 
-      Vector3d placed = vertices[v];
-      const Surface *first = entry.second[0].get();
-      if (planes_here.size() == 2) {
-        // A quadric and two planes meet in a point, not a curve. The line the
-        // two planes share is crossed with the surface, which is what the
-        // triple-point rung above does from provenance; the difference is only
-        // where the three come from - here, the faces the file writes.
+      // Which constraints a position satisfies, counted per tier, to the ladder's
+      // exactness floor. Compared from the most precise tier down.
+      using Score = std::array<std::size_t, kConstraintTierCount>;
+      auto score_of = [&](const Vector3d& p) {
+        Score s{};
+        for (const auto& c : constraints) {
+          Vector3d q;
+          if (AnalyticFeatures::closestOnSurface(c.surface, p, q) &&
+              (q - p).norm() <= 1e-9 * std::max(1.0, p.norm())) {
+            s[tierRank(c.tier)]++;
+          }
+        }
+        return s;
+      };
+
+      struct Candidate {
+        Vector3d p;
+        CornerRung rung;
+      };
+      std::vector<Candidate> candidates;
+      candidates.push_back({vertices[v], CornerRung::Mesh});
+      const auto earlier = moves.find(v);
+      if (earlier != moves.end()) {
+        const auto r = move_rung.find(v);
+        candidates.push_back(
+          {earlier->second, r != move_rung.end() ? r->second : CornerRung::Provenance});
+      }
+      // Solved from the constraints: every pair, which meet in a curve and give
+      // its nearest point, and every triple, which meet in a point. The score
+      // decides which of them is the corner.
+      for (std::size_t a = 0; a < n_all; a++) {
+        for (std::size_t b = a + 1; b < n_all; b++) {
+          Vector3d p = vertices[v];
+          AnalyticFeatures::projectOntoBoth(constraints[a].surface, constraints[b].surface, p, 1e-11);
+          if (p.allFinite()) candidates.push_back({p, CornerRung::FileFaces});
+          for (std::size_t c = b + 1; c < n_all; c++) {
+            const Surface *tri[3] = {constraints[a].surface, constraints[b].surface,
+                                     constraints[c].surface};
+            // Two planes and a quadric: the planes meet in a line and a line meets
+            // a quadric twice, both roots exact and only one of them the corner.
+            // A free Newton lands on either - on lid10 the far one, 1.87 away,
+            // which then blocked its neighbour. Along the line the quadric's
+            // implicit is exactly a quadratic in the line's parameter, so three
+            // evaluations fix it and both roots come out in closed form; both are
+            // offered, and least travel breaks the tie between equally exact ones.
+            const PlaneSurface *pl[3];
+            int np = 0, quad = -1;
+            for (int k = 0; k < 3; k++) {
+              pl[k] = dynamic_cast<const PlaneSurface *>(tri[k]);
+              if (pl[k] != nullptr) np++;
+              else if (AnalyticFeatures::isQuadric(tri[k])) quad = k;
+            }
+            if (np == 2 && quad >= 0) {
+              const PlaneSurface *p1 =
+                pl[(quad + 1) % 3] != nullptr ? pl[(quad + 1) % 3] : pl[(quad + 2) % 3];
+              const PlaneSurface *p2 = pl[(quad + 2) % 3] != nullptr && pl[(quad + 2) % 3] != p1
+                                         ? pl[(quad + 2) % 3]
+                                         : pl[(quad + 1) % 3];
+              const Vector3d n1 = p1->normdir.normalized(), n2 = p2->normdir.normalized();
+              const double d1 = n1.dot(p1->refpt), d2 = n2.dot(p2->refpt);
+              const Vector3d dir = n1.cross(n2);
+              const double cc = n1.dot(n2), det = 1 - cc * cc;
+              if (dir.norm() > 1e-12 && fabs(det) > 1e-12) {
+                const Vector3d dh = dir.normalized();
+                const Vector3d base = n1 * ((d1 - d2 * cc) / det) + n2 * ((d2 - d1 * cc) / det);
+                const double t0 = dh.dot(vertices[v] - base);
+                double f[3];
+                Vector3d g;
+                bool ok = true;
+                for (int k = 0; k < 3 && ok; k++) {
+                  ok = AnalyticFeatures::surfaceImplicit(tri[quad], base + dh * (t0 + k - 1), f[k], g,
+                                                         nullptr);
+                }
+                if (ok) {
+                  // f(t0 + s) = A s^2 + B s + C through s = -1, 0, 1.
+                  const double A = 0.5 * (f[0] + f[2]) - f[1], B = 0.5 * (f[2] - f[0]), C = f[1];
+                  std::vector<double> roots;
+                  if (fabs(A) > 1e-15 * std::max({fabs(B), fabs(C), 1.0})) {
+                    const double disc = B * B - 4 * A * C;
+                    if (disc >= 0) {
+                      const double sq = std::sqrt(disc);
+                      // The numerically stable pair, not the textbook one.
+                      const double qq = -0.5 * (B + (B >= 0 ? sq : -sq));
+                      if (qq != 0) roots.push_back(C / qq);
+                      roots.push_back(qq / A);
+                    }
+                  } else if (B != 0) {
+                    roots.push_back(-C / B);
+                  }
+                  for (const double s : roots) {
+                    const Vector3d p = base + dh * (t0 + s);
+                    if (p.allFinite()) candidates.push_back({p, CornerRung::FileFaces});
+                  }
+                }
+              }
+              continue;
+            }
+            Vector3d p3 = vertices[v];
+            if (AnalyticFeatures::projectOntoThree(tri[0], tri[1], tri[2], p3, 1e-11, 0)) {
+              candidates.push_back({p3, CornerRung::FileFaces});
+            }
+          }
+        }
+      }
+      (void)travel_bound;
+
+      // Weigh them: the tiers from the most precise down, then the rung table,
+      // then least travel. A candidate that moves the corner must not fold the file.
+      const Candidate *best = nullptr;
+      Score best_s{};
+      bool full_but_folds = false;
+      Score all{};
+      for (const auto& c : constraints) all[tierRank(c.tier)]++;
+      // Which constraints the corner is on where the mesh put it, for `hard`.
+      std::vector<char> on_at_mesh(constraints.size(), 0);
+      for (std::size_t k = 0; k < constraints.size(); k++) {
         Vector3d q;
-        if (!AnalyticFeatures::closestOnSurface(first, vertices[v], q)) continue;
-        bool in_planes = true;
-        for (const auto *cp : planes_here) {
-          if (fabs((vertices[v] - cp->on_plane).dot(cp->normal)) > 1e-9) in_planes = false;
-        }
-        if ((q - vertices[v]).norm() <= 1e-9 && in_planes) continue;  // nothing to do
-        if (!AnalyticFeatures::projectOntoSurfaceAndPlanes(
-              first, planes_here[0]->normal, planes_here[0]->normal.dot(planes_here[0]->on_plane),
-              planes_here[1]->normal, planes_here[1]->normal.dot(planes_here[1]->on_plane), placed,
-              1e-11, travel_bound, nullptr)) {
-          note_left(left_solve, v, vertices[v]);
-          continue;
-        }
-        if (!AnalyticFeatures::closestOnSurface(first, placed, q) || (q - placed).norm() > 1e-9) {
-          note_left(left_solve, v, vertices[v]);
-          continue;
-        }
-        in_planes = true;
-        for (const auto *cp : planes_here) {
-          if (fabs((placed - cp->on_plane).dot(cp->normal)) > 1e-9) in_planes = false;
-        }
-        if (!in_planes) {
-          note_left(left_solve, v, vertices[v]);
-          continue;
-        }
-        const double travel = (placed - vertices[v]).norm();
-        if (folds_a_facet(v, placed)) {
-          note_left(left_far, v, vertices[v]);
-          continue;
-        }
-        moves.emplace(v, placed);
-        worst_corner = std::max(worst_corner, travel);
-        onto_corner++;
-        continue;
+        on_at_mesh[k] = AnalyticFeatures::closestOnSurface(constraints[k].surface, vertices[v], q) &&
+                        (q - vertices[v]).norm() <= 1e-9 * std::max(1.0, vertices[v].norm());
       }
-      std::shared_ptr<const Surface> plane;  // holds the one built below alive
-      const Surface *second = nullptr;
-      if (planes_here.size() == 1) {
-        plane = std::make_shared<PlaneSurface>(planes_here[0]->on_plane, planes_here[0]->normal);
-        second = plane.get();
+      // Ordered, then walked: score from the most precise tier down, then the
+      // rung table, then least travel. Within one score only the first - the
+      // nearest of the equally exact - is eligible. Two planes and a quadric
+      // have two roots that score the same, and the far one is a true solution
+      // that is the wrong answer: taking it when the near one would fold moved
+      // a corner of f04 2.27 and an edge off its faces by as much. So if the
+      // nearest at a score folds or leaves a hard constraint, that whole score
+      // is given up and the walk drops to the next lower one.
+      struct Weighed {
+        const Candidate *c;
+        Score s;
+        double travel;
+      };
+      std::vector<Weighed> weighed;
+      for (const auto& cand : candidates)
+        weighed.push_back({&cand, score_of(cand.p), (cand.p - vertices[v]).norm()});
+      std::stable_sort(weighed.begin(), weighed.end(), [](const Weighed& x, const Weighed& y) {
+        if (x.s != y.s) return x.s > y.s;
+        const int rx = cornerRungRank(x.c->rung), ry = cornerRungRank(y.c->rung);
+        if (rx != ry) return rx < ry;
+        return x.travel < y.travel;
+      });
+      bool have_level = false;
+      Score level{};
+      for (const auto& w : weighed) {
+        if (have_level && w.s == level) continue;  // this score was given up, or already decided
+        have_level = true;
+        level = w.s;
+        const Candidate& cand = *w.c;
+        const bool moved = w.travel > 0;
+        bool leaves_hard = false;
+        for (std::size_t k = 0; moved && k < constraints.size(); k++) {
+          if (!tierHard(constraints[k].tier) || !on_at_mesh[k]) continue;
+          Vector3d q;
+          if (!AnalyticFeatures::closestOnSurface(constraints[k].surface, cand.p, q) ||
+              (q - cand.p).norm() > 1e-9 * std::max(1.0, cand.p.norm())) {
+            leaves_hard = true;
+          }
+        }
+        if (leaves_hard) continue;
+        if (moved && folds_a_facet(v, cand.p)) {
+          if (w.s == all) full_but_folds = true;
+          continue;
+        }
+        best = &cand;
+        best_s = w.s;
+        break;
+      }
+      // Where the mesh put it is always a valid answer, and the floor of the walk.
+      if (best == nullptr) {
+        best = &candidates.front();
+        best_s = score_of(best->p);
+      }
+      const std::size_t best_n = [&] {
+        std::size_t n = 0;
+        for (const auto k : best_s) n += k;
+        return n;
+      }();
+      const std::size_t n_surf = entry.second.size();
+      (void)n_surf;
+      if (best == nullptr) continue;  // the mesh position is always a candidate
+      won_by[best->rung]++;
+      if (earlier != moves.end() && best->rung != move_rung[v] &&
+          (best->p - earlier->second).norm() > 0) {
+        overruled++;
+      }
+      if (best->rung == CornerRung::Mesh) {
+        moves.erase(v);
+        move_rung.erase(v);
       } else {
-        second = entry.second[1].get();
+        moves[v] = best->p;
+        move_rung[v] = best->rung;
       }
-      Vector3d qa, qb;
-      if (!AnalyticFeatures::closestOnSurface(first, vertices[v], qa)) continue;
-      if (!AnalyticFeatures::closestOnSurface(second, vertices[v], qb)) continue;
-      if ((qa - vertices[v]).norm() <= 1e-9 && (qb - vertices[v]).norm() <= 1e-9) continue;
-      // Two analytic faces and a face written as a plane: three constraints, one
-      // point. Two such planes, or a plane beside a corner already held by one,
-      // and the corner is over-determined and stays.
-      std::shared_ptr<const Surface> third;
-      if (planes_here.empty()) {
-        const auto written = written_planes_at(v);
-        if (written.size() > 1) {
-          note_left(left_manyplanes, v, vertices[v]);
-          continue;
-        }
-        if (written.size() == 1) {
-          third = std::make_shared<PlaneSurface>(written[0].first * written[0].second, written[0].first);
+      if (best->rung == CornerRung::FileFaces) {
+        const double travel = (best->p - vertices[v]).norm();
+        if (n_all >= 3) {
+          worst_corner = std::max(worst_corner, travel);
+          onto_triple_faces++;
+        } else if (std::any_of(constraints.begin(), constraints.end(), [](const Constraint& c) {
+                     return dynamic_cast<const PlaneSurface *>(c.surface) != nullptr;
+                   })) {
+          worst_plane = std::max(worst_plane, travel);
+          onto_plane++;
+        } else {
+          worst_faces = std::max(worst_faces, travel);
+          onto_faces++;
         }
       }
-      if (third != nullptr) {
-        if (!AnalyticFeatures::projectOntoThree(first, second, third.get(), placed, 1e-11, 0)) {
-          note_left(left_solve, v, vertices[v]);
-          continue;
-        }
-      } else {
-        AnalyticFeatures::projectOntoBoth(first, second, placed, 1e-11);
-      }
-      if (!AnalyticFeatures::closestOnSurface(first, placed, qa) || (qa - placed).norm() > 1e-9) {
-        note_left(left_solve, v, vertices[v]);
-        continue;
-      }
-      if (!AnalyticFeatures::closestOnSurface(second, placed, qb) || (qb - placed).norm() > 1e-9) {
-        note_left(left_solve, v, vertices[v]);
-        continue;
-      }
-      const double travel = (placed - vertices[v]).norm();
-      if (folds_a_facet(v, placed)) {
-        note_left(left_far, v, vertices[v]);
-        left_far_travel = std::max(left_far_travel, travel);
-        left_far_bound = std::max(left_far_bound, travel_bound);
-        continue;
-      }
-      moves.emplace(v, placed);
-      if (plane != nullptr) {
-        worst_plane = std::max(worst_plane, travel);
-        onto_plane++;
-      } else {
-        worst_faces = std::max(worst_faces, travel);
-        onto_faces++;
-      }
+      if (best_n < n_all) note_left(full_but_folds ? left_far : left_solve, v, best->p);
     }
-    const std::size_t left_total =
-      left_moved + left_many + left_noplane + left_manyplanes + left_solve + left_far;
+    const std::size_t left_total = left_solve + left_far;
     if (left_total > 0) {
       LOG(message_group::Export_Warning,
           "STEP export: %1$d corners are left off a surface the file writes a face of them on, "
-          "by %2$.4f at worst - %3$d were placed by an earlier path, %4$d have three or more "
-          "analytic faces the solve could not place, %5$d have no plane across their boundary, %6$d "
-          "have more than two, "
-          "%7$d the solve did not reach, %8$d would fold a face or turn an edge round",
-          int(left_total), left_worst, int(left_moved), int(left_many), int(left_noplane),
-          int(left_manyplanes), int(left_solve), int(left_far));
-      if (left_far > 0) {
-        LOG(message_group::Export_Warning,
-            "STEP export:    the ones refused wanted %1$.4f, where their nearest neighbour "
-            "is %2$.4f",
-            left_far_travel, left_far_bound);
+          "by %2$.4f at worst - %3$d because no candidate satisfies every face there, %4$d because "
+          "the one that does would fold a face or turn an edge round",
+          int(left_total), left_worst, int(left_solve), int(left_far));
+    }
+    {
+      std::string tally;
+      for (const auto& spec : kCornerRungs) {
+        const auto w = won_by.find(spec.rung);
+        if (w == won_by.end()) continue;
+        tally += (tally.empty() ? "" : ", ") + std::to_string(w->second) + " " + spec.name;
+      }
+      if (!tally.empty()) {
+        LOG(
+          "STEP export: corners of analytic faces, by the placement that satisfies most of their faces: "
+          "%1$s; "
+          "%2$d of them overruled a less precise rung that had placed them first",
+          tally, int(overruled));
       }
     }
     on_faces = onto_faces;

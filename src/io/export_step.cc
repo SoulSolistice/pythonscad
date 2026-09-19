@@ -225,7 +225,8 @@ bool sameSurfaceGeometrically(const Surface *a, const Surface *b)
  */
 void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_t>> *out,
                      std::map<int, Vector3d> *out_moves, std::map<int, std::size_t> *out_single,
-                     std::map<int, std::pair<std::size_t, std::size_t>> *out_split)
+                     std::map<int, std::pair<std::size_t, std::size_t>> *out_split,
+                     std::map<int, std::vector<std::size_t>> *out_owners)
 {
   if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) return;
   if (ps.surfaces.empty()) return;
@@ -554,6 +555,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // build_tri_body. doc/step-export-development.md records the three ways of
       // guessing it from triangles that do not work.
       if (out_single != nullptr) out_single->emplace(int(v), candidates[0]);
+      if (out_owners != nullptr) (*out_owners)[int(v)].push_back(candidates[0]);
     } else if (candidates.size() == 2) {
       pair++;
       // Both owners have to be surfaces this corner's makers actually put here.
@@ -570,6 +572,15 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         }
         return false;
       };
+      // Every owner that did contribute here, for the arbiter in build_tri_body:
+      // a declared surface this corner's makers put at it is a constraint on the
+      // corner whether or not a face of it is written there, and it is the one
+      // that says a corner on a bore facet's chord belongs on the bore.
+      if (out_owners != nullptr) {
+        for (std::size_t c = 0; c < candidates.size(); c++) {
+          if (contributed(c)) (*out_owners)[int(v)].push_back(candidates[c]);
+        }
+      }
       // Whether this corner may be placed where the two cross at all.
       //
       // Asked only where both owners are exact quadrics. Where one of them is a
@@ -852,9 +863,10 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   std::map<int, Vector3d> corner_moves;
   std::map<int, std::size_t> single_owner;
   std::map<int, std::pair<std::size_t, std::size_t>> owner_split;  // corner -> (exact, fitted)
+  std::map<int, std::vector<std::size_t>> corner_owners;           // corner -> contributing owners
   if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
     reportProvenance(*ps);
-    reportOwnership(*ps, &owned, &corner_moves, &single_owner, &owner_split);
+    reportOwnership(*ps, &owned, &corner_moves, &single_owner, &owner_split, &corner_owners);
   }
 
   std::vector<IndexedFace> indicesNew;
@@ -917,7 +929,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
                     faceOrigin, corner_moves, single_owner, owner_split, owned, faceParents, newNormals,
-                    1e-5, analytic, approximate);
+                    1e-5, analytic, approximate, corner_owners);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;

@@ -2023,7 +2023,8 @@ public:
                       const std::map<int, std::pair<std::size_t, std::size_t>>& ownerSplit,
                       const std::map<int32_t, std::vector<std::size_t>>& owned,
                       const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals,
-                      double tol, bool analytic = false, bool approximate = false);
+                      double tol, bool analytic = false, bool approximate = false,
+                      const std::map<int, std::vector<std::size_t>>& cornerOwners = {});
   EdgeCurve *get_line_from_map(std::map<std::pair<int, int>, StepKernel::EdgeCurve *>& edge_map,
                                int ind1, int ind2, StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
                                bool& edge_dir, int& merge_cnt);
