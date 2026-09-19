@@ -81,9 +81,31 @@ def unit(a):
     return [x / n for x in a] if n > 0 else a
 
 
+def bspline_eval(ctrl, degree, knots, t):
+    """de Boor: the point at parameter t of a B-spline given its full knot vector."""
+    n = len(ctrl)
+    t = min(max(t, knots[degree]), knots[n])
+    k = degree
+    while k < n - 1 and not (knots[k] <= t < knots[k + 1]):
+        k += 1
+    d = [list(ctrl[j + k - degree]) for j in range(degree + 1)]
+    for r in range(1, degree + 1):
+        for j in range(degree, r - 1, -1):
+            i = j + k - degree
+            den = knots[i + degree + 1 - r] - knots[i]
+            a = 0.0 if den == 0 else (t - knots[i]) / den
+            d[j] = [(1 - a) * d[j - 1][c] + a * d[j][c] for c in range(3)]
+    return d[degree]
+
+
 def distance(ents, curve_id, p):
     kind, args = ents[curve_id]
     r = refs(args)
+    # An edge on a surface is written as its 3D curve with pcurves; the vertex
+    # belongs on the 3D curve. Returning 0 for a SURFACE_CURVE, as this did, made
+    # code 7 vacuous for every edge of a sweep face.
+    if kind == "SURFACE_CURVE":
+        return distance(ents, r[0], p)
     if kind == "LINE":
         base = point(ents, r[0])
         vec_kind, vec_args = ents[r[1]]
@@ -156,7 +178,44 @@ def distance(ents, curve_id, p):
         ctrl = [point(ents, i) for i in refs(args.split("(", 1)[1].split(")", 1)[0])]
         if not ctrl:
             return 0.0
-        return min(norm(sub(p, ctrl[0])), norm(sub(p, ctrl[-1])))
+        m = re.match(r"\s*'[^']*'\s*,\s*(\d+)", args)
+        degree = int(m.group(1)) if m else len(ctrl) - 1
+        # Knots, where the curve carries its own: the two lists after the flags.
+        tail = args.split(".F.")[-1]
+        lists = re.findall(r"\(([^()]*)\)", tail)
+        knots = None
+        if len(lists) >= 2:
+            try:
+                mults = [int(x) for x in lists[0].split(",") if x.strip()]
+                vals = [float(x) for x in lists[1].split(",") if x.strip()]
+                full = [v for v, mm in zip(vals, mults) for _ in range(mm)]
+                if len(full) == len(ctrl) + degree + 1:
+                    knots = full
+            except ValueError:
+                knots = None
+        if knots is None:
+            # A Bezier - or a form not read here - passes through its end
+            # points, which is what an edge from end to end needs.
+            return min(norm(sub(p, ctrl[0])), norm(sub(p, ctrl[-1])))
+        # Anywhere along it: an edge may be trimmed at interior points of a curve
+        # it shares with others, as a sweep's column is.
+        lo, hi = knots[degree], knots[len(ctrl)]
+        best, best_t = float("inf"), lo
+        samples = 40 * len(ctrl)
+        for k in range(samples + 1):
+            t = lo + (hi - lo) * k / samples
+            d = norm(sub(p, bspline_eval(ctrl, degree, knots, t)))
+            if d < best:
+                best, best_t = d, t
+        step = (hi - lo) / samples
+        while step > 1e-15:
+            for t in (best_t - step, best_t + step):
+                if lo <= t <= hi:
+                    d = norm(sub(p, bspline_eval(ctrl, degree, knots, t)))
+                    if d < best:
+                        best, best_t = d, t
+            step *= 0.5
+        return best
     return 0.0
 
 
