@@ -54,8 +54,16 @@ recorded in a ledger, and a shadow check holds the exporter against it. Step 3
 is next - flip the source of truth from `consumed` to the ledger, and not one
 number in the suite may move.
 
-Where to start: (1) step 3, then step 4, which is where the 372 facets lid10
-has contested by more than one recogniser stop being decided by call order;
+Where to start: (1) **make a declared surface's recognition whole**. lid10's
+cone 50 is one connected region of one declared cone written as two kinds of
+face - 56 facets to a band's wall, 6 to a quadric face, touching along 2 mesh
+edges - and the bayonet has a cylinder and a cone the same way. The quadric
+pass would have written all 62 as one face; the band's claim is the partial
+one. Two candidate fixes, both needing a PoC measured on derived volume and the
+curve kinds at the rims, are in doc/step-recognition-design.md. Do *not*
+arbitrate facet ownership first: measured, 452 of lid10's 452 contested facets
+name the same surface as the claim holding them, so an ownership arbiter has
+almost nothing to decide.
 (2) lid10's two code-21 faces, planes of area 1.466 at (-56.999,-55.863,89.788)
 and (-55.863,56.999,89.788), never investigated; (3) open item 21's corner and
 the 1% volume question in item 23's SOLIDWORKS run.
