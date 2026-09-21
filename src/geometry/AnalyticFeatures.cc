@@ -1881,14 +1881,14 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         }
         stray = std::max(stray, (grid->evaluate(vu, vv) - vertices[v]).norm());
       }
-      // Recorded whether it wins or loses: a claim that leaves no trace is the
-      // whole defect. The ledger decides nothing - `held` still does.
-      if (ledger != nullptr) {
-        ledger->add({f, surface, ClaimPrecision::DeclaredInterpolant, "a declared sweep",
-                     "every corner and the middle lie on the declared sweep"});
-      }
       if (held) {
+        // Covered and not held: recorded, never honoured. A claim that leaves
+        // no trace is the whole defect this ledger exists for.
         contested.push_back(f);
+        if (ledger != nullptr) {
+          ledger->add({f, surface, ClaimPrecision::DeclaredInterpolant, "a declared sweep",
+                       "covered, but already held when this pass looked", false});
+        }
         continue;
       }
       claimed.push_back(f);
@@ -1956,10 +1956,6 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         for (std::size_t k = 0; k < claimed.size(); k++) {
           if (stray_of[k] > allow) {
             refused++;
-            // The pass claimed it and is now withdrawing: the ledger has to say
-            // so, or it names a holder that gave the facet up. Six facets on
-            // lid10 and the bayonet, found by the shadow check.
-            if (ledger != nullptr) ledger->release(claimed[k]);
             continue;
           }
           kept.push_back(claimed[k]);
@@ -2421,17 +2417,17 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
         }
       }
       if (interior > interior_allow) continue;
-      // Recorded whether it wins or loses. `effective` is the declared surfaces
-      // followed by the approximation pass's fits, so the index is what tells
-      // the two apart - a fit is not a declaration and must not rank as one.
-      if (ledger != nullptr) {
-        ledger->add(
-          {f, surface,
-           surface_index < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted,
-           "a quadric face", "the facet lies on the quadric within its own tolerance"});
-      }
       if (held) {
+        // What this pass covers and does not hold. Recorded as it is found, and
+        // never honoured - such a facet is held by someone else, so it can
+        // never be mistaken for a claim nothing acted on.
         contested.push_back(f);
+        if (ledger != nullptr) {
+          ledger->add({f, surface,
+                       surface_index < declared_count ? ClaimPrecision::DeclaredExact
+                                                      : ClaimPrecision::Fitted,
+                       "a quadric face", "covered, but already held when this pass looked", false});
+        }
         continue;
       }
       claimed.push_back(f);
@@ -3032,7 +3028,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         consumed[f] = 1;
         result.consumed_by[f] = "a band's wall";
         result.ledger.add({f, nullptr, ClaimPrecision::DeclaredExact, "a band's wall",
-                           "the facet walks out from the band's seed"});
+                           "the facet walks out from the band's seed", true});
         band_of_loop[f] = bands.size();
       }
       bands.push_back(info);
@@ -3661,9 +3657,9 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
           result.consumed_by[cap_low] = "a band's cap";
           result.consumed_by[cap_high] = "a band's cap";
           result.ledger.add({cap_low, nullptr, ClaimPrecision::DeclaredExact, "a band's cap",
-                             "the loop closing the band"});
+                             "the loop closing the band", true});
           result.ledger.add({cap_high, nullptr, ClaimPrecision::DeclaredExact, "a band's cap",
-                             "the loop closing the band"});
+                             "the loop closing the band", true});
         }
         rims[seed] = ends;
         for (const std::size_t bi : run) {

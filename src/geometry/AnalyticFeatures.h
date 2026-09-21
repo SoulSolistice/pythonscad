@@ -231,6 +231,14 @@ struct Claim {
   ClaimPrecision precision = ClaimPrecision::Fitted;
   const char *by = nullptr;
   const char *why = nullptr;
+  /*! Whether the exporter acted on it.
+   *
+   * A claim that lost is still recorded - that record is the point - but it is
+   * not a candidate for who holds the facet. Inferring this from *where* the
+   * claim was recorded does not work: a pass abandons a region after covering
+   * it, in several places, and each one is a way to record a claim nothing
+   * honours. Measured: 288 such on lid10 before this was a field. */
+  bool honoured = false;
 };
 
 /*! Every claim every recogniser made, in the order they were made.
@@ -260,7 +268,12 @@ public:
    * shadow check caught exactly that on lid10 (162 facets) and the bayonet (42)
    * the first time it ran. The claims stay in `all()`, because what was claimed
    * and withdrawn is part of the record; they simply stop being candidates. */
-  void release(std::size_t facet) { by_facet_.erase(facet); }
+  void release(std::size_t facet)
+  {
+    const auto it = by_facet_.find(facet);
+    if (it == by_facet_.end()) return;
+    for (const std::size_t i : it->second) claims_[i].honoured = false;
+  }
   [[nodiscard]] std::vector<const Claim *> claimants(std::size_t facet) const
   {
     std::vector<const Claim *> out;
@@ -275,8 +288,75 @@ public:
   [[nodiscard]] const Claim *firstClaimant(std::size_t facet) const
   {
     const auto it = by_facet_.find(facet);
-    if (it == by_facet_.end() || it->second.empty()) return nullptr;
-    return &claims_[it->second.front()];
+    if (it == by_facet_.end()) return nullptr;
+    for (const std::size_t i : it->second) {
+      if (claims_[i].honoured) return &claims_[i];
+    }
+    return nullptr;
+  }
+  /*! Facets held by a claimant less precise than another that also covered
+   * them.
+   *
+   * This, and not `contested`, is what deciding by call order costs. A facet
+   * two recognisers want is no defect at all if the more precise one has it;
+   * the defect is a declared exact surface losing to a fit, or to an
+   * interpolant, because it happened to run second. Each one of these is a face
+   * written from a worse surface than the model provides.
+   *
+   * `worst_loser`, when given, receives what the most precise unhonoured
+   * claimant was, so a report can name the kind of loss rather than count it. */
+  [[nodiscard]] std::size_t misheld(ClaimPrecision *best_lost = nullptr) const
+  {
+    std::size_t n = 0;
+    for (const auto& kv : by_facet_) {
+      const Claim *holder = nullptr;
+      const Claim *best = nullptr;
+      for (const std::size_t i : kv.second) {
+        const Claim& c = claims_[i];
+        if (c.honoured && holder == nullptr) holder = &c;
+        if (best == nullptr || c.precision < best->precision) best = &c;
+      }
+      if (holder == nullptr || best == nullptr) continue;
+      if (best->precision >= holder->precision) continue;
+      n++;
+      if (best_lost != nullptr && (n == 1 || best->precision < *best_lost)) {
+        *best_lost = best->precision;
+      }
+    }
+    return n;
+  }
+  /*! Facets whose best claimants are of *equal* precision, and different
+   * recognisers.
+   *
+   * `misheld` catches a holder beaten on precision. It says nothing about a
+   * tie, and a tie is not harmless: two claimants equally precise by this
+   * ranking are still separated by call order, and nothing anywhere states
+   * which of them is right. On lid10 the ties are the bulk of the contention -
+   * a band's wall against a quadric face, both declared exact - so a zero from
+   * `misheld` must never be read as "the correct recogniser took it". It means
+   * only that no strictly better claimant lost. */
+  [[nodiscard]] std::size_t tied() const
+  {
+    std::size_t n = 0;
+    for (const auto& kv : by_facet_) {
+      const Claim *holder = nullptr;
+      for (const std::size_t i : kv.second) {
+        if (claims_[i].honoured) {
+          holder = &claims_[i];
+          break;
+        }
+      }
+      if (holder == nullptr) continue;
+      for (const std::size_t i : kv.second) {
+        const Claim& c = claims_[i];
+        if (&c == holder || c.honoured) continue;
+        if (c.precision != holder->precision) continue;
+        if (c.by != nullptr && holder->by != nullptr && std::string(c.by) == holder->by) continue;
+        n++;
+        break;
+      }
+    }
+    return n;
   }
   [[nodiscard]] std::size_t contested() const
   {

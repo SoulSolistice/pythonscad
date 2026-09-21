@@ -2217,7 +2217,7 @@ void StepKernel::build_tri_body(
       for (const std::size_t f : patch.facets) features.consumed_by[f] = "a Bezier patch";
       for (const std::size_t f : patch.facets)
         features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredInterpolant,
-                             "a Bezier patch", "the facet lies on the declared Bezier patch"});
+                             "a Bezier patch", "the facet lies on the declared Bezier patch", true});
     }
 
     // Which of the surviving patches are exactly quadrics.
@@ -2408,6 +2408,9 @@ void StepKernel::build_tri_body(
           grid_faces.push_back(patch);
           for (const std::size_t f : patch.facets) features.consumed[f] = 1;
           for (const std::size_t f : patch.facets) features.consumed_by[f] = "a declared sweep";
+          for (const std::size_t f : patch.facets)
+            features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredInterpolant,
+                                 "a declared sweep", "the sweep's patch is written and takes it", true});
         }
       }
       LOG("STEP export: its facets lie over %1$d of the profile's %2$d spans - %3$s", used, segs,
@@ -2779,6 +2782,9 @@ void StepKernel::build_tri_body(
         claimed_facets += patch.facets.size();
         for (const std::size_t f : patch.facets) features.consumed[f] = 1;
         for (const std::size_t f : patch.facets) features.consumed_by[f] = "a quadric face";
+        for (const std::size_t f : patch.facets)
+          features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredExact,
+                               "a quadric face", "the quadric's patch is written and takes it", true});
       }
       if (!quadric_faces.empty()) {
         LOG(
@@ -3228,17 +3234,35 @@ void StepKernel::build_tri_body(
   // regions - have no `consumed_by` and are skipped rather than counted as
   // disagreements.
   {
-    std::size_t checked = 0, disagreed = 0;
-    const char *first_bad = nullptr;
+    std::size_t checked = 0, disagreed = 0, overclaimed = 0;
+    const char *first_bad = nullptr, *first_over = nullptr;
     for (std::size_t f = 0; f < features.consumed_by.size(); f++) {
       const char *holder = features.consumed_by[f];
-      if (holder == nullptr) continue;
+      if (holder == nullptr) {
+        // The other direction, and the one a one-sided check cannot see: a
+        // facet nothing holds must have no live claimant either. A pass records
+        // its claim while walking facets, but only takes them if the patch they
+        // land in turns out to be a sheet - so a claim on a facet of a patch
+        // that died is a claim the exporter never honoured.
+        const AnalyticFeatures::Claim *live = features.ledger.firstClaimant(f);
+        if (live != nullptr && f < features.consumed.size() && features.consumed[f] == 0) {
+          overclaimed++;
+          if (first_over == nullptr) first_over = live->by != nullptr ? live->by : "something";
+        }
+        continue;
+      }
       checked++;
       const AnalyticFeatures::Claim *first = features.ledger.firstClaimant(f);
       const char *by = first != nullptr ? first->by : nullptr;
       if (by != nullptr && std::string(by) == holder) continue;
       disagreed++;
       if (first_bad == nullptr) first_bad = by != nullptr ? by : "nothing";
+    }
+    if (overclaimed > 0) {
+      LOG(message_group::Export_Error,
+          "STEP export: the claim ledger holds %1$d facets nothing actually took - the first by "
+          "%2$s. A claim the exporter never honoured; see doc/step-recognition-design.md",
+          int(overclaimed), first_over);
     }
     if (disagreed > 0) {
       LOG(message_group::Export_Error,
@@ -3247,10 +3271,20 @@ void StepKernel::build_tri_body(
           "yet describe what this exporter does; see doc/step-recognition-design.md",
           int(disagreed), int(checked), first_bad);
     } else if (checked > 0) {
+      AnalyticFeatures::ClaimPrecision lost = AnalyticFeatures::ClaimPrecision::Fitted;
+      const std::size_t misheld = features.ledger.misheld(&lost);
+      const char *kind = lost == AnalyticFeatures::ClaimPrecision::DeclaredExact
+                           ? "a declared exact surface"
+                           : (lost == AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
+                                ? "a declared interpolant"
+                                : "a fit");
       LOG(
-        "STEP export: the claim ledger agrees with the holder of all %1$d claimed facets, and "
-        "records %2$d contested by more than one recogniser",
-        int(checked), int(features.ledger.contested()));
+        "STEP export: the claim ledger agrees with the holder of all %1$d claimed facets; %2$d "
+        "are contested by more than one recogniser, and %3$d of those are held by a claimant less "
+        "precise than one that also covered them (the best that lost is %4$s), and %5$d are a tie "
+        "between recognisers of equal precision, which nothing decides but the order they run in",
+        int(checked), int(features.ledger.contested()), int(misheld), kind,
+        int(features.ledger.tied()));
     }
   }
   if (approximate) {

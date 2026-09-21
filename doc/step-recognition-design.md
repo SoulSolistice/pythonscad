@@ -82,6 +82,66 @@ demands of every new assertion.
 
 Each of those has cost an afternoon at least once.
 
+## The arbitration key: precision is not enough, and the matcher needs a rung
+
+**Measured 2026-09-21, and it changes step 4.** With the ledger in place, the
+first question asked of it was whether the *right* recogniser holds each
+contested facet - not merely whether there was a contest. Counting disagreement
+says one thing; counting damage says another:
+
+| part | contested | held by a less precise claimant | **a tie of equal precision** |
+| --- | --- | --- | --- |
+| lid10 | 452 | 0 | **452** |
+| bayonet | 532 | 0 | **524** |
+| f02 | 32 | 0 | **32** |
+| f04 | 64 | 0 | **64** |
+
+**Every contested facet is a tie.** The precision ranking carried over from the
+corner arbiter - declared exact, declared interpolant, fitted - does not
+discriminate here at all: a band's wall and a quadric face are both declared
+exact, and the whole contest is settled by which function runs first.
+
+So **arbitrating by precision alone would have been a no-op**, and shipping it
+green would have retired the question with the contention untouched. The zero in
+the middle column is the trap: it reads as "no damage" and means "my key cannot
+see the damage".
+
+### What discriminates instead
+
+Two keys, in order, and the second is the one this section adds.
+
+**1. Provenance, which is identity rather than measurement.** The model knows
+which original made a facet and which surfaces that original owns. A facet
+whose maker owns the surface claiming it is not in the same position as one
+that merely lies near it, and no distance test can substitute - the same
+principle as *diagnose at the origin*: carry the fact from where the geometry
+was made rather than inferring it by proximity.
+
+**2. A rung of the matchers, ordered by the strength of the evidence.** The
+corner arbiter already has this as `kCornerRungs`, and the reason "three
+surfaces meeting in a point beats two meeting in a curve" is not a preference
+but a *dimensionality* argument: three constraints determine the answer, two
+leave a freedom. A facet rung has to be justified the same way, and each step
+below has such an argument:
+
+| rung | evidence | why it outranks the next |
+| --- | --- | --- |
+| provenance owns it | the generator says this facet's maker owns this surface | a declaration, not a measurement; nothing derived can outrank it |
+| declared points | the facet's corners are points the generator emitted on the surface | exact by position, with no tolerance to choose |
+| area membership | corners *and* interior lie on the surface | a facet closing a declared profile has every corner on the surface by position alone - the interior is what distinguishes the region from its lid, and `recogniseGridPatches` already asks the centroid for exactly this reason |
+| corners only | position of the corners alone | the weakest, and the one that claims a cap over a bore because every vertex is on the rim |
+
+Reordering is editing the table, as it is for corners. And measured
+satisfaction decides before the table does, so a rung cannot let weaker
+evidence beat stronger - the rule the corner arbiter already holds to.
+
+### What this means for step 4
+
+Step 4 is not "arbitrate by precision". It is: give each claim its evidence,
+rank the evidence, and let the arbiter decide - with the tie count above as the
+before-measurement. A change that leaves 452 ties at 452 has done nothing,
+whatever else it reports.
+
 ## Migrating without a big bang
 
 The suite is 54 tests and it has a known history of blind spots - the flagship
