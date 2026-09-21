@@ -624,6 +624,113 @@ travel bound, which was a proxy for the same question and blind to direction:
 lid10's crease corner has its nearest neighbour 0.2356 away *perpendicular* to a
 1.338 move with 4.6 of room along it.
 
+### Catalogue first, arbitrate second - and nothing decides a position anywhere else
+
+The corner placement was rebuilt this way and it was the largest single
+structural win this work has had: rungs stopped *claiming* and started
+*proposing*, and an arbiter decides. What follows is that shape stated as
+doctrine, because it generalises and because the places that still violate it
+are enumerable.
+
+**The rule.** A decision with more than one possible claimant is taken in two
+phases. Phase one **catalogues** who claims what, and on what evidence. Phase
+two **arbitrates**, by precision. Precedence lives in a table, not in the order
+the passes happen to run in.
+
+**The detector, and it is mechanical.** Any flag that makes a claimed thing
+invisible to a later claimant is an arbiter with a one-line policy of "whoever
+ran first" and no record of the contest:
+
+```text
+AnalyticFeatures.cc:1170   if (... consumed[f] || taken[f]) continue;   quadrics
+AnalyticFeatures.cc:1806   if (... consumed[f] || taken[f]) continue;   declared grids
+AnalyticFeatures.cc:2282   if (... consumed[f] || taken[f]) continue;   smooth regions
+AnalyticFeatures.cc:2652   if (... consumed[seed] ...) continue;        fillets
+StepKernel.cc:3181         // Every path checks `moves.count(v)` first, so first refusal
+```
+
+The last line is the corner placement's own comment, describing the defect the
+arbiter was built to end. The four above it are **facet ownership**, which still
+has it: whichever recognition pass runs first takes a facet, and a more precise
+declaration arriving later cannot have it. That is the same defect, one
+granularity up, and it is the next arbiter to build.
+
+**What the catalogue buys beyond correctness.** Precedence becomes *data*:
+reordering the corner ladder is "editing a table, not the control flow", so it
+can be mutation-tested like any other assertion. And **losers become
+reportable**. Today "why is this facet a plane?" costs an afternoon with an
+instrumented build; with a catalogue it is one line - *claimed by the sweep and
+by a chord plane; the sweep won at tier 1*. A large part of
+`scripts/step-diagnostics/` exists to reconstruct, after the fact, information a
+catalogue would simply have.
+
+**Its limits, named rather than discovered.**
+
+- *Arbitration has dependencies.* The corner arbiter needs to know which faces
+  exist at a corner, which is recognition's output. So this is not one catalogue
+  then one arbitration; it is staged, with feedback, and the first place that
+  bites is the grid claim (open item 25: claim, place, revise the claim).
+  Anything cyclic needs a termination argument before it is written.
+- *Cataloguing is not free.* The corner arbiter enumerates every pair and triple
+  of constraints per corner. That is affordable at corner scale and must be
+  measured at facet scale rather than assumed.
+- *No contention, no arbiter.* Where one claimant is possible by construction
+  the machinery is overhead - though a catalogue with one entry costs little,
+  and uniformity is usually worth more than the saving.
+
+**The trap, paid for on 2026-09-21.** Phase one must catalogue claims *without
+deciding positions*. A proof of concept for the grid claim did catalogue and
+arbitrate in the right order, and reproduced the old defect anyway, because what
+it arbitrated over was the coordinate the **mesh** happened to hold. Which is
+the next section.
+
+### A point carries whether it has moved, and identity is never inferred from a coordinate
+
+Three separate days have been lost to one mistake: **a coordinate used as an
+identity.**
+
+- A proof of concept refused two facets over a corner at
+  `(76.7944 20.4008 1.0332)`. `at-vertex.py` finds no such point in the exported
+  file: the placement had moved it, and the two facets were the ridge's own
+  flank (open item 25).
+- The flagship check's "cone corner 0.716 off its surface" on lid10 is
+  **OpenCASCADE's**, not ours - in our text that vertex is used by the sweep and
+  two planes and *no cone at all*, and OCCT had widened it to 1.08 (open item
+  23).
+- "The written face's loop acquires a vertex the recogniser never accepted"
+  (open item 15).
+
+*The mesh moves between recognition and writing* above records the symptom and
+settles for a workaround - checksum `vertices` at both call sites. A checksum
+says *that* something moved. It cannot say which point, or what it was before,
+or who is entitled to an opinion about it.
+
+So a point carries its status, and each value carries a rule:
+
+| status | what it is | the rule |
+| --- | --- | --- |
+| **declared** | the generator emitted it (`isDeclaredPoint`) | exact on its surface; nothing may move it |
+| **tessellation** | a boolean made it; it lies on facets | a station's sagitta off the smooth surface, legitimately - not an error |
+| **placed** | the arbiter moved it, by a named rung, satisfying named constraints | its coordinate is the arbiter's answer and the only valid one |
+| **provisional** | it will be placed and has not been | **no decision may be taken on it** |
+| **reader-invented** | not ours at all - a kernel made it on read | an instrument must say which side of this line it read |
+
+The fourth row is the 2026-09-21 defect stated so that it cannot recur, and the
+fifth is why `reader-built.py` exists. Together they give the catalogue its
+missing half: **phase one records claims against identities and evidence; phase
+two assigns coordinates.** Without a status, phase one inevitably reaches for a
+coordinate, because a coordinate is what is in front of it.
+
+**Costs, honestly.** `vertices` is a plain `std::vector<Vector3d>`, so a status
+lives in a parallel structure - invasive either way. And it must be derived or
+invalidated when a point moves, never cached and left, or it becomes a second
+thing that can be silently stale, which is the disease and not the cure.
+
+**And the standing rule this makes explicit:** *identity is carried, never
+inferred by proximity.* `diagnose-at-the-origin` says that of provenance; this
+says it of coordinates. Matching a point to an entity by distance is the method
+that produced all three failures above.
+
 ### The rungs themselves, as landed
 
 | condition | action |
