@@ -3516,6 +3516,100 @@ plane one of their own bounds is not in" on the old binary; the arbiter adds
 `step-cap-meets-wall` and takes the band family from 11 faces to 13. No test
 gates that mode's EXPORT-ERROR.
 
+### 24. The flagship third of the suite does 18 exports where 6 would do
+
+**Measured 2026-09-21**, while waiting an hour for a baseline run on a 16-core
+machine. Not an exporter defect - a cost we pay on every verification, and the
+verification loop is the thing this work runs most.
+
+**Two independent multipliers**, both in `tests/step-flagship-check.py` and
+`tests/CMakeLists.txt:1221-1256`:
+
+1. **The six coupons are exported three times over.** `export-step-flagship-coupons`,
+   `-strict` and `-corners` are the same script over the same `COUPONS` list;
+   `--strict` and `--strict-corners` change *assertions applied to output already
+   produced*, not what is exported. So lid10 and the bayonet - the two most
+   expensive models in the project - are each exported three times per suite run.
+2. **Within a run the six are serial.** `for name, source, extra in COUPONS:`
+   exports, validates and round-trips one at a time. The coupons share no state
+   and write separate files, so this is a sum where it could be a max.
+
+**The fix, ctest-native rather than a cache.** Split export from assertion with
+an `--export-dir`: one setup test exports the six once, the three assertion tests
+consume that directory, wired with `FIXTURES_SETUP` / `FIXTURES_REQUIRED`. That
+is what the property is for - no staleness heuristic, no lockfile, ctest owns the
+ordering, and the three keep their own names and `WILL_FAIL` semantics. Then
+parallelise the export loop in the setup with a thread pool (`subprocess.run`
+releases the GIL), collecting results and printing in coupon order so the report
+stays deterministic.
+
+**The detail that would gut it if missed.** The checks do not read only the
+`.stp`. `--strict` greps the export's **stdout** for `STRICT_MUST_NOT_SAY`, and
+the round trip parses `tessellation band of ([\d.]+)` out of that same output to
+set `fitted_band`. A split that persists only the `.stp` leaves `--strict`
+asserting nothing and the round trip without its band - green for the wrong
+reason, which is the failure mode this file is full of.
+
+**Cost to land:** adding a test needs `cmake -B build`, which `CLAUDE.md` says
+costs a full rebuild, against one unexplained 19-second measurement over an
+existing cache. Unknown which applies here.
+
+**Half of it landed 2026-09-21**, the half that needs no `cmake` reconfigure:
+the coupon loop in `step-flagship-check.py` now exports concurrently on a thread
+pool and checks serially in `COUPONS` order, so the wall clock is a max over the
+exports instead of a sum, and the report stays deterministic. A flagship test
+goes from about 300 s to **152 s** at Release. `scripts/step-dev.sh flagship`
+also passes `-j` now, where it had been running the three tests one after
+another.
+
+What is left is the 3x duplication, and it is worth less than it looks: ctest
+already runs the three tests **concurrently**, so removing the duplicate exports
+saves CPU rather than wall clock. It needs a new `add_test`, hence a configure
+and a full rebuild. Take it when something else already forces a configure.
+
+**Priority, corrected the same day.** The numbers above were first taken on a
+build with no `CMAKE_BUILD_TYPE` (see *A build with no build type*, below), where
+the flagship set took 2h10m. On a Release build of the same commit the same six
+coupons take about five minutes, so the 18-vs-6 redundancy is worth ~3 minutes a
+run, not ~90. Still worth doing, and no longer urgent.
+
+Banked rather than taken: it pays only across several full suite runs, and the
+claim work's loop is `export` + `census`, which does not touch it.
+
+### A build with no build type runs 26x slower and says nothing
+
+**Measured 2026-09-21.** A fresh worktree's first build came out with
+`CMAKE_BUILD_TYPE:STRING=` - empty. CMake defines `CMAKE_CXX_FLAGS_RELEASE` as
+`-O3 -DNDEBUG` and then never applies it, so the binary is built with no
+optimisation at all. Nothing in the build output, the smoke test or the suite
+says so; the exports are **byte-for-byte identical**, and the only symptom is
+time.
+
+What it cost, same commit, same machine, six flagship coupons:
+
+| coupon | Release | no build type |
+| --- | --- | --- |
+| band-fn048 | 29 s | ~14 min |
+| band-fn064 | 64 s | ~30 min |
+| band-fn096 | 97 s | ~49 min |
+| lid10 | 56 s | ~19 min |
+| bayonet | 44 s | ~17 min |
+| **all six** | **~5 min** | **~2 h 10 min** |
+
+and the full STEP suite 8437 s instead of a few minutes.
+
+**The cause was in `scripts/msys2-build.sh`**, which auto-configures when there
+is no cache and ran a bare `cmake -B build` with no build type, while
+`CLAUDE.md`'s documented configure line passes `-DCMAKE_BUILD_TYPE=Release`.
+Only a *fresh* tree reaches that branch - every other tree had a cache
+configured by hand - so the one path nobody ran was the one a new worktree
+always takes. Fixed: the script now passes it on both configure paths.
+
+**The general shape**, worth more than the fix: a default that is *absent*
+rather than wrong produces correct output and no diagnostic, so it can only be
+found by noticing that a number is out of line with experience. Here it was
+"this has never taken two hours before".
+
 ## Unexplained, and to be validated
 
 - ~~**Untapered band family at `$fn` 32** trades code 17 for 13/30 with sixteen
