@@ -190,6 +190,42 @@ measured, and it is why the question had to be asked per surface. Per facet,
 every answer looked benign: one honoured claim each, no precision inversion, no
 provenance conflict.
 
+#### The split is gratuitous, and the band's claim is the partial one
+
+Measured further, because a cone a boolean left in two pieces legitimately needs
+two faces and "fixing" that would be damage:
+
+```text
+lid10   cone 50, 62 facets (56 to a band's wall, 6 to a quadric face)
+        2 mesh edges have a differently-held facet on each side
+bayonet cylinder 6, 60 facets (52 band, 8 quadric), 16 such edges
+        cone 74, 62 facets (56 band, 6 quadric), 2 such edges
+```
+
+Facets held by the two kinds **touch**, so this is one connected region cut in
+two, not two disconnected pieces. And the quadric pass says what it wanted:
+*"56 facets this quadric also covers are held by something that claimed them
+first"* - it would have written all 62 as one face. **The band's claim is the
+partial one.**
+
+That is not the band misbehaving. A band *is* a ring between two rims; this
+region is such a ring plus 6 facets a boolean left attached, and the band has no
+shape for them.
+
+**Two candidate fixes, and the choice needs a proof of concept of each:**
+
+1. *The band yields to the superset.* The quadric writes all 62 as one trimmed
+   cone. Whole by construction - but the band's rim machinery goes with it:
+   exact circular rim edges, the caps, the seam handling, and whatever else
+   consumes bands. The risk is trading a gratuitous edge for inexact rims.
+2. *The band absorbs the remainder.* Rims are kept, but a band's structure is a
+   ring between two rims and the extra facets do not have that shape; forcing
+   them risks corrupting rim detection, which is load-bearing elsewhere.
+
+Compare them on the reference parts by derived volume, by the kinds of curve
+written at the rims, and by whether the false edge disappears - not by face
+count, which both change.
+
 **What is genuinely open, and it is two different things:**
 
 1. **60 facets on lid10** where the losing claim names a *different* surface.

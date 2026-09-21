@@ -3393,9 +3393,44 @@ void StepKernel::build_tri_body(
                      : dynamic_cast<const PlaneSurface *>(sf)    ? "a plane"
                                                                  : "a surface";
             }
+            // Is the division gratuitous? A cone a boolean left in two
+            // disconnected pieces legitimately needs two faces. It is only a
+            // defect where facets held by *different* kinds touch: one
+            // connected region of one declared surface, cut in two by nothing
+            // but the order the passes ran in.
+            std::map<std::pair<int, int>, std::vector<std::string>> across;
+            for (std::size_t f = 0; f < features.consumed_by.size(); f++) {
+              const AnalyticFeatures::Claim *h = features.ledger.firstClaimant(f);
+              if (h == nullptr || h->by == nullptr || h->surface_index != kv.first) continue;
+              if (f >= loops.size() || !loop_valid[f]) continue;
+              const std::vector<int>& loop = loops[f];
+              for (std::size_t i = 0; i < loop.size(); i++) {
+                const int a = loop[i], b = loop[(i + 1) % loop.size()];
+                across[{std::min(a, b), std::max(a, b)}].push_back(h->by);
+              }
+            }
+            std::map<std::string, std::size_t> share;
+            for (std::size_t f = 0; f < features.consumed_by.size(); f++) {
+              const AnalyticFeatures::Claim *h = features.ledger.firstClaimant(f);
+              if (h == nullptr || h->by == nullptr || h->surface_index != kv.first) continue;
+              share[h->by]++;
+            }
+            std::string division;
+            for (const auto& sv : share) {
+              division += (division.empty() ? "" : ", ") + std::to_string(sv.second) + " to " + sv.first;
+            }
+            std::size_t touching = 0;
+            for (const auto& e : across) {
+              if (e.second.size() != 2) continue;
+              if (e.second[0] != e.second[1]) touching++;
+            }
             LOG(message_group::Export_Warning,
-                "STEP export:   %1$s, surface %2$d, %3$d facets, held by %4$s",
-                kind, int(kv.first), int(facets_of[kv.first]), who);
+                "STEP export:   %1$s, surface %2$d, %3$d facets (%7$s) - %5$d mesh edges have a "
+                "differently-held facet on each side%6$s",
+                kind, int(kv.first), int(facets_of[kv.first]), who, int(touching),
+                touching > 0 ? ", so this is one connected region cut in two by pass order"
+                             : ", so the pieces are disconnected and two faces are correct",
+                division);
           }
         }
       }
