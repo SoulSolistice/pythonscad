@@ -1761,7 +1761,8 @@ Patch patchFromFacets(const std::vector<std::vector<int>>& loops,
 std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
                                         const std::vector<std::shared_ptr<Surface>>& surfaces,
                                         const std::vector<char>& consumed,
-                                        std::vector<std::string>& report)
+                                        std::vector<std::string>& report,
+                                        const std::vector<const char *> *held_by)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -1812,10 +1813,22 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     // written as an open rectangle can be bounded across its own seam.
     const int segs = grid->closed_v ? grid->cols : grid->cols - 1;
     std::vector<std::size_t> claimed;
+    std::vector<std::size_t> contested;  // on this sweep, but already held elsewhere
     std::vector<int> span_of;
     std::vector<double> stray_of;  // worst any corner of the facet is off the fit
     for (std::size_t f = 0; f < loops.size(); f++) {
-      if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
+      if (!loop_valid[f] || is_hole[f]) continue;
+      // A facet something else already holds is still *examined*, and if this
+      // sweep would have covered it that is recorded rather than lost.
+      //
+      // Whoever runs first takes a facet and it becomes invisible to everyone
+      // after, so the contest leaves no trace and "why is this facet a plane?"
+      // has to be reconstructed with an instrumented build. Cataloguing the
+      // claim costs one membership test per held facet and answers it outright.
+      // See doc/step-export-development.md, *Catalogue first, arbitrate
+      // second*: this is the record, not yet the arbitration - who holds the
+      // facet is still decided by who ran first.
+      const bool held = consumed[f] != 0 || taken[f] != 0;
       bool on = true;
       for (const int v : loops[f]) {
         const Vector3d& p = vertices[v];
@@ -1869,12 +1882,34 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         }
         stray = std::max(stray, (grid->evaluate(vu, vv) - vertices[v]).norm());
       }
+      if (held) {
+        contested.push_back(f);
+        continue;
+      }
       claimed.push_back(f);
       stray_of.push_back(stray);
       if (miss > worst_claimed) worst_at_u = pu;
       worst_claimed = std::max(worst_claimed, miss);
       claim_band = std::max(claim_band, grid->membershipTolerance());
       span_of.push_back(segs > 0 ? std::max(0, std::min(segs - 1, int(pv * segs))) : 0);
+    }
+    // What this sweep covers and does not hold. Reported per holder, because
+    // "already taken" without a name is the answer that costs an afternoon.
+    if (!contested.empty()) {
+      std::map<std::string, std::size_t> by_holder;
+      for (const std::size_t f : contested) {
+        const char *who = held_by != nullptr && f < held_by->size() ? (*held_by)[f] : nullptr;
+        by_holder[who != nullptr ? who : "another declared sweep"]++;
+      }
+      std::string who;
+      for (const auto& kv : by_holder) {
+        who += (who.empty() ? "" : ", ") + std::to_string(kv.second) + " by " + kv.first;
+      }
+      report.push_back(
+        format("%d facets this declared sweep also covers are held by something that claimed them "
+               "first: %s - who holds a facet is still decided by which pass ran first, and this "
+               "is the record of what that cost",
+               int(contested.size()), who.c_str()));
     }
     if (claimed.empty()) continue;
 
@@ -2148,7 +2183,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
                                            const std::vector<std::shared_ptr<Surface>>& surfaces,
                                            const std::vector<char>& consumed,
                                            const Provenance& provenance, double smooth_angle,
-                                           double max_off, std::vector<std::string>& report)
+                                           double max_off, std::vector<std::string>& report,
+                                           const std::vector<const char *> *held_by)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -2288,11 +2324,17 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     };
 
     std::vector<std::size_t> claimed;
+    std::vector<std::size_t> contested;  // on this quadric, but already held elsewhere
     std::vector<double> span_of_claim;
     double worst = 0;
     for (std::size_t f = 0; f < loops.size(); f++) {
-      if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
+      if (!loop_valid[f] || is_hole[f]) continue;
       if (loops[f].size() < 3) continue;
+      // Examined even when something already holds it - see the same record in
+      // recogniseGridPatches. This pass runs *after* the sweeps, so it is the
+      // one that loses facets, and the first pass reporting no contention is a
+      // statement about the order the passes run in and not about the geometry.
+      const bool held = consumed[f] != 0 || taken[f] != 0;
       // Ask the model before measuring. See Provenance: where the generator
       // says this facet's maker does not own this surface, no distance test can
       // make it true, and every threshold below is spared the question.
@@ -2370,6 +2412,10 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
         }
       }
       if (interior > interior_allow) continue;
+      if (held) {
+        contested.push_back(f);
+        continue;
+      }
       claimed.push_back(f);
       span_of_claim.push_back(spanOf(f));
       worst = std::max(worst, off);
@@ -2387,6 +2433,22 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     // span itself - no facet of a tessellation reaches 134 degrees when its
     // neighbours reach eleven. Judged against this claim's own median, as the
     // sweep's corners are, so that nothing here assumes a resolution.
+    if (!contested.empty()) {
+      std::map<std::string, std::size_t> by_holder;
+      for (const std::size_t f : contested) {
+        const char *who = held_by != nullptr && f < held_by->size() ? (*held_by)[f] : nullptr;
+        by_holder[who != nullptr ? who : "an earlier pass"]++;
+      }
+      std::string who;
+      for (const auto& kv : by_holder) {
+        who += (who.empty() ? "" : ", ") + std::to_string(kv.second) + " by " + kv.first;
+      }
+      report.push_back(
+        format("%d facets this quadric also covers are held by something that claimed them first: "
+               "%s - who holds a facet is still decided by which pass ran first, and this is the "
+               "record of what that cost",
+               int(contested.size()), who.c_str()));
+    }
     {
       std::vector<double> ranked = span_of_claim;
       std::sort(ranked.begin(), ranked.end());
@@ -2495,6 +2557,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
   Result result;
   result.band_of_loop.assign(face_cnt, NO_BAND);
   result.consumed.assign(face_cnt, 0);
+  result.consumed_by.assign(face_cnt, nullptr);
   if (surfaces.empty()) return result;
 
   std::vector<Band>& bands = result.bands;
@@ -2949,6 +3012,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
 
       for (const std::size_t f : walls) {
         consumed[f] = 1;
+        result.consumed_by[f] = "a band's wall";
         band_of_loop[f] = bands.size();
       }
       bands.push_back(info);
@@ -3572,6 +3636,8 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         if (pole_closed) {
           consumed[cap_low] = 1;
           consumed[cap_high] = 1;
+          result.consumed_by[cap_low] = "a band's cap";
+          result.consumed_by[cap_high] = "a band's cap";
         }
         rims[seed] = ends;
         for (const std::size_t bi : run) {

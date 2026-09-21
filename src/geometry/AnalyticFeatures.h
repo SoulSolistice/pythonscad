@@ -218,6 +218,17 @@ struct Result {
   std::vector<std::size_t> band_of_loop;        // NO_BAND when not in a band
   std::vector<char> consumed;                   // loop is part of a live band
 
+  /*! Who took each facet, parallel to `consumed`, and empty where nothing has.
+   *
+   * `consumed` records *that* a facet is taken and not by whom, so "why is this
+   * facet a plane?" has cost an afternoon with an instrumented build every time
+   * it has been asked. Ownership is the first half of the catalogue the
+   * arbitration doctrine wants: a claim carries who made it. The strings are
+   * literals owned by the recogniser that set them, never freed.
+   *
+   * See doc/step-export-development.md, *Catalogue first, arbitrate second*. */
+  std::vector<const char *> consumed_by;
+
   /*! What was recognised and, for every band that was not, the rule that
    * rejected it.
    *
@@ -486,7 +497,8 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
 std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
                                         const std::vector<std::shared_ptr<Surface>>& surfaces,
                                         const std::vector<char>& consumed,
-                                        std::vector<std::string>& report);
+                                        std::vector<std::string>& report,
+                                        const std::vector<const char *> *held_by = nullptr);
 
 /*! Regions lying on a declared or fitted quadric, as patches.
  *
@@ -520,7 +532,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
                                            const std::vector<std::shared_ptr<Surface>>& surfaces,
                                            const std::vector<char>& consumed,
                                            const Provenance& provenance, double smooth_angle,
-                                           double max_off, std::vector<std::string>& report);
+                                           double max_off, std::vector<std::string>& report,
+                                           const std::vector<const char *> *held_by = nullptr);
 
 /*! Find the bands of facets which were modelled as a surface of revolution.
  *

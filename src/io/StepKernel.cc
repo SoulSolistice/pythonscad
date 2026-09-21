@@ -2214,6 +2214,7 @@ void StepKernel::build_tri_body(
       }
       if (!patch.alive) continue;
       for (const std::size_t f : patch.facets) features.consumed[f] = 1;
+      for (const std::size_t f : patch.facets) features.consumed_by[f] = "a Bezier patch";
     }
 
     // Which of the surviving patches are exactly quadrics.
@@ -2361,8 +2362,8 @@ void StepKernel::build_tri_body(
     // that cannot be made into a face has to say so, rather than looking like a
     // sweep that was never declared.
     std::vector<std::string> grid_report;
-    const std::vector<AnalyticFeatures::Patch> grid_patches =
-      AnalyticFeatures::recogniseGridPatches(mesh, effective, features.consumed, grid_report);
+    const std::vector<AnalyticFeatures::Patch> grid_patches = AnalyticFeatures::recogniseGridPatches(
+      mesh, effective, features.consumed, grid_report, &features.consumed_by);
     for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
 
     // Where the claimed region sits on the sweep, which is the question a face
@@ -2403,6 +2404,7 @@ void StepKernel::build_tri_body(
         if (approximate) {
           grid_faces.push_back(patch);
           for (const std::size_t f : patch.facets) features.consumed[f] = 1;
+          for (const std::size_t f : patch.facets) features.consumed_by[f] = "a declared sweep";
         }
       }
       LOG("STEP export: its facets lie over %1$d of the profile's %2$d spans - %3$s", used, segs,
@@ -2446,7 +2448,8 @@ void StepKernel::build_tri_body(
       const double max_off = approximate ? std::numeric_limits<double>::infinity() : 1e-7;
       std::vector<std::string> quadric_report;
       const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::recogniseQuadricPatches(
-        mesh, effective, features.consumed, provenance, smooth_angle, max_off, quadric_report);
+        mesh, effective, features.consumed, provenance, smooth_angle, max_off, quadric_report,
+        &features.consumed_by);
       for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
       // Corners on the surface are not enough to call a face exact. The
       // boundary between two of them is a straight edge in the mesh, and a
@@ -2772,6 +2775,7 @@ void StepKernel::build_tri_body(
         quadric_faces.push_back(patch);
         claimed_facets += patch.facets.size();
         for (const std::size_t f : patch.facets) features.consumed[f] = 1;
+        for (const std::size_t f : patch.facets) features.consumed_by[f] = "a quadric face";
       }
       if (!quadric_faces.empty()) {
         LOG(
