@@ -275,10 +275,46 @@ a `CIRCLE` for a circular run on a *quadric face* (`circular_runs` /
 is circular. Rim exactness is not a band privilege, and the objection that
 yielding the surface would lose it does not hold.
 
-**What a proof of concept still has to measure** is therefore narrower: not rim
-exactness, but everything else a band carries - the caps, the seam handling,
-`rim_seam`, and the other consumers of band structures - against derived volume
-on the reference parts.
+**The proof of concept, run 2026-09-21.** A temporary switch made the band pass
+yield one named declared surface, so the pass after it covered the whole region.
+Never committed; the point was to measure the cost before building anything.
+
+On lid10, yielding cone 50:
+
+| | base | yielded |
+| --- | --- | --- |
+| census 7 / 16 / 13 / 21 | 0 / 0 / 0 / 3 | identical |
+| census 17 | 42, worst 0.108893 | identical, same breakdown |
+| faces | 837 | 837 |
+| seam crossings | 0 | 0 |
+| **CIRCLE** | 300 | **410** |
+| trimmed quadrics | 13, over 377 facets | 14, over **433** facets |
+| split surfaces | 1 | **none** |
+| area | 107318.432226 | **107318.432226** |
+| volume | 224620.232151 | **224618.150378** |
+
+433 - 377 = 56, exactly the band's facets, absorbed into one face over the whole
+region. The split is gone, the census does not move, the face count does not
+move, and **110 more exact circles** are written. The fear that yielding would
+cost rim exactness is not merely unfounded - the trimmed patch writes *more*
+exact curves than the band did.
+
+**What blocks adoption is the volume**, and specifically its shape: the area is
+identical to the last digit while the volume moves by 2.0818 mm3 (9.3e-6
+relative). Geometrically identical faces should move neither; a genuinely
+changed boundary should move both. Identical area with moved volume points at
+something that changes the enclosed region without changing the surface measure
+- a trim, an orientation, or a face contributing with a different sense - and
+that is worth understanding before anything is adopted.
+
+**And lid10 cannot adjudicate it.** It has no derived volume; taking
+OpenCASCADE's figure as truth is the *kernel agreement is not proof* trap.
+
+**So the next step is a fixture**, small enough to reason about, that reproduces
+the split and carries a **hand-derived** volume: a declared cylinder or cone
+with a boolean-attached remainder. Then the two representations are measured
+against the model's own arithmetic, and the invariant becomes regression-tested
+rather than observed once on two specimens.
 
 Compare them on the reference parts by derived volume, by the kinds of curve
 written at the rims, and by whether the false edge disappears - not by face
