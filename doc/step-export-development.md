@@ -549,7 +549,82 @@ settles which faces are analytic and before the pass that writes them.
 - **Not by projecting a corner onto one of its two surfaces.** It takes the
   corner off the other, and on lid10 the walls were always the worse of the two.
 
-### The ladder, as landed
+### The ladder is an arbiter now, and its precedence is two tables
+
+**Landed 2026-09-19.** Every rung below used to *claim* a corner: whichever ran
+first held it and the rest skipped it on `moves.count(v)`, so the ladder's order
+was its precision ranking, fixed in control flow - and the rungs written first,
+which are the least precise because they predate the exact ones, kept winning.
+Measured on `step-exact-trim`, 32 corners were reachable two ways and went
+entirely to whichever ran first; on lid10 the provenance rung held two corners
+on the *curve* two surfaces share while the *point* all three of their faces
+meet was one solve away.
+
+A rung now only **proposes**. One arbiter, in `build_tri_body`, collects every
+candidate for a corner - each rung's answer, the mesh position, and the solutions
+of the constraints themselves taken in pairs and triples - and chooses. It
+measures each candidate against every constraint the file asserts at that corner,
+to the ladder's exactness floor of 1e-9, and takes the one that satisfies the
+most precise set. Two tables at the top of `src/io/StepKernel.cc` are the whole
+of the precedence, so reordering the ladder is editing a table:
+
+**`kCornerTiers`** - what kinds of constraint a corner has, and how each counts.
+Candidates are compared tier by tier from the most precise down, so one
+constraint of a higher tier outweighs any number of a lower one.
+
+| tier | kind | `hard` | `used` |
+| --- | --- | --- | --- |
+| 0 | declared exact: a quadric or closed-form sweep the model declared, and a plane it declared | no | yes |
+| 1 | declared interpolant: a `declare_grid` sweep or a Bezier patch - declared, but interpolated through stations and publishing a band | no | yes |
+| 2 | fitted face: what the approximation found. Less precise than a declaration, but the file asserts it | no | yes |
+| 3 | provenance owner: a declared surface the corner's makers put there, with no face of it written at the corner. Only owners that *contributed* a facet are passed on, which filters provenance's known false owners | no | yes |
+| 4 | mesh plane: the tessellation's chord | — | **no** |
+
+**`kCornerRungs`** - which rung wins when two candidates are equally exact by
+that measure: the file-faces solve, then provenance, then the mesh-plane triple,
+then the mesh-plane conic, then the mesh position. Ties beyond that go to least
+travel.
+
+Three columns because precision, safety and relevance are different questions.
+`rank` is precision; `hard` says a candidate that takes the corner off such a
+constraint, where the corner was on it, is no candidate at all; `used` says
+whether the kind enters the arbiter. Each setting of the last row was measured
+and all but one was wrong:
+
+- held `hard`, as the ladder did before the arbiter: corners stayed on a chord
+  0.096 inside the declared bore on `step-declare-grid-scad`;
+- ranked level with a declaration: two chord planes outvote the sweep, and lid10
+  left 61 corners off faces the file asserts;
+- ranked last but `used`: a far root on a bore's vertex line lies on *both* facet
+  planes beside it, outscores the near root, and `step-declare-grid-scad` moved a
+  corner 1.9 onto its neighbour's point;
+- **unused**: none of that occurs. A chord says nothing about where a point of
+  the model is, and a planar face the placement bends is fanned by the writer
+  anyway.
+
+The ranking between the middle tiers was measured too: provenance above the
+fitted faces took 60 lid10 corners off faces the file writes, and the final
+"no move may take a corner off an analytic face" check refused them.
+
+**A far root is never a fallback for a near one.** Two planes and a quadric meet
+in two points - the planes' shared line crosses the quadric twice - and both are
+exact, so the score cannot separate them. Along that line the quadric's implicit
+is exactly a quadratic in the line parameter, so three evaluations fix it and
+both roots come out in closed form; both are offered as candidates and least
+travel takes the near one. Within one score only the nearest candidate is
+eligible: if it folds, that whole score is given up and the walk drops to the
+next, rather than sliding sideways to the far root, which took a corner of f04
+2.27 out when it did.
+
+**What the arbiter does not decide is what may move.** A candidate that moves the
+corner must leave the file unfolded - no edge at the corner turning round, no
+facet *written as itself* folding or leaving its plane - and a facet an analytic
+face absorbed is not asked, because it is not in the file. That replaced the
+travel bound, which was a proxy for the same question and blind to direction:
+lid10's crease corner has its nearest neighbour 0.2356 away *perpendicular* to a
+1.338 move with 4.6 of room along it.
+
+### The rungs themselves, as landed
 
 | condition | action |
 | --- | --- |
@@ -565,7 +640,9 @@ were already off the sweep before any move, by up to 0.3962 against its band of
 surface and not the sweep's: a surface with no claim on a corner was vetoing its
 placement on the surface it is actually on.
 
-**A corner may travel no further than its nearest neighbouring vertex.** The line
+**A corner may travel no further than its nearest neighbouring vertex.**
+*Superseded 2026-09-19 by the fold test above; kept because the trap it was
+written for is real and the replacement has to keep catching it.* The line
 two faces cross along can meet the surface twice, and the far crossing is a
 perfectly good solution to the wrong problem. Bounding by the face's extent let a
 corner on `step-shared-arc` move 2.0 and took a cone that was exact to 1.41 out.

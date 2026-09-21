@@ -7,11 +7,200 @@ What is settled lives in `doc/step-export-development.md`; build and test
 mechanics live in `CLAUDE.md`. Read both before this one — several items below
 are one sentence because the reasoning behind them is there.
 
-**Last updated 2026-09-18.** The session of 2026-09-16 to 18 is summarised in
-one page under *Where it stands* below, with what it learned about *method* as
-well as what it fixed - start there. The suite is green at 54 of 54 on
-`claude/solidworks-fault-code-17-b58858`, and every SOLIDWORKS number since
+**Last updated 2026-09-21.** Start at *Handover: the next session starts here*
+immediately below - it carries the priming prompt, the branches, the standing
+rules and the tooling. The session of 2026-09-16 to 18 is summarised under
+*Where it stands*; 2026-09-18 to 19 is open item 23. The suite is green at 54 of
+54 on `claude/step-ladder-precision`, and every SOLIDWORKS number since
 2026-09-17 was taken with `-Raw`.
+
+---
+
+## Handover: the next session starts here (2026-09-21)
+
+### The priming prompt
+
+Paste this into a new session, adjusting only the worktree path:
+
+```text
+You are continuing work on the PythonSCAD STEP exporter, in a worktree of
+E:\29_Git_Soulsolistice\pythonscad. Branch: claude/step-handover-2026-09-21,
+which is claude/step-ladder-precision plus this handover. Nothing is pushed.
+
+Read first, in this order: CLAUDE.md (build, test, the dev loop), then
+doc/step-export-wip.md "Handover: the next session starts here" - the standing
+rules there bind - then doc/step-export-development.md sections "The census",
+"How to interrogate a reader", "Fault codes" and "Entities: what ISO 10303-42
+has, and what we write", then this file's open items 21, 22 and 23.
+
+The development loop is committed; do not write your own build or export
+scripts. From PowerShell:
+
+  powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 build
+  powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 test
+  powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 export lid10
+  powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 census <file.stp>
+
+scripts/step-dev.sh is the same from bash. Verify with `test` (54 of 54) before
+and after any change. Never run two builds or two suites at once.
+
+Every diagnostic is catalogued by the question it answers in
+scripts/step-diagnostics/README.md - read it before writing any instrument. Run
+the census on our own file before asking any reader anything.
+
+Where to start: open item 23's three followers, in this order - (1) the claim
+decided by solvability, which unparks claude/step-grid-claim-parked and takes
+f04's code 17 from 38 to 8 and splits the sweep faces SOLIDWORKS objects to
+with code 30; (2) lid10's two code-21 faces, planes of area 1.466 at
+(-56.999,-55.863,89.788) and (-55.863,56.999,89.788), never investigated; (3)
+open item 21's corner and the 1% volume question in item 23's SOLIDWORKS run.
+```
+
+### Branches
+
+Nothing has been pushed. Every branch below is local.
+
+| branch | head | what it is |
+| --- | --- | --- |
+| `claude/step-handover-2026-09-21` | this commit | **this handover**, docs only, off `claude/step-ladder-precision` |
+| `claude/step-ladder-precision` | `1123b8e4c` | **the landed work**: the corner arbiter and its two tables, the constraint tiers, the code-7 instrument fix, the survey and the SOLIDWORKS run. Suite 54 of 54 |
+| `claude/step-grid-claim-parked` | `2bd2cfdf4` | the grid claim without its statistical refusal, spans read from corners, and sweep cuts written as the surface's own column curves. f04 code 17 38 -> 8, lid10 42 -> 52 |
+| `claude/step-corner-arbiter-parked` | `4f4411b94` | the first arbiter; **superseded** by `claude/step-ladder-precision` |
+| `claude/step-grid-junction-parked` | `954a2c7d3` | the relative-distance exemption; **superseded and refuted** - it was a threshold |
+| `claude/step-sweep-chord-parked` | `1de808ff9` | the sweep chord promotion, parked 2026-09-18 on the validator's B-spline pcurve gap (item 22) |
+| `claude/pythonscad-step-solidworks-fault-6e908a` | `7bb1fde58` | the session branch this work grew from; contained in the ladder branch |
+
+### What this session established (2026-09-18 to 21)
+
+Measured, each on the reference parts, suite green at every landing:
+
+1. **A corner is determined by the faces the file writes on it, and three of
+   them meet in a point.** `projectOntoThree` solves that; the ladder had no such
+   solver and two rules deciding by distance instead. Code 17 on lid10 and the
+   bayonet 62 -> 42, f02 38 -> 8, f04 62 -> 38; codes 16 and 13 to zero.
+2. **The travel bound was direction-blind.** "No further than the nearest
+   neighbour" refused a 1.338 move whose nearest neighbour lay 0.2356 away
+   *perpendicular* to it, with 4.6 of room along it. It is replaced by asking the
+   file's own question: no edge at the corner turns round, and no facet written
+   as itself folds or leaves its plane. Facets an analytic face absorbed are not
+   asked - they are not in the file.
+3. **Chord planes must not vote.** Scoring the tessellation's own planes in the
+   arbiter caused every downstream defect seen this session: shells opening,
+   fans that could not be cut, and two corners placed on one root 1.4e-12 to 1.9
+   apart in the mesh. With mesh planes `used = false`, none of it occurs. The
+   merge built for the "coincident corners" - and the ring dedupe, and the cap
+   recognition, and a coaxial-circle construction - were all removed unused.
+4. **Three instruments were blind, two of them ours.** `vertex-on-curve.py` (and
+   through it the census's code-7 row) returned 0 for every `SURFACE_CURVE`,
+   which is every sweep edge, and measured a B-spline only at its end control
+   points; it now unwraps and evaluates by de Boor, mutation-checked.
+   `validatestep.py` rejected any B-spline curve that was not one Bezier span
+   (fixed on the parked branch). The veto's "faces would turn over" counted the
+   faces that did *not*.
+5. **Recognition and the writer disagreed about a facet's profile span** -
+   centroid against corners - and the corner reading is the right one. With it,
+   a wrapping claim is seen and cut, and lid10's seam crossings go 2 -> 0.
+6. **A cut along a sweep's column is a curve of the surface itself**, not a
+   chord: `GridSurface::columnCurve`, the surface's own u-knots and that column
+   of its control net. 155 chords off the sweep on lid10 become 1.
+7. **What blocks the rest is a claim question, not a solver.** The five corners
+   left at the thread's ends are exactly on two exact declarations and 0.10-0.22
+   off the sweep - they sit on the ridge's flat end cap, which the sweep never
+   reaches - so the facets attaching them to the sweep face are not the sweep's.
+   A claim decided by *solvability* is the next design step.
+8. **SOLIDWORKS moved.** lid10 went from `faultyfaces=7 faultyedges=1
+   codes=7/17/21` to `faultyfaces=3 faultyedges=0 codes=21/30`; the bayonet to
+   code 30 alone; f02 and f04 are clean by every API check.
+
+### Standing rules
+
+These are not preferences. Each was paid for, and the last two are new.
+
+1. **Only declared values and closed algebraic solutions are viable upfront.** A
+   magic number, a statistical threshold (a median, an outlier factor) or an
+   approximation band is the **absolute last resort** and needs explicit
+   approval before anything is built on it. The exporter's hard defects have all
+   been a computable quantity decided by a threshold instead.
+2. **A band excuses the defect it should expose.** A grid publishes its
+   tessellation's sagitta; measuring against it hid 19 of 27 sweep chords and two
+   corners 0.02-0.04 off the sweep. Measure against the surface **as written**.
+3. **Precision beats ladder order - the rung philosophy.** Wherever a less
+   precise rung has claimed a corner, face or edge first, the more precise answer
+   replaces it. The low-precision rungs are *historical*: they were written
+   before the exact ones existed, and first refusal (`moves.count(v)`) kept them
+   winning. Since 2026-09-19 the corner placement is an **arbiter over
+   candidates** rather than a ladder of claims, and its precedence lives in two
+   tables at the top of `src/io/StepKernel.cc`:
+   - `kCornerTiers`: what kinds of constraint a corner has, with `rank`
+     (precision: declared exact, declared interpolant, fitted face, provenance
+     owner, mesh plane), `hard` (leaving it disqualifies a candidate) and `used`
+     (whether it enters the arbiter at all).
+   - `kCornerRungs`: which rung wins a tie between equally exact answers.
+     Reordering the ladder is editing a table, not the control flow. Measured
+     satisfaction decides first, so a table cannot let a less precise rung beat a
+     more precise answer. The tables, what each setting was measured to do and
+     what the arbiter does *not* decide are in `doc/step-export-development.md`,
+     *The ladder is an arbiter now, and its precedence is two tables*.
+4. **Exactness takes precedence**: a declared surface always beats a fitted one,
+   and a substituted curve must pass through its own run's endpoints.
+5. **Prefer the declaration to a deduction.** When two things meet, ask whether
+   both are declared before computing their crossing.
+6. **Kernel agreement is not proof.** OpenCASCADE heals on read. New checks read
+   the STEP text with no kernel in the path - and when an instrument reads zero,
+   mutate a file and prove it can read non-zero.
+7. **Five whys with named branches**; record the refuted ones. Land no fix until
+   something in the suite fails without it, and **land no guard that nothing
+   exercises** - three exact constructions were removed this session for that
+   reason alone.
+8. **Half a fix is worse than none.** A change that trades one part's numbers for
+   another's parks, with its measurements.
+
+### SOLIDWORKS: how every run is made from now on
+
+Start SOLIDWORKS by hand, never kill the driver mid-import, and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\step-interop-solidworks.ps1 `
+  -KitDir <kit> -ImportSettings "raw (do-not-knit, diagnostics off, analytic conversion off)" `
+  -Raw -RoundTrip -Heal -FaultDetail <kit>\faults.tsv
+```
+
+- **`-Raw` always.** Knitting, healing and analytic conversion are on by default
+  and each changes what is measured; the script restores them afterwards.
+- **`-RoundTrip` always**, and **`-Heal`** to isolate the repair: the pair
+  `<coupon>_SW.STEP` and `<coupon>_SW_healed.STEP` differs by the repair alone.
+  Compare with `scripts/step-interop-sw-roundtrip.py --kitdir <kit>`, which runs
+  both comparisons, and `scripts/step-diagnostics/reader-diff.py` for a pair.
+- **`-FaultDetail` always.** The counts say how many faults; the TSV says *which
+  entities*, with kind, area and centre - which is what turned "lid10: 3 faulty
+  faces" into "one B-spline at the thread's run-in and two planes at z = 89.788".
+  It re-imports every file a second time, so on a full kit take the counts first
+  and re-run with `-FaultDetail -Only` over the files whose counts were not zero.
+  Note it writes relative to the *caller's* directory.
+- **Always include the control** `f02-band-fn032-analytic.stp` (in
+  `build/interop-kit3/` of the `solidworks-fault-code-17-b58858` worktree), which
+  must read `faults=2 faultyfaces=2 codes=17`. A run without a positive control
+  proves nothing.
+- Label every run with its import settings, and count faults **before** any heal.
+
+### The tooling, and the order to use it
+
+- **`scripts/step-diagnostics/README.md` is the catalogue**: every instrument
+  this work has built, grouped *by the question it answers* - the census first,
+  then one check per fault relation, then how to locate a fault in the file, then
+  how to interrogate a reader. Read it before writing a new instrument; the
+  question has usually been answered already.
+- **First on any export**: `scripts/step-diagnostics/fault-census.py <file.stp>`,
+  which keys every property known to become a SOLIDWORKS fault by the code it
+  becomes. Our file is the part we control; a reader's verdict is the last thing
+  to ask.
+- The dev loop is `scripts/step-dev.ps1` / `.sh`:
+  `build | test | flagship | export <part> | census <file>`. It sets MSYS2 up,
+  passes arguments untouched (lid10's `-P "New set 1"` is what an inline command
+  mangles), exports with both feature flags, and runs the suite with the staging
+  DLLs on PATH.
+- `CLAUDE.md` has the build, the test invocation, the Windows traps and the
+  interop kit; `doc/step-export-development.md` has what is settled.
 
 ---
 
@@ -36,17 +225,20 @@ and **a new fixture needs `cmake -B build` before ctest can see it at all**. Run
 it under the machine's own locale, not `LC_ALL=C`,
 which breaks five UTF-8 filename tests.
 
-**Two of the 54 fail on purpose and report green**, both registered
-`WILL_FAIL`: ctest reports them *passed* while they fail, and will report each
-*failed* on the day it starts passing — which is how that fix gets noticed. Do
-not delete them, and do not read their green as the defect being gone.
+**One of the 54 fails on purpose and reports green**, registered `WILL_FAIL`:
+ctest reports it *passed* while it fails, and will report it *failed* on the day
+it starts passing — which is how that fix gets noticed. Do not delete it, and do
+not read its green as the defect being gone.
 
-- `export-step-flagship-strict` asserts that the plane veto never gives up the
-  crossing-curve boundary. It does, on all six flagship coupons.
 - `export-step-flagship-corners` asserts that every corner of an analytic face
-  lies on that face's surface, as every fixture's round trip does. It fails on
-  all six coupons, normal build and relaxed veto alike, on the tessellation's
-  slack: 0.01 to 0.72 against an allowance near 1e-6.
+  lies on that face's surface, as every fixture's round trip does. Since
+  2026-09-19 it **passes on the four band-family coupons** and fails only on
+  lid10 and the bayonet, where OpenCASCADE's own repair at the thread's run-in
+  is what it measures (item 23). Its allowance is near 1e-6.
+
+`export-step-flagship-strict` was the second until 2026-09-16, when open item 11
+landed; it asserts that the plane veto never gives up the crossing-curve
+boundary and passes on its own merits.
 `export-step-sanitytest_step-cap-meets-wall` was the third until 2026-09-16,
 when the placement onto the crossing of the two faces a corner bounds fixed the
 slack it was marked for - ctest reported it as a *failure* that day, which is
@@ -3298,8 +3490,25 @@ re-fit at a ten-thousandth of a millimetre, touching no vertex, surface or
 topology. The volume OpenCASCADE reads from SOLIDWORKS's re-export is 1.04%
 below ours on lid10 and 0.81% on the bayonet, while SOLIDWORKS's own volume for
 lid10 (224483.5622) is 0.06% from what OpenCASCADE reads of ours (224620.2322);
-which side of the second read loses the 1% is not established. The `-FaultDetail`
-TSV was not written.
+which side of the second read loses the 1% is not established.
+
+**`-FaultDetail` named the entities**, which is why it is now part of every run.
+Six rows, and they place both codes exactly:
+
+| file | entity | kind | area mm2 | centre | codes |
+| --- | --- | --- | --- | --- | --- |
+| bayonet | face 19 | bspline | 14.005973 | 78.5601; 8.4690; 0.9727 | 30 |
+| lid10 | face 34 | bspline | 14.007408 | 78.5601; 8.4690; 0.9727 | 30 |
+| lid10 | face 550 | plane | 1.466064 | -56.9991; -55.8627; 89.7880 | 21 |
+| lid10 | face 682 | plane | 1.466064 | -55.8627; 56.9991; 89.7880 | 21 |
+| control | face 1 | bspline | 1027.844725 | 0.0298; 0.0882; 17.3483 | 17/17 |
+| control | face 4 | cylinder | 2098.714282 | 0.1454; 0.0000; 20.0000 | 17/17 |
+
+Code 30 is **one face, the same on both parts**: the sweep at the thread's
+run-in, 14 mm2 at z = 0.97 - the small claim covering one span of the profile.
+Code 21 is **two** planes of 1.466 mm2 at **z = 89.788**, not the three the
+census counts and not the z = 84.9 recorded earlier in this file; they are a
+mirror pair, which is what to expect of a feature the model places four times.
 
 Also noted, not caused here: on the CGAL backend in the analytic-only mode,
 `step-bored-cone` and `step-band-family` already raise "planar faces assert a
