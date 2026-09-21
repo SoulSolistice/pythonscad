@@ -1761,8 +1761,7 @@ Patch patchFromFacets(const std::vector<std::vector<int>>& loops,
 std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
                                         const std::vector<std::shared_ptr<Surface>>& surfaces,
                                         const std::vector<char>& consumed,
-                                        std::vector<std::string>& report,
-                                        const std::vector<const char *> *held_by)
+                                        std::vector<std::string>& report, ClaimLedger *ledger)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -1882,6 +1881,12 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         }
         stray = std::max(stray, (grid->evaluate(vu, vv) - vertices[v]).norm());
       }
+      // Recorded whether it wins or loses: a claim that leaves no trace is the
+      // whole defect. The ledger decides nothing - `held` still does.
+      if (ledger != nullptr) {
+        ledger->add({f, surface, ClaimPrecision::DeclaredInterpolant, "a declared sweep",
+                     "every corner and the middle lie on the declared sweep"});
+      }
       if (held) {
         contested.push_back(f);
         continue;
@@ -1898,8 +1903,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     if (!contested.empty()) {
       std::map<std::string, std::size_t> by_holder;
       for (const std::size_t f : contested) {
-        const char *who = held_by != nullptr && f < held_by->size() ? (*held_by)[f] : nullptr;
-        by_holder[who != nullptr ? who : "another declared sweep"]++;
+        const Claim *first = ledger != nullptr ? ledger->firstClaimant(f) : nullptr;
+        by_holder[first != nullptr && first->by != nullptr ? first->by : "another declared sweep"]++;
       }
       std::string who;
       for (const auto& kv : by_holder) {
@@ -1951,6 +1956,10 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         for (std::size_t k = 0; k < claimed.size(); k++) {
           if (stray_of[k] > allow) {
             refused++;
+            // The pass claimed it and is now withdrawing: the ledger has to say
+            // so, or it names a holder that gave the facet up. Six facets on
+            // lid10 and the bayonet, found by the shadow check.
+            if (ledger != nullptr) ledger->release(claimed[k]);
             continue;
           }
           kept.push_back(claimed[k]);
@@ -2184,7 +2193,7 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
                                            const std::vector<char>& consumed,
                                            const Provenance& provenance, double smooth_angle,
                                            double max_off, std::vector<std::string>& report,
-                                           const std::vector<const char *> *held_by)
+                                           ClaimLedger *ledger, std::size_t declared_count)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -2412,6 +2421,15 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
         }
       }
       if (interior > interior_allow) continue;
+      // Recorded whether it wins or loses. `effective` is the declared surfaces
+      // followed by the approximation pass's fits, so the index is what tells
+      // the two apart - a fit is not a declaration and must not rank as one.
+      if (ledger != nullptr) {
+        ledger->add(
+          {f, surface,
+           surface_index < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted,
+           "a quadric face", "the facet lies on the quadric within its own tolerance"});
+      }
       if (held) {
         contested.push_back(f);
         continue;
@@ -2436,8 +2454,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     if (!contested.empty()) {
       std::map<std::string, std::size_t> by_holder;
       for (const std::size_t f : contested) {
-        const char *who = held_by != nullptr && f < held_by->size() ? (*held_by)[f] : nullptr;
-        by_holder[who != nullptr ? who : "an earlier pass"]++;
+        const Claim *first = ledger != nullptr ? ledger->firstClaimant(f) : nullptr;
+        by_holder[first != nullptr && first->by != nullptr ? first->by : "an earlier pass"]++;
       }
       std::string who;
       for (const auto& kv : by_holder) {
@@ -3013,6 +3031,8 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       for (const std::size_t f : walls) {
         consumed[f] = 1;
         result.consumed_by[f] = "a band's wall";
+        result.ledger.add({f, nullptr, ClaimPrecision::DeclaredExact, "a band's wall",
+                           "the facet walks out from the band's seed"});
         band_of_loop[f] = bands.size();
       }
       bands.push_back(info);
@@ -3384,6 +3404,8 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     if (bands[i].alive) continue;
     for (const std::size_t f : bands[i].walls) {
       consumed[f] = 0;
+      result.consumed_by[f] = nullptr;
+      result.ledger.release(f);
       band_of_loop[f] = NO_BAND;
     }
   }
@@ -3638,6 +3660,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
           consumed[cap_high] = 1;
           result.consumed_by[cap_low] = "a band's cap";
           result.consumed_by[cap_high] = "a band's cap";
+          result.ledger.add({cap_low, nullptr, ClaimPrecision::DeclaredExact, "a band's cap",
+                             "the loop closing the band"});
+          result.ledger.add({cap_high, nullptr, ClaimPrecision::DeclaredExact, "a band's cap",
+                             "the loop closing the band"});
         }
         rims[seed] = ends;
         for (const std::size_t bi : run) {

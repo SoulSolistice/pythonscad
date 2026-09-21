@@ -2215,6 +2215,9 @@ void StepKernel::build_tri_body(
       if (!patch.alive) continue;
       for (const std::size_t f : patch.facets) features.consumed[f] = 1;
       for (const std::size_t f : patch.facets) features.consumed_by[f] = "a Bezier patch";
+      for (const std::size_t f : patch.facets)
+        features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredInterpolant,
+                             "a Bezier patch", "the facet lies on the declared Bezier patch"});
     }
 
     // Which of the surviving patches are exactly quadrics.
@@ -2363,7 +2366,7 @@ void StepKernel::build_tri_body(
     // sweep that was never declared.
     std::vector<std::string> grid_report;
     const std::vector<AnalyticFeatures::Patch> grid_patches = AnalyticFeatures::recogniseGridPatches(
-      mesh, effective, features.consumed, grid_report, &features.consumed_by);
+      mesh, effective, features.consumed, grid_report, &features.ledger);
     for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
 
     // Where the claimed region sits on the sweep, which is the question a face
@@ -2449,7 +2452,7 @@ void StepKernel::build_tri_body(
       std::vector<std::string> quadric_report;
       const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::recogniseQuadricPatches(
         mesh, effective, features.consumed, provenance, smooth_angle, max_off, quadric_report,
-        &features.consumed_by);
+        &features.ledger, surfaces.size());
       for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
       // Corners on the surface are not enough to call a face exact. The
       // boundary between two of them is a straight edge in the mesh, and a
@@ -3212,6 +3215,44 @@ void StepKernel::build_tri_body(
   // corner may travel no further than its nearest neighbouring vertex - which is
   // section 4's bound, and not the longest edge at it, which is the trap that
   // licensed a 1.9976 move on step-partial-cylinder.
+  // The shadow check (doc/step-recognition-design.md, step 2).
+  //
+  // The ledger records every claim and decides nothing; `consumed` still
+  // decides everything. So the ledger's answer *under the policy in force* -
+  // whoever claimed first - must be the holder `consumed_by` recorded. Where
+  // they disagree, the ledger does not yet describe what the exporter does, and
+  // nothing may be built on it until it does. Loud, because it is the net that
+  // makes flipping the source of truth safe later.
+  //
+  // Facets taken by a pass that does not record a claim yet - the smooth
+  // regions - have no `consumed_by` and are skipped rather than counted as
+  // disagreements.
+  {
+    std::size_t checked = 0, disagreed = 0;
+    const char *first_bad = nullptr;
+    for (std::size_t f = 0; f < features.consumed_by.size(); f++) {
+      const char *holder = features.consumed_by[f];
+      if (holder == nullptr) continue;
+      checked++;
+      const AnalyticFeatures::Claim *first = features.ledger.firstClaimant(f);
+      const char *by = first != nullptr ? first->by : nullptr;
+      if (by != nullptr && std::string(by) == holder) continue;
+      disagreed++;
+      if (first_bad == nullptr) first_bad = by != nullptr ? by : "nothing";
+    }
+    if (disagreed > 0) {
+      LOG(message_group::Export_Error,
+          "STEP export: the claim ledger disagrees with what holds %1$d of %2$d facets - the "
+          "first says %3$s where the exporter recorded a different holder. The ledger does not "
+          "yet describe what this exporter does; see doc/step-recognition-design.md",
+          int(disagreed), int(checked), first_bad);
+    } else if (checked > 0) {
+      LOG(
+        "STEP export: the claim ledger agrees with the holder of all %1$d claimed facets, and "
+        "records %2$d contested by more than one recogniser",
+        int(checked), int(features.ledger.contested()));
+    }
+  }
   if (approximate) {
     // The distinct surfaces of the analytic faces at each corner. Bands are
     // included by the surface their face is written from, which is the same

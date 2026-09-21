@@ -212,6 +212,87 @@ struct Mesh {
   const std::vector<Vector3d> *normals = nullptr;
 };
 
+/*! How precise a claim on a facet is - the same idea the corner arbiter's
+ * `kCornerTiers` applies to a corner's constraints, one granularity up.
+ *
+ * A declared exact surface states where it is algebraically; a declared
+ * interpolant was fitted through the model's own stations and publishes a band;
+ * a fit is the approximation pass's own guess. Ordered, lower is more precise,
+ * and this is what an arbiter will compare when ownership stops being decided
+ * by which pass ran first. See doc/step-recognition-design.md. */
+enum class ClaimPrecision { DeclaredExact, DeclaredInterpolant, Fitted };
+
+/*! One recogniser's claim on one facet, with the evidence for it.
+ *
+ * `by` and `why` are string literals owned by the recogniser, never freed. */
+struct Claim {
+  std::size_t facet = 0;
+  std::shared_ptr<const Surface> surface;
+  ClaimPrecision precision = ClaimPrecision::Fitted;
+  const char *by = nullptr;
+  const char *why = nullptr;
+};
+
+/*! Every claim every recogniser made, in the order they were made.
+ *
+ * The point of recording a claim that *lost* is that today it leaves no trace
+ * at all: whoever runs first takes a facet and it is invisible to everyone
+ * after, so "why is this facet a plane?" has to be reconstructed with an
+ * instrumented build. With the ledger, contention is `claimants(f).size() > 1`
+ * - computed once, by the component whose job it is.
+ *
+ * The ledger decides nothing yet. `consumed` still does. `firstClaimant` exists
+ * so that the ledger's answer under the *current* policy can be held against
+ * what `consumed` produced, which is the shadow check that makes it safe to
+ * flip the source of truth later. */
+class ClaimLedger
+{
+public:
+  void add(const Claim& claim)
+  {
+    by_facet_[claim.facet].push_back(claims_.size());
+    claims_.push_back(claim);
+  }
+  /*! A claimant gave the facet back.
+   *
+   * A band that is dropped puts its facets back, and something else then takes
+   * them. Without this the ledger names a holder that had already let go - the
+   * shadow check caught exactly that on lid10 (162 facets) and the bayonet (42)
+   * the first time it ran. The claims stay in `all()`, because what was claimed
+   * and withdrawn is part of the record; they simply stop being candidates. */
+  void release(std::size_t facet) { by_facet_.erase(facet); }
+  [[nodiscard]] std::vector<const Claim *> claimants(std::size_t facet) const
+  {
+    std::vector<const Claim *> out;
+    const auto it = by_facet_.find(facet);
+    if (it == by_facet_.end()) return out;
+    out.reserve(it->second.size());
+    for (const std::size_t i : it->second) out.push_back(&claims_[i]);
+    return out;
+  }
+  /*! Who would hold the facet under the policy in force today: whoever claimed
+   * it first. Null where nothing claimed it. */
+  [[nodiscard]] const Claim *firstClaimant(std::size_t facet) const
+  {
+    const auto it = by_facet_.find(facet);
+    if (it == by_facet_.end() || it->second.empty()) return nullptr;
+    return &claims_[it->second.front()];
+  }
+  [[nodiscard]] std::size_t contested() const
+  {
+    std::size_t n = 0;
+    for (const auto& kv : by_facet_) {
+      if (kv.second.size() > 1) n++;
+    }
+    return n;
+  }
+  [[nodiscard]] const std::vector<Claim>& all() const { return claims_; }
+
+private:
+  std::vector<Claim> claims_;
+  std::map<std::size_t, std::vector<std::size_t>> by_facet_;
+};
+
 struct Result {
   std::vector<Band> bands;
   std::vector<std::pair<RimRef, RimRef>> rims;  // bottom, top - one per band
@@ -228,6 +309,12 @@ struct Result {
    *
    * See doc/step-export-development.md, *Catalogue first, arbitrate second*. */
   std::vector<const char *> consumed_by;
+
+  /*! Every claim every recogniser made, winners and losers alike.
+   *
+   * Records; decides nothing. See ClaimLedger and
+   * doc/step-recognition-design.md. */
+  ClaimLedger ledger;
 
   /*! What was recognised and, for every band that was not, the rule that
    * rejected it.
@@ -497,8 +584,7 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
 std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
                                         const std::vector<std::shared_ptr<Surface>>& surfaces,
                                         const std::vector<char>& consumed,
-                                        std::vector<std::string>& report,
-                                        const std::vector<const char *> *held_by = nullptr);
+                                        std::vector<std::string>& report, ClaimLedger *ledger = nullptr);
 
 /*! Regions lying on a declared or fitted quadric, as patches.
  *
@@ -533,7 +619,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
                                            const std::vector<char>& consumed,
                                            const Provenance& provenance, double smooth_angle,
                                            double max_off, std::vector<std::string>& report,
-                                           const std::vector<const char *> *held_by = nullptr);
+                                           ClaimLedger *ledger = nullptr,
+                                           std::size_t declared_count = std::size_t(-1));
 
 /*! Find the bands of facets which were modelled as a surface of revolution.
  *

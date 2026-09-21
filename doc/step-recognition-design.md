@@ -92,10 +92,34 @@ against it is how a subtle regression ships. So:
    `consumed` still decides everything. Additive, behaviour unchanged, suite
    bit-identical. *(Started: `Result::consumed_by` records who took each facet,
    and the grid and quadric passes record what they covered and lost.)*
-2. **The shadow check.** Derive the assignment from the ledger and assert it
-   equals the one `consumed` produced, with an `EXPORT-ERROR` when it does not.
-   This is the safety net that makes step 3 safe, and it is this project's own
-   "make should-never-happen loud" applied to a refactor.
+2. **The shadow check.** *(Done 2026-09-21.)* Derive the assignment from the
+   ledger and assert it equals the one `consumed` produced, with an
+   `EXPORT-ERROR` when it does not. This is the safety net that makes step 3
+   safe, and it is this project's own "make should-never-happen loud" applied to
+   a refactor.
+
+   It paid for itself the first time it ran, by finding two things the ledger
+   had modelled wrongly and no export would have shown:
+
+   - **A dropped band gives its facets back.** `consumed[f] = 0`, and something
+     else takes them - so the first claimant is not the holder. lid10 disagreed
+     on 162 facets of 1687, the bayonet on 42 of 1651.
+   - **A pass's own refusal is a withdrawal.** The grid claim's 4x-median rule
+     drops facets it had already covered. Six more on each part.
+
+   With both modelled the ledger reproduces the exporter exactly:
+
+   | part | facets checked | agree | contested |
+   | --- | --- | --- | --- |
+   | lid10 | 1671 | all | **372** |
+   | bayonet | 1651 | all | **496** |
+   | f02 | 703 | all | 32 |
+   | f04 | 1374 | all | 64 |
+
+   The contested column is the prize: 372 facets on lid10 are wanted by more
+   than one recogniser, and every one of those contests is settled today by
+   which function runs first, with no record kept. Suite 54 of 54, including all
+   45 fixtures, so the agreement holds on every model the suite covers.
 3. **Flip the source of truth** from `consumed` to the ledger. The suite must
    not move a single number.
 4. **Change policy**, one tier at a time, measuring each: this is where the 56
