@@ -48,12 +48,17 @@ Every diagnostic is catalogued by the question it answers in
 scripts/step-diagnostics/README.md - read it before writing any instrument. Run
 the census on our own file before asking any reader anything.
 
-Where to start: open item 23's three followers, in this order - (1) the claim
-decided by solvability, which unparks claude/step-grid-claim-parked and takes
-f04's code 17 from 38 to 8 and splits the sweep faces SOLIDWORKS objects to
-with code 30; (2) lid10's two code-21 faces, planes of area 1.466 at
-(-56.999,-55.863,89.788) and (-55.863,56.999,89.788), never investigated; (3)
-open item 21's corner and the 1% volume question in item 23's SOLIDWORKS run.
+Read doc/step-recognition-design.md before touching recognition. Steps 1 and 2
+of it are landed on claude/step-claim-two-pass: every recogniser's claims are
+recorded in a ledger, and a shadow check holds the exporter against it. Step 3
+is next - flip the source of truth from `consumed` to the ledger, and not one
+number in the suite may move.
+
+Where to start: (1) step 3, then step 4, which is where the 372 facets lid10
+has contested by more than one recogniser stop being decided by call order;
+(2) lid10's two code-21 faces, planes of area 1.466 at (-56.999,-55.863,89.788)
+and (-55.863,56.999,89.788), never investigated; (3) open item 21's corner and
+the 1% volume question in item 23's SOLIDWORKS run.
 ```
 
 ### Branches
@@ -62,7 +67,10 @@ Nothing has been pushed. Every branch below is local.
 
 | branch | head | what it is |
 | --- | --- | --- |
-| `claude/step-handover-2026-09-21` | this commit | **this handover**, docs only, off `claude/step-ladder-precision` |
+| `claude/step-claim-two-pass` | `cadd09045` | **the live work, 2026-09-21**: the build fixes, both doctrines, the recognition design, PointOrigin, and steps 1-2 of the ledger. Suite 54 of 54 |
+| `claude/step-claim-revision-parked` | `e30a43240` | the claim revision on the arbiter's verdict. Right mechanism, wrong place - see item 25 |
+| `claude/step-claim-after-placement-parked` | `df15f82d6` | the unconditional claim and the corner-stray diagnostic; lid10 42 -> 52, f04 38 -> 8 |
+| `claude/step-handover-2026-09-21` | `b9703205b` | the previous handover, docs only |
 | `claude/step-ladder-precision` | `1123b8e4c` | **the landed work**: the corner arbiter and its two tables, the constraint tiers, the code-7 instrument fix, the survey and the SOLIDWORKS run. Suite 54 of 54 |
 | `claude/step-grid-claim-parked` | `2bd2cfdf4` | the grid claim without its statistical refusal, spans read from corners, and sweep cuts written as the surface's own column curves. f04 code 17 38 -> 8, lid10 42 -> 52 |
 | `claude/step-corner-arbiter-parked` | `4f4411b94` | the first arbiter; **superseded** by `claude/step-ladder-precision` |
