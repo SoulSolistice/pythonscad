@@ -239,6 +239,14 @@ struct Claim {
    * it, in several places, and each one is a way to record a claim nothing
    * honours. Measured: 288 such on lid10 before this was a field. */
   bool honoured = false;
+  /*! Which declared surface this claim is for, as an index into the surface
+   * list the recognisers were given - `std::size_t(-1)` where the claimant
+   * cannot name one.
+   *
+   * Needed to ask `Provenance` anything: it answers per (facet, surface index),
+   * and a claim that cannot name its index cannot be arbitrated by the model's
+   * own statement of who owns what. */
+  std::size_t surface_index = std::size_t(-1);
 };
 
 /*! Every claim every recogniser made, in the order they were made.

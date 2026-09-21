@@ -1789,7 +1789,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     }
   }
 
-  for (const auto& surface : surfaces) {
+  for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
+    const auto& surface = surfaces[surface_index];
     const auto *grid = dynamic_cast<const GridSurface *>(surface.get());
     if (grid == nullptr || grid->net.empty()) continue;
 
@@ -1887,7 +1888,7 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         contested.push_back(f);
         if (ledger != nullptr) {
           ledger->add({f, surface, ClaimPrecision::DeclaredInterpolant, "a declared sweep",
-                       "covered, but already held when this pass looked", false});
+                       "covered, but already held when this pass looked", false, surface_index});
         }
         continue;
       }
@@ -2426,7 +2427,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
           ledger->add({f, surface,
                        surface_index < declared_count ? ClaimPrecision::DeclaredExact
                                                       : ClaimPrecision::Fitted,
-                       "a quadric face", "covered, but already held when this pass looked", false});
+                       "a quadric face", "covered, but already held when this pass looked", false,
+                       surface_index});
         }
         continue;
       }
@@ -3028,7 +3030,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         consumed[f] = 1;
         result.consumed_by[f] = "a band's wall";
         result.ledger.add({f, nullptr, ClaimPrecision::DeclaredExact, "a band's wall",
-                           "the facet walks out from the band's seed", true});
+                           "the facet walks out from the band's seed", true, matched});
         band_of_loop[f] = bands.size();
       }
       bands.push_back(info);

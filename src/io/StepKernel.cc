@@ -1997,6 +1997,15 @@ void StepKernel::build_tri_body(
     // six sided tessellation of a cylinder, and the reason the exact path
     // refuses to guess - never forms one.
     std::vector<std::shared_ptr<Surface>> effective = surfaces;
+    // A patch names its surface by pointer; the ledger and Provenance both work
+    // in indices into this list, so the winning claim needs the translation.
+    auto indexOf = [&effective](const std::shared_ptr<const Surface>& s) {
+      if (s == nullptr) return std::size_t(-1);
+      for (std::size_t i = 0; i < effective.size(); i++) {
+        if (effective[i].get() == s.get() || (effective[i] && effective[i]->sameAs(*s))) return i;
+      }
+      return std::size_t(-1);
+    };
     AnalyticFeatures::Provenance provenance;
     provenance.face_origin = &faceOrigin;
     provenance.owned = &owned;
@@ -2217,7 +2226,7 @@ void StepKernel::build_tri_body(
       for (const std::size_t f : patch.facets) features.consumed_by[f] = "a Bezier patch";
       for (const std::size_t f : patch.facets)
         features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredInterpolant,
-                             "a Bezier patch", "the facet lies on the declared Bezier patch", true});
+                             "a Bezier patch", "the facet lies on the declared Bezier patch", true, indexOf(patch.surface)});
     }
 
     // Which of the surviving patches are exactly quadrics.
@@ -2410,7 +2419,7 @@ void StepKernel::build_tri_body(
           for (const std::size_t f : patch.facets) features.consumed_by[f] = "a declared sweep";
           for (const std::size_t f : patch.facets)
             features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredInterpolant,
-                                 "a declared sweep", "the sweep's patch is written and takes it", true});
+                                 "a declared sweep", "the sweep's patch is written and takes it", true, indexOf(patch.surface)});
         }
       }
       LOG("STEP export: its facets lie over %1$d of the profile's %2$d spans - %3$s", used, segs,
@@ -2784,7 +2793,7 @@ void StepKernel::build_tri_body(
         for (const std::size_t f : patch.facets) features.consumed_by[f] = "a quadric face";
         for (const std::size_t f : patch.facets)
           features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredExact,
-                               "a quadric face", "the quadric's patch is written and takes it", true});
+                               "a quadric face", "the quadric's patch is written and takes it", true, indexOf(patch.surface)});
       }
       if (!quadric_faces.empty()) {
         LOG(
@@ -3278,6 +3287,150 @@ void StepKernel::build_tri_body(
                            : (lost == AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
                                 ? "a declared interpolant"
                                 : "a fit");
+      // How much of the contention the *model* settles, as against how much a
+      // ranking of evidence would have to.
+      //
+      // Provenance says which original made a facet and which surfaces that
+      // original owns. That is identity, not measurement: it needs no
+      // tolerance, and it does not care what order the passes run in. So the
+      // strategic question - whether arbitrating facet ownership is a matter of
+      // asking the model, or an endless tuning of match orders - is answered by
+      // how many ties it decides outright.
+      //
+      // It is a gate and is deliberately silent twice over: on a fitted surface
+      // nothing declared, and on an original whose ownership is too thin to
+      // state. Silence is counted separately, because mistaking it for
+      // agreement is exactly how a threshold gets adopted by accident.
+      AnalyticFeatures::Provenance prov;
+      prov.face_origin = &faceOrigin;
+      prov.owned = &owned;
+      prov.declared = surfaces.size();
+      std::size_t prov_decides = 0, prov_silent = 0, prov_unnamed = 0, prov_same = 0;
+      for (std::size_t f = 0; f < features.consumed_by.size(); f++) {
+        const auto claims = features.ledger.claimants(f);
+        if (claims.size() < 2) continue;
+        const AnalyticFeatures::Claim *holder = nullptr;
+        for (const auto *c : claims) {
+          if (c->honoured) {
+            holder = c;
+            break;
+          }
+        }
+        if (holder == nullptr) continue;
+        bool named = holder->surface_index != std::size_t(-1);
+        bool split = false;
+        for (const auto *c : claims) {
+          if (c == holder || c->honoured) continue;
+          if (c->surface_index == std::size_t(-1)) {
+            named = false;
+            continue;
+          }
+          if (prov.excludes(f, c->surface_index) != prov.excludes(f, holder->surface_index)) {
+            split = true;
+          }
+        }
+        // Are the rivals even rivals? A band's wall and a quadric face can name
+        // the *same* declared surface - one original owning a cylinder that two
+        // passes each recognise - in which case there is nothing to arbitrate
+        // and the contention is an artefact of recognising it twice.
+        bool same_surface = false;
+        for (const auto *c : claims) {
+          if (c == holder || c->honoured) continue;
+          if (c->surface_index != std::size_t(-1) &&
+              c->surface_index == holder->surface_index) {
+            same_surface = true;
+          }
+        }
+        if (same_surface) prov_same++;
+        else if (!named) prov_unnamed++;
+        else if (split) prov_decides++;
+        else prov_silent++;
+      }
+      // Is one declared surface held by more than one kind of recogniser?
+      //
+      // This is the question a count of contention cannot reach. Two passes
+      // covering one surface is harmless if one of them ends up with all of it.
+      // It is not harmless if the surface is *split* between them: the same
+      // cylinder written partly as a band's wall and partly as a quadric patch
+      // has a boundary between the two that the model never asked for, and
+      // which half goes to which is decided by the order the passes run in.
+      // Neither holder is wrong about the surface, and neither is right about
+      // the face.
+      {
+        std::map<std::size_t, std::set<std::string>> holders_of;
+        std::map<std::size_t, std::size_t> facets_of;
+        for (std::size_t f = 0; f < features.consumed_by.size(); f++) {
+          const AnalyticFeatures::Claim *holder = features.ledger.firstClaimant(f);
+          if (holder == nullptr || holder->by == nullptr) continue;
+          if (holder->surface_index == std::size_t(-1)) continue;
+          holders_of[holder->surface_index].insert(holder->by);
+          facets_of[holder->surface_index]++;
+        }
+        std::size_t split_surfaces = 0, split_facets = 0;
+        for (const auto& kv : holders_of) {
+          if (kv.second.size() < 2) continue;
+          split_surfaces++;
+          split_facets += facets_of[kv.first];
+        }
+        if (split_surfaces > 0) {
+          LOG(message_group::Export_Warning,
+              "STEP export: %1$d declared surface%2$s split between different kinds of "
+              "recogniser, over %3$d facets - one surface written as two kinds of face, with the "
+              "division decided by the order the passes run in",
+              int(split_surfaces), split_surfaces == 1 ? " is" : "s are", int(split_facets));
+          for (const auto& kv : holders_of) {
+            if (kv.second.size() < 2) continue;
+            std::string who;
+            for (const auto& name : kv.second) who += (who.empty() ? "" : " and ") + name;
+            // `surfaces` is what the model declared; anything past it was fitted
+            // by the approximation pass and this cannot name it.
+            const char *kind = kv.first >= surfaces.size() ? "a fitted surface" : "a surface";
+            if (kv.first < surfaces.size() && surfaces[kv.first] != nullptr) {
+              const Surface *sf = surfaces[kv.first].get();
+              kind = dynamic_cast<const CylinderSurface *>(sf)   ? "a cylinder"
+                     : dynamic_cast<const ConeSurface *>(sf)     ? "a cone"
+                     : dynamic_cast<const GridSurface *>(sf)     ? "a declared sweep"
+                     : dynamic_cast<const PlaneSurface *>(sf)    ? "a plane"
+                                                                 : "a surface";
+            }
+            LOG(message_group::Export_Warning,
+                "STEP export:   %1$s, surface %2$d, %3$d facets, held by %4$s",
+                kind, int(kv.first), int(facets_of[kv.first]), who);
+          }
+        }
+      }
+      // Which recognisers are meeting, and on what. A count of contention says
+      // nothing about whether it matters; the pair does. Two passes covering
+      // one declared surface is overlapping *capability* - benign if the face
+      // they would write is the same, a real question if it is not.
+      std::map<std::string, std::size_t> pairs;
+      for (std::size_t f = 0; f < features.consumed_by.size(); f++) {
+        const auto claims = features.ledger.claimants(f);
+        if (claims.size() < 2) continue;
+        const AnalyticFeatures::Claim *holder = nullptr;
+        for (const auto *c : claims) {
+          if (c->honoured) {
+            holder = c;
+            break;
+          }
+        }
+        if (holder == nullptr || holder->by == nullptr) continue;
+        for (const auto *c : claims) {
+          if (c == holder || c->honoured || c->by == nullptr) continue;
+          const bool same = c->surface_index != std::size_t(-1) &&
+                            c->surface_index == holder->surface_index;
+          pairs[std::string(holder->by) + " holds, " + c->by + " also covered" +
+                (same ? " (the same surface)" : " (a different surface)")]++;
+        }
+      }
+      for (const auto& kv : pairs) {
+        LOG("STEP export:   contention: %1$s - %2$d facets", kv.first, int(kv.second));
+      }
+      LOG("STEP export: of the contested facets, %1$d name the *same* declared surface from two "
+          "recognisers - nothing to arbitrate, the surface was recognised twice; provenance "
+          "separates the claimants on %2$d, is silent on %3$d, and %4$d have a claimant that "
+          "cannot name its declared surface",
+          int(prov_same), int(prov_decides), int(prov_silent), int(prov_unnamed));
       LOG(
         "STEP export: the claim ledger agrees with the holder of all %1$d claimed facets; %2$d "
         "are contested by more than one recogniser, and %3$d of those are held by a claimant less "

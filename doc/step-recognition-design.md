@@ -135,6 +135,78 @@ Reordering is editing the table, as it is for corners. And measured
 satisfaction decides before the table does, so a rung cannot let weaker
 evidence beat stronger - the rule the corner arbiter already holds to.
 
+### What the contention actually is, measured 2026-09-21 - and a retraction
+
+The tie table above was published as the cost of deciding by call order. **It is
+not, and the correction matters more than the original number.**
+
+Nothing is double-consumed: `consumed` does its job, and the shadow check proves
+exactly one honoured claim per facet. What the ledger counts as contested is a
+*losing* claim - a later pass covering a facet already held. Asked what those
+claims are for, the answer is almost always the surface that already holds it:
+
+| part | contested | naming the *same* declared surface | a different surface |
+| --- | --- | --- | --- |
+| lid10 | 452 | 452 | 60 (pair instances) |
+| bayonet | 532 | 524 | 8 |
+| f02 | 32 | 32 | 0 |
+| f04 | 64 | 64 | 0 |
+
+and the pairs are exclusively one meeting:
+
+```text
+lid10:  a band's wall holds, a quadric face also covered (the same surface)   296
+        a quadric face holds, a band's wall also covered (the same surface)   156
+        a band's wall holds, a quadric face also covered (a different one)     60
+```
+
+So the bulk of it is **two recognisers with overlapping capability** - a declared
+cylinder or cone is reachable by the band pass and by the quadric pass alike -
+and not a dispute about who owns a facet. Provenance cannot separate them
+because there is nothing to separate: it is the same surface of the same
+original. An ownership arbiter, by precision or by provenance or by a rung of
+evidence, would have had nothing to decide on 452 of them.
+
+**And one surface is genuinely split, which is the defect under all of it.**
+Asking per *surface* rather than per facet - how many kinds of recogniser hold
+it - finds the case a count of contention cannot:
+
+```text
+lid10:   a cone, surface 50, 62 facets, held by a band's wall and a quadric face
+bayonet: a cylinder, surface 6,  60 facets - the same
+         a cone,     surface 74, 62 facets - the same
+f02, f04: no surface is split
+```
+
+lid10's own provenance report names it: *original 78, 252 facets, owns cone 50
+(120 facets whole, 71 cut)*. One declared cone of one original solid, written as
+**two kinds of face**, with the division decided by which pass reached which
+facet first. Neither holder is wrong about the surface and neither is right
+about the face, and the boundary between them is an edge the model never asked
+for.
+
+This is what "is the right consumer holding the claim?" means once it is
+measured, and it is why the question had to be asked per surface. Per facet,
+every answer looked benign: one honoured claim each, no precision inversion, no
+provenance conflict.
+
+**What is genuinely open, and it is two different things:**
+
+1. **60 facets on lid10** where the losing claim names a *different* surface.
+   That is a real contest settled by call order, and it is the ownership
+   arbiter's actual target - two orders of magnitude smaller than the headline.
+2. **A representation question, not an ownership one.** For the 452, both
+   recognisers want the same surface but write different *faces*: a band writes
+   walls with rims, caps and a seam; a quadric writes a trimmed patch. Which one
+   the file gets is decided by which pass runs first. That deserves deciding on
+   purpose, and no ownership arbiter - and no class hierarchy - addresses it.
+
+**The lesson for the metric, which is the general one.** A count of disagreement
+is not a count of damage, and a big number is not a finding. "452 contested"
+looked like a defect, survived a precision check (0 misheld), survived a
+provenance check (0 separated), and only dissolved when the claims were asked
+what surface they were *for*. Every intermediate step read like progress.
+
 ### What this means for step 4
 
 Step 4 is not "arbitrate by precision". It is: give each claim its evidence,
