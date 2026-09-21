@@ -669,11 +669,16 @@ almost always:
 | **added** a source file | configure first; sources are found by glob, and the full rebuild is unavoidable |
 | **added** a test or fixture | configure first, or ctest will not see the new test at all |
 
-One measurement against that, not yet explained: on 2026-09-14, in the
-`solidworks-fault-code-17` worktree, `cmake -B build` over an existing cache
-after adding one `add_test` took 19 s and the following build ran 20 ninja steps
-in under a minute. Whether the hour is specific to a changed cache, a fresh
-tree, or another worktree is unmeasured; do not rely on either figure.
+Two measurements against that, and the hour now looks like the exception rather
+than the rule. On 2026-09-14, in the `solidworks-fault-code-17` worktree,
+`cmake -B build` over an existing cache after adding one `add_test` took 19 s
+and the following build ran 20 ninja steps in under a minute. On 2026-09-21, in
+a Release tree, `msys2-build.sh --configure` after adding one fixture took
+**110 s end to end** - configure, build, bundle and stage - and the suite then
+saw the new test. So a configure over an *existing, unchanged* cache is cheap;
+what costs an hour is a cache whose settings changed (a build type, a feature
+flag), which invalidates every object. Still worth avoiding by reflex, and still
+not worth putting in a script "to be safe".
 
 Do not put a configure step into a script "to be safe": that quietly turns every
 run into a full rebuild. `scripts/msys2-build.sh` therefore skips it unless the
