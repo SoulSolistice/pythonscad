@@ -684,6 +684,59 @@ arbitrate in the right order, and reproduced the old defect anyway, because what
 it arbitrated over was the coordinate the **mesh** happened to hold. Which is
 the next section.
 
+### The representation fits the region, never the region the representation
+
+**The third doctrine, and the one that generalises furthest.** Stated as a rule:
+
+> A recogniser decides *which* facets it takes by what the **declaration**
+> covers, never by what its own form can express. Where the two differ, the
+> region wins and the representation gives way.
+
+**What it cost to learn.** lid10's cone 50 is one declared cone of one original
+solid, and the exporter writes it as **two kinds of face** - 56 facets as a
+band's wall and 6 as a quadric patch, touching along 2 mesh edges. The bayonet
+has a cylinder and a cone the same way. Asked of provenance, every facet on both
+sides comes from the *same* original, and that original declared the surface: so
+nothing is ambiguous about where they belong.
+
+The cause is not a contest and not a tolerance. A *band* is not something the
+model declares - it is a way of writing a region that happens to be a ring
+between two rims. The band pass chooses its facets by what a band can express,
+so a region that is a ring **plus six facets a boolean left attached** is
+truncated to the ring, and the remainder falls to whoever runs next. The model
+gets a boundary it never asked for, inside a surface it declared once.
+
+**Why it generalises.** Any recogniser that decides which facets by what it can
+express splits surfaces this way, on geometry nobody has looked at yet. The
+reference parts are *specimens*: they are where the defect happened to show, not
+where it lives. A fix aimed at those three surfaces would be worthless.
+
+**The order this implies:**
+
+1. **Region** from the declaration and provenance - the facets whose maker owns
+   this surface and which lie on it, connected.
+2. **Representation** chosen to fit that region: a band with rims where the
+   region really is a ring, a trimmed patch where it is not.
+3. **Exact curves as a property of the boundary**, available to whichever
+   representation wins. This is already true and was the reason to fear step 2:
+   a circular run on a *quadric face* is written as a `CIRCLE` (`circular_runs`
+   / `runCircle`), so a trimmed patch keeps exact rims. Rim exactness is not a
+   band privilege.
+
+**And it is enforceable, not just stated.** The claim ledger makes the invariant
+checkable, which is the whole reason the ledger exists:
+
+> For every declared surface, the facets held for it are held by **one** kind of
+> recogniser, and are the whole connected region the declaration covers.
+
+The export already raises an `EXPORT-WARNING` naming any surface that fails it,
+with the division, the originals on each side, and how many mesh edges cross the
+divide - so a new geometry that trips this says so on the first export instead
+of being found years later as a strange effect in a CAD system. Two of the three
+questions a reader would ask are answered in the same line: whether the pieces
+touch (a boolean may legitimately leave two), and whether the model considers
+them one thing.
+
 ### A point carries whether it has moved, and identity is never inferred from a coordinate
 
 Three separate days have been lost to one mistake: **a coordinate used as an

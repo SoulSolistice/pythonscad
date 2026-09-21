@@ -3419,6 +3419,26 @@ void StepKernel::build_tri_body(
             for (const auto& sv : share) {
               division += (division.empty() ? "" : ", ") + std::to_string(sv.second) + " to " + sv.first;
             }
+            // What the model says about the pieces. If the facets both kinds hold
+            // come from the same original, and that original declared this
+            // surface, then the region is not ambiguous at all - it is one
+            // region of one declared surface, and only the *representation* is
+            // in question. That is the difference between "who owns these
+            // facets" and "how is this surface written".
+            std::map<std::string, std::set<int32_t>> origins;
+            for (std::size_t f = 0; f < features.consumed_by.size(); f++) {
+              const AnalyticFeatures::Claim *h = features.ledger.firstClaimant(f);
+              if (h == nullptr || h->by == nullptr || h->surface_index != kv.first) continue;
+              if (f < faceOrigin.size()) origins[h->by].insert(faceOrigin[f]);
+            }
+            std::string by_origin;
+            for (const auto& ov : origins) {
+              std::string ids;
+              for (const int32_t id : ov.second) {
+                ids += (ids.empty() ? "" : "/") + std::to_string(int(id));
+              }
+              by_origin += (by_origin.empty() ? "" : "; ") + ov.first + " from original " + ids;
+            }
             std::size_t touching = 0;
             for (const auto& e : across) {
               if (e.second.size() != 2) continue;
@@ -3426,11 +3446,11 @@ void StepKernel::build_tri_body(
             }
             LOG(message_group::Export_Warning,
                 "STEP export:   %1$s, surface %2$d, %3$d facets (%7$s) - %5$d mesh edges have a "
-                "differently-held facet on each side%6$s",
+                "differently-held facet on each side%6$s - %8$s",
                 kind, int(kv.first), int(facets_of[kv.first]), who, int(touching),
                 touching > 0 ? ", so this is one connected region cut in two by pass order"
                              : ", so the pieces are disconnected and two faces are correct",
-                division);
+                division, by_origin);
           }
         }
       }

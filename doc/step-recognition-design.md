@@ -40,6 +40,24 @@ Five consequences, every one of them measured this session:
 
 ### Three phases, and the first one is pure
 
+**The rule that governs phase one**, found the hard way on 2026-09-21 and
+carried as a doctrine of its own in `doc/step-export-development.md`, *The
+representation fits the region, never the region the representation*:
+
+> A recogniser decides *which* facets it claims by what the **declaration**
+> covers, never by what its own form can express.
+
+A claim truncated to fit a form is the defect no amount of arbitration can
+repair, because the arbiter never sees the facets that were dropped - they are
+in nobody's claim. Phase two can only choose between claims that were made.
+
+The ledger makes it checkable rather than merely stated: *for every declared
+surface, the facets held for it are held by one kind of recogniser, and are the
+whole connected region the declaration covers.* An export that breaks it says
+so, naming the surface, the division, the originals on each side, and how many
+mesh edges cross the divide.
+
+
 **Propose.** Each recogniser reads the mesh and the declarations and *writes
 claims*. It mutates nothing shared. A claim is data:
 
@@ -212,15 +230,55 @@ That is not the band misbehaving. A band *is* a ring between two rims; this
 region is such a ring plus 6 facets a boolean left attached, and the band has no
 shape for them.
 
-**Two candidate fixes, and the choice needs a proof of concept of each:**
+**Both obvious fixes are wrong, and the framing was the problem.** "The band
+yields" destroys geometry; "the band absorbs the remainder" puts facets where
+they do not belong. A choice between two damaging options usually means the
+question is posed wrongly, and it was.
 
-1. *The band yields to the superset.* The quadric writes all 62 as one trimmed
-   cone. Whole by construction - but the band's rim machinery goes with it:
-   exact circular rim edges, the caps, the seam handling, and whatever else
-   consumes bands. The risk is trading a gratuitous edge for inexact rims.
-2. *The band absorbs the remainder.* Rims are kept, but a band's structure is a
-   ring between two rims and the extra facets do not have that shape; forcing
-   them risks corrupting rim detection, which is load-bearing elsewhere.
+**The root cause: the region is chosen to fit the representation.** The
+*declared* thing is cone 50. A band is not declared by anything - it is a way of
+*writing* a region that happens to be a ring between two rims. The band pass
+decides which facets it takes by what its own form can express, so a region that
+is a ring **plus six facets** gets truncated to the ring, and the remainder
+looks like someone else's problem.
+
+That generalises, which is what matters: **any** recogniser that decides *which
+facets* by *what it can express* will split surfaces this way, on models nobody
+has seen. lid10 and the bayonet are not the bug; they are the two specimens
+where it shows.
+
+**And the model settles where the facets belong.** Asked of provenance, every
+facet on both sides of every split comes from *one* original, and that original
+declared the surface:
+
+```text
+lid10   cone 50:    a band's wall from original 78; a quadric face from original 78
+bayonet cylinder 6: both from original 41
+bayonet cone 74:    both from original 74
+```
+
+One original, one declared surface, one connected region. Nothing is ambiguous
+about ownership at all - only about *how the region is written*.
+
+**So the order is: region first, representation second.**
+
+1. Determine the region from the declaration and provenance - the facets whose
+   maker owns this surface and which lie on it, connected.
+2. Choose the representation to fit *that* region: a band with rims where the
+   region really is a ring, a trimmed patch otherwise.
+3. Keep exact curves as a property of the **boundary**, not of the
+   representation.
+
+Step 3 is already true and was the reason to fear step 2: `StepKernel.cc` writes
+a `CIRCLE` for a circular run on a *quadric face* (`circular_runs` /
+`runCircle`), so a trimmed patch keeps exact circular edges where its boundary
+is circular. Rim exactness is not a band privilege, and the objection that
+yielding the surface would lose it does not hold.
+
+**What a proof of concept still has to measure** is therefore narrower: not rim
+exactness, but everything else a band carries - the caps, the seam handling,
+`rim_seam`, and the other consumers of band structures - against derived volume
+on the reference parts.
 
 Compare them on the reference parts by derived volume, by the kinds of curve
 written at the rims, and by whether the false edge disappears - not by face
