@@ -3516,6 +3516,69 @@ plane one of their own bounds is not in" on the old binary; the arbiter adds
 `step-cap-meets-wall` and takes the band family from 11 faces to 13. No test
 gates that mode's EXPORT-ERROR.
 
+### 25. The claim must be revised after placement, not decided before it
+
+**Measured 2026-09-21**, taking item 23's first follower. The conclusion is not
+the one the follower expected, and it is worth more.
+
+**What was tried.** The 4x-median refusal was replaced by a solver: a facet
+belongs to the sweep when each of its corners can be placed on the sweep
+together with the exact declarations it already lies on, asked with
+`projectOntoThree` at 1e-9 and unbounded travel, "exact" being `declaredBand ==
+0` rather than a tolerance chosen for the purpose. Measured on lid10: 6 facets
+refused, code 17 **52 -> 44**, f04 held at **8**, `sweep-chords` 20 -> 17 with
+the "an end off one of them" population 14 -> 11.
+
+**Why it is wrong anyway.** `planes-at-sweep.py` reported two of the refused
+facets as *the sweep's own* - every corner on it, meeting it at 1.4 and 2.7
+degrees - which is the exact defect removing the refusal exists to cure. Chasing
+it with `at-vertex.py`, the corner they were refused for, (76.7944 20.4008
+1.0332), **does not exist in the exported file**: the placement had already
+moved it.
+
+So the test judged a corner *where the mesh left it*, and the mesh is the least
+precise answer there is. The solver was sound - pairwise solves converge
+(0.1074, 0.1080, 0.2189), and the triples that fail really have no root - but it
+was given a provisional point. The 4x-median rule had the same flaw; replacing
+its statistic with a solver kept its input and made the error look principled.
+
+**This is the last ladder-order violation.** The arbiter was built so that where
+a corner belongs is decided once, by the most precise constraint available. The
+grid claim still decides earlier, by the tessellation, and wins by running
+first - `moves.count(v)` in a new costume.
+
+**And the arbiter already computes the answer.** On the unconditional claim it
+reports, of its own accord:
+
+```text
+EXPORT-WARNING: 5 corners are left off a surface the file writes a face of them
+  on, by 0.2184 at worst - 5 because no candidate satisfies every face there,
+  0 because the one that does would fold a face or turn an edge round
+```
+
+Five corners, with the two reasons separated: no candidate satisfying every face
+is the solvability answer, reached after placement, on the closed form. Those
+five are item 23's five, named by the right component instead of guessed.
+
+**What it therefore needs**, and it is a restructuring rather than a rule:
+recognition claims unconditionally, the arbiter places, and a revision pass
+un-claims any facet with a corner the arbiter could not put on the sweep. The
+obstacle is ordering - recognition completes before any placement runs, and the
+arbiter needs recognition's faces to know what meets at a corner - so the claim
+has to become two-pass. Nothing may decide a corner's position anywhere else.
+
+**Parked** on `claude/step-claim-after-placement-parked`, with the corner-stray
+diagnostic below, because the claim alone leaves lid10 and the bayonet at 52
+against 42 committed.
+
+**A diagnostic came out of it**, and it is landed rather than parked: the corner
+strays the old refusal consumed are now *reported* and decide nothing -
+"the corners of the 776 facets the sweeps claim are within 0.2069 of the surface
+as written, median 0.0128". Measured against the surface as written, not the
+band. The median reproduces, independently, the 0.0128 item 22 records for the
+middle of lid10's thread, and it is the measurement behind that item's
+unexplained middle-versus-ends question.
+
 ### 24. The flagship third of the suite does 18 exports where 6 would do
 
 **Measured 2026-09-21**, while waiting an hour for a baseline run on a 16-core
