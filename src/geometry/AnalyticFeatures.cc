@@ -22,6 +22,18 @@ namespace AnalyticFeatures {
  * Not every kind: a Bezier patch and a grid answer by projection, which can
  * fail to converge, and the caller has to treat that as "not this surface"
  * rather than as an answer. */
+const char *pointOriginName(PointOrigin origin)
+{
+  switch (origin) {
+  case PointOrigin::Provisional:    return "provisional";
+  case PointOrigin::Declared:       return "declared";
+  case PointOrigin::Tessellation:   return "tessellation";
+  case PointOrigin::Placed:         return "placed";
+  case PointOrigin::ReaderInvented: return "reader-invented";
+  }
+  return "unknown";
+}
+
 bool closestOnSurface(const Surface *s, const Vector3d& p, Vector3d& out)
 {
   if (const auto *cyl = dynamic_cast<const CylinderSurface *>(s)) {

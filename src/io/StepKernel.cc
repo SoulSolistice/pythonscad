@@ -3375,6 +3375,10 @@ void StepKernel::build_tri_body(
     // them says nothing about which to work on.
     std::size_t left_solve = 0, left_far = 0;
     double left_worst = 0;
+    // The corners the arbiter could not seat, by *identity*. Counting them says
+    // how many; the claim revision needs to know which, and a coordinate cannot
+    // answer that once the point has moved - see PointOrigin.
+    std::set<int> left_solve_ids, left_far_ids;
     auto off_its_faces = [&](int v, const Vector3d& at) {
       double worst = 0;
       const auto have = faces_at.find(v);
@@ -3398,6 +3402,9 @@ void StepKernel::build_tri_body(
       const double d = off_its_faces(v, at);
       if (d <= 0) return;
       bucket++;
+      // By identity, and only once it is established that the corner really is
+      // off a face it bounds - the early return above is the whole test.
+      (&bucket == &left_solve ? left_solve_ids : left_far_ids).insert(v);
       left_worst = std::max(left_worst, d);
     };
     // The arbiter. For each corner of an analytic face: every constraint on it,
@@ -3704,6 +3711,40 @@ void StepKernel::build_tri_body(
         }
       }
       if (best_n < n_all) note_left(full_but_folds ? left_far : left_solve, v, best->p);
+    }
+    // Every corner's status, now that the arbiter has spoken. Derived here and
+    // not cached anywhere: a status that outlives the move it describes is a
+    // second thing that can be silently stale, which is the disease this is
+    // meant to cure. See AnalyticFeatures::PointOrigin.
+    {
+      std::map<AnalyticFeatures::PointOrigin, std::size_t> tally;
+      for (const auto& entry : faces_at) {
+        const int v = entry.first;
+        AnalyticFeatures::PointOrigin origin = AnalyticFeatures::PointOrigin::Tessellation;
+        if (moves.count(v) != 0) {
+          origin = AnalyticFeatures::PointOrigin::Placed;
+        } else {
+          // A point the generator emitted, asked of the declarations rather than
+          // measured: isDeclaredPoint is exact, by position, with no tolerance
+          // to choose.
+          for (const auto& d : surfaces) {
+            const auto *g = dynamic_cast<const GridSurface *>(d.get());
+            if (g != nullptr && g->isDeclaredPoint(vertices[v])) {
+              origin = AnalyticFeatures::PointOrigin::Declared;
+              break;
+            }
+          }
+        }
+        tally[origin]++;
+      }
+      std::string line;
+      for (const auto& kv : tally) {
+        line += (line.empty() ? "" : ", ") + std::to_string(kv.second) + " " +
+                AnalyticFeatures::pointOriginName(kv.first);
+      }
+      if (!line.empty()) {
+        LOG("STEP export: corners of analytic faces by where their coordinate comes from: %1$s", line);
+      }
     }
     const std::size_t left_total = left_solve + left_far;
     if (left_total > 0) {

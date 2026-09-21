@@ -533,6 +533,31 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
 /*! An arbitrary unit vector perpendicular to `norm`. */
 Vector3d perpendicular(const Vector3d& norm);
 
+/*! Where a point's coordinate comes from, and therefore who may decide on it.
+ *
+ * Three days of this work have gone to one mistake - a coordinate used as an
+ * identity - and each value below carries the rule that prevents it. See
+ * doc/step-export-development.md, *A point carries whether it has moved*.
+ *
+ *   Provisional    it will be placed and has not been. **No decision may be
+ *                  taken on it.** Every mesh vertex is this until the corner
+ *                  arbiter has run, which is why recognition may not judge a
+ *                  corner by where the mesh left it.
+ *   Declared       the generator emitted it: exact on its surface, and nothing
+ *                  may move it.
+ *   Tessellation   a boolean made it. It lies on the facets, a station's
+ *                  sagitta off the smooth surface, and that is not an error.
+ *   Placed         the arbiter moved it. Its coordinate is the arbiter's answer
+ *                  and the only valid one.
+ *
+ * A fifth, ReaderInvented, is a vertex a kernel made on read. It cannot occur in
+ * a mesh of ours and is named so that an instrument reporting one has to say so
+ * - `scripts/step-diagnostics/reader-built.py` exists for exactly that. */
+enum class PointOrigin { Provisional, Declared, Tessellation, Placed, ReaderInvented };
+
+/*! The name of a `PointOrigin`, for a report. */
+const char *pointOriginName(PointOrigin origin);
+
 /*! Closest point on a declared surface, where one can be written down.
  *
  * Not every kind: a Bezier patch and a grid answer by projection, which can
