@@ -3004,6 +3004,18 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         continue;
       }
 
+      // A diagnostic, and the only way to obtain the *other* representation of a
+      // surface: skip the band on the declared surface named by
+      // OPENSCAD_STEP_YIELD_SURFACE, so the general pass covers its whole
+      // region instead. Exporting a model twice, with and without it, is how
+      // representation-independence is tested - the same solid written either
+      // way must enclose the same volume - and it is what
+      // tests/step-representation-check.py drives. It changes nothing unless
+      // the variable is set. See doc/step-recognition-design.md, *region before
+      // representation*.
+      if (const char *yield_to_general = getenv("OPENSCAD_STEP_YIELD_SURFACE")) {
+        if (matched == std::size_t(atoi(yield_to_general))) continue;
+      }
       Band info;
       // Which record this band answers to, so that a caller can tell a band on
       // the model's own surface from one on a surface the approximation fitted.

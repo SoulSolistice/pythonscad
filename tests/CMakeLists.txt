@@ -1249,6 +1249,28 @@ add_test(NAME export-step-flagship-strict
 # coupons, normal build and relaxed veto alike, on the tessellation's slack
 # (0.01 to 0.72). A test of its own rather than a second clause of --strict, so
 # that the veto's fix and this one each flip a test when they land.
+# How a surface is written must not change the solid.
+#
+# A declared cylinder or cone can be written as a band's wall or as a trimmed
+# patch on the same surface. Both assert the same surface, so both bound the
+# same solid, and its volume and area belong to the solid rather than to the
+# choice. Asserted as a *property*, which matters because no absolute volume is
+# available here: the boolean cuts the tessellation while the surface is written
+# analytically, and the two do not compose into closed-form arithmetic. Comparing
+# a solid against itself needs none of it.
+#
+# Registered WILL_FAIL. It fails today by 1.2126 mm3 of volume and 0.4700 of
+# area on step-split-surface.scad - 7.75e-5 and 1.19e-4 relative - which is the
+# defect and not the test: one declared cylinder written two ways bounds two
+# different solids. lid10 shows the same at 2.0818 mm3, there with the area
+# identical to the last digit. The day it starts passing, ctest reports *that*
+# as the failure, which is how the fix announces itself.
+add_test(NAME export-step-representation
+  COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/step-representation-check.py
+          --openscad ${OPENSCAD_BINPATH}
+)
+set_tests_properties(export-step-representation PROPERTIES WILL_FAIL TRUE)
+
 add_test(NAME export-step-flagship-corners
   COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/step-flagship-check.py
           --openscad ${OPENSCAD_BINPATH} --strict-corners
