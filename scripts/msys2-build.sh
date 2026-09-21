@@ -69,12 +69,24 @@ if [ "${MSYSTEM:-}" != "UCRT64" ]; then
   echo "         Start this from an MSYS2 UCRT64 shell, or set MSYSTEM=UCRT64." >&2
 fi
 
+# The build type has to be passed, and a bare `cmake -B build` does not pass it.
+# CMake leaves CMAKE_BUILD_TYPE empty by default, which means no -O3 and no
+# NDEBUG - CMAKE_CXX_FLAGS_RELEASE is defined and simply never applied. Measured
+# 2026-09-21 on a fresh worktree that took this branch: the six flagship coupons
+# took 2h10m where a Release build of the same commit takes 5 minutes, byte-for-
+# byte identical output. 26x, and nothing says a word about it.
+#
+# It hid for so long because only a *fresh* tree reaches here. Every other tree
+# had a cache configured by hand with CLAUDE.md's full line, which does pass it,
+# so the no-cache branch was the one path nobody had run.
+CONFIGURE_ARGS=(-DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}")
+
 if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
-  echo "==> configure ($BUILD_DIR) - no cache yet"
-  cmake -B "$BUILD_DIR"
+  echo "==> configure ($BUILD_DIR) - no cache yet, ${CONFIGURE_ARGS[*]}"
+  cmake -B "$BUILD_DIR" "${CONFIGURE_ARGS[@]}"
 elif [ "$DO_CONFIGURE" -eq 1 ]; then
   echo "==> configure ($BUILD_DIR) - asked for, expect a full rebuild"
-  cmake -B "$BUILD_DIR"
+  cmake -B "$BUILD_DIR" "${CONFIGURE_ARGS[@]}"
 else
   echo "==> skipping configure (pass --configure after adding a file)"
 fi
@@ -86,12 +98,37 @@ echo "==> bundle runtime python"
 BUNDLE_PY_AUTO_INSTALL_PIP_LICENSES=1 \
   ./scripts/bundle-runtime-python.sh "$BUILD_DIR/pythonscad-bundled-py" --python python
 
+# `set -e` is not enough here: bundle-runtime-python.sh has been seen to fail its
+# final `mv` - "Permission denied", the destination held by something - print the
+# error and still return 0. Check the artefact, not the exit code.
+if [ ! -d "$BUILD_DIR/pythonscad-bundled-py" ]; then
+  echo "error: the runtime python bundle is missing at $BUILD_DIR/pythonscad-bundled-py" >&2
+  echo "       bundle-runtime-python.sh reported success without producing it; rerun and" >&2
+  echo "       look for a failed mv (a stale bundle directory held open by a process)." >&2
+  exit 1
+fi
+
 echo "==> install to $BUILD_DIR/staging"
 cmake --install "$BUILD_DIR" --prefix "$BUILD_DIR/staging"
 
 STAGED="$ROOT/$BUILD_DIR/staging/pythonscad.exe"
 if [ ! -x "$STAGED" ]; then
   echo "error: no staged binary at $STAGED" >&2
+  exit 1
+fi
+
+# Existence is not enough either, and this is the trap that cost an afternoon.
+# When bundling failed above, `cmake --install` never ran, the *previous* build's
+# staged binary was still sitting there, and the script exited 0. Everything
+# downstream - ctest, scripts/step-dev.sh export - runs the staged binary, so a
+# whole session then measures an old build, and the only symptom is that the
+# numbers are strange. Staging must not be older than what was just built.
+BUILT="$ROOT/$BUILD_DIR/pythonscad.exe"
+if [ -f "$BUILT" ] && [ "$BUILT" -nt "$STAGED" ]; then
+  echo "error: $STAGED is older than $BUILT - staging did not take." >&2
+  echo "       Everything downstream runs the staged binary, so this would have" >&2
+  echo "       measured the previous build. Rerun; if it persists, check that no" >&2
+  echo "       process holds build/staging or build/pythonscad-bundled-py." >&2
   exit 1
 fi
 
