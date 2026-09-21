@@ -6357,6 +6357,12 @@ void StepKernel::build_tri_body(
   // reason the endpoint invariant binds at the writer. `planeSectionEllipse` is
   // the same solver both use.
   int conics_promoted = 0, conics_declined = 0;
+  // Rims the declaration settled, where a neighbouring chord plane would have
+  // bent them into an ellipse. See open item 26.
+  int rims_kept_circular = 0;
+  // Which conics are cut by a declared plane, and which by a tessellation
+  // chord. See open item 26.
+  int conics_on_declared = 0, conics_on_chord = 0;
   int why_noproj = 0, why_offquad = 0, why_offplane = 0, why_nosection = 0, why_shape = 0;
   int why_branch = 0, conics_ellipse = 0, conics_hyperbola = 0, conics_parabola = 0;
   double conic_worst_end = 0, why_offplane_worst = 0;
@@ -6435,6 +6441,81 @@ void StepKernel::build_tri_body(
       }
     }
 
+    // A rim is a circle by construction, and no fit may overrule it.
+    //
+    // The plane in this section is whatever planar face sits beside the edge,
+    // and that is not necessarily a plane the model declared: a facet of a
+    // curved surface left faceted is a *chord* plane, and cutting the quadric
+    // with it gives a conic that touches the true boundary only at the two ends
+    // and leaves it in between. The corner arbiter already refuses such planes
+    // as constraints - `kCornerTiers` marks MeshPlane `used = false`, because
+    // "a chord is not a constraint" - and this pass had no such guard.
+    //
+    // Measured: step-split-surface.scad wrote its cylinder's rim at z = 10 as a
+    // 45 degree ELLIPSE, semi-axes 28.318 x 20, centred at z = 30 on a model 13
+    // tall - the chamfer's own slope, leaking out of a chord facet into a curve
+    // belonging to the cylinder. The curve arcs off the rim between its
+    // endpoints and the solid loses 1.2126 mm3, which no validator and neither
+    // kernel objects to. See open item 26.
+    //
+    // So: where both ends sit at one level along the quadric's axis, and one
+    // distance from it, the edge is an arc of that quadric's own circle. That
+    // is settled by the declaration - the axis and the radius are the surface's
+    // own - and the section plane is then the perpendicular one through the
+    // ends, whatever plane the neighbouring face happens to lie in.
+    {
+      Vector3d qaxis, qbase;
+      bool axial = false;
+      if (const auto *cyl = dynamic_cast<const CylinderSurface *>(quadric.get())) {
+        qaxis = cyl->normdir.normalized();
+        qbase = cyl->refpt;
+        axial = qaxis.norm() > 0;
+      } else if (const auto *con = dynamic_cast<const ConeSurface *>(quadric.get())) {
+        qaxis = con->normdir.normalized();
+        qbase = con->refpt;
+        axial = qaxis.norm() > 0;
+      }
+      if (axial) {
+        const double h1 = qaxis.dot(p1 - qbase), h2 = qaxis.dot(p2 - qbase);
+        const double scale = std::max(1.0, std::max(p1.norm(), p2.norm()));
+        const double r1 = ((p1 - qbase) - qaxis * h1).norm();
+        const double r2 = ((p2 - qbase) - qaxis * h2).norm();
+        if (fabs(h1 - h2) <= 1e-9 * scale && fabs(r1 - r2) <= 1e-9 * scale) {
+          pnorm = qaxis;
+          ppoint = qbase + qaxis * h1;
+          rims_kept_circular++;
+        }
+      }
+    }
+    // Is the plane doing the cutting a plane the *model* declared?
+    //
+    // Measured 2026-09-21: **none of them are**, on any reference part - 0 of
+    // 78 on lid10, 0 of 18 on the bayonet, 0 of 37 on f04. So this pass never
+    // has declaration-level support for its section plane; it always deduces
+    // one, and cannot tell a genuine flat face a boolean made from a facet of
+    // something curved that was left faceted. The corner arbiter refuses the
+    // second as a constraint - kCornerTiers marks MeshPlane `used = false`,
+    // "a chord is not a constraint" - and this pass never asked.
+    //
+    // Counted rather than refused, deliberately: declared planes are rare by
+    // construction (item 23 measured 2 of 1533 merged planes matching one), so
+    // refusing everything undeclared would refuse the sound cases with the
+    // unsound. Telling them apart is what the claim ledger is for.
+    {
+      bool declared_plane = false;
+      const double scale = std::max(1.0, ppoint.norm());
+      for (const auto& d : surfaces) {
+        const auto *pl = dynamic_cast<const PlaneSurface *>(d.get());
+        if (pl == nullptr) continue;
+        const Vector3d dn = pl->normdir.normalized();
+        if (!(dn.norm() > 0) || fabs(fabs(dn.dot(pnorm)) - 1) > 1e-9) continue;
+        if (fabs(dn.dot(ppoint - pl->refpt)) > 1e-9 * scale) continue;
+        declared_plane = true;
+        break;
+      }
+      if (declared_plane) conics_on_declared++;
+      else conics_on_chord++;
+    }
     SectionConic sec;
     if (!planeSectionConic(quadric.get(), pnorm, ppoint, sec)) {
       conics_declined++;
@@ -6587,6 +6668,20 @@ void StepKernel::build_tri_body(
   if (arcs_promoted > 0 || arcs_declined > 0) {
     LOG("STEP export: %1$d edge%2$s written as an arc on the surface it bounds, %3$d left straight",
         arcs_promoted, arcs_promoted == 1 ? "" : "s", arcs_declined);
+  }
+  if (rims_kept_circular > 0) {
+    LOG(
+      "STEP export: %1$d edge%2$s a circle of the quadric's own, kept from the conic a chord "
+      "plane beside them would have cut - a rim is settled by the declaration, not by the facet "
+      "next to it",
+      rims_kept_circular, rims_kept_circular == 1 ? " is" : "s are");
+  }
+  if (conics_on_declared + conics_on_chord > 0) {
+    LOG(
+      "STEP export: of the conics considered, %1$d are cut by a plane the model declared and "
+      "%2$d by a plane nothing declares - which may be a genuine flat face a boolean made, or a "
+      "facet of something curved left faceted; this pass cannot yet tell them apart",
+      conics_on_declared, conics_on_chord);
   }
   if (conics_promoted > 0 || conics_declined > 0) {
     LOG(
