@@ -6,15 +6,25 @@ a ring between two rims, or as a trimmed patch on the same surface. Both assert
 the *same surface*, so the solid they bound is the same solid, and its volume
 and area are properties of that solid rather than of the choice.
 
-That is the assertion here, and it is a property rather than a captured number -
-no absolute volume is needed, which matters because none is available. The
-boolean cuts the *tessellation* while the surface is written *analytically*, so
-the solid is a trim following the mesh's edges bounding an exact surface, and
-the two do not compose into closed-form arithmetic. (Measured: a plain
-`cylinder(h=12, r=20, $fn=32)` exports at 15079.644737, which is pi*400*12 and
-not the 32-gon's 1248.578*12. A circular-segment formula for a cut then leaves
-4.88 mm3 unexplained.) That is very likely why lid10 carries no derived volume
-either. Comparing a solid against *itself* needs no such arithmetic.
+That is the assertion here, and it is a property rather than a captured number,
+which is what makes it portable: it holds for any model, including those with no
+volume anyone can write down.
+
+For *this* model a volume can be written down, and it says which representation
+is wrong rather than merely that they differ. The solid is a cylinder plus a
+45-degree chamfer frustum minus a vertical slab, and the cut integrates in
+closed form - the slab's area inside a disc of radius r is
+`4*sqrt(r^2-16) + r^2*asin(4/r) - 112`, valid throughout since r stays above
+sqrt(212). Integrating that over the chamfer gives **15647.634695**, and:
+
+    trimmed patch  15647.634695   -1.89e-11 relative   exact
+    band's wall    15646.422089   -7.75e-05 relative   loses 1.2126 mm3
+
+The band's rim is written as a 45-degree ELLIPSE instead of the circle it is,
+and the curve arcs off the rim between its endpoints. See open item 26; note
+that the earlier claim in this file that no absolute volume was available was
+simply wrong - it came from integrating the 32-gon when the exporter writes the
+analytic surface.
 
 The two representations are obtained with OPENSCAD_STEP_YIELD_SURFACE, which
 makes the band pass skip one declared surface so the general pass covers its

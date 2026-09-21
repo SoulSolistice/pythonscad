@@ -3595,6 +3595,69 @@ band. The median reproduces, independently, the 0.0128 item 22 records for the
 middle of lid10's thread, and it is the measurement behind that item's
 unexplained middle-versus-ends question.
 
+### 26. A rim is written as a 45 degree ELLIPSE, and it costs 1.2 mm3 no kernel objects to
+
+**Found 2026-09-21**, by asking why one declared surface written two ways bounds
+two different solids. It is the first defect of this work adjudicated by the
+*model's own arithmetic* rather than by a kernel, and no kernel would ever have
+found it.
+
+**The measurement.** `tests/data/scad/step-export/step-split-surface.scad`
+exported two ways - the cylinder written as a band's wall, and the same cylinder
+written as a trimmed patch (`OPENSCAD_STEP_YIELD_SURFACE=0`):
+
+| | volume | against the model |
+| --- | --- | --- |
+| derived from the model, in closed form | **15647.634695** | - |
+| trimmed patch | 15647.634695 | **-1.89e-11 relative** |
+| band's wall | 15646.422089 | **-1.2126, -7.75e-5** |
+
+The patch is exact to eleven digits. The band loses 1.2126 mm3.
+
+**And neither reader notices.** SOLIDWORKS reads both as `valid=1 faults=0`,
+with the control in the same run reading `faults=2 faultyfaces=2 codes=17` as it
+must; OpenCASCADE reads both back as solids and reports the same two volumes to
+four decimal places. Two kernels agree on both numbers, because both *files* are
+well formed. What is wrong is which solid one of them describes, and only the
+model can say.
+
+**The defect.** The band file writes two `ELLIPSE`s - semi-axes 28.318 x 20 and
+28.349 x 20 - whose four endpoints all lie at `z = 10.0`, radius exactly 20:
+the crease circle where the cylinder meets the chamfer. Their placements give
+them away:
+
+```text
+centre (0, 0, 29.956)  normal (-0.677,  0.207, -0.706)
+centre (0, 0, 30.000)  normal (-0.678, -0.207, -0.705)
+```
+
+A centre at `z = 30` on a model 13 tall, and a normal 45 degrees off the axis. A
+45-degree section of the r = 20 cylinder centred at `z = 30` runs from `z = 10`
+to `z = 50`, so **`z = 10` is the ellipse's lowest extremity**: both endpoints
+sit at that extremity and the curve arcs *upward* between them, off the rim,
+shaving the sliver.
+
+**The root cause is a deduction where a declaration was available.** The rim of a
+cylinder at constant `z` is a circle by construction. The exporter instead
+*fitted a plane* to the boundary run - and a run along a rim does not determine
+one: infinitely many planes contain that line. The fit took a 45 degree plane,
+which is the chamfer cone's own slope, so the neighbouring face's orientation
+leaked into a curve belonging to the cylinder. Nothing here needed fitting.
+
+**Why it stayed hidden.** It needs a rim run next to a 45 degree face, which
+lid10 and the bayonet have and f02/f04 do not; the curve it produces is well
+formed, so every validator and both kernels accept it; and the cost is 7.75e-5
+of volume, which no face count, census row or fault list reports.
+
+**What it explains.** Why the band representation loses volume; why the patch
+representation is exact (it keeps the mesh vertices and writes real arcs, never
+fitting a plane to a run); and why *representation-independence* was the right
+property to assert even before the cause was known.
+
+**Open:** lid10's own split shows 2.0818 mm3 with the area *identical to the
+last digit*, where this fixture moves both area and volume. That is a different
+signature and may be a second mechanism.
+
 ### 24. The flagship third of the suite does 18 exports where 6 would do
 
 **Measured 2026-09-21**, while waiting an hour for a baseline run on a 16-core
