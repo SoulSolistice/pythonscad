@@ -28,6 +28,22 @@ cd "$ROOT" || exit 1
 FLAGS=(--enable=step-analytic-surfaces --enable=step-approximate-surfaces)
 BIN="$ROOT/build/staging/pythonscad.com"
 
+# How many tests to run at once: the whole machine. This was -j8, a number
+# someone typed, which left half of a 16-core box idle for the ~20 minutes the
+# suite takes.
+#
+# It is deliberately NOT the three-quarters rule scripts/msys2-build.sh uses.
+# That rule is there because a CGAL translation unit peaks near 2 GB and memory,
+# not cores, is what binds a *build*; it is also what gives the 4-core agent
+# sandbox its -j3. ctest runs exports, not compiles, and nothing here comes near
+# that footprint - so the suite gets every core, and the build keeps its
+# fraction. Override with STEP_DEV_JOBS.
+JOBS="${STEP_DEV_JOBS:-}"
+if [ -z "$JOBS" ]; then
+  JOBS="$(nproc 2>/dev/null || echo 4)"
+  [ "$JOBS" -lt 1 ] && JOBS=1
+fi
+
 # The interpreter CMake found, which is the one with cadquery-ocp installed -
 # not MSYS2's python, which has no OCP and makes every (OCP) instrument skip.
 ocp_python() {
@@ -64,11 +80,11 @@ case "${1:-}" in
     ;;
   test)
     export PATH="$ROOT/build/staging:$PATH"
-    ctest --test-dir "$ROOT/build" -R 'export-step-|mutations' -j8 2>&1 | tail -12
+    ctest --test-dir "$ROOT/build" -R 'export-step-|mutations' -j"$JOBS" 2>&1 | tail -12
     ;;
   flagship)
     export PATH="$ROOT/build/staging:$PATH"
-    ctest --test-dir "$ROOT/build" -R 'export-step-flagship' --output-on-failure 2>&1 | tail -30
+    ctest --test-dir "$ROOT/build" -R 'export-step-flagship' -j"$JOBS" --output-on-failure 2>&1 | tail -30
     ;;
   export)
     shift

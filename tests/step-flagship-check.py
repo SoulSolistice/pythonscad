@@ -32,6 +32,7 @@ and a CAD kernel can read it back as a solid.
 """
 
 import argparse
+import concurrent.futures
 import os
 import re
 import subprocess
@@ -129,12 +130,35 @@ def main():
 
     failures = []
     tmp = tempfile.mkdtemp(prefix="step-flagship-")
-    for name, source, extra in COUPONS:
+
+    # The coupons are exported concurrently and checked in order.
+    #
+    # They share no state and write separate files, so exporting them one at a
+    # time made the wall clock a sum where it is a max - and the two slowest,
+    # lid10 and the bayonet, are the parts this work exists for. The checks stay
+    # serial and in COUPONS order: they are cheap beside an export, and a
+    # deterministic report is worth more than the seconds.
+    #
+    # Threads rather than processes because each export is a subprocess and the
+    # GIL is released across it.
+    todo = [(name, source, extra) for name, source, extra in COUPONS
+            if os.path.isfile(os.path.join(ROOT, source))]
+    for name, source, _extra in COUPONS:
         if not os.path.isfile(os.path.join(ROOT, source)):
             print("SKIP %-12s (no %s)" % (name, source), file=sys.stderr)
-            continue
+    exported = {}
+    if todo:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(todo)) as pool:
+            futures = {
+                pool.submit(export, binary, source, os.path.join(tmp, name + ".stp"), extra): name
+                for name, source, extra in todo
+            }
+            for fut in concurrent.futures.as_completed(futures):
+                exported[futures[fut]] = fut.result()
+
+    for name, source, extra in todo:
         target = os.path.join(tmp, name + ".stp")
-        code, output = export(binary, source, target, extra)
+        code, output = exported[name]
         if code != 0 or not os.path.isfile(target):
             print("FAIL %-12s export exited %d" % (name, code), file=sys.stderr)
             print(output, file=sys.stderr)
