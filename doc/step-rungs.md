@@ -235,6 +235,46 @@ and is not restated here.
 4. **Then, and only then, retire C5.** Refusing it before its inputs are fixed
    took code 17 from 42 to 198 on lid10, because C6 is worse.
 
+## What completing the system means, and how to tell when it is done
+
+The point of this document is not to fix the reference parts. lid10 and the
+bayonet are **specimens**: they are where the ugly cases were found, not the
+thing being optimised, and `doc/step-export-development.md`, *Scope*, has said
+so since it was written. A finding on one counts when it has become a synthetic
+fixture that isolates it. **If the ladder is complete and correct, the reference
+parts fall out of it** - there is nothing about them to hunt.
+
+Completing it has three axes, and they fail independently.
+
+**Breadth - every entity the exporter writes has a ladder.** Curves, surfaces,
+regions and corners have one here. The one that visibly does not is the
+**boundary run**: which stretch of a loop becomes a single curve is decided by
+case analysis (`RimRef`'s four kinds, `Patch::Run`), not by a classed ladder,
+and the cases were added one at a time. Worth surveying on the same terms as the
+rest - what *determines* a run, and therefore which rung it is.
+
+**Depth - every rung names its class and the class of its evidence.** A rung is
+as exact as what decides it. Nothing checks this today; see the honour-system
+note under the D4 rule above.
+
+**Feedstock - every primitive declares what it makes.** A ladder can only reach
+D0 where a declaration exists, and where none does it falls to D4 with nothing
+saying so. `doc/step-export-wip.md`, *What still rests on the mesh with no
+declaration at all*, is the inventory: `minkowski()` declares nothing, so a
+rounded cube is 142 planes; `hull()` declares its operands but not the blend;
+`import()`, `surface()` and `projection()` have nothing to declare;
+`linear_extrude(twist=)`, `PathExtrudeNode` and `SkinNode` declare nothing. Each
+gap is a region of every model that cannot rise above the tessellation.
+
+**And the instrument that would make all three measurable does not exist.** The
+export cannot say what class its own output is. A census by class - for every
+entity written, which rung produced it and which class that rung is - turns
+*"how much of this model is determined, and where does it fall to the
+tessellation?"* into a number, per model, for any model. That is the measurement
+the whole survey implies and is the natural next thing to build: it grades the
+ladder rather than a part, it needs no behaviour change, and it is what lets a
+new model be judged without anyone knowing its geometry in advance.
+
 ## How to add a rung without guessing
 
 Three things, each of which was skipped by at least one rung this session:

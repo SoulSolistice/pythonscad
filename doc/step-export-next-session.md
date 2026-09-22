@@ -220,38 +220,60 @@ out as planes. **A closed form was surrendered, not exchanged**, which is 1.1.
 
 ## 3. Next steps, in order
 
-1. ~~A fixture that can see an exact-tier loss.~~ **Done 2026-09-22**, as two:
-   `step-region-beyond-the-band` asserts the exact tier's analytic coverage
-   (`ROUNDTRIP: Cylinder=1 Plane=5`) on a declared cylinder written as a band
-   with facets of the same surface beside it; `step-region-pocket` carries a
-   **derived volume**, `4185*pi = 13147.565255`, which both tiers miss by
-   5.4398 and the parked R0 hits exactly. The second is `WILL_FAIL` and is the
-   model on which a region rule actually fires. `scripts/step-dev.sh export`
-   now writes `<name>-exact.stp` as well, so the exact tier is measured by the
-   loop rather than by remembering to.
-2. **Open item 27 - C0, and it no longer waits on R0.** Work down lid10's own
-   refusals: a claim whose boundary strays 0.1094 where the tessellation allows
-   0.0067 (192 facets); 20 facets reaching further round the axis than four
-   times the typical span; 24 sweep facets off their fit. Two of those are
-   4x-median statistics - a yardstick made of the error it grades.
-3. **Open item 29 - R0, properly.** Two things: provenance's *positive* query so
-   the region carries no tolerance, and an arbiter so a closed form is exchanged
-   rather than surrendered. Do step 3 of the migration plan first (flip the
-   source of truth from `consumed` to the ledger); the attempt jumped to step 4
-   with Propose impure, which is the failure that plan exists to prevent.
-4. **Open item 28 - determinism.** Export one model a hundred times and diff the
+**The goal is the rung system, not the reference parts.** lid10 and the bayonet
+are specimens - they are where the ugly geometry was found, not the thing being
+optimised - and a finding on one counts when it has become a synthetic fixture
+that isolates it. If the ladder is complete and correct they fall out of it.
+`doc/step-rungs.md`, *What completing the system means*, is the shape of the
+work; the list below is that shape in order.
+
+1. **The class census - the instrument the survey implies and does not have.**
+   For every entity the export writes, which rung produced it and which class
+   that rung is, reported per model. It turns *"how much of this model is
+   determined, and where does it fall to the tessellation?"* into a number for
+   **any** model, which is what stops the work being a hunt. No behaviour
+   change. Everything below gets graded by it.
+2. **Provenance's positive query, reporting only.** Today `Provenance` answers
+   only `excludes`; the positive answer is already derived in `export_step.cc`
+   as `covered` / `covered_cut` - *"a cut facet has lost a corner to the boolean
+   and still belongs to the surface the other two are on"*. Give it a query and
+   a report line: per declared surface, how many facets belong to it, how many
+   are written analytically, how many are left planar. Still no behaviour
+   change - and it is the measurement that settles whether C0 is downstream of
+   R0 or independent of it.
+3. **R0 properly** (open item 29), if step 2 says the region is larger than what
+   is written. Two parts: the region from step 2's query, carrying no tolerance;
+   and *exchanged, never surrendered* - `boundary_lies_on_surface` is computable
+   on a candidate patch **before** the band is dropped, so the band gives up
+   only when the replacement will actually be written. That is the check whose
+   absence caused the reverted regression, and it does not need the full
+   Propose / Arbitrate / Assemble rewrite to exist. Judged by
+   `step-region-pocket`'s derived `4185*pi` and `step-region-beyond-the-band`'s
+   exact-tier coverage.
+4. **C0 and the refusals** (open item 27). The facets left planar at the exact
+   tier are refused by `boundary_lies_on_surface` - all of a surface or none,
+   which is right - and by two **4x-median statistics**, which are a yardstick
+   made of the error they grade and are the ladder's own forbidden shape. Take
+   the statistics first.
+5. **Enforcement, so the classes stop being an honour system.** The ledger
+   carries a claim's own `ClaimPrecision` but not the class of the *evidence*
+   behind it, so a claim can call itself DeclaredExact while a tessellation band
+   decided it. Carry both, make the mismatch an `EXPORT-ERROR`. It would have
+   refused the reverted attempt on its first export.
+6. **Feedstock: the primitives that declare nothing.** A ladder reaches D0 only
+   where a declaration exists; where none does it falls to D4 silently.
+   `minkowski()` (a rounded cube is 142 planes), `hull()`'s blend,
+   `linear_extrude(twist=)`, `PathExtrudeNode`, `SkinNode`, and no surface type
+   for an ellipse. See the roadmap in `doc/step-export-wip.md`.
+7. **Survey the boundary run.** Which stretch of a loop becomes one curve is
+   decided by case analysis (`RimRef`'s four kinds, `Patch::Run`) with no
+   classed ladder behind it. It is the one entity the survey does not cover.
+8. **Open item 28 - determinism.** Export one model a hundred times and diff the
    *reports*. If any decision is "first surface to accept it wins" over a
    pointer-keyed container, the geometry is non-deterministic and nothing today
    would notice.
-5. **lid10's two code-21 faces** - planes of area 1.466 at
-   `(-56.999, -55.863, 89.788)` and `(-55.863, 56.999, 89.788)`, never
-   investigated.
-6. **Open item 21's corner**, and the 1% volume question in item 23's
-   SOLIDWORKS run.
-7. **Banked**: item 24, the flagship third of the suite doing 18 exports where 6
-   would do.
-
----
+9. **The rest, unchanged**: lid10's two code-21 faces; open item 21's corner and
+   item 23's 1% volume question; item 24's flagship duplication, banked.
 
 ## 4. Tooling and setup
 
@@ -374,13 +396,21 @@ Verify with `test` (58 of 58) before and after any change. Never run two builds
 or two suites at once. Every diagnostic is catalogued by the question it answers
 in scripts/step-diagnostics/README.md.
 
-Where to start: (1) a fixture that can see an exact-tier loss - a declared cone
-whose region exceeds a band's ring, asserting ROUNDTRIP: Cone=1 with the
-analytic flag alone; it would have caught the regression above in one run.
-(2) Open item 27, C0: the 78 edges on lid10 written as a section of a surface by
-its own chord plane, a boundary of nothing. It no longer waits on R0 - measured,
-R0 moved that count by zero, because those facets are ones the general pass
-*refused*, each with a reason the export prints.
+The goal is the rung system itself, not the reference parts. lid10 and the
+bayonet are specimens - where the ugly geometry was found, not the thing being
+optimised - and if the ladder is complete and correct they fall out of it. Read
+doc/step-rungs.md, *What completing the system means*: breadth (every entity has
+a ladder - the boundary run does not), depth (every rung names its class and its
+evidence's class - nothing checks this), feedstock (every primitive declares -
+minkowski, hull's blend, linear_extrude(twist=), PathExtrude and Skin do not).
+
+Where to start, and the first two change no behaviour: (1) the class census -
+for every entity written, which rung produced it and which class that rung is,
+reported per model, so "how much of this model is determined?" is a number for
+any model; (2) provenance's positive query, reported the same way - it is what
+settles whether C0 is downstream of R0. Then R0 properly, then C0's refusals,
+starting with the two 4x-median statistics, which are a yardstick made of the
+error they grade.
 
 Do NOT start by arbitrating facet ownership, and do NOT start by refusing the
 wrong curves. Both were measured: every contested facet is a precision tie
