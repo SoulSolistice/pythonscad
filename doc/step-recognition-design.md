@@ -460,7 +460,7 @@ whatever else it reports.
 
 ## Migrating without a big bang
 
-The suite is 56 tests and it has a known history of blind spots - the flagship
+The suite is 58 tests and it has a known history of blind spots - the flagship
 check could not fail its round trip for four days. A wholesale rewrite validated
 against it is how a subtle regression ships. So:
 

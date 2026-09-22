@@ -1178,6 +1178,18 @@ add_cmdline_test(export-stl-sanitytest  SCRIPT ${STLEXPORTSANITYTEST_PY} SUFFIX 
 # guards a defect the STEP exporter has had; see tests/validatestep.py.
 file(GLOB STEP_EXPORT_FILES ${TEST_STEP_EXPORT_DIR}/*.scad)
 add_cmdline_test(export-step-sanitytest SCRIPT ${STEPEXPORTSANITYTEST_PY} SUFFIX txt FILES ${STEP_EXPORT_FILES} ARGS ${OPENSCAD_EXE_ARG} --trust-python)
+# step-region-pocket is registered WILL_FAIL: it asserts the model's own volume,
+# 4185*pi = 13147.565255, and both tiers export 13142.125430 - short by 5.4398,
+# because part of each declared cylinder is written as chord planes that sit
+# inside the surface they stand for. The region is not claimed whole; see
+# doc/step-rungs.md, R0, and open item 29. The parked attempt on
+# claude/step-region-r0-optimistic-parked exports the derived figure exactly on
+# this model, so the number is reachable rather than aspirational. The day R0
+# lands properly ctest reports this as a failure, which is how the fix announces
+# itself. Its companion step-region-beyond-the-band guards the same surface's
+# face count and passes on its own merits.
+set_tests_properties(export-step-sanitytest_step-region-pocket PROPERTIES WILL_FAIL TRUE)
+
 # step-cap-meets-wall was registered WILL_FAIL when it was added, because two of
 # its corners still sat 3.6e-03 and 4.5e-03 off the analytic faces they bound.
 # ctest reported it as a *failure* the day that stopped being true - which is

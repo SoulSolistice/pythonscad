@@ -10,12 +10,16 @@
 # its own location so it works in any worktree.
 #
 #   scripts/step-dev.sh build              incremental build and stage (no configure)
-#   scripts/step-dev.sh test               the STEP suite: export-step-|mutations, 56 tests
+#   scripts/step-dev.sh test               the STEP suite: export-step-|mutations, 58 tests
 #   scripts/step-dev.sh flagship           the three flagship tests only
 #   scripts/step-dev.sh export <part> [dir]
 #                                          lid10 | bayonet | f02 | f04 | <file.scad>
 #                                          into [dir] (default build/step-dev), with
-#                                          both feature flags and the right customizer
+#                                          the right customizer, TWICE: <name>.stp with
+#                                          both feature flags and <name>-exact.stp with
+#                                          the analytic flag alone. Measure both - a
+#                                          change can improve one tier and wreck the
+#                                          other. STEP_DEV_TIER=approx skips the second.
 #   scripts/step-dev.sh census <file.stp>...
 #                                          scripts/step-diagnostics/fault-census.py
 #   scripts/step-dev.sh python             print the interpreter ctest uses (has OCP)
@@ -25,6 +29,16 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
+# The two tiers, and both of them get exported.
+#
+# The exact tier writes only what it can prove; the approximation tier is
+# allowed to spend the tessellation band. They are different exports and a
+# change can improve one while wrecking the other - measured on 2026-09-22, a
+# region rule bought 110 exact circles with both flags on and took a declared
+# cone on lid10 down to planes with only the analytic one, on a run that was
+# green. This used to export the approximation tier alone, so the tier most
+# likely to be damaged was the one nobody looked at. See doc/step-rungs.md.
+EXACT_FLAGS=(--enable=step-analytic-surfaces)
 FLAGS=(--enable=step-analytic-surfaces --enable=step-approximate-surfaces)
 BIN="$ROOT/build/staging/pythonscad.com"
 
@@ -67,10 +81,20 @@ export_part() {
   esac
   local name="${part##*/}"; name="${name%.*}"
   local target="$out/$name.stp" log="$out/$name.log"
+  local exact="$out/$name-exact.stp" exact_log="$out/$name-exact.log"
   "$BIN" "${args[@]}" -o "$target" --trust-python "${FLAGS[@]}" >"$log" 2>&1
   local rc=$?
   echo "$name: exit $rc -> $target"
   grep -E "EXPORT-ERROR" "$log" && echo "   ^ the exporter says its own output is wrong" >&2
+  # And the exact tier, always. Skipped only with STEP_DEV_TIER=approx, which is
+  # for a loop that has already established the exact tier does not move.
+  if [ "${STEP_DEV_TIER:-both}" != "approx" ]; then
+    "$BIN" "${args[@]}" -o "$exact" --trust-python "${EXACT_FLAGS[@]}" >"$exact_log" 2>&1
+    local erc=$?
+    echo "$name: exit $erc -> $exact   (exact tier, --enable=step-analytic-surfaces alone)"
+    grep -E "EXPORT-ERROR" "$exact_log" && echo "   ^ the exporter says its own output is wrong" >&2
+    [ $rc -eq 0 ] && rc=$erc
+  fi
   return $rc
 }
 

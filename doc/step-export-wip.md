@@ -235,7 +235,7 @@ Verify the tree before changing anything, and again after:
 ctest --test-dir build -R 'export-step-|mutations'
 ```
 
-**56 tests**, and it has to be this regex and not `-R step`, which drops
+**58 tests**, and it has to be this regex and not `-R step`, which drops
 `bspline-check-mutations` and `closed-sphere-check-mutations` — the harnesses
 whose job is to prove the other tests would fail if the defect came back. What
 the 53 are: 33 SCAD fixtures in `tests/data/scad/step-export/`, 12 Python in
@@ -248,7 +248,7 @@ and **a new fixture needs `cmake -B build` before ctest can see it at all**. Run
 it under the machine's own locale, not `LC_ALL=C`,
 which breaks five UTF-8 filename tests.
 
-**One of the 56 fails on purpose and reports green**, registered `WILL_FAIL`:
+**Two of the 58 fail on purpose and reports green**, registered `WILL_FAIL`:
 ctest reports it *passed* while it fails, and will report it *failed* on the day
 it starts passing — which is how that fix gets noticed. Do not delete it, and do
 not read its green as the defect being gone.

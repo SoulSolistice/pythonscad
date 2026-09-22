@@ -4,7 +4,7 @@ Everything a new session needs: the doctrine as it now stands, what was
 measured, what to do next, the tooling, the diagnostic method, and a priming
 prompt to paste.
 
-Branch `claude/step-claim-two-pass`, suite **56 of 56**, nothing pushed.
+Branch `claude/step-claim-two-pass`, suite **58 of 58**, nothing pushed.
 
 **This session attempted R0 and reverted it.** The exporter's behaviour is
 exactly what it was at `006ab3b45`; what is new is one behaviour-neutral
@@ -187,10 +187,9 @@ out as planes. **A closed form was surrendered, not exchanged**, which is 1.1.
 
 ### Two gaps in the instruments
 
-- **The suite cannot see an exact-tier regression on a reference part.** lid10 is
-  not a fixture, the flagship checks run with both feature flags, and no fixture
-  asserts the exact tier's analytic coverage on a model where a region rule
-  fires. The whole regression above passed 56 of 56.
+- **The suite could not see an exact-tier regression**, and the whole regression
+  above passed the suite. **Closed 2026-09-22** by `step-region-beyond-the-band`
+  and `step-region-pocket`, and by `step-dev.sh export` writing both tiers.
 - **The fault census is not the exactness metric.** It was *identical* across
   the R0 attempt - 0/0/0/3/162, same worst, same breakdown - while the exact
   tier lost a conical face and 56 facets to planes. And in the other direction,
@@ -216,10 +215,15 @@ out as planes. **A closed form was surrendered, not exchanged**, which is 1.1.
 
 ## 3. Next steps, in order
 
-1. **A fixture that can see an exact-tier loss.** Cheapest, and it gates
-   everything else: a declared cone whose region exceeds a band's ring,
-   asserting `ROUNDTRIP: Cone=1` with `--enable=step-analytic-surfaces` alone.
-   The regression above would have been caught in one run.
+1. ~~A fixture that can see an exact-tier loss.~~ **Done 2026-09-22**, as two:
+   `step-region-beyond-the-band` asserts the exact tier's analytic coverage
+   (`ROUNDTRIP: Cylinder=1 Plane=5`) on a declared cylinder written as a band
+   with facets of the same surface beside it; `step-region-pocket` carries a
+   **derived volume**, `4185*pi = 13147.565255`, which both tiers miss by
+   5.4398 and the parked R0 hits exactly. The second is `WILL_FAIL` and is the
+   model on which a region rule actually fires. `scripts/step-dev.sh export`
+   now writes `<name>-exact.stp` as well, so the exact tier is measured by the
+   loop rather than by remembering to.
 2. **Open item 27 - C0, and it no longer waits on R0.** Work down lid10's own
    refusals: a claim whose boundary strays 0.1094 where the tessellation allows
    0.0067 (192 facets); 20 facets reaching further round the axis than four
@@ -324,7 +328,7 @@ Paste this into a new session, adjusting only the worktree path.
 ```text
 You are continuing work on the PythonSCAD STEP exporter, in a worktree of
 E:\29_Git_Soulsolistice\pythonscad. Branch: claude/step-claim-two-pass, suite
-56 of 56, nothing pushed.
+58 of 58, nothing pushed.
 
 Read first, in this order: CLAUDE.md (build, test, the dev loop), then
 doc/step-export-next-session.md in full, then doc/step-rungs.md and
@@ -361,7 +365,7 @@ the staged binary with --enable=step-analytic-surfaces alone for that, and
 measure both tiers on any change to recognition - the suite cannot see an
 exact-tier loss on a reference part. A worktree has no submodules: copy them
 from the main checkout and repoint each .git file at <main>/.git/modules/<path>.
-Verify with `test` (56 of 56) before and after any change. Never run two builds
+Verify with `test` (58 of 58) before and after any change. Never run two builds
 or two suites at once. Every diagnostic is catalogued by the question it answers
 in scripts/step-diagnostics/README.md.
 
