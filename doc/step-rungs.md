@@ -36,7 +36,7 @@ exchanged for another closed form, never surrendered to a chord or a facet
 plane. Days of debugging are in that sentence, and the one attempt that ignored
 it is recorded under *Regions*, below.
 
-Three consequences that have each cost a day:
+Two consequences that have each cost a day:
 
 - **A D4 may never be an input to a D0-D2.** A facet's plane is not a plane; a
   chord is not a constraint. The corner arbiter enforces this (`kCornerTiers`
@@ -59,10 +59,14 @@ that do not lie on the face they bound. Greedy consumption *hides* such edges by
 absorbing the facets into something that will tolerate them; every step towards
 exactness exposes them, because an exact face is strict about its boundary where
 a facet plane is not. As the foundation gains exactness the count goes **up**,
-and that is the ladder working, not failing. This is why C5 is still in place:
-removing the wrong curves before their inputs are fixed took code 17 from 42 to
-198 on lid10, and the number is a symptom of the inputs, not a verdict on the
-change.
+and that is the ladder working, not failing.
+
+So the 42 to 198 that C5's removal cost on lid10 is **not** the reason C5 is
+still in place, and reading it that way is the trap this section is about. The
+reason is an exactness one: C5's replacement is C6, a plain chord, which lies
+*further* off the face than the wrong conic does. The census measured that; it
+did not decide it. Fix C5's inputs and the same removal will read as a rise
+too, and will be right.
 
 **And a census that does not move is not a statement that nothing moved.** The
 R0 attempt of 2026-09-22 is the worked example: the census was *identical* -
@@ -107,7 +111,7 @@ from S0 down to S3. Two ladders crossed, and the exact one lost.
 
 | rung | curve | determined by | class | today |
 | --- | --- | --- | --- | --- |
-| C0 | **no edge at all** | both sides are the *same* declared surface - there is no boundary | D0 | **not implemented**: 78 such edges on lid10, 18 on the bayonet, 31 on f04, written as a section of a surface by its own chord plane. the R0 attempt of 2026-09-22 did not move any of those counts, which is the finding: they are not where a band truncated a region but where the *general* pass refused one - a claim whose boundary strays too far, a facet reaching too far round the axis, a sweep facet off its fit. Open item 27 |
+| C0 | **no edge at all** | both sides are the *same* declared surface - there is no boundary | D0 | **not implemented**: 78 such edges on lid10, 18 on the bayonet, 31 on f04, written as a section of a surface by its own chord plane. The R0 attempt of 2026-09-22 did not move any of those counts, which is the finding: they are not where a band truncated a region but where the *general* pass refused one - a claim whose boundary strays too far, a facet reaching too far round the axis, a sweep facet off its fit. Open item 27 |
 | C1 | `CIRCLE` on a quadric's rim | the surface's own axis and radius, where both ends share an axial level | D0 | **landed 2026-09-21**, 60 edges on lid10 |
 | C2 | `CIRCLE` / `ELLIPSE` / `HYPERBOLA` / `PARABOLA` | a **declared** plane cutting a declared quadric | D0 | implemented - but measured 0 of 78 on lid10 use a declared plane |
 | C3 | crossing of two declared surfaces (`B_SPLINE_CURVE`) | both declarations, solved to 1e-7 of each | D2 | implemented (`intersectionArc`), reached only when both sides are *written* as analytic faces |
