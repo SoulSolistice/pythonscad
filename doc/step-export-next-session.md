@@ -254,9 +254,36 @@ work; the list below is that shape in order.
    end discs and the pocket's r = 20 wall land in *no mesh left*, exactly as
    `step-region-pocket.scad` derives in prose.
 
-   **Next on it**: take those nine one at a time and answer *why*. Note the tier
-   split - the approximation writes lid10's cone 54 and sweep 65 and loses
-   cylinder 12 - so each has to be asked of both tiers.
+   **And it reports per facet too, because per declaration it cannot see the
+   worst case.** *Written* means a face stands on the declaration, not that it
+   holds everything it should. And a fitted surface can consume a region that
+   was really a combination of exact primitives and leave a few facets behind:
+   the declarations that should have covered them had their ground taken, their
+   recognisers never proposed, **no losing claim exists to count**, and the
+   stranded facets have no route back. `consumed` is not *consumed by the most
+   exact claimant*, and once a facet is consumed every later pass is blind to
+   it.
+
+   ```text
+   lid10  exact   909 declared surface, 27 declared plane, 0 fitted, 1521 tessellation
+          approx 1671 declared surface, 27 declared plane, 0 fitted,  759 tessellation
+   step-approximate-report  exact 0/2/0/2048   approx 0/2/2048/0
+   ```
+
+   That last row is the tier in one line and is what proves the fitted bucket
+   fires, so lid10's zero there is a true zero.
+
+   **One number is deliberately absent**: how many fitted or tessellated facets
+   had a declaration *available*. `owned` names an original's surfaces, not a
+   facet's, so on any model that declares anything it answers "all of them" -
+   measured, and taken back out rather than shipped. It needs the positive
+   per-facet query, which is the next item.
+
+   **Then**: take the nine unexplained declarations one at a time and answer
+   *why*, of **both** tiers - the approximation writes lid10's cone 54 and sweep
+   65 and loses cylinder 12, so they fail on different declarations. Two of
+   lid10's four and three of the bayonet's five already have their answer
+   narrowed: their mesh is held under another surface's name.
 
 2. **Attribution: is every facet held for the surface the model says it belongs
    to?** The other half of *used as intended*. Utilisation asks whether a

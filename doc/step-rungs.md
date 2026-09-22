@@ -328,6 +328,47 @@ model: they are a ring's two walls, distinct surfaces with equal facet counts.
 The bucket fired zero times and was removed rather than landed, and the pairs
 stay bug reports.
 
+**And it has to be asked per facet as well, because per declaration it cannot
+see the worst case.** *Written* means a face stands on the declaration, not that
+the declaration holds everything it should - one facet of a hundred reads the
+same as all hundred. Worse, consider a fitted surface that consumes a region
+which was really a combination of exact primitives, and leaves a few facets
+behind: the declarations that should have covered them had their ground taken,
+so their recognisers never proposed, **no losing claim exists to count**, and
+the stranded facets have no route back to anything. Once a facet is consumed
+every later pass is blind to it. That is invisible to a per-declaration count
+and to the ledger's contention numbers alike.
+
+So the export also reports what class wrote each facet:
+
+```text
+lid10  exact   909 on a declared surface, 27 on a declared plane,
+                 0 fitted, 1521 left to the tessellation
+       approx  1671 on a declared surface, 27 on a declared plane,
+                 0 fitted,  759 left to the tessellation
+step-approximate-report
+       exact      0 / 2 / 0 / 2048        approx  0 / 2 / 2048 / 0
+```
+
+The last line is the tier in one row - the same model entirely tessellated
+without the flag and entirely on fitted surfaces with it - and it is what
+demonstrates the fitted bucket fires, so lid10's zero there is a true zero.
+
+**`consumed` is not `consumed by the most exact claimant`, and that is the
+foundation under all of it.** It is also why the rung order has to be *followed*
+rather than admired: D0 is covered first precisely so a D3 fit never gets the
+chance to take exact ground and strand the remainder.
+
+**One number is deliberately missing.** How many of the fitted and tessellated
+facets had a declaration *available*, which is exact ground that did not come
+out exact, needs a per-facet, per-surface membership test. `owned` cannot answer it: it
+names an *original's* surfaces, not a facet's, so on any model that declares
+anything it reports every facet of that original as owned by every surface it
+owns, and the answer comes back "all of them". That was measured and the
+refinement was taken back out rather than shipped. The test that would answer it
+is `export_step.cc`'s `covered` / `covered_cut`, and exposing it as a positive
+`Provenance` query is the same thing R0 needs.
+
 The census grades the ladder rather than a part, changes no behaviour, and turns
 the doctrine above into a work list.
 

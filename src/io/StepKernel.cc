@@ -1983,6 +1983,12 @@ void StepKernel::build_tri_body(
   // *a declaration that is not taken is a bug report* makes a defect to
   // explain. See doc/step-rungs.md, *How to read a result*.
   std::vector<char> decl_written(surfaces.size(), 0);
+  // What class actually wrote each facet: 0 the tessellation, 1 a declared
+  // plane, 2 a declared curved surface, 3 a surface the approximation fitted.
+  // Per facet and not per declaration, because "a face stands on this
+  // declaration" cannot see a declaration that kept one facet of a hundred,
+  // and cannot see ground a fit took.
+  std::vector<unsigned char> facet_class(faces.size(), 0);
   struct SectionMiss {
     double tilt, offset;
   };
@@ -6203,6 +6209,7 @@ void StepKernel::build_tri_body(
         if (dp < declared_plane_index.size() && declared_plane_index[dp] < decl_written.size()) {
           decl_written[declared_plane_index[dp]] = 1;
         }
+        if (i < facet_class.size()) facet_class[i] = 1;
         // Keep the mesh's sense: a declaration says which plane, not which way
         // the face looks out of it.
         norm = declared.second.dot(norm) > 0 ? declared.second : Vector3d(-declared.second);
@@ -6324,21 +6331,58 @@ void StepKernel::build_tri_body(
       if (features.consumed[f] == 0) continue;
       for (const auto *claim : features.ledger.claimants(f)) {
         if (!claim->honoured) continue;
-        if (claim->surface_index < decl_written.size()) decl_written[claim->surface_index] = 1;
+        if (claim->surface_index < decl_written.size()) {
+          decl_written[claim->surface_index] = 1;
+          if (f < facet_class.size()) facet_class[f] = 2;
+        } else if (f < facet_class.size()) {
+          // Past `surfaces` is a surface the approximation fitted. A facet held
+          // under one is D3 ground however exact the mesh under it happens to
+          // be, and if a declaration owned it then a measurement has displaced
+          // a declaration.
+          facet_class[f] = 3;
+        }
+        break;
       }
     }
-    // Which declarations still have mesh on them at all.
+    // Which declarations still have mesh on them at all - and, of that mesh,
+    // how much is already held by a claim naming something else.
+    //
+    // **`consumed` does not mean consumed by the most exact claimant**, and
+    // that is the foundation under all of this. Once a facet is taken, every
+    // later pass is blind to it: there is no losing claim to count, so
+    // `misheld` reads zero and the ledger records no contest. A declaration can
+    // therefore come out unexplained not because nothing could write it but
+    // because something *else* got its facets first - which is a different
+    // defect with a different fix, and reporting the two as one sends the
+    // reader after the wrong one.
+    //
+    // The denominator is coarse and is not a coverage figure: `owned` maps an
+    // *original* to the surfaces it owns, so an original owning two surfaces
+    // counts all its facets for both. It is used only to ask a categorical
+    // question - is any of this declaration's mesh held under another name -
+    // which coarseness cannot turn from no into yes.
     std::vector<char> present(surfaces.size(), 0);
+    std::vector<std::size_t> held_elsewhere(surfaces.size(), 0);
     for (std::size_t f = 0; f < faceOrigin.size() && f < loops.size(); f++) {
       if (!loop_valid[f]) continue;
       const auto it = owned.find(faceOrigin[f]);
       if (it == owned.end()) continue;
+      std::size_t holder = std::size_t(-1);
+      if (f < features.consumed.size() && features.consumed[f] != 0) {
+        for (const auto *claim : features.ledger.claimants(f)) {
+          if (!claim->honoured) continue;
+          holder = claim->surface_index;
+          break;
+        }
+      }
       for (const std::size_t si : it->second) {
-        if (si < present.size()) present[si] = 1;
+        if (si >= present.size()) continue;
+        present[si] = 1;
+        if (holder != std::size_t(-1) && holder != si) held_elsewhere[si]++;
       }
     }
     struct Tally {
-      std::size_t total = 0, written = 0, evidence = 0, removed = 0, idle = 0;
+      std::size_t total = 0, written = 0, evidence = 0, removed = 0, idle = 0, taken = 0;
     };
     Tally curved, flat;
     std::vector<std::string> to_explain;
@@ -6361,6 +6405,7 @@ void StepKernel::build_tri_body(
         continue;
       }
       t.idle++;
+      if (held_elsewhere[i] > 0) t.taken++;
       if (to_explain.size() < 12) {
         const char *kind = dynamic_cast<const CylinderSurface *>(sf)      ? "cylinder"
                            : dynamic_cast<const ConeSurface *>(sf)        ? "cone"
@@ -6385,6 +6430,7 @@ void StepKernel::build_tri_body(
     say("surfaces", curved);
     say("planes", flat);
     const std::size_t idle = curved.idle + flat.idle;
+    const std::size_t taken = curved.taken + flat.taken;
     if (idle > 0) {
       std::string names;
       for (const auto& n : to_explain) names += (names.empty() ? "" : ", ") + n;
@@ -6392,6 +6438,69 @@ void StepKernel::build_tri_body(
           "STEP export:   %1$d declaration%2$s has mesh on it and no face written on it, and "
           "nothing read it: %3$s%4$s - a declaration that is not taken is a bug report",
           int(idle), idle == 1 ? "" : "s", names.c_str(), idle > to_explain.size() ? ", ..." : "");
+      // Which of the two defects each one is. A facet already taken is
+      // invisible to every later pass, so the declaration's own recogniser
+      // never got to propose and nothing recorded a contest.
+      LOG(message_group::Export_Warning,
+          "STEP export:   of those, %1$d have mesh held under another surface's name - their "
+          "facets were consumed before the declaration's own recogniser could claim them, so no "
+          "losing claim exists to count - and %2$d have mesh nothing claimed at all",
+          int(taken), int(idle - taken));
+    }
+    // And the caution that belongs beside the word *written*: it means a face
+    // stands on the declaration, **not** that the declaration holds everything
+    // it should. A declaration holding one facet of a hundred reads as written
+    // here. That is why the per-facet tally below exists beside it, and why it
+    // is the one to read when the question is *how much of this model is
+    // exact*.
+
+    // ---- the same question per facet, which is where it cannot hide --------
+    //
+    // A per-declaration answer has two blind spots and the second is the worse.
+    // It cannot see a declaration that kept one facet of a hundred. And it
+    // cannot see this: **a fitted surface consumes a region that was really a
+    // combination of exact primitives, the fit leaves a few facets behind, and
+    // those facets are now attributable to nothing.** The declarations that
+    // should have covered them had their ground taken, so their recognisers
+    // never proposed and no losing claim exists; the leftovers are orphans with
+    // no route back. Once a facet is consumed every later pass is blind to it,
+    // so nothing downstream can notice, and the only place it is visible is
+    // here, by asking what class wrote each facet.
+    //
+    // That is the whole reason the rung order has to be followed rather than
+    // admired: D0 is covered first precisely so that a D3 fit never gets the
+    // chance to take exact ground and strand the remainder.
+    {
+      std::size_t by_plane = 0, by_declared = 0, by_fit = 0, by_mesh = 0;
+      for (std::size_t f = 0; f < facet_class.size() && f < loops.size(); f++) {
+        if (!loop_valid[f] || loop_is_hole[f]) continue;
+        switch (facet_class[f]) {
+        case 1:  by_plane++; break;
+        case 2:  by_declared++; break;
+        case 3:  by_fit++; break;
+        default: by_mesh++; break;
+        }
+      }
+      LOG(
+        "STEP export:   by facet: %1$d written on a declared surface, %2$d on a declared plane, "
+        "%3$d on a surface the approximation fitted, %4$d left to the tessellation",
+        int(by_declared), int(by_plane), int(by_fit), int(by_mesh));
+      // **What this cannot yet say, and it is the number that matters most.**
+      // How many of the fitted and tessellated facets had a *declaration
+      // available* - exact ground that did not come out exact - needs a
+      // per-facet, per-surface membership test. `owned` cannot answer it: it
+      // names an original's surfaces, not a facet's, so on any model that
+      // declares anything at all it reports every facet of that original as
+      // owned by every surface it owns, and the answer comes back "all of
+      // them". That was measured on 2026-09-22 and the refinement was taken
+      // back out rather than shipped, because a number that says every
+      // tessellated facet is lost exact ground is the trap this file is full
+      // of: a nearly-right quantity answering a question it was not asked.
+      //
+      // The test that would answer it already exists in `export_step.cc` as
+      // `covered` / `covered_cut`, per original and per surface. Exposing it as
+      // a positive `Provenance` query is what this line is waiting on, and it
+      // is the same query R0 needs. See doc/step-rungs.md.
     }
   }
 
