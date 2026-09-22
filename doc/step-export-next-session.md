@@ -178,7 +178,12 @@ out as planes. **A closed form was surrendered, not exchanged**, which is 1.1.
   ends. The attempt removed every split surface and left C0's seam edges exactly
   where they were - 78 on lid10, 18 on the bayonet, 31 on f04. R0's facets were
   ones a *band* could not hold; C0's are ones the *general pass refused*, each
-  with a stated reason. **C0 can therefore be taken on its own.**
+  with a stated reason. **But the attempt took its region from the tessellation
+  band**; the rule leaving C0's facets planar is `boundary_lies_on_surface`, all
+  of a surface or none, and a region taken from *provenance* would reach the
+  natural boundary instead of a ragged one. Whether that moves C0 is
+  **untested**, and it is what settles the order of the next two pieces of
+  work.
 - **The residual 1.0489 mm3 of open item 26 was not another ellipse.** The rim
   fix took 1.2126 to 1.0489; `reader-diff.py` showed the rest was three facets
   of the chamfer **cone** left planar, a chord plane sitting inside the cone it

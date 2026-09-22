@@ -215,9 +215,19 @@ and is not restated here.
    seam edges exactly where they were. They share a description - facets of a
    surface that an analytic face does not cover - and not a cause: R0's were
    facets a *band* left behind because its form could not hold them, C0's are
-   facets the *general pass refused*, each with a reason it states. So **C0 can
-   be taken on its own**, and it no longer waits on R0. The order below still
-   holds; the reason given for it was half wrong.
+   facets the *general pass refused*, each with a reason it states.
+
+   **But do not read that as more than it is.** What was measured is that the
+   *attempted* R0 did not move C0, and that attempt took its region from the
+   tessellation band. The rule that leaves C0's facets planar at the exact tier
+   is `boundary_lies_on_surface` - all of a surface or none, because a boundary
+   that steps on and off a surface makes a kernel take a tight tolerance from
+   the majority and break on every outlier - and a region taken from
+   **provenance** would reach the natural boundary instead of a ragged one, so
+   it may move C0 where the attempt did not. That is **untested**, and it is the
+   measurement that settles which of the two to do first. The order below still
+   holds; the reason given for it was half wrong and its replacement is not yet
+   measured.
 2. **C2 before C5.** Once regions are whole, a section plane is either declared
    or a genuine flat face; the facet case disappears rather than being refused.
 3. **C3 where two declarations genuinely meet** - already correct, and it will
