@@ -40,7 +40,11 @@ Two consequences that have each cost a day:
 
 - **A D4 may never be an input to a D0-D2.** A facet's plane is not a plane; a
   chord is not a constraint. The corner arbiter enforces this (`kCornerTiers`
-  marks MeshPlane `used = false`); nothing else did.
+  marks MeshPlane `used = false`); nothing else did - and on 2026-09-22 the
+  cost of "nothing else" was measured. R0 was written with the tessellation
+  band as its yardstick, landed green on 56 of 56, and took a declared cone on
+  lid10 down to planes. **Everywhere but the corner arbiter this rule is an
+  honour system, and the honour system has now failed once, expensively.**
 - **"On the surface" is not "the right curve".** A section of a quadric by a
   chord plane lies *exactly* on the quadric and is still not a boundary of
   anything. Code 17 cannot see the difference, which is why code 17 went *up*
@@ -225,8 +229,14 @@ and is not restated here.
 
 Three things, each of which was skipped by at least one rung this session:
 
-- **Name its class.** If it is D3 or D4, it may not overrule anything and may
-  not feed anything higher.
+- **Name its class, and name the class of its inputs.** If it is D3 or D4, it
+  may not overrule anything and may not feed anything higher - and if its
+  *evidence* is D3 or D4 then it is itself D3 or D4, whatever the entity it
+  decides about. R0 was called D0 because a declared surface was in the
+  sentence; what decided it was `bandOf`, and that is what fixed its class.
+  Nothing in the code checks this today: the ledger carries a claim's own
+  `ClaimPrecision` but not the class of the evidence behind it, so the next
+  structural step is to carry both and make the mismatch loud.
 - **Say what it is measured against**, and make it something the model states.
   A statistic over the tessellation's own spread is the yardstick made of the
   error it grades.

@@ -3735,6 +3735,16 @@ Propose / Arbitrate / Assemble and is step 4 of the migration plan. The attempt
 jumped to step 4 with step 3 undone and Propose impure, which is exactly the
 failure mode that plan is written to prevent.
 
+**2b. And the rule it broke is enforced nowhere.** `doc/step-rungs.md` has said
+since it was written that *a D4 may never be an input to a D0-D2*, and named the
+gap in the same breath: *"the corner arbiter enforces this; nothing else did"*.
+R0 is what "nothing else" costs. The ledger carries a claim's own
+`ClaimPrecision` but not the class of the **evidence** behind it, so a claim can
+call itself DeclaredExact while a tessellation band decided it, and no check
+anywhere notices. Carrying both and making the mismatch an `EXPORT-ERROR` is the
+structural fix, and it is worth more than R0 itself - it would have refused this
+attempt on the first export instead of on the third day.
+
 **3. A fixture first.** Nothing in the suite noticed the regression: lid10 is
 not a fixture, the flagship checks run with both feature flags, and no fixture
 asserts the **exact tier's** analytic coverage on a model where R0 fires. Before
