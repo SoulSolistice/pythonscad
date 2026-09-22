@@ -164,7 +164,7 @@ pythonscad model.scad -o out.stp \
 rebuild:
 
 ```bash
-ctest --test-dir build -R 'export-step-|mutations'   # 54 tests
+ctest --test-dir build -R 'export-step-|mutations'   # 56 tests
 TEST_GENERATE=1 ctest --test-dir build -R <fixture>
 ```
 
