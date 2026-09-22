@@ -279,13 +279,41 @@ cannot tell "fell to the tessellation" from "nothing could have been declared
 here" grades the ladder wrongly on exactly the models it is meant to open up.
 
 **And the instrument that would make all three measurable does not exist.** The
-export cannot say what class its own output is. A census by class - for every
-entity written, which rung produced it and which class that rung is - turns
-*"how much of this model is determined, and where does it fall to the
-tessellation?"* into a number, per model, for any model. That is the measurement
-the whole survey implies and is the natural next thing to build: it grades the
-ladder rather than a part, it needs no behaviour change, and it is what lets a
-new model be judged without anyone knowing its geometry in advance.
+export cannot say what class its own output is, so *"how much of this model is
+determined, and where does it fall to the tessellation?"* has no answer.
+
+**Ask it from the declarations, not from the entities.** The stronger question
+is not "what class is this face" but **"is everything that could be D0 actually
+D0?"** - and that is answerable today, because the declarations are already in
+hand. `doc/step-export-development.md` states the doctrine already, under *a
+declaration that is not taken is a bug report*:
+
+> A declaration takes precedence over fitting and approximation through the
+> whole consumer chain. Where one is not taken and should have been, the reason
+> has to be found rather than worked around.
+
+It has never been measured. Standing instance, current in both tiers on 2026-09-22:
+**lid10 declares 41 planes and 27 planar faces are written on a declared plane.**
+Fourteen declarations do not become a face and nothing says why. For the 25
+declared analytic surfaces the same number is not reported at all. And the
+export already prints a second instance without itemising it - *"2 regions are
+fitted to a surface the model had already declared, so the fit gained nothing -
+a declaration was refused upstream and re-derived here"*, which is a D0 that
+ended as a D3.
+
+**Three outcomes, not two, and a census that confuses them reports the channel
+working as a defect.** A declaration may be
+
+- **written**: a face stands on it;
+- **used as evidence and never written**: `hull()` of two coaxial cylinders
+  declares the two *cylinders* and never the cone between them, and the band
+  pass identifies the cone by matching both rims. Those two declarations are
+  doing exactly their job and will never be a face;
+- **unused**: nothing matched it, nothing refused it on the record. That one is
+  the bug report.
+
+That census grades the ladder rather than a part, needs no behaviour change, and
+turns the doctrine above into a work list. It is the first thing to build.
 
 ## How to add a rung without guessing
 

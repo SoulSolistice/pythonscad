@@ -227,27 +227,40 @@ that isolates it. If the ladder is complete and correct they fall out of it.
 `doc/step-rungs.md`, *What completing the system means*, is the shape of the
 work; the list below is that shape in order.
 
-1. **The class census - the instrument the survey implies and does not have.**
-   For every entity the export writes, which rung produced it and which class
-   that rung is, reported per model. It turns *"how much of this model is
-   determined, and where does it fall to the tessellation?"* into a number for
-   **any** model, which is what stops the work being a hunt. No behaviour
-   change. Everything below gets graded by it.
+1. **The declaration-utilisation census. Is everything that could be D0 actually
+   D0?** Not "what class is this face" but the stronger question, asked from the
+   declarations, which are already in hand. The doctrine exists already -
+   `doc/step-export-development.md`, *a declaration that is not taken is a bug
+   report* - and has never been measured.
 
-   **It has to separate three answers, not two**: written at this class;
-   fell to the tessellation though a declaration was available; and *nothing
-   could have been declared here* (`polyhedron`, `import`, `surface`,
-   `projection`, an imported mesh). A census that cannot tell the last two apart
-   grades an imported STL as a defect and a refused `linear_extrude(twist=)` as
-   a boundary, which is backwards.
-2. **Provenance's positive query, reporting only.** Today `Provenance` answers
-   only `excludes`; the positive answer is already derived in `export_step.cc`
-   as `covered` / `covered_cut` - *"a cut facet has lost a corner to the boolean
-   and still belongs to the surface the other two are on"*. Give it a query and
-   a report line: per declared surface, how many facets belong to it, how many
-   are written analytically, how many are left planar. Still no behaviour
-   change - and it is the measurement that settles whether C0 is downstream of
-   R0 or independent of it.
+   The standing instance, current in **both** tiers on 2026-09-22: **lid10
+   declares 41 planes and writes 27 planar faces on a declared plane.** Fourteen
+   declarations never become a face and nothing says why. For the 25 declared
+   analytic surfaces the same number is not reported at all. A third instance is
+   already printed but not itemised - *"2 regions are fitted to a surface the
+   model had already declared, so the fit gained nothing - a declaration was
+   refused upstream and re-derived here"* - which is a D0 that ended as a D3.
+
+   **Three outcomes, not two.** A declaration is *written* (a face stands on
+   it), *used as evidence and never written* - `hull()` of two coaxial cylinders
+   declares the two cylinders and never the cone between them, and the band pass
+   identifies the cone by matching both rims, so those two are doing their job
+   and will never be a face - or *unused*, which is the bug report. A census
+   that cannot separate the middle case reports the channel working correctly as
+   fourteen defects.
+
+   No behaviour change. It turns the doctrine into a work list, and every row is
+   a "why", which is the question that found the missing `fabs` and the pair of
+   bugs that each looked like a no-op alone.
+
+2. **Attribution: is every facet held for the surface the model says it belongs
+   to?** The other half of *used as intended*. Utilisation asks whether a
+   declaration was consumed at all; attribution asks whether what consumed it
+   was entitled to. Measured already and unexplained: **60 facets on lid10 whose
+   losing claim names a *different* surface** - a real contest settled by call
+   order, and two orders of magnitude smaller than the 452 headline that
+   dissolved. `Provenance` can answer it and today only vetoes with it.
+
 3. **R0 properly** (open item 29), if step 2 says the region is larger than what
    is written. Two parts: the region from step 2's query, carrying no tolerance;
    and *exchanged, never surrendered* - `boundary_lies_on_surface` is computable
@@ -425,11 +438,18 @@ a ladder - the boundary run does not), depth (every rung names its class and its
 evidence's class - nothing checks this), feedstock (every primitive declares -
 minkowski, hull's blend, linear_extrude(twist=), PathExtrude and Skin do not).
 
-Where to start, and the first two change no behaviour: (1) the class census -
-for every entity written, which rung produced it and which class that rung is,
-reported per model, so "how much of this model is determined?" is a number for
-any model; (2) provenance's positive query, reported the same way - it is what
-settles whether C0 is downstream of R0. Then R0 properly, then C0's refusals,
+Where to start, and it changes no behaviour: **is everything that could be D0
+actually D0?** Ask it from the declarations, not from the written entities.
+doc/step-export-development.md already carries the doctrine - "a declaration
+that is not taken is a bug report" - and it has never been measured. Current in
+both tiers: lid10 declares 41 planes and writes 27 planar faces on a declared
+plane, so fourteen declarations never become a face and nothing says why; for
+the 25 declared analytic surfaces the number is not reported at all; and 2
+regions are fitted to a surface the model had already declared, which is a D0
+that ended as a D3. Separate three outcomes, not two - written, used as evidence
+and never written (hull's two rims identify a cone and are never faces), and
+unused, which is the bug report. Then attribution (60 facets on lid10 whose
+losing claim names a different surface), then R0 properly, then C0's refusals,
 starting with the two 4x-median statistics, which are a yardstick made of the
 error they grade.
 
