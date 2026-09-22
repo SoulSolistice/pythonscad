@@ -227,31 +227,36 @@ that isolates it. If the ladder is complete and correct they fall out of it.
 `doc/step-rungs.md`, *What completing the system means*, is the shape of the
 work; the list below is that shape in order.
 
-1. **The declaration-utilisation census. Is everything that could be D0 actually
-   D0?** Not "what class is this face" but the stronger question, asked from the
-   declarations, which are already in hand. The doctrine exists already -
-   `doc/step-export-development.md`, *a declaration that is not taken is a bug
-   report* - and has never been measured.
+1. ~~The declaration-utilisation census.~~ **Built 2026-09-22.** Every export
+   now reports, per declaration: written as a face / read to identify a surface
+   without one standing on it / no mesh left on it (the booleans took it, which
+   provenance decides) / **unexplained**, which is the bug report. Both
+   discriminators were mutation-checked, and a fifth bucket - *a duplicate of
+   one already written* - was tried, fired zero times on every model, and was
+   removed rather than landed.
 
-   The standing instance, current in **both** tiers on 2026-09-22: **lid10
-   declares 41 planes and writes 27 planar faces on a declared plane.** Fourteen
-   declarations never become a face and nothing says why. For the 25 declared
-   analytic surfaces the same number is not reported at all. A third instance is
-   already printed but not itemised - *"2 regions are fitted to a surface the
-   model had already declared, so the fit gained nothing - a declaration was
-   refused upstream and re-derived here"* - which is a D0 that ended as a D3.
+   **The work list it produced**, and the headline was mostly not a defect. The
+   standing figure was *"lid10 declares 41 planes and writes 27 planar faces on
+   a declared plane"*, fourteen unaccounted for. Of those 41 planes: 10 written,
+   31 with no mesh left, **none unexplained** - the plane channel is clean. What
+   remains is small, named and curved:
 
-   **Three outcomes, not two.** A declaration is *written* (a face stands on
-   it), *used as evidence and never written* - `hull()` of two coaxial cylinders
-   declares the two cylinders and never the cone between them, and the band pass
-   identifies the cone by matching both rims, so those two are doing their job
-   and will never be a face - or *unused*, which is the bug report. A census
-   that cannot separate the middle case reports the channel working correctly as
-   fourteen defects.
+   ```text
+   lid10   exact       25 surfaces: 13 written, 1 evidence, 7 no mesh, 4 unexplained
+                       cylinder 43, cone 54, cylinder 56, sweep 65
+           both flags  3 unexplained - cylinder 12, cylinder 43, cylinder 56
+   bayonet exact       23 surfaces: 11 written, 0 evidence, 7 no mesh, 5 unexplained
+                       cylinder 24, cylinder 60, cylinder 67, cone 78, sweep 87
+   ```
 
-   No behaviour change. It turns the doctrine into a work list, and every row is
-   a "why", which is the question that found the missing `fabs` and the pair of
-   bugs that each looked like a no-op alone.
+   `step-cube`, `step-bored-cylinder` and `step-region-pocket` report **zero**
+   unexplained, which is the census passing its own sanity check: the bore's two
+   end discs and the pocket's r = 20 wall land in *no mesh left*, exactly as
+   `step-region-pocket.scad` derives in prose.
+
+   **Next on it**: take those nine one at a time and answer *why*. Note the tier
+   split - the approximation writes lid10's cone 54 and sweep 65 and loses
+   cylinder 12 - so each has to be asked of both tiers.
 
 2. **Attribution: is every facet held for the surface the model says it belongs
    to?** The other half of *used as intended*. Utilisation asks whether a
@@ -354,11 +359,15 @@ In this order. Each step exists because skipping it cost a day.
 
 1. **The census, on our own file.** `fault-census.py` keys every property known
    to become a CAD fault by the code it becomes.
-2. **The export's own report** - the claim ledger's agreement, any declared
-   surface split between recogniser kinds, how many section planes were facets
-   of the surface being cut, how many rims the declaration settled. **But know
-   what each line cannot see**: the split warning counts only facets another
-   recogniser claimed, so a region left planar does not appear in it.
+2. **The export's own report** - **the declaration census first**: of everything
+   the model declared, how much is written as a face, how much the booleans
+   removed, and how much is unexplained. That is *is everything that could be
+   exact written as exact*, which is the question the rungs exist to answer.
+   Then the claim ledger's agreement, any declared surface split between
+   recogniser kinds, how many section planes were facets of the surface being
+   cut, how many rims the declaration settled. **But know what each line cannot
+   see**: the split warning counts only facets another recogniser claimed, so a
+   region left planar does not appear in it.
 3. **The catalogued instruments**, by question - `reader-diff.py` (what do these
    two files differ *by*? - it found the three planar chamfer facets behind the
    last 1.0489 mm3), `sweep-chords.py`, `planes-at-sweep.py`, `at-vertex.py`,

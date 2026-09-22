@@ -1972,6 +1972,17 @@ void StepKernel::build_tri_body(
   // exact rather than merely close, so it is preferred wherever it agrees with
   // the face at hand.
   std::vector<std::pair<Vector3d, Vector3d>> declared_planes;  // point, unit normal
+  // Which entry of `surfaces` each of those came from, so that a face written
+  // on one can be attributed back to the declaration it honoured. Parallel to
+  // `declared_planes`; `surfaces.size()` for a fitted plane, which no census
+  // row is owed.
+  std::vector<std::size_t> declared_plane_index;
+  // The declaration census, indexed as `surfaces`. A declaration is written
+  // when a face stands on it, evidence when something read it to identify a
+  // surface without a face ever standing on it, and otherwise unused - which
+  // *a declaration that is not taken is a bug report* makes a defect to
+  // explain. See doc/step-rungs.md, *How to read a result*.
+  std::vector<char> decl_written(surfaces.size(), 0);
   struct SectionMiss {
     double tilt, offset;
   };
@@ -2597,9 +2608,11 @@ void StepKernel::build_tri_body(
         return true;
       };
 
-      for (const auto& sf : effective) {
-        const auto *pl = dynamic_cast<const PlaneSurface *>(sf.get());
-        if (pl != nullptr) declared_planes.emplace_back(pl->refpt, pl->normdir.normalized());
+      for (std::size_t si = 0; si < effective.size(); si++) {
+        const auto *pl = dynamic_cast<const PlaneSurface *>(effective[si].get());
+        if (pl == nullptr) continue;
+        declared_planes.emplace_back(pl->refpt, pl->normdir.normalized());
+        declared_plane_index.push_back(si < surfaces.size() ? si : surfaces.size());
       }
       decide_sections = [&](const std::vector<const AnalyticFeatures::Patch *>& standing) {
         // Whose facets are not there to be written as a planar face: what an
@@ -6179,13 +6192,17 @@ void StepKernel::build_tri_body(
         extent = std::max(extent, (vertices[loop[j]] - on_plane).norm());
       }
       const double tol = std::max(1e-12, 1e-9 * std::max(1.0, extent));
-      for (const auto& declared : declared_planes) {
+      for (std::size_t dp = 0; dp < declared_planes.size(); dp++) {
+        const auto& declared = declared_planes[dp];
         if (fabs(fabs(declared.second.dot(norm)) - 1.0) > 1e-9) continue;
         bool holds = true;
         for (int j = 0; holds && j < n; j++) {
           holds = fabs((vertices[loop[j]] - declared.first).dot(declared.second)) <= tol;
         }
         if (!holds) continue;
+        if (dp < declared_plane_index.size() && declared_plane_index[dp] < decl_written.size()) {
+          decl_written[declared_plane_index[dp]] = 1;
+        }
         // Keep the mesh's sense: a declaration says which plane, not which way
         // the face looks out of it.
         norm = declared.second.dot(norm) > 0 ? declared.second : Vector3d(-declared.second);
@@ -6253,6 +6270,129 @@ void StepKernel::build_tri_body(
       "STEP export: %1$d planar face%2$s written on a plane the model declared rather than one "
       "fitted to its own corners",
       planes_declared, planes_declared == 1 ? "" : "s");
+  }
+
+  // ---- the declaration census ------------------------------------------
+  //
+  // *Is everything that could be D0 actually D0?* The declarations are the D0
+  // feedstock and they are already in hand, so the question is answerable
+  // directly rather than inferred from what came out. This reports it and
+  // decides nothing.
+  //
+  // The rule it serves is doc/step-export-development.md, *a declaration that
+  // is not taken is a bug report*: a declaration takes precedence over fitting
+  // and approximation through the whole consumer chain, and where one is not
+  // taken the reason has to be found rather than worked around. That doctrine
+  // had no measurement until this line.
+  //
+  // **Four fates, and a count that stops at two reports the channel working as
+  // a list of defects.**
+  //
+  //   written    a face stands on it.
+  //   evidence   something read it to identify a surface and no face stands on
+  //              it. `hull()` of two coaxial cylinders declares the two
+  //              cylinders and nothing declares the cone between them, so the
+  //              band pass matches *both rims*: those two have done exactly
+  //              their job and will never be a face.
+  //   removed    unused, and no facet of the mesh comes from a maker that owns
+  //              it - the booleans took the geometry away. step-bored-cylinder
+  //              declares the bore's two end discs and `difference()` consumes
+  //              them; there is nothing left to write and nothing to explain.
+  //   unused     unused, and facets of the mesh *do* belong to it. That one is
+  //              the bug report.
+  //
+  // **A fifth category was tried and refuted, 2026-09-22.** lid10's original 67
+  // owns cylinder 39 *and* cylinder 43 over the same 120 facets, and original 40
+  // owns cylinder 9 and cylinder 56 the same way, which looks exactly like one
+  // surface declared twice with the twin unwritable. `Surface::sameAs` says no
+  // on every pair, on every model: they are a ring's two walls, distinct
+  // surfaces with equal facet counts. The category fired zero times and was
+  // removed rather than landed - a bucket nothing exercises is a deleted check
+  // that still costs a reader a paragraph. The pairs are genuine bug reports.
+  //
+  // The third category is decided by provenance, which is identity rather than
+  // measurement: the generator says which original made each facet and which
+  // surfaces that original owns, so "is any of this surface still in the mesh"
+  // needs no tolerance and no distance test.
+  //
+  // What counts as written is what the exporter *finally holds*: a facet with
+  // `consumed` set and the claim that holds it. A claim made and then given
+  // back - a dropped band, a pass's own refusal - is not a face, and the ledger
+  // models both, which is what the shadow check established.
+  if (analytic && !surfaces.empty()) {
+    for (std::size_t f = 0; f < features.consumed.size(); f++) {
+      if (features.consumed[f] == 0) continue;
+      for (const auto *claim : features.ledger.claimants(f)) {
+        if (!claim->honoured) continue;
+        if (claim->surface_index < decl_written.size()) decl_written[claim->surface_index] = 1;
+      }
+    }
+    // Which declarations still have mesh on them at all.
+    std::vector<char> present(surfaces.size(), 0);
+    for (std::size_t f = 0; f < faceOrigin.size() && f < loops.size(); f++) {
+      if (!loop_valid[f]) continue;
+      const auto it = owned.find(faceOrigin[f]);
+      if (it == owned.end()) continue;
+      for (const std::size_t si : it->second) {
+        if (si < present.size()) present[si] = 1;
+      }
+    }
+    struct Tally {
+      std::size_t total = 0, written = 0, evidence = 0, removed = 0, idle = 0;
+    };
+    Tally curved, flat;
+    std::vector<std::string> to_explain;
+    for (std::size_t i = 0; i < surfaces.size(); i++) {
+      const Surface *sf = surfaces[i].get();
+      if (sf == nullptr) continue;
+      const bool is_plane = dynamic_cast<const PlaneSurface *>(sf) != nullptr;
+      Tally& t = is_plane ? flat : curved;
+      t.total++;
+      if (decl_written[i] != 0) {
+        t.written++;
+        continue;
+      }
+      if (i < features.evidence.size() && features.evidence[i] != 0) {
+        t.evidence++;
+        continue;
+      }
+      if (present[i] == 0) {
+        t.removed++;
+        continue;
+      }
+      t.idle++;
+      if (to_explain.size() < 12) {
+        const char *kind = dynamic_cast<const CylinderSurface *>(sf)      ? "cylinder"
+                           : dynamic_cast<const ConeSurface *>(sf)        ? "cone"
+                           : dynamic_cast<const SphereSurface *>(sf)      ? "sphere"
+                           : dynamic_cast<const TorusSurface *>(sf)       ? "torus"
+                           : dynamic_cast<const GridSurface *>(sf)        ? "sweep"
+                           : dynamic_cast<const BezierPatchSurface *>(sf) ? "patch"
+                                                                          : "plane";
+        to_explain.push_back(std::string(kind) + " " + std::to_string(int(i)));
+      }
+    }
+    auto say = [&](const char *what, const Tally& t) {
+      if (t.total == 0) return;
+      LOG(
+        "STEP export:   %1$d declared %2$s: %3$d written as a face, %4$d read to identify a "
+        "surface without one standing on them, %5$d with no mesh left on them, %6$d unexplained",
+        int(t.total), what, int(t.written), int(t.evidence), int(t.removed), int(t.idle));
+    };
+    LOG(
+      "STEP export: the declaration census - is everything that could be exact written as "
+      "exact?");
+    say("surfaces", curved);
+    say("planes", flat);
+    const std::size_t idle = curved.idle + flat.idle;
+    if (idle > 0) {
+      std::string names;
+      for (const auto& n : to_explain) names += (names.empty() ? "" : ", ") + n;
+      LOG(message_group::Export_Warning,
+          "STEP export:   %1$d declaration%2$s has mesh on it and no face written on it, and "
+          "nothing read it: %3$s%4$s - a declaration that is not taken is a bug report",
+          int(idle), idle == 1 ? "" : "s", names.c_str(), idle > to_explain.size() ? ", ..." : "");
+    }
   }
 
   // The fans for the polygons the corner placement bent.

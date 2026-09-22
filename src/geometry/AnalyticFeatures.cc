@@ -2826,6 +2826,15 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     return true;
   };
 
+  // Declarations this pass read in order to identify something. Recorded where
+  // the match is made rather than derived afterwards: which records were
+  // *consulted* is not recoverable from the claim, because a claim names one
+  // surface and a cone is identified by two rims.
+  result.evidence.assign(surfaces.size(), 0);
+  auto note_evidence = [&](std::size_t which) {
+    if (which < result.evidence.size()) result.evidence[which] = 1;
+  };
+
   for (std::size_t seed = 0; seed < face_cnt; seed++) {
     if (!loop_valid[seed] || consumed[seed] || loop_is_hole[seed]) continue;
     if (loops[seed].size() != 4) continue;
@@ -3087,8 +3096,19 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
                              declared_cylinder(r_top, axis, base, &which_top);
         if (!by_rims && !declared_cone(r_bottom, r_top, axis, base, hi - lo, &which_cone)) continue;
         matched = by_rims ? std::max(which_bottom, which_top) : which_cone;
+        // Both rims were read to identify this cone and only one of them can be
+        // `matched`. Record the pair, or a census cannot tell a declaration
+        // doing its job from one nothing used - see Result::evidence.
+        if (by_rims) {
+          note_evidence(which_bottom);
+          note_evidence(which_top);
+        } else {
+          note_evidence(which_cone);
+        }
       } else if (!declared_cylinder(r_bottom, axis, base, &matched)) {
         continue;
+      } else {
+        note_evidence(matched);
       }
 
       // A diagnostic, and the only way to obtain the *other* representation of a

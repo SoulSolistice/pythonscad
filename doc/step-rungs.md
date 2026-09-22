@@ -292,28 +292,44 @@ declaration that is not taken is a bug report*:
 > whole consumer chain. Where one is not taken and should have been, the reason
 > has to be found rather than worked around.
 
-It has never been measured. Standing instance, current in both tiers on 2026-09-22:
-**lid10 declares 41 planes and 27 planar faces are written on a declared plane.**
-Fourteen declarations do not become a face and nothing says why. For the 25
-declared analytic surfaces the same number is not reported at all. And the
-export already prints a second instance without itemising it - *"2 regions are
-fitted to a surface the model had already declared, so the fit gained nothing -
-a declaration was refused upstream and re-derived here"*, which is a D0 that
-ended as a D3.
+**Built 2026-09-22**, and it reports four fates, because a count that stops at
+two reports the channel working correctly as a list of defects:
 
-**Three outcomes, not two, and a census that confuses them reports the channel
-working as a defect.** A declaration may be
+| fate | meaning |
+| --- | --- |
+| **written** | a face stands on it |
+| **evidence** | something read it to identify a surface and no face stands on it. `hull()` of two coaxial cylinders declares the two *cylinders* and nothing declares the cone between them, so the band pass matches **both rims**; those two have done their job and will never be a face |
+| **no mesh left** | nothing matched it because the booleans took the geometry away. `step-bored-cylinder` declares the bore's two end discs and `difference()` consumes them - nothing to write and nothing to explain. Decided by **provenance**, which is identity: is any facet of the mesh from a maker that owns this surface |
+| **unexplained** | mesh on it, no face on it, nothing read it. *That* one is the bug report |
 
-- **written**: a face stands on it;
-- **used as evidence and never written**: `hull()` of two coaxial cylinders
-  declares the two *cylinders* and never the cone between them, and the band
-  pass identifies the cone by matching both rims. Those two declarations are
-  doing exactly their job and will never be a face;
-- **unused**: nothing matched it, nothing refused it on the record. That one is
-  the bug report.
+**And the headline number was mostly not a defect.** The standing figure was
+*"lid10 declares 41 planes and writes 27 planar faces on a declared plane"* -
+fourteen unaccounted for. Measured properly: of those 41 planes, **10 are
+written, 31 have no mesh left on them, and none is unexplained.** The plane
+channel is clean. What is left is small, named and curved:
 
-That census grades the ladder rather than a part, needs no behaviour change, and
-turns the doctrine above into a work list. It is the first thing to build.
+```text
+lid10   exact tier  25 surfaces: 13 written, 1 evidence, 7 no mesh, 4 unexplained
+                    cylinder 43, cone 54, cylinder 56, sweep 65
+        both flags  3 unexplained - cylinder 12, cylinder 43, cylinder 56
+bayonet exact tier  23 surfaces: 11 written, 0 evidence, 7 no mesh, 5 unexplained
+                    cylinder 24, cylinder 60, cylinder 67, cone 78, sweep 87
+```
+
+Nine declarations across the two specimens, each a *reason to find*. Note the
+tier split on lid10: the approximation writes cone 54 and sweep 65 and loses
+cylinder 12, so the two tiers fail on different declarations.
+
+**A fifth category was tried and refuted.** lid10's original 67 owns cylinder 39
+*and* cylinder 43 over the same 120 facets, and original 40 owns cylinder 9 and
+cylinder 56 the same way, which reads exactly like one surface declared twice
+with the twin unwritable. `Surface::sameAs` says no on every pair on every
+model: they are a ring's two walls, distinct surfaces with equal facet counts.
+The bucket fired zero times and was removed rather than landed, and the pairs
+stay bug reports.
+
+The census grades the ladder rather than a part, changes no behaviour, and turns
+the doctrine above into a work list.
 
 ## How to add a rung without guessing
 

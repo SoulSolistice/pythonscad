@@ -404,6 +404,23 @@ struct Result {
    * doc/step-recognition-design.md. */
   ClaimLedger ledger;
 
+  /*! Declarations this pass *read* in order to identify something, indexed as
+   * the caller's surface list, 1 where one was used.
+   *
+   * A declaration has three fates and only two of them are visible from the
+   * claims. It can be written - a face stands on it. It can be **used as
+   * evidence and never written**: `hull()` of two coaxial cylinders declares
+   * the two cylinders and nothing declares the cone between them, so the band
+   * pass identifies that cone by matching *both rims*, and those two cylinder
+   * declarations have done exactly their job while never becoming a face. Or it
+   * can be unused, which by *a declaration that is not taken is a bug report*
+   * is a defect to explain.
+   *
+   * Without this a census cannot tell the second from the third, and reports
+   * the declaration channel working correctly as a list of defects. See
+   * doc/step-rungs.md, *How to read a result*. */
+  std::vector<char> evidence;
+
   /*! What was recognised and, for every band that was not, the rule that
    * rejected it.
    *
