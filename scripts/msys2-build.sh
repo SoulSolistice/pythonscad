@@ -94,6 +94,27 @@ fi
 echo "==> build -j$JOBS"
 cmake --build "$BUILD_DIR" -j"$JOBS"
 
+# Anything still running out of this build tree holds the files the bundle and
+# the install are about to replace, and Windows will not let them move: the
+# symptom is `mv: ... Permission denied` from bundle-runtime-python.sh, which
+# that script reports and then exits 0 on, leaving a stale staged binary for the
+# next measurement to use. Seen twice on 2026-09-21.
+#
+# Only processes whose executable lives *under this build directory* are killed.
+# That is our own artefact - a pythonscad.exe left over from an export or a
+# crashed test - and never the user's editor, shell or CAD session.
+if command -v powershell.exe >/dev/null 2>&1; then
+  build_win="$(cygpath -w "$ROOT/$BUILD_DIR" 2>/dev/null || echo "")"
+  if [ -n "$build_win" ]; then
+    stale=$(powershell.exe -NoProfile -Command       "Get-CimInstance Win32_Process | Where-Object { \$_.ExecutablePath -and \$_.ExecutablePath.StartsWith('$build_win') } | ForEach-Object { \"\$(\$_.ProcessId) \$(\$_.Name)\" }" 2>/dev/null | tr -d '')
+    if [ -n "$stale" ]; then
+      echo "==> killing processes running out of $BUILD_DIR, which would block the bundle:"
+      echo "$stale" | sed 's/^/      /'
+      powershell.exe -NoProfile -Command         "Get-CimInstance Win32_Process | Where-Object { \$_.ExecutablePath -and \$_.ExecutablePath.StartsWith('$build_win') } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" >/dev/null 2>&1 || true
+    fi
+  fi
+fi
+
 echo "==> bundle runtime python"
 BUNDLE_PY_AUTO_INSTALL_PIP_LICENSES=1 \
   ./scripts/bundle-runtime-python.sh "$BUILD_DIR/pythonscad-bundled-py" --python python

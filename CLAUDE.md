@@ -887,6 +887,8 @@ smoke testing, JavaScript API (`EmsInitPython` / `EmsEvaluatePython`), and known
 | `CLAUDE.md` | this file: environment, build, packaging, running and testing |
 | `doc/step-export-next-session.md` | STEP exporter: a priming prompt for the next session — standing rules, where to start |
 | `doc/step-export-development.md` | STEP exporter: settled design, kernel behaviour, testing doctrine, traps, refuted claims |
+| `doc/step-rungs.md` | STEP exporter: what determines each entity, and therefore which rung it is - the survey |
+| `doc/step-recognition-design.md` | STEP exporter: the claim ledger and the region-before-representation design |
 | `doc/step-export-wip.md` | STEP exporter: open items, unexplained results, roadmap, handover |
 | `doc/testing.md` | the test suite in general |
 | `doc/python-modules.md` | the three-module Python layout |

@@ -329,6 +329,58 @@ using AnalyticFeatures::surfaceImplicit;
 
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 
+/*! The declared curved surface this plane is a *facet* of, or null.
+ *
+ * Not every planar face is a plane. A tessellation's facet lies *along* the
+ * surface it approximates, so its normal runs with that surface's own normal
+ * there; a plane that genuinely cuts across - a cylinder's cap, the face a
+ * boolean's cutter left - does not. That is section 4's chord-vs-cap rule, and
+ * `cos(pi/6)` admits every chord because nothing coarser than a hexagon is a
+ * tessellation.
+ *
+ * The corner arbiter has always known this - `kCornerTiers` marks MeshPlane
+ * `used = false`, "a chord is not a constraint" - and every other consumer of a
+ * plane was told only whether the *model declared* it. That is a far rarer
+ * thing (item 23 measured 2 of 1533 merged planes matching a declaration), so
+ * "undeclared" could not be refused without refusing the genuine flat faces
+ * too. This is the question that separates them, and it is the one to ask.
+ *
+ * Exact, with no tessellation band anywhere in it: the test points must lie on
+ * the candidate surface *to the exactness floor*, which the corners of a facet
+ * do because they are points the generator emitted. A point that is merely near
+ * a surface classifies nothing.
+ *
+ * Measured on 2026-09-21: lid10 wrote a cylinder's rim as a 45 degree ELLIPSE
+ * because the facet beside it - a chord of the chamfer cone - was taken for a
+ * section plane. See open item 26. */
+static const Surface *planeIsFacetOfCurved(const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                           const Vector3d& pnorm,
+                                           const std::vector<Vector3d>& on_plane)
+{
+  const Vector3d n = pnorm.normalized();
+  if (!(n.norm() > 0)) return nullptr;
+  for (const auto& d : surfaces) {
+    const Surface *sf = d.get();
+    if (sf == nullptr || dynamic_cast<const PlaneSurface *>(sf) != nullptr) continue;
+    for (const Vector3d& p : on_plane) {
+      const double scale = std::max(1.0, p.norm());
+      const double owed = 1e-9 * scale;
+      Vector3d q0;
+      if (!AnalyticFeatures::closestOnSurface(sf, p, q0)) continue;
+      const double off0 = (q0 - p).norm();
+      if (off0 > owed) continue;  // not on this surface: it classifies nothing
+      // Step along the plane's normal. A facet's normal is the surface's, so
+      // the distance grows at the full rate; a cap's does not grow at all.
+      const double eps = 1e-4 * scale;
+      Vector3d q1;
+      if (!AnalyticFeatures::closestOnSurface(sf, p + n * eps, q1)) continue;
+      const double along = fabs(((p + n * eps) - q1).norm() - off0) / eps;
+      if (along >= cos(M_PI / 6)) return sf;
+    }
+  }
+  return nullptr;
+}
+
 /*! The rungs of the corner placement, and the precision they rank at.
  *
  * Every rung that places a corner used to *claim* it: whichever ran first held
@@ -5639,6 +5691,9 @@ void StepKernel::build_tri_body(
   std::size_t section_unshared = 0;
   std::set<std::set<int>> section_subs;  // sections already handed to a planar face
   int sections_declared = 0, sections_fitted = 0;
+  // Boundary sections refused because their plane was a facet of something
+  // curved rather than a plane. See open item 26.
+  int sections_on_facet = 0;
   auto conic_placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
     return new Axis2Placement(entities, new Direction(entities, dir), new Direction(entities, towards),
                               new Point(entities, origin));
@@ -5814,6 +5869,12 @@ void StepKernel::build_tri_body(
             edge = found->second;
             dir = edge->vert1 == get_vertex(a);
           } else {
+            // Counted, not refused, for the reason the promotion pass gives:
+            // the conic is the wrong curve but lies on the quadric, and the
+            // chord it would fall back to does not. See open item 26.
+            if (planeIsFacetOfCurved(surfaces, bs.normal, {vertices[a], vertices[b]}) != nullptr) {
+              sections_on_facet++;
+            }
             SectionEllipse sec;
             if (!planeSectionEllipse(patch.surface.get(), bs.normal, bs.on_plane, sec)) {
               starts_at[i] = -1;  // fall back to the chords, which is what was there
@@ -6362,7 +6423,10 @@ void StepKernel::build_tri_body(
   int rims_kept_circular = 0;
   // Which conics are cut by a declared plane, and which by a tessellation
   // chord. See open item 26.
-  int conics_on_declared = 0, conics_on_chord = 0;
+  int conics_on_declared = 0, conics_on_chord = 0, conics_on_facet = 0;
+  // Why the crossing was not available: the facet belongs to the very surface
+  // being cut, or the arc would not fit.
+  int facet_same_surface = 0;
   int why_noproj = 0, why_offquad = 0, why_offplane = 0, why_nosection = 0, why_shape = 0;
   int why_branch = 0, conics_ellipse = 0, conics_hyperbola = 0, conics_parabola = 0;
   double conic_worst_end = 0, why_offplane_worst = 0;
@@ -6515,6 +6579,44 @@ void StepKernel::build_tri_body(
       }
       if (declared_plane) conics_on_declared++;
       else conics_on_chord++;
+      // Counted, *not* refused - and the measurement is why.
+      //
+      // A facet of something curved is not a plane, and the conic it cuts is
+      // not a curve of this model: the true boundary is where the quadric meets
+      // the surface that facet belongs to. But the conic does lie exactly on the
+      // quadric, which is what code 17 measures, and the chord it would fall
+      // back to does not. Refusing these outright was tried on 2026-09-21 and
+      // took code 17 from 42 to 198 on lid10, 42 to 78 on the bayonet and 38 to
+      // 100 on f04 - 156 edges put back off the faces they bound.
+      //
+      // So this cannot be fixed here. The neighbour is written as a plane
+      // because a region of a *declared curved surface* was never claimed, and
+      // once that has happened no consumer can recover what the model said. The
+      // fix is upstream, in the claim; see open item 26 and
+      // doc/step-recognition-design.md, *region before representation*.
+      const Surface *facet_of =
+        declared_plane ? nullptr : planeIsFacetOfCurved(surfaces, pnorm, {p1, p2});
+      if (facet_of != nullptr) {
+        conics_on_facet++;
+        // And *every one of them*, on every reference part, has the facet on
+        // the same surface being cut: 78 of 78 on lid10, 18 of 18 on the
+        // bayonet, 31 of 31 on f04.
+        //
+        // So there are not two surfaces here and there is no crossing to write.
+        // There is one declared surface, claimed as an analytic face over part
+        // of its region and left as facets over the rest, and this edge is the
+        // seam between the two halves - written as a section of the surface by
+        // its own chord plane, which is not a boundary of anything.
+        //
+        // These edges should not exist. That is the split-surface defect of
+        // open item 26 in another costume, and it cannot be repaired here:
+        // refusing the conics was tried and took code 17 from 42 to 198 on
+        // lid10, because the chord they fall back to is further off the face
+        // than the wrong curve is. Removing the paper does not mend the tear.
+        // The fix is upstream - claim the region whole - see
+        // doc/step-recognition-design.md, *region before representation*.
+        if (facet_of == quadric.get() || facet_of->sameAs(*quadric)) facet_same_surface++;
+      }
     }
     SectionConic sec;
     if (!planeSectionConic(quadric.get(), pnorm, ppoint, sec)) {
@@ -6676,12 +6778,20 @@ void StepKernel::build_tri_body(
       "next to it",
       rims_kept_circular, rims_kept_circular == 1 ? " is" : "s are");
   }
+  if (facet_same_surface > 0) {
+    LOG(message_group::Export_Warning,
+        "STEP export: %1$d edge%2$s the seam between an analytic face and facets of the *same* "
+        "declared surface, written as a section of that surface by its own chord plane - a "
+        "boundary of nothing. The region was not claimed whole; see open item 26",
+        facet_same_surface, facet_same_surface == 1 ? " is" : "s are");
+  }
   if (conics_on_declared + conics_on_chord > 0) {
     LOG(
       "STEP export: of the conics considered, %1$d are cut by a plane the model declared and "
-      "%2$d by a plane nothing declares - which may be a genuine flat face a boolean made, or a "
-      "facet of something curved left faceted; this pass cannot yet tell them apart",
-      conics_on_declared, conics_on_chord);
+      "%2$d by a plane nothing declares - of which %3$d are facets of something curved, so the "
+      "conic is the wrong curve; kept because the chord is further off the face, and the fix is "
+      "upstream in the claim",
+      conics_on_declared, conics_on_chord, conics_on_facet);
   }
   if (conics_promoted > 0 || conics_declined > 0) {
     LOG(
@@ -6771,6 +6881,13 @@ void StepKernel::build_tri_body(
       LOG("STEP export:    %1$d of them run across a crease in the declared profile and %2$d do not",
           int(arc_creased), int(arc_uncreased));
     }
+  }
+  if (sections_on_facet > 0) {
+    LOG(
+      "STEP export: %1$d boundary section%2$s cut by a facet of something curved rather than by a "
+      "plane - the wrong curve, kept because the chord it would fall back to is further off the "
+      "face; the fix is upstream, in the claim",
+      sections_on_facet, sections_on_facet == 1 ? " is" : "s are");
   }
   if (sections_declared + sections_fitted > 0) {
     // Where each section's plane came from, because it is the difference

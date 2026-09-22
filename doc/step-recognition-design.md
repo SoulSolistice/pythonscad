@@ -10,6 +10,10 @@ this document exists to remove.
 This is a design, not a record of what is built. What is built is in
 `doc/step-export-development.md`; what is open is in `doc/step-export-wip.md`.
 
+`doc/step-rungs.md` is the companion survey: what determines each entity the
+exporter writes, and therefore which rung it belongs on. Read it before adding
+a rung - four were added by hand in one session, and one fired zero times.
+
 ## What is wrong, stated as properties rather than complaints
 
 Recognition is four free functions called in a fixed order from a 4000-line
