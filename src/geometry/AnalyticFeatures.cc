@@ -2160,6 +2160,217 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
   return patches;
 }
 
+namespace {
+
+/*! Does one facet lie on one quadric?
+ *
+ * The exporter's single definition of *on this surface*, so that the pass which
+ * writes such facets as a trimmed patch and the band pass, which has to know
+ * whether the region a surface covers is larger than the ring its own form can
+ * write, ask the same question. Two definitions would let a band keep a partial
+ * claim because its own test disagreed with the test that then took the
+ * remainder - and a region truncated to fit a representation is the defect this
+ * is here to make visible, not a detail of it. See doc/step-rungs.md, R0.
+ *
+ * Three independent tests, each with a fixture behind it:
+ *
+ *   lean      a facet across the axis is not on the surface however close its
+ *             corners fall - a cap over a bore has every vertex on the rim
+ *   corners   every vertex within `max_off`, and within what the mesh itself
+ *             concedes about where its surface lies
+ *   interior  the centroid and the edge midpoints within the sagitta the
+ *             facet's own angular span implies - what separates a facet *of*
+ *             the surface from one spanning a hole in it
+ */
+class OnQuadric
+{
+public:
+  OnQuadric(const Mesh& mesh, const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops,
+            const Surface *surface, double smooth_angle)
+    : mesh_(mesh),
+      edge_loops_(edge_loops),
+      smooth_angle_(smooth_angle),
+      cyl_(dynamic_cast<const CylinderSurface *>(surface)),
+      cone_(dynamic_cast<const ConeSurface *>(surface))
+  {
+    if (!valid()) return;
+    axis_ = (cyl_ != nullptr ? cyl_->normdir : cone_->normdir).normalized();
+    base_ = cyl_ != nullptr ? cyl_->refpt : cone_->refpt;
+    // A cone's normal is not perpendicular to its axis - it leans by the half
+    // angle - so what a facet has to agree with is that lean, not zero.
+    //
+    // fabs: the facet lean below is an absolute value, so the threshold has to
+    // be one too. A cone whose radius falls with height - which is what
+    // `cylinder(r1, r2 = 0)` draws - has a negative slope, and comparing an
+    // absolute lean against a negative threshold rejected every facet of it.
+    //
+    // Latent as it stands, and deliberately left that way. Nothing declares a
+    // ConeSurface of that orientation today - primitives.cc declares the two
+    // rims of a frustum and leaves the cone between them to be recognised - so
+    // no facet reaches this test with a negative slope, and fixing it moves no
+    // face of any export in the suite. It is fixed anyway, because an absolute
+    // value compared against a signed threshold is wrong however it is reached.
+    // The next person to follow *declare first, recognise second* and declare
+    // that cone will need it, and should know what else they will meet: with
+    // both in place the claim on step-bored-cone widens from 32 facets to 52,
+    // the trimmed-quadric path bounds them wrongly, and the solid comes out
+    // 2.75% under its derived volume - 5234.1 against 5382.2 +/- 12, with a
+    // total surface area below the mesh's own, which a fitted cone cannot have.
+    // The declaration is right and the bounding is not. That fixture's
+    // VOLUME-APPROX is the assertion that says so; the surface census does not,
+    // it improves while the solid gets worse.
+    lean_ = cyl_ != nullptr ? 0.0 : fabs(cone_->slope) / sqrt(1 + cone_->slope * cone_->slope);
+    ref_ = perpendicular(axis_);
+    ref2_ = axis_.cross(ref_);
+  }
+
+  /*! A quadric this can be asked about at all: a cylinder of positive radius,
+   * or a cone. */
+  [[nodiscard]] bool valid() const { return (cyl_ != nullptr && cyl_->r > 0) || cone_ != nullptr; }
+
+  /*! How far a point is off the quadric, as a distance rather than as a radius
+   * difference - on a cone those differ by the cosine of the half angle, and it
+   * is the perpendicular distance the tessellation band is a bound on. */
+  [[nodiscard]] double offsetAt(const Vector3d& p) const
+  {
+    if (cyl_ != nullptr) return fabs(distanceToAxis(p, cyl_->refpt, axis_) - cyl_->r);
+    const double want = cone_->radiusAt(p);
+    if (want < 0) return std::numeric_limits<double>::max();  // past the apex
+    return fabs(distanceToAxis(p, cone_->refpt, axis_) - want) / sqrt(1 + cone_->slope * cone_->slope);
+  }
+
+  /*! How far a facet reaches around the axis. The widest gap between
+   * consecutive angles is the part the facet does *not* cover, so the span is
+   * the turn less that gap - which is what tells a facet straddling the seam
+   * from one wrapped right round. */
+  [[nodiscard]] double spanOf(std::size_t f) const
+  {
+    const std::vector<Vector3d>& vertices = *mesh_.vertices;
+    std::vector<double> t;
+    for (const int v : (*mesh_.loops)[f]) {
+      const Vector3d rel = vertices[v] - base_;
+      double a = atan2(rel.dot(ref2_), rel.dot(ref_));
+      if (a < 0) a += 2 * M_PI;
+      t.push_back(a);
+    }
+    std::sort(t.begin(), t.end());
+    double gap = t.front() + 2 * M_PI - t.back();
+    for (std::size_t i = 0; i + 1 < t.size(); i++) gap = std::max(gap, t[i + 1] - t[i]);
+    return std::max(0.0, 2 * M_PI - gap);
+  }
+
+  /*! How far off the surface a facet's own middle stands when its corners are
+   * on it: R(1 - cos(theta/2)) over its angular span. Computable from the
+   * surface and the facet, needing no neighbour, and unchanged by anything done
+   * to the corners - which is what the interior test needs, because moving a
+   * corner onto the curve where its owners cross changes every dihedral around
+   * it. */
+  [[nodiscard]] double sagittaOf(std::size_t f) const
+  {
+    const std::vector<Vector3d>& vertices = *mesh_.vertices;
+    double r = 0;
+    for (const int v : (*mesh_.loops)[f]) {
+      r = std::max(r, distanceToAxis(vertices[v], base_, axis_));
+    }
+    return r * (1 - cos(std::min(M_PI, spanOf(f)) / 2));
+  }
+
+  /*! The band a single facet leaves open, by the same sagitta the approximation
+   * pass measures: over every edge, (reach/2)*tan(dihedral/4) against whatever
+   * lies across it. A single facet has no interior edge of its own, so this is
+   * that sagitta asked of the one facet rather than of a region. */
+  [[nodiscard]] double bandOf(std::size_t f) const
+  {
+    const std::vector<Vector3d>& vertices = *mesh_.vertices;
+    const std::vector<std::vector<int>>& loops = *mesh_.loops;
+    const std::vector<Vector3d>& normals = *mesh_.normals;
+    const std::vector<int>& loop = loops[f];
+    double band = 0;
+    for (std::size_t i = 0; i < loop.size(); i++) {
+      const int a = loop[i], b = loop[(i + 1) % loop.size()];
+      const auto it = edge_loops_.find(edgeKey(a, b));
+      if (it == edge_loops_.end()) continue;
+      for (const std::size_t g : it->second) {
+        if (g == f) continue;
+        const double dot = std::clamp(normals[f].normalized().dot(normals[g].normalized()), -1.0, 1.0);
+        const double dihedral = acos(dot);
+        if (dihedral > smooth_angle_) continue;
+        const double reach =
+          std::max(reachAcross(vertices, loops[f], a, b), reachAcross(vertices, loops[g], a, b));
+        band = std::max(band, (reach / 2.0) * tan(dihedral / 4.0));
+      }
+    }
+    return band;
+  }
+
+  /*! Is this facet on the surface, spending no more than `max_off` of what the
+   * mesh concedes? `off_out` takes the worst corner offset, which a caller
+   * judging a whole region needs. */
+  [[nodiscard]] bool covers(std::size_t f, double max_off, double *off_out = nullptr) const
+  {
+    const std::vector<Vector3d>& vertices = *mesh_.vertices;
+    const std::vector<std::vector<int>>& loops = *mesh_.loops;
+    const std::vector<Vector3d>& normals = *mesh_.normals;
+    if (!(*mesh_.valid)[f] || (*mesh_.is_hole)[f]) return false;
+    if (loops[f].size() < 3) return false;
+
+    // A facet across the axis is not on the surface however close its corners
+    // fall - a cap over a bore has every vertex on the rim. On a cylinder that
+    // is exact: every facet of a prism is parallel to the axis. On a cone it is
+    // not, and demanding it be was what kept the fitted cones from ever
+    // reaching a face: a facet of a polygonal frustum is a chord plane, so it
+    // leans by a little more than the true cone does, by a factor of cos(pi/n),
+    // and the rest is left to the distances below.
+    const double lean_of_f = fabs(normals[f].normalized().dot(axis_));
+    if (cyl_ != nullptr ? lean_of_f > 1e-6 : lean_of_f > std::min(0.99, lean_ * 1.05 + 1e-6)) {
+      return false;
+    }
+    double off = 0;
+    for (const int v : loops[f]) off = std::max(off, offsetAt(vertices[v]));
+    // The band is what the mesh concedes about where its surface lies;
+    // `max_off` is how much of that concession this tier is willing to spend.
+    // At 1e-7 it spends none, and claims only facets the surface already runs
+    // through.
+    if (off > std::min(bandOf(f), max_off)) return false;
+
+    // Corners on the surface are not enough, and the lean test above is not the
+    // whole of the guard. A facet that spans a *hole* in the surface has every
+    // corner on it and no interior on it at all. The bore through
+    // step-bored-cone is walled by one quad per angular step running the full
+    // 18mm length of the bore; all four of its corners lie on the two mouth
+    // curves, and a mouth curve is a section of the cone, so all four are on
+    // the cone to 1e-7. Its middle is 6.0 from that cone, which concedes 0.048.
+    // At theta = 180 the bore's wall runs so nearly parallel to the cone it
+    // pierces that the two normals agree to five degrees, so only the distance
+    // separates them - and only if it is asked somewhere other than at the
+    // corners. The quarter allows for a tessellation whose facets are not even
+    // arcs.
+    const double interior_allow = 1.25 * sagittaOf(f) + 1e-12;
+    Vector3d centre(0, 0, 0);
+    for (const int v : loops[f]) centre += vertices[v];
+    centre /= double(loops[f].size());
+    double interior = offsetAt(centre);
+    for (std::size_t i = 0; i < loops[f].size() && interior <= interior_allow; i++) {
+      const Vector3d mid = (vertices[loops[f][i]] + vertices[loops[f][(i + 1) % loops[f].size()]]) / 2;
+      interior = std::max(interior, offsetAt(mid));
+    }
+    if (interior > interior_allow) return false;
+    if (off_out != nullptr) *off_out = off;
+    return true;
+  }
+
+private:
+  const Mesh& mesh_;
+  const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops_;
+  double smooth_angle_ = 0;
+  const CylinderSurface *cyl_ = nullptr;
+  const ConeSurface *cone_ = nullptr;
+  Vector3d axis_{0, 0, 1}, base_{0, 0, 0}, ref_{1, 0, 0}, ref2_{0, 1, 0};
+  double lean_ = 0;
+};
+
+}  // namespace
+
 /*! Regions lying on a declared or fitted quadric, as patches.
  *
  * The band recogniser already writes quadrics, and writes them better - a
@@ -2211,13 +2422,11 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     }
   }
 
-  // The band a set of facets leaves open, by the same sagitta the approximation
-  // pass measures: over every interior edge, (reach/2)*tan(dihedral/4).
+  // The band a region of facets leaves open, by the same sagitta the
+  // approximation pass measures: over every interior edge,
+  // (reach/2)*tan(dihedral/4). The one-facet case belongs to OnQuadric, which
+  // asks it of whatever lies across each of the facet's own edges.
   auto bandOf = [&](const std::vector<std::size_t>& facets) {
-    // A single facet has no interior edge of its own, so for that case the
-    // band is measured against whatever lies across each of its edges - which
-    // is the same sagitta, asked of the one facet rather than of a region.
-    const bool single = facets.size() == 1;
     const std::set<std::size_t> in(facets.begin(), facets.end());
     double band = 0;
     for (const std::size_t f : facets) {
@@ -2227,7 +2436,7 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
         const auto it = edge_loops.find(edgeKey(a, b));
         if (it == edge_loops.end()) continue;
         for (const std::size_t g : it->second) {
-          if (g == f || (!single && !in.count(g))) continue;
+          if (g == f || !in.count(g)) continue;
           const double dot = std::clamp(normals[f].normalized().dot(normals[g].normalized()), -1.0, 1.0);
           const double dihedral = acos(dot);
           if (dihedral > smooth_angle) continue;
@@ -2240,21 +2449,6 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     return band;
   };
 
-  // How far a point is off a quadric, as a distance rather than as a radius
-  // difference - on a cone those differ by the cosine of the half angle, and it
-  // is the perpendicular distance the tessellation band is a bound on.
-  auto offsetAt = [](const Surface *surface, const Vector3d& p) {
-    if (const auto *cyl = dynamic_cast<const CylinderSurface *>(surface)) {
-      const Vector3d axis = cyl->normdir.normalized();
-      return fabs(distanceToAxis(p, cyl->refpt, axis) - cyl->r);
-    }
-    const auto *cone = dynamic_cast<const ConeSurface *>(surface);
-    const Vector3d axis = cone->normdir.normalized();
-    const double want = cone->radiusAt(p);
-    if (want < 0) return std::numeric_limits<double>::max();  // past the apex
-    return fabs(distanceToAxis(p, cone->refpt, axis) - want) / sqrt(1 + cone->slope * cone->slope);
-  };
-
   for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
     const auto& surface = surfaces[surface_index];
     const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
@@ -2262,32 +2456,6 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     if (cyl == nullptr && cone == nullptr) continue;
     if (cyl != nullptr && !(cyl->r > 0)) continue;
     const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
-    // A cone's normal is not perpendicular to its axis - it leans by the half
-    // angle - so what a facet has to agree with is that lean, not zero.
-    // fabs: the facet lean below is an absolute value, so the threshold has to
-    // be one too. A cone whose radius falls with height - which is what
-    // `cylinder(r1, r2 = 0)` draws - has a negative slope, and comparing an
-    // absolute lean against a negative threshold rejected every facet of it.
-    //
-    // Latent as it stands, and deliberately left that way. Nothing declares a
-    // ConeSurface of that orientation today - primitives.cc declares the two
-    // rims of a frustum and leaves the cone between them to be recognised - so
-    // no facet reaches this test with a negative slope, and fixing it moves no
-    // face of any export in the suite.
-    //
-    // It is fixed anyway, because an absolute value compared against a signed
-    // threshold is wrong however it is reached. The next person to follow
-    // doc/step-export-development.md's *declare first, recognise second* and
-    // declare that cone will need it - and should know what else they will meet.
-    // With both
-    // in place the claim on step-bored-cone widens from 32 facets to 52, the
-    // trimmed-quadric path bounds them wrongly, and the solid comes out 2.75%
-    // under its derived volume: 5234.1 against 5382.2 +/- 12, with a total
-    // surface area below the mesh's own, which a fitted cone cannot have. The
-    // declaration is right and the bounding is not. That fixture's
-    // VOLUME-APPROX is the assertion that says so; the surface census does not,
-    // it improves while the solid gets worse.
-    const double lean = cyl != nullptr ? 0.0 : fabs(cone->slope) / sqrt(1 + cone->slope * cone->slope);
 
     // How far a facet may sit off the surface and still be on it is the
     // facet's *own* tessellation band, not a fraction of the radius. A
@@ -2300,34 +2468,11 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     // The band is local and self calibrating: it is what the mesh already
     // concedes about where its own surface lies, so a facet inside it is one
     // this cylinder could be the surface of, and a facet outside it belongs to
-    // something else.
-    // How far a facet reaches around the axis, and how far off the surface that
-    // reach puts its middle.
+    // something else. That, the lean and the interior test are OnQuadric, which
+    // the band pass asks the same question of.
+    const OnQuadric on_quadric(mesh, edge_loops, surface.get(), smooth_angle);
     const Vector3d ref = perpendicular(axis);
     const Vector3d ref2 = axis.cross(ref);
-    auto spanOf = [&](std::size_t f) {
-      std::vector<double> t;
-      for (const int v : loops[f]) {
-        const Vector3d rel = vertices[v] - (cyl != nullptr ? cyl->refpt : cone->refpt);
-        double a = atan2(rel.dot(ref2), rel.dot(ref));
-        if (a < 0) a += 2 * M_PI;
-        t.push_back(a);
-      }
-      std::sort(t.begin(), t.end());
-      // The widest gap between consecutive angles is the part the facet does
-      // *not* cover, so the span is the turn less that gap. This is what tells
-      // a facet straddling the seam from one wrapped right round.
-      double gap = t.front() + 2 * M_PI - t.back();
-      for (std::size_t i = 0; i + 1 < t.size(); i++) gap = std::max(gap, t[i + 1] - t[i]);
-      return std::max(0.0, 2 * M_PI - gap);
-    };
-    auto sagittaOf = [&](std::size_t f) {
-      double r = 0;
-      for (const int v : loops[f]) {
-        r = std::max(r, distanceToAxis(vertices[v], cyl != nullptr ? cyl->refpt : cone->refpt, axis));
-      }
-      return r * (1 - cos(std::min(M_PI, spanOf(f)) / 2));
-    };
 
     std::vector<std::size_t> claimed;
     std::vector<std::size_t> contested;  // on this quadric, but already held elsewhere
@@ -2348,44 +2493,6 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
         gated++;
         continue;
       }
-      // A facet across the axis is not on the surface however close its corners
-      // fall - a cap over a bore has every vertex on the rim.
-      //
-      // On a cylinder that is exact: every facet of a prism is parallel to the
-      // axis. On a cone it is not, and demanding it be was what kept the fitted
-      // cones from ever reaching a face. A facet of a polygonal frustum is a
-      // chord plane, so it leans by a little more than the true cone does -
-      // by a factor of cos(pi/n) - and the further test is left to the vertex
-      // distances below, which measure the thing that actually matters.
-      const double lean_of_f = fabs(normals[f].normalized().dot(axis));
-      if (cyl != nullptr ? lean_of_f > 1e-6 : lean_of_f > std::min(0.99, lean * 1.05 + 1e-6)) {
-        continue;
-      }
-      double off = 0;
-      for (const int v : loops[f]) {
-        off = std::max(off, offsetAt(surface.get(), vertices[v]));
-      }
-      // The band is what the mesh concedes about where its surface lies;
-      // `max_off` is how much of that concession this tier is willing to spend.
-      // At 1e-7 it spends none, and claims only facets the surface already runs
-      // through.
-      if (off > std::min(bandOf({f}), max_off)) continue;
-
-      // Corners on the surface are not enough, and the lean test above is not
-      // the whole of the guard the comment there claims. A facet that spans a
-      // *hole* in the surface has every corner on it and no interior on it at
-      // all. The bore through step-bored-cone is walled by one quad per
-      // angular step running the full 18mm length of the bore; all four of its
-      // corners lie on the two mouth curves, and a mouth curve is a section of
-      // the cone, so all four are on the cone to 1e-7. Its middle is 6.0 from
-      // that cone, which concedes 0.048.
-      //
-      // The lean test is what rejects a cap over a bore - a cap's normal is
-      // square to the axis - and it cannot reject this one: at theta = 180 the
-      // bore's wall runs so nearly parallel to the cone it pierces that the two
-      // normals agree to five degrees. Only the distance separates them, and
-      // only if it is asked somewhere other than at the corners.
-      //
       // The allowance comes from the surface, not from the neighbours.
       //
       // It used to be twice `bandOf`, which is the dihedral to whatever lies
@@ -2397,43 +2504,23 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
       // radius 10 was allowed 0.0033 because its neighbours happened to come
       // out nearly coplanar. The claim shattered into fourteen pieces of one
       // and three facets.
-      //
-      // A facet whose corners are on a quadric and which spans `theta` about
-      // its axis stands off it by R(1 - cos(theta/2)) at the middle of its
-      // widest chord. That is the whole of it: computable from the surface and
-      // the facet, needing no neighbour, and unchanged by anything done to the
-      // corners. The quarter allows for a tessellation whose facets are not
-      // even arcs.
-      const double interior_allow = 1.25 * sagittaOf(f) + 1e-12;
-      double interior = 0;
-      {
-        Vector3d centre(0, 0, 0);
-        for (const int v : loops[f]) centre += vertices[v];
-        centre /= double(loops[f].size());
-        interior = offsetAt(surface.get(), centre);
-        for (std::size_t i = 0; i < loops[f].size() && interior <= interior_allow; i++) {
-          const Vector3d mid =
-            (vertices[loops[f][i]] + vertices[loops[f][(i + 1) % loops[f].size()]]) / 2;
-          interior = std::max(interior, offsetAt(surface.get(), mid));
-        }
-      }
-      if (interior > interior_allow) continue;
+      double off = 0;
+      if (!on_quadric.covers(f, max_off, &off)) continue;
       if (held) {
         // What this pass covers and does not hold. Recorded as it is found, and
         // never honoured - such a facet is held by someone else, so it can
         // never be mistaken for a claim nothing acted on.
         contested.push_back(f);
         if (ledger != nullptr) {
-          ledger->add({f, surface,
-                       surface_index < declared_count ? ClaimPrecision::DeclaredExact
-                                                      : ClaimPrecision::Fitted,
-                       "a quadric face", "covered, but already held when this pass looked", false,
-                       surface_index});
+          ledger->add(
+            {f, surface,
+             surface_index < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted,
+             "a quadric face", "covered, but already held when this pass looked", false, surface_index});
         }
         continue;
       }
       claimed.push_back(f);
-      span_of_claim.push_back(spanOf(f));
+      span_of_claim.push_back(on_quadric.spanOf(f));
       worst = std::max(worst, off);
     }
     if (claimed.size() < 3) continue;
@@ -3016,6 +3103,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       if (const char *yield_to_general = getenv("OPENSCAD_STEP_YIELD_SURFACE")) {
         if (matched == std::size_t(atoi(yield_to_general))) continue;
       }
+
       Band info;
       // Which record this band answers to, so that a caller can tell a band on
       // the model's own surface from one on a surface the approximation fitted.
