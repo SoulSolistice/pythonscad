@@ -710,13 +710,43 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
                                            ClaimLedger *ledger = nullptr,
                                            std::size_t declared_count = std::size_t(-1));
 
+/*! What a band needs in order to tell a whole region from a truncated one.
+ *
+ * A band is a ring between two rims. It is not something a model declares - it
+ * is a *way of writing* a region that happens to be such a ring. Left to
+ * itself the band pass chooses its facets by what that form can express, so a
+ * region which is a ring plus a few facets a boolean left attached gets
+ * truncated to the ring and the remainder falls to whoever runs next: one
+ * declared surface, two kinds of face, and a boundary the model never asked
+ * for. See doc/step-rungs.md, R0, and doc/step-export-development.md, *The
+ * representation fits the region, never the region the representation*.
+ *
+ * These are the same three things `recogniseQuadricPatches` decides a region
+ * by, and they are passed here so that both passes ask **one** question. The
+ * band asks it of the pass that would take the remainder, not of itself: a
+ * separate definition would let a band keep a partial claim because its own
+ * test disagreed with the test that then claimed the rest.
+ *
+ * `max_off` is the tier, and it is not cosmetic. At 1e-7 the region of a
+ * declared surface *is* the ring on both reference parts and on
+ * step-split-surface - measured 2026-09-22, no surface is split without the
+ * approximation flag - so nothing is given up. It is the tier that spends the
+ * tessellation band which finds the region larger than the ring. */
+struct WholeRegion {
+  const Provenance *provenance = nullptr;
+  double smooth_angle = 0;  // radians; how sharp an edge still counts as one surface
+  double max_off = 0;       // what this tier will spend, as recogniseQuadricPatches takes it
+  bool enabled = false;     // off leaves the pass exactly as it was
+};
+
 /*! Find the bands of facets which were modelled as a surface of revolution.
  *
  * `surfaces` are the analytic surfaces the model declared; with none of them
  * nothing is recognised, by design. `tol` is the modelling tolerance. */
 Result recogniseSurfacesOfRevolution(const Mesh& mesh,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
-                                     std::size_t declared_count = std::size_t(-1));
+                                     std::size_t declared_count = std::size_t(-1),
+                                     const WholeRegion& whole = {});
 
 /*! An arbitrary unit vector perpendicular to `norm`. */
 Vector3d perpendicular(const Vector3d& norm);

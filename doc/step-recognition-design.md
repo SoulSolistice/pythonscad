@@ -61,7 +61,6 @@ whole connected region the declaration covers.* An export that breaks it says
 so, naming the surface, the division, the originals on each side, and how many
 mesh edges cross the divide.
 
-
 **Propose.** Each recogniser reads the mesh and the declarations and *writes
 claims*. It mutates nothing shared. A claim is data:
 
@@ -264,7 +263,8 @@ bayonet cone 74:    both from original 74
 One original, one declared surface, one connected region. Nothing is ambiguous
 about ownership at all - only about *how the region is written*.
 
-**So the order is: region first, representation second.**
+**So the order is: region first, representation second.** *(Landed 2026-09-22
+as R0; the measurements are below, under "R0, as landed".)*
 
 1. Determine the region from the declaration and provenance - the facets whose
    maker owns this surface and which lie on it, connected.
@@ -307,9 +307,9 @@ exact curves than the band did.
 identical to the last digit while the volume moves by 2.0818 mm3 (9.3e-6
 relative). Geometrically identical faces should move neither; a genuinely
 changed boundary should move both. Identical area with moved volume points at
-something that changes the enclosed region without changing the surface measure
-- a trim, an orientation, or a face contributing with a different sense - and
-that is worth understanding before anything is adopted.
+something that changes the enclosed region without changing the surface
+measure - a trim, an orientation, or a face contributing with a different
+sense - and that is worth understanding before anything is adopted.
 
 **And lid10 cannot adjudicate it.** It has no derived volume; taking
 OpenCASCADE's figure as truth is the *kernel agreement is not proof* trap.
@@ -340,6 +340,74 @@ is not a count of damage, and a big number is not a finding. "452 contested"
 looked like a defect, survived a precision check (0 misheld), survived a
 provenance check (0 separated), and only dissolved when the claims were asked
 what surface they were *for*. Every intermediate step read like progress.
+
+### R0, as landed - 2026-09-22
+
+The band pass now measures whether the ring it found is the whole of what its
+surface covers there, and gives the region up rather than truncating it.
+
+**How it asks, and this is the part worth copying.** It asks with `OnQuadric`,
+which is `recogniseQuadricPatches`'s own per-facet admission test lifted into a
+shared class - lean, corners inside `max_off` and inside the mesh's own
+concession, interior inside the sagitta the facet's span implies - with
+provenance asked before any of it. One definition of *on this surface*, shared
+by the pass that gives a region up and the pass that takes it. Two definitions
+would let a band keep a partial claim because its own test disagreed with the
+test that then claimed the rest, which is the defect wearing a different hat.
+The extraction was landed and verified separately: byte-for-byte the same
+reports and the same volumes on lid10 and `step-split-surface`, suite 56 of 56.
+
+**And it runs after the whole seed loop, which is the only reason it works.**
+The first version asked at the claim and regressed three fixtures. A sphere is
+written as a *stack* of bands - one per ring of its tessellation - so at the
+moment a ring is claimed its neighbours are siblings that do not exist yet;
+every ring therefore looked like a truncated region, every band was given up,
+one drop cascaded into the next through "the band sharing this rim was dropped",
+and `step-sphere` exported as 482 planes with 448 corners off their own
+surfaces. Run once every band has claimed, a ring's neighbours are *held* and
+the walk stops at them, which is what the chain means. This is the same lesson
+as open item 25's, reached from the other end: **claim, then revise.** The
+revision runs to a fixed point, because giving one band up frees its facets and
+a neighbour on the same surface should go with it rather than be left holding
+half a region; dropping is monotone, so it terminates.
+
+**What it cost and bought**, same build before and after:
+
+| | base | R0 |
+| --- | --- | --- |
+| lid10 split surfaces | 1 (cone 50) | **none** |
+| lid10 regions given up whole | - | surfaces 9 (4 of 76), 50 (56 of 62), 52 (36 of 61) |
+| lid10 facets covered analytically | 536 band + 377 patch = 913 | 480 + 433 = **913** |
+| lid10 `CIRCLE` | 300 | **410** |
+| lid10 census 7 / 16 / 13 / 21 / 17 | 0 / 0 / 0 / 3 / 162 | **identical, same worst 0.108893, same breakdown** |
+| lid10 faces, OCCT | 845, 1 solid, 1 shell | **845, 1 solid, 1 shell** |
+| `step-split-surface` volume | 15646.585807, **-1.0489 against the model** | **15647.634695, -1.9e-11** |
+| `step-bored-cylinder` approximation volume | 5298.405620 (derived 5298.405619) | **5298.405620** |
+| `step-bored-cylinder` cylinder faces | 8 | **4** |
+
+The facet count is the line to read first: **the same facets are written
+analytically, in fewer faces, with more exact curves.** Nothing was given up to
+a fallback. `step-bored-cylinder` is the clearest case - the same exact volume,
+in six faces instead of ten, because the wall arrives at the trimmed-quadric
+pass in one piece instead of in the pieces a band's ring left between its two
+arc-bounded strips.
+
+**What it did not do, and this was the expectation to lose.** `doc/step-rungs.md`
+said C0 and R0 were one defect from two ends. They are not. The 78 edges on
+lid10 written as a section of a surface by its own chord plane are **still 78**,
+18 on the bayonet and 31 on f04 unmoved. Those facets are not ones a band left
+behind; they are ones the *general* pass refused, each with a stated reason - a
+claim whose boundary strays 0.1094 where the tessellation allows 0.0067, 20
+facets reaching further round the axis than four times the typical span, 24
+sweep facets off their fit. C0 is a refusal problem, and open item 27 is where
+it goes.
+
+**Unadjudicated.** lid10's own volume moved from 224683.668014 to 224711.283834
+by OpenCASCADE's reckoning, 1.2e-4 relative. lid10 has no derived volume, so
+nothing here says which is right; the direction is the one more analytic
+coverage predicts, since a chord plane cuts inside the surface it replaces, and
+the fixture that *does* have a derivation became exact. That is as far as the
+evidence goes.
 
 ### What this means for step 4
 

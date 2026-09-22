@@ -723,6 +723,33 @@ where it lives. A fix aimed at those three surfaces would be worthless.
    / `runCircle`), so a trimmed patch keeps exact rims. Rim exactness is not a
    band privilege.
 
+**Landed 2026-09-22 as R0**, and the measurements are in
+`doc/step-recognition-design.md`, *R0, as landed*. Three things about it
+generalise past this one rung:
+
+- **One definition of "on this surface", shared by whoever gives a region up and
+  whoever takes it.** The band asks `OnQuadric`, which is the trimmed-quadric
+  pass's own admission test lifted into a class. A second definition would let a
+  band keep a partial claim because its own test disagreed with the test that
+  then claimed the rest - the defect in a different hat.
+- **Decide after the pass has finished claiming, not during it.** Asked at the
+  claim, the region test judged each band against a state that did not exist
+  yet: a sphere is a *stack* of bands, so every ring's neighbours were siblings
+  not yet claimed, every ring looked truncated, and `step-sphere` came out as
+  482 planes. This is *claim, then revise* - open item 25's conclusion, reached
+  from the other end - and it is the fifth time a provisional input has produced
+  a plausible wrong answer here.
+- **The same facets, in fewer faces, with more exact curves.** lid10 writes 913
+  facets analytically before and after; the division between band and patch
+  moved and the total did not. That is the line to read first when judging a
+  claim change, because a count of faces moves either way and says nothing.
+
+**And one expectation to unlearn.** `doc/step-rungs.md` had C0 and R0 as one
+defect from two ends. Claiming regions whole removed every split surface and
+left C0's 78 seam edges on lid10 exactly as they were. They share a description
+and not a cause: R0's facets were ones a *band* could not hold, C0's are ones
+the general pass **refused**, each with a stated reason. See open item 27.
+
 **And it is enforceable, not just stated.** The claim ledger makes the invariant
 checkable, which is the whole reason the ledger exists:
 

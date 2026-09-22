@@ -354,8 +354,7 @@ using AnalyticFeatures::projectOntoSurfaceAndPlanes;
  * because the facet beside it - a chord of the chamfer cone - was taken for a
  * section plane. See open item 26. */
 static const Surface *planeIsFacetOfCurved(const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                           const Vector3d& pnorm,
-                                           const std::vector<Vector3d>& on_plane)
+                                           const Vector3d& pnorm, const std::vector<Vector3d>& on_plane)
 {
   const Vector3d n = pnorm.normalized();
   if (!(n.norm() > 0)) return nullptr;
@@ -2030,8 +2029,22 @@ void StepKernel::build_tri_body(
     mesh.valid = &loop_valid;
     mesh.is_hole = &loop_is_hole;
     mesh.normals = &loop_normals;
+    AnalyticFeatures::Provenance provenance;
+    provenance.face_origin = &faceOrigin;
+    provenance.owned = &owned;
+    provenance.declared = surfaces.size();
+    // What the band pass needs to tell a whole region from a truncated one, and
+    // it is deliberately the *same* three things `recogniseQuadricPatches` is
+    // given below - the band asks its question of the pass that would take the
+    // remainder, not of itself. `max_off` is that pass's own tier: see
+    // AnalyticFeatures::WholeRegion.
+    AnalyticFeatures::WholeRegion whole;
+    whole.provenance = &provenance;
+    whole.smooth_angle = smooth_angle;
+    whole.max_off = approximate ? std::numeric_limits<double>::infinity() : 1e-7;
+    whole.enabled = true;
     features =
-      AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol, surfaces.size());
+      AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol, surfaces.size(), whole);
 
     // The approximation pass, and the only place in this exporter where a
     // surface is written that the model never declared.
@@ -2058,10 +2071,6 @@ void StepKernel::build_tri_body(
       }
       return std::size_t(-1);
     };
-    AnalyticFeatures::Provenance provenance;
-    provenance.face_origin = &faceOrigin;
-    provenance.owned = &owned;
-    provenance.declared = surfaces.size();
     if (approximate) {
       const std::vector<AnalyticFeatures::SmoothRegion> candidates =
         AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
@@ -2162,8 +2171,8 @@ void StepKernel::build_tri_body(
         // Re-run with the fits in hand. Cheaper than threading them through the
         // pass that has already run, and it means a fitted surface goes through
         // exactly the checks a declared one does.
-        features =
-          AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol, surfaces.size());
+        features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol,
+                                                                   surfaces.size(), whole);
         std::size_t lost = 0, demoted = 0;
         for (std::size_t f = 0; f < exact_consumed.size() && f < features.consumed.size(); f++) {
           if (exact_consumed[f] == 0) continue;  // the declared-only pass did not have it
@@ -2278,7 +2287,8 @@ void StepKernel::build_tri_body(
       for (const std::size_t f : patch.facets) features.consumed_by[f] = "a Bezier patch";
       for (const std::size_t f : patch.facets)
         features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredInterpolant,
-                             "a Bezier patch", "the facet lies on the declared Bezier patch", true, indexOf(patch.surface)});
+                             "a Bezier patch", "the facet lies on the declared Bezier patch", true,
+                             indexOf(patch.surface)});
     }
 
     // Which of the surviving patches are exactly quadrics.
@@ -2471,7 +2481,8 @@ void StepKernel::build_tri_body(
           for (const std::size_t f : patch.facets) features.consumed_by[f] = "a declared sweep";
           for (const std::size_t f : patch.facets)
             features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredInterpolant,
-                                 "a declared sweep", "the sweep's patch is written and takes it", true, indexOf(patch.surface)});
+                                 "a declared sweep", "the sweep's patch is written and takes it", true,
+                                 indexOf(patch.surface)});
         }
       }
       LOG("STEP export: its facets lie over %1$d of the profile's %2$d spans - %3$s", used, segs,
@@ -2845,7 +2856,8 @@ void StepKernel::build_tri_body(
         for (const std::size_t f : patch.facets) features.consumed_by[f] = "a quadric face";
         for (const std::size_t f : patch.facets)
           features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredExact,
-                               "a quadric face", "the quadric's patch is written and takes it", true, indexOf(patch.surface)});
+                               "a quadric face", "the quadric's patch is written and takes it", true,
+                               indexOf(patch.surface)});
       }
       if (!quadric_faces.empty()) {
         LOG(
@@ -3334,11 +3346,11 @@ void StepKernel::build_tri_body(
     } else if (checked > 0) {
       AnalyticFeatures::ClaimPrecision lost = AnalyticFeatures::ClaimPrecision::Fitted;
       const std::size_t misheld = features.ledger.misheld(&lost);
-      const char *kind = lost == AnalyticFeatures::ClaimPrecision::DeclaredExact
-                           ? "a declared exact surface"
-                           : (lost == AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
-                                ? "a declared interpolant"
-                                : "a fit");
+      const char *kind =
+        lost == AnalyticFeatures::ClaimPrecision::DeclaredExact
+          ? "a declared exact surface"
+          : (lost == AnalyticFeatures::ClaimPrecision::DeclaredInterpolant ? "a declared interpolant"
+                                                                           : "a fit");
       // How much of the contention the *model* settles, as against how much a
       // ranking of evidence would have to.
       //
@@ -3388,8 +3400,7 @@ void StepKernel::build_tri_body(
         bool same_surface = false;
         for (const auto *c : claims) {
           if (c == holder || c->honoured) continue;
-          if (c->surface_index != std::size_t(-1) &&
-              c->surface_index == holder->surface_index) {
+          if (c->surface_index != std::size_t(-1) && c->surface_index == holder->surface_index) {
             same_surface = true;
           }
         }
@@ -3439,11 +3450,11 @@ void StepKernel::build_tri_body(
             const char *kind = kv.first >= surfaces.size() ? "a fitted surface" : "a surface";
             if (kv.first < surfaces.size() && surfaces[kv.first] != nullptr) {
               const Surface *sf = surfaces[kv.first].get();
-              kind = dynamic_cast<const CylinderSurface *>(sf)   ? "a cylinder"
-                     : dynamic_cast<const ConeSurface *>(sf)     ? "a cone"
-                     : dynamic_cast<const GridSurface *>(sf)     ? "a declared sweep"
-                     : dynamic_cast<const PlaneSurface *>(sf)    ? "a plane"
-                                                                 : "a surface";
+              kind = dynamic_cast<const CylinderSurface *>(sf) ? "a cylinder"
+                     : dynamic_cast<const ConeSurface *>(sf)   ? "a cone"
+                     : dynamic_cast<const GridSurface *>(sf)   ? "a declared sweep"
+                     : dynamic_cast<const PlaneSurface *>(sf)  ? "a plane"
+                                                               : "a surface";
             }
             // Is the division gratuitous? A cone a boolean left in two
             // disconnected pieces legitimately needs two faces. It is only a
@@ -3524,8 +3535,8 @@ void StepKernel::build_tri_body(
         if (holder == nullptr || holder->by == nullptr) continue;
         for (const auto *c : claims) {
           if (c == holder || c->honoured || c->by == nullptr) continue;
-          const bool same = c->surface_index != std::size_t(-1) &&
-                            c->surface_index == holder->surface_index;
+          const bool same =
+            c->surface_index != std::size_t(-1) && c->surface_index == holder->surface_index;
           pairs[std::string(holder->by) + " holds, " + c->by + " also covered" +
                 (same ? " (the same surface)" : " (a different surface)")]++;
         }
@@ -3533,18 +3544,18 @@ void StepKernel::build_tri_body(
       for (const auto& kv : pairs) {
         LOG("STEP export:   contention: %1$s - %2$d facets", kv.first, int(kv.second));
       }
-      LOG("STEP export: of the contested facets, %1$d name the *same* declared surface from two "
-          "recognisers - nothing to arbitrate, the surface was recognised twice; provenance "
-          "separates the claimants on %2$d, is silent on %3$d, and %4$d have a claimant that "
-          "cannot name its declared surface",
-          int(prov_same), int(prov_decides), int(prov_silent), int(prov_unnamed));
+      LOG(
+        "STEP export: of the contested facets, %1$d name the *same* declared surface from two "
+        "recognisers - nothing to arbitrate, the surface was recognised twice; provenance "
+        "separates the claimants on %2$d, is silent on %3$d, and %4$d have a claimant that "
+        "cannot name its declared surface",
+        int(prov_same), int(prov_decides), int(prov_silent), int(prov_unnamed));
       LOG(
         "STEP export: the claim ledger agrees with the holder of all %1$d claimed facets; %2$d "
         "are contested by more than one recogniser, and %3$d of those are held by a claimant less "
         "precise than one that also covered them (the best that lost is %4$s), and %5$d are a tie "
         "between recognisers of equal precision, which nothing decides but the order they run in",
-        int(checked), int(features.ledger.contested()), int(misheld), kind,
-        int(features.ledger.tied()));
+        int(checked), int(features.ledger.contested()), int(misheld), kind, int(features.ledger.tied()));
     }
   }
   if (approximate) {

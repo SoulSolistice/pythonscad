@@ -42,7 +42,7 @@ Two consequences that have each cost a day:
 
 | rung | curve | determined by | class | today |
 | --- | --- | --- | --- | --- |
-| C0 | **no edge at all** | both sides are the *same* declared surface - there is no boundary | D0 | **not implemented**: 78 such edges on lid10 are written as a section of a surface by its own chord plane. Open item 26 |
+| C0 | **no edge at all** | both sides are the *same* declared surface - there is no boundary | D0 | **not implemented**: 78 such edges on lid10, 18 on the bayonet, 31 on f04, written as a section of a surface by its own chord plane. R0 did not move any of those counts, which is the finding: they are not where a band truncated a region but where the *general* pass refused one - a claim whose boundary strays too far, a facet reaching too far round the axis, a sweep facet off its fit. Open item 27 |
 | C1 | `CIRCLE` on a quadric's rim | the surface's own axis and radius, where both ends share an axial level | D0 | **landed 2026-09-21**, 60 edges on lid10 |
 | C2 | `CIRCLE` / `ELLIPSE` / `HYPERBOLA` / `PARABOLA` | a **declared** plane cutting a declared quadric | D0 | implemented - but measured 0 of 78 on lid10 use a declared plane |
 | C3 | crossing of two declared surfaces (`B_SPLINE_CURVE`) | both declarations, solved to 1e-7 of each | D2 | implemented (`intersectionArc`), reached only when both sides are *written* as analytic faces |
@@ -51,7 +51,9 @@ Two consequences that have each cost a day:
 | C6 | `LINE` | nothing; the tessellation | D4 | the fallback |
 
 The gap that matters is **C0**, and it is not a curve at all: the commonest
-"conic" in this exporter is the seam of one surface against itself.
+"conic" in this exporter is the seam of one surface against itself. R0 was
+expected to remove most of it and removed none of it - see *What the survey says
+to do*, below, and open item 27.
 
 ### Surfaces, by what determines them
 
@@ -66,9 +68,30 @@ The gap that matters is **C0**, and it is not a curve at all: the commonest
 
 | rung | rule | class | today |
 | --- | --- | --- | --- |
-| R0 | the whole connected region the declaration covers | D0 | **not implemented.** One surface per reference part is split across two recognisers; the region is truncated to whatever form claimed it first |
-| R1 | provenance: the facets whose maker owns this surface | D0 | available (`Provenance`), used only as a *gate* |
-| R2 | whatever a recogniser's own form can express | D4 | what happens today |
+| R0 | the whole connected region the surface covers | D0 | **landed 2026-09-22.** A band measures whether its ring is the whole of what its surface covers there, and gives the region up rather than truncating it. No surface is split on any reference part or fixture |
+| R1 | provenance: the facets whose maker owns this surface | D0 | used by R0 as its first question, and as a gate elsewhere |
+| R2 | whatever a recogniser's own form can express | D4 | what the band pass did until R0 |
+
+**How R0 is decided, since the yardstick is the point.** The band asks
+`OnQuadric` - the *same* predicate `recogniseQuadricPatches` admits facets with -
+to grow its ring across mesh edges into every facet the surface runs through,
+with provenance asked first. One definition of "on this surface", so a band
+cannot keep a partial claim because its own test disagreed with the test that
+then claimed the rest.
+
+**And it runs after every band has claimed, not at the claim.** Asked inside the
+seed loop it judges a band against a state the pass has not finished producing.
+A sphere is a *stack* of bands and each ring's neighbours are siblings not yet
+claimed, so every ring looked truncated, every band was given up, and
+`step-sphere` came out as 482 planes. Run once the claims are in, a ring's
+neighbours are held and the walk stops at them. Claim, then revise - which is
+what open item 25 concluded the grid claim needs, reached from the other end.
+
+**What the tier means here.** At 1e-7 no surface on lid10, the bayonet or
+`step-split-surface` is split at all - measured 2026-09-22 by exporting without
+`--enable=step-approximate-surfaces`. The region only exceeds the ring in the
+tier that spends the tessellation band, so R0 fires there and is silent in the
+exact tier, which is self-consistent rather than a special case.
 
 ### Corners
 
@@ -78,10 +101,14 @@ and is not restated here.
 
 ## What the survey says to do, in order
 
-1. **C0 and R0 are the same defect** and come first. A region of a declared
-   surface that is not claimed whole produces facets; those facets are then
-   mistaken for planes by every downstream pass, which invents curves for a
-   seam that should not exist. Everything else on this page is downstream of it.
+1. ~~**C0 and R0 are the same defect** and come first.~~ **R0 landed
+   2026-09-22, and the two turned out not to be the same defect.** Claiming
+   regions whole removed every split surface and bought 110 more exact circles
+   on lid10, and left C0's 78 seam edges exactly where they were. They share a
+   description - facets of a surface that an analytic face does not cover - and
+   not a cause: R0's were facets a *band* left behind because its form could not
+   hold them, C0's are facets the *general* pass refused, each with a reason it
+   states. The order below still holds; the reason for it was half wrong.
 2. **C2 before C5.** Once regions are whole, a section plane is either declared
    or a genuine flat face; the facet case disappears rather than being refused.
 3. **C3 where two declarations genuinely meet** - already correct, and it will

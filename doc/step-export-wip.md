@@ -18,6 +18,12 @@ rules and the tooling. The session of 2026-09-16 to 18 is summarised under
 
 ## Handover: the next session starts here (2026-09-21)
 
+> **Superseded 2026-09-22 by `doc/step-export-next-session.md`**, which carries
+> the current doctrine, the current measurements and the current priming prompt.
+> The prompt immediately below is kept for its account of where the work stood
+> before R0 landed; its "where to start" is done. The standing rules further
+> down this section still bind.
+
 ### The priming prompt
 
 Paste this into a new session, adjusting only the worktree path:
@@ -228,7 +234,7 @@ Verify the tree before changing anything, and again after:
 ctest --test-dir build -R 'export-step-|mutations'
 ```
 
-**54 tests**, and it has to be this regex and not `-R step`, which drops
+**56 tests**, and it has to be this regex and not `-R step`, which drops
 `bspline-check-mutations` and `closed-sphere-check-mutations` — the harnesses
 whose job is to prove the other tests would fail if the defect came back. What
 the 53 are: 33 SCAD fixtures in `tests/data/scad/step-export/`, 12 Python in
@@ -241,7 +247,7 @@ and **a new fixture needs `cmake -B build` before ctest can see it at all**. Run
 it under the machine's own locale, not `LC_ALL=C`,
 which breaks five UTF-8 filename tests.
 
-**One of the 54 fails on purpose and reports green**, registered `WILL_FAIL`:
+**One of the 56 fails on purpose and reports green**, registered `WILL_FAIL`:
 ctest reports it *passed* while it fails, and will report it *failed* on the day
 it starts passing — which is how that fix gets noticed. Do not delete it, and do
 not read its green as the defect being gone.
@@ -255,6 +261,11 @@ not read its green as the defect being gone.
 `export-step-flagship-strict` was the second until 2026-09-16, when open item 11
 landed; it asserts that the plane veto never gives up the crossing-curve
 boundary and passes on its own merits.
+`export-step-representation` was the third until 2026-09-22, when R0 landed -
+a band gives a region up whole rather than writing part of one surface - ctest
+reported it as a *failure* because it had started passing, and the marking came
+off. It now also asserts the model's own derived volume for
+`step-split-surface`, 15647.634695, which the export meets to 1.9e-11.
 `export-step-sanitytest_step-cap-meets-wall` was the third until 2026-09-16,
 when the placement onto the crossing of the two faces a corner bounds fixed the
 slack it was marked for - ctest reported it as a *failure* that day, which is
@@ -3657,6 +3668,98 @@ property to assert even before the cause was known.
 **Open:** lid10's own split shows 2.0818 mm3 with the area *identical to the
 last digit*, where this fixture moves both area and volume. That is a different
 signature and may be a second mechanism.
+
+#### Closed 2026-09-22, and the residue was not the ellipse
+
+The rim fix took the fixture's deficit from 1.2126 to **1.0489**, and the
+remaining 1.0489 was not another rim. Asked what the two files differ *by*
+(`reader-diff.py`, band against patch), the band export carried three extra
+`PLANE` faces whose normals lean 45 degrees - facets of the chamfer **cone**,
+left planar because the band had truncated that region - and the patch export
+wrote them as part of a conical face. A chord plane sits inside the cone it
+replaces, so the solid loses the sliver; one facet of that chamfer is worth
+about 1.05 mm3 by the same arithmetic the fixture derives its volume with.
+
+The two `ELLIPSE`s still in the band file are `ELLIPSE('',#396,20.,20.)` at
+`(0,0,10)` about `(0,0,-1)`: semi-axes both 20, which is the crease circle
+written as a degenerate ellipse. Geometrically right, and worth nothing to the
+volume. **The lesson is the one the fixture was built for**: a defect found at a
+rim was closed at the rim, and the number that was left over belonged to a
+different mechanism entirely. Only the derived volume said so.
+
+**R0 closes it.** The region is claimed whole, the chamfer's facets go into the
+conical face they belong to, and the export measures **15647.634695** against
+the model's 15647.634695 - 1.9e-11 relative.
+`tests/step-representation-check.py` now asserts that absolute figure as well as
+the property, its `WILL_FAIL` marking is off, and the mutation check (the
+derived constant set to the old 15646.585807) fails the test as it must.
+
+### 27. C0 is a refusal problem, not a claim one - the 78 seam edges R0 did not touch
+
+**Opened 2026-09-22**, by R0 landing and the count not moving.
+
+`doc/step-rungs.md` had C0 ("no edge at all, because both sides are the same
+declared surface") and R0 ("claim the region whole") down as one defect from two
+ends. R0 landed - every split surface is gone from every reference part - and
+the seam count is **unchanged**: 78 edges on lid10, 18 on the bayonet, 31 on
+f04, each written as a section of a surface by its own chord plane, which is a
+boundary of nothing.
+
+**Why the prediction was wrong.** Both describe facets of a surface that an
+analytic face does not cover, and there the resemblance ends:
+
+| | R0's facets | C0's facets |
+| --- | --- | --- |
+| who left them | a **band**, because its form is a ring and they were not in one | the **general** pass, which considered them and said no |
+| what the export says | nothing until R0; now "given up whole rather than written as a band" | a reason per refusal, already printed |
+| the fix | change which region a representation takes | change what a refusal does, or make the refusal unnecessary |
+
+lid10's refusals, from its own report, are the list to work down:
+
+```text
+a region of 192 facets on the declared cylinder r=79.8094 is not written:
+    its boundary strays 0.1094 where the tessellation allows 0.0067
+20 facets reach further round the declared cylinder r=79.8094 than four times
+    the 1.5 degrees this claim's facets typically do
+24 facets of the sweep are left faceted: a corner of each is further off the
+    fit than four times the 0.0229 this claim is typically off, by up to 0.2184
+4 trimmed quadric regions could not be bounded
+31 smooth regions left faceted, 687 facets in all
+```
+
+Two of those five are 4x-median statistics, which is the shape open item 25
+refused on its own rung: a yardstick made of the error it grades. The first is a
+comparison of a claim's worst boundary stray against the *region's* band, which
+is a different question from the per-facet one `OnQuadric` asks and may be the
+wrong one. None of it is a claim-truncation problem, so none of it is downstream
+of R0.
+
+**Do not start by refusing the wrong curves**, which remains measured: code 17
+went 42 to 198 on lid10 when the facet-plane conics were removed, because the
+chord they fall back to is further off the face. The refusals come first.
+
+### 28. The exporter is not byte-deterministic run to run
+
+**Found 2026-09-22**, while trying to verify that a refactor changed nothing by
+diffing two exports. The same binary, the same model, the same flags, twice:
+the files differ. Not in substance - the entity census, the export's whole
+report and both kernel volumes are identical to the last digit - but entity
+*numbering* differs, so a `diff` is useless as a check.
+
+The likely cause is a `std::map` keyed on a pointer; `section_planes` in
+`StepKernel.cc` is one (`section_planes[patch.surface.get()]`), and with ASLR
+its iteration order changes per run. Not chased further.
+
+**Two consequences, and the second is the one that matters.**
+
+- A behaviour-neutral change has to be verified by *content* - the report text,
+  the entity census, the derived volumes - and not by comparing files. That is
+  what was done for `OnQuadric`.
+- If any decision anywhere is "the first surface that accepts it wins" over a
+  pointer-ordered container, then which geometry an export gets is
+  non-deterministic. Nothing observed says that happens; nothing checked says it
+  does not. **The cheap check is to export one model a hundred times and diff
+  the reports**, which would be a real assertion and does not exist today.
 
 ### 24. The flagship third of the suite does 18 exports where 6 would do
 

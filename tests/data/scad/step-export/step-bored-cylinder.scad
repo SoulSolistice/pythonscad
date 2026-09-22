@@ -53,18 +53,27 @@
 // With the approximation flag the trimmed-quadric path takes the rest. It
 // claims facets by distance to the axis rather than by walking rings, and
 // bounds the face with the mesh's own polyline - the same bound the faceted
-// faces around it already use, so the shell closes edge for edge. Eight
-// cylinder faces rather than two because a face written on an open rectangle
-// cannot wrap, so each surface is cut at its seam.
-// Six faces, not four. The bore cuts the wall into separate regions and a
-// face cannot be in two places, so each region is its own face; the two the
-// count gained were being carried as inner bounds of the others, which is
-// what an inner bound is not for. ROUNDTRIP-APPROX does not move, because
-// OpenCASCADE was splitting them on read and counting eight all along - what
-// changed is that the file now says what the kernel was already making of it.
-// APPROX: 6 trimmed quadrics written as one face each, replacing 52 facets
+// faces around it already use, so the shell closes edge for edge.
+//
+// Four cylinder faces, and the arithmetic is the model's. There are two
+// declared cylinders. Each is one connected region here - the wall is a tube
+// with two holes punched through it, which you can still walk right around,
+// and the bore passes clean through so its tube is unbroken - and each region
+// wraps its axis. A face written on an open rectangle cannot wrap, so each
+// surface is cut at its seam and no more: 2 + 2.
+//
+// It used to be eight, and the four it lost were an artefact of the band pass
+// rather than of the model. A band is a ring between two rims, so it took the
+// two arc-bounded strips of the wall - twenty facets - and left the remainder
+// in pieces, each of which then had to be its own face. Since R0 the band gives
+// a region up whole rather than writing part of one surface (the export says
+// so, naming the surface and both counts), and the wall arrives at this pass in
+// one piece. The facets are the same facets: 20 + 52 was the division, 72 is
+// the total, and the total has not moved.
+// APPROX: declared surface 0 is given up whole rather than written as a band
+// APPROX: 4 trimmed quadrics written as one face each, replacing 72 facets
 // APPROX: approximation found nothing left to fit
-// ROUNDTRIP-APPROX: Cylinder=8 Plane=2
+// ROUNDTRIP-APPROX: Cylinder=4 Plane=2
 //
 // And in the approximation tier the opening is neither chords nor sections any
 // more: it is the curve itself. Once the corner placement has put the junction
