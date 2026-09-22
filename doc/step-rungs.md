@@ -259,12 +259,24 @@ note under the D4 rule above.
 
 **Feedstock - every primitive declares what it makes.** A ladder can only reach
 D0 where a declaration exists, and where none does it falls to D4 with nothing
-saying so. `doc/step-export-wip.md`, *What still rests on the mesh with no
-declaration at all*, is the inventory: `minkowski()` declares nothing, so a
-rounded cube is 142 planes; `hull()` declares its operands but not the blend;
-`import()`, `surface()` and `projection()` have nothing to declare;
-`linear_extrude(twist=)`, `PathExtrudeNode` and `SkinNode` declare nothing. Each
-gap is a region of every model that cannot rise above the tessellation.
+saying so. But *no declaration today* is not *undeclarable*, and the three cases
+are different things that a single list would blur:
+
+| | | |
+| --- | --- | --- |
+| **read** | the table in `doc/step-export-development.md`, *What declares today* | working |
+| **there to be read, and not read yet** | the 2D channel. `Outline2d` already half-carries it - arcs survive, which is why `offset(r = 2)` corners come out as cylinders - and finishing it is what makes **one derivation** serve both extruders. `linear_extrude(twist=)` becomes one branch instead of a refusal; the ellipse item dissolves, because an extruded ellipse is a `SURFACE_OF_LINEAR_EXTRUSION` over a curve the exporter already writes; a revolved segment that meets its own axis stops being a silent `continue`. See *One derivation, not five guards* | the gap |
+| **no intent to read** | `polyhedron()`, `import()`, `surface()`, `projection()`, an imported mesh. Correctly undeclarable - `declare_grid` and `declare_sweep` exist as the user-facing channel for exactly these, and they are also where a corner can never be made exact | a boundary, not a gap |
+
+`minkowski()` and `hull()` sit between the last two: minkowski drops its records
+deliberately, hull declares its operands but not the blend, and for both the
+question is what the operands' declarations *imply* about the result - which is
+not the same as carrying a record through an operation that invalidated it.
+
+**The third row matters to the census below**: reporting D4 for an imported STL
+is not a defect found, it is the boundary being where it belongs. A census that
+cannot tell "fell to the tessellation" from "nothing could have been declared
+here" grades the ladder wrongly on exactly the models it is meant to open up.
 
 **And the instrument that would make all three measurable does not exist.** The
 export cannot say what class its own output is. A census by class - for every

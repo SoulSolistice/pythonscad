@@ -233,6 +233,13 @@ work; the list below is that shape in order.
    determined, and where does it fall to the tessellation?"* into a number for
    **any** model, which is what stops the work being a hunt. No behaviour
    change. Everything below gets graded by it.
+
+   **It has to separate three answers, not two**: written at this class;
+   fell to the tessellation though a declaration was available; and *nothing
+   could have been declared here* (`polyhedron`, `import`, `surface`,
+   `projection`, an imported mesh). A census that cannot tell the last two apart
+   grades an imported STL as a defect and a refused `linear_extrude(twist=)` as
+   a boundary, which is backwards.
 2. **Provenance's positive query, reporting only.** Today `Provenance` answers
    only `excludes`; the positive answer is already derived in `export_step.cc`
    as `covered` / `covered_cut` - *"a cut facet has lost a corner to the boolean
@@ -260,11 +267,25 @@ work; the list below is that shape in order.
    behind it, so a claim can call itself DeclaredExact while a tessellation band
    decided it. Carry both, make the mismatch an `EXPORT-ERROR`. It would have
    refused the reverted attempt on its first export.
-6. **Feedstock: the primitives that declare nothing.** A ladder reaches D0 only
-   where a declaration exists; where none does it falls to D4 silently.
-   `minkowski()` (a rounded cube is 142 planes), `hull()`'s blend,
-   `linear_extrude(twist=)`, `PathExtrudeNode`, `SkinNode`, and no surface type
-   for an ellipse. See the roadmap in `doc/step-export-wip.md`.
+6. **Feedstock: finish the 2D channel, one derivation instead of five guards.**
+   This is the largest D0 unlock there is and it is already surveyed - see
+   `doc/step-export-wip.md`, *One derivation, not five guards*. `Outline2d`
+   half-carries the 2D representation already (arcs survive, which is why
+   `offset(r = 2)` corners come out as cylinders); finishing it lets both
+   extruders answer from **one total function** - segment class and operation
+   in, surface out, every class enumerated, no silent `continue`.
+   `linear_extrude(twist=)` becomes one branch rather than a refused wall; the
+   ellipse item dissolves, since an extruded ellipse is a
+   `SURFACE_OF_LINEAR_EXTRUSION` over a curve the exporter already writes; the
+   revolved segment that meets its own axis stops being a wrong refusal that
+   read as a decision because it carried a comment. And
+   `cylinder(r1 = 10, r2 = 0, h = 20)` writing a cone while the identical solid
+   revolved from a profile writes 96 planes stops being possible, because both
+   answer from the same table - **which is a property assertion needing no
+   ground truth: the same solid by two routes must declare the same surfaces.**
+   `polyhedron()`, `import()`, `surface()` and `projection()` are *not* on this
+   list: they have no intent to read, `declare_grid` and `declare_sweep` are the
+   channel for them, and that is a boundary rather than a gap.
 7. **Survey the boundary run.** Which stretch of a loop becomes one curve is
    decided by case analysis (`RimRef`'s four kinds, `Patch::Run`) with no
    classed ladder behind it. It is the one entity the survey does not cover.
