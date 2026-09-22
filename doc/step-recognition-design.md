@@ -458,6 +458,47 @@ rank the evidence, and let the arbiter decide - with the tie count above as the
 before-measurement. A change that leaves 452 ties at 452 has done nothing,
 whatever else it reports.
 
+## The declaration census against this design - 2026-09-22
+
+A census was built to answer *is everything that could be D0 actually D0*. It
+works, it produced a work list of nine declarations, and **most of it is this
+document's own list, rebuilt by hand on the wrong foundation.** Recording that
+is worth more than the feature.
+
+| what the census does | what this document already specifies |
+| --- | --- |
+| reports what class wrote each facet - declared surface, declared plane, fit, tessellation | *What becomes cheap*: **"Why is this facet a plane? - read the ledger."** |
+| a new `Result::evidence` vector, recording which declarations a pass consulted | the claim's own `evidence` field - *"the measurement that justified it, so a report can say why and not only who"* |
+| splits an unexplained declaration by whether its mesh is held under another name | consequence 1, **order is policy**: *"whoever runs first takes a facet and it becomes invisible to everyone after"* |
+| cost: a struct field, two vectors, a per-facet class array, two report blocks | consequence 5: *"Every new answer costs plumbing... the reason this document exists rather than a sixth feature."* |
+
+**And the number it could not produce is the one purity gives away for free.**
+The census cannot say how many fitted or tessellated facets had a declaration
+*available*, because `owned` names an original's surfaces rather than a facet's.
+That was going to need a positive `Provenance` query. Under a **pure Propose**
+it needs nothing: every recogniser proposes over the whole mesh regardless of
+what has been taken, so a claim naming a declared surface *is* the evidence that
+a declaration was available there. The question stops needing an instrument.
+
+**Where the ledger is actually incomplete, measured.** `recogniseQuadricPatches`
+already proposes over held facets and records the loss - which is why *"56
+facets this quadric also covers are held by something that claimed them first"*
+exists at all. But it records a claim only when the facet is **held by someone
+else**; a facet it claims and then drops to its own span rule or `worst > band`
+leaves no entry. And the band pass, which runs first and takes 536 facets on
+lid10, records only what it honours. So the catalogue is missing exactly the
+claims that would answer the census's hardest question.
+
+**So the next step is not another instrument.** It is to finish **step 1** of
+the plan below - *every pass records its claims into the ledger while `consumed`
+still decides everything* - and to extend it from "what a pass lost" to "every
+claim a pass would make, honoured or not". That is additive, behaviour-neutral
+and testable by the suite not moving a number, and it turns the census from a
+reconstruction of `consumed` into a read of the catalogue.
+
+The census stays meanwhile: it is measurement, it found nine declarations to
+explain, and its limits are now written down beside it.
+
 ## Migrating without a big bang
 
 The suite is 58 tests and it has a known history of blind spots - the flagship

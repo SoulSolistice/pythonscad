@@ -6,10 +6,23 @@ prompt to paste.
 
 Branch `claude/step-claim-two-pass`, suite **58 of 58**, nothing pushed.
 
-**This session attempted R0 and reverted it.** The exporter's behaviour is
-exactly what it was at `006ab3b45`; what is new is one behaviour-neutral
-refactor, a great deal of measurement, and a sharper statement of the ladder's
-governing philosophy. Read section 1.2 and section 2 before touching regions.
+**This session attempted R0, reverted it, and then spent the rest of itself
+rediscovering things `doc/step-recognition-design.md` already said.** That is
+the session's main lesson and it is worth more than its output:
+
+> Before building anything in recognition, find the paragraph in
+> `doc/step-recognition-design.md` that already covers it. R0's region test was
+> specified there (*"the facets whose maker owns this surface and which lie on
+> it, connected"*) and was implemented with a tessellation band instead. The
+> declaration census re-derived *"Why is this facet a plane? - read the
+> ledger"*, *"order is policy"*, and the claim's own `evidence` field - the
+> document's consequence 5 names that exact temptation: *"Every new answer costs
+> plumbing... the reason this document exists rather than a sixth feature."*
+
+The plan in section 3 is therefore expressed in **that document's own numbered
+migration steps**, not in parallel ones. The exporter's behaviour is what it was
+at `006ab3b45` plus one behaviour-neutral refactor and the census; what else is
+new is measurement and a sharper statement of the ladder's philosophy.
 
 ---
 
@@ -285,13 +298,24 @@ work; the list below is that shape in order.
    lid10's four and three of the bayonet's five already have their answer
    narrowed: their mesh is held under another surface's name.
 
-2. **Attribution: is every facet held for the surface the model says it belongs
-   to?** The other half of *used as intended*. Utilisation asks whether a
-   declaration was consumed at all; attribution asks whether what consumed it
-   was entitled to. Measured already and unexplained: **60 facets on lid10 whose
-   losing claim names a *different* surface** - a real contest settled by call
-   order, and two orders of magnitude smaller than the 452 headline that
-   dissolved. `Provenance` can answer it and today only vetoes with it.
+2. **Finish step 1 of `doc/step-recognition-design.md`'s migration plan**, and
+   read that plan rather than this line. *Every pass records its claims into the
+   ledger while `consumed` still decides everything* - additive,
+   behaviour-neutral, and the suite must not move a number.
+
+   What is missing, measured: `recogniseQuadricPatches` proposes over held
+   facets but records a claim only when someone **else** holds them, so a facet
+   it claims and then drops to its own span rule or `worst > band` leaves no
+   entry; and the band pass, which runs first and takes 536 facets on lid10,
+   records only what it honours. Extend it from *what a pass lost* to **every
+   claim a pass would make, honoured or not**.
+
+   That is what makes the census a read of the catalogue instead of a
+   reconstruction of `consumed`, and it is what supplies the one number the
+   census cannot: under a pure Propose, a claim naming a declared surface *is*
+   the evidence that a declaration was available on that facet, so the positive
+   `Provenance` query stops being needed for it. Then **step 3** - flip the
+   source of truth from `consumed` to the ledger - and only then step 4.
 
 3. **R0 properly** (open item 29), if step 2 says the region is larger than what
    is written. Two parts: the region from step 2's query, carrying no tolerance;
