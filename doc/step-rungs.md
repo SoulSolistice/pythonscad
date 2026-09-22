@@ -26,7 +26,17 @@ entity is:
 | **D3 - fitted to the mesh** | a shape fitted to tessellation vertices; correct only to the tessellation | by D0-D2 |
 | **D4 - the tessellation itself** | a chord, a facet plane. States nothing about the model | by everything |
 
-Two consequences that have each cost a day:
+**The philosophy the ladder rests on, and everything below is a consequence of
+it:** *a closed form is exact by definition and has to stay.* So the classes are
+a **covering order**, not merely a tie-break. Every D0 representation is covered
+first, then D1 takes what is left, then D2, then D3, and D4 takes only what
+nothing above it could. A lower rank never drives a higher one, and nothing ever
+falls *down* the ladder: an entity already written in closed form may be
+exchanged for another closed form, never surrendered to a chord or a facet
+plane. Days of debugging are in that sentence, and the one attempt that ignored
+it is recorded under *Regions*, below.
+
+Three consequences that have each cost a day:
 
 - **A D4 may never be an input to a D0-D2.** A facet's plane is not a plane; a
   chord is not a constraint. The corner arbiter enforces this (`kCornerTiers`
@@ -36,13 +46,53 @@ Two consequences that have each cost a day:
   anything. Code 17 cannot see the difference, which is why code 17 went *up*
   when the wrong curves were removed.
 
+## How to read a result, because the obvious metric is the wrong one
+
+**Consume what is exact first, and protect it.** That is the whole concept, and
+provenance, type and class are how it is expressed. A pass that takes whatever
+it *can* take - without asking whose surface it is or whether the form it will
+write is algebraically closed - is **greedy**, and greed is the thing the
+classes exist to stop.
+
+**So a rising fault census is not by itself a regression.** Code 17 counts edges
+that do not lie on the face they bound. Greedy consumption *hides* such edges by
+absorbing the facets into something that will tolerate them; every step towards
+exactness exposes them, because an exact face is strict about its boundary where
+a facet plane is not. As the foundation gains exactness the count goes **up**,
+and that is the ladder working, not failing. This is why C5 is still in place:
+removing the wrong curves before their inputs are fixed took code 17 from 42 to
+198 on lid10, and the number is a symptom of the inputs, not a verdict on the
+change.
+
+**And a census that does not move is not a statement that nothing moved.** The
+R0 attempt of 2026-09-22 is the worked example: the census was *identical* -
+0/0/0/3/162, same worst 0.108893, same breakdown - while the exact tier lost a
+conical face and 56 facets to planes. The census could not see it.
+
+**What to watch instead**: how much of the model is written in closed form, per
+declared surface, and whether any closed form was **surrendered** rather than
+exchanged. Analytic face counts by kind, exact curve counts, and the derived
+volume where the model has one. Those are the measures the ladder is about.
+
 ## The inventory
+
+**Each geometric primitive carries its own deterministic ladder, and that is
+why this inventory is split the way it is.** What determines a circle is not
+what determines a surface, and neither is what determines a region. So curves
+have C0-C6, surfaces S0-S3, regions R0-R2, corners their own two tables, and
+each is resolved on its own ladder, exact first. The ladders do not borrow one
+another's evidence, and a decision on one may not demote an entity on another.
+
+The R0 attempt of 2026-09-22 broke both halves of that in one change: a
+**region** question was decided by a *surface-membership distance* - the
+tessellation band - and the answer was then allowed to take a **surface** entity
+from S0 down to S3. Two ladders crossed, and the exact one lost.
 
 ### Curves, by what determines them
 
 | rung | curve | determined by | class | today |
 | --- | --- | --- | --- | --- |
-| C0 | **no edge at all** | both sides are the *same* declared surface - there is no boundary | D0 | **not implemented**: 78 such edges on lid10, 18 on the bayonet, 31 on f04, written as a section of a surface by its own chord plane. R0 did not move any of those counts, which is the finding: they are not where a band truncated a region but where the *general* pass refused one - a claim whose boundary strays too far, a facet reaching too far round the axis, a sweep facet off its fit. Open item 27 |
+| C0 | **no edge at all** | both sides are the *same* declared surface - there is no boundary | D0 | **not implemented**: 78 such edges on lid10, 18 on the bayonet, 31 on f04, written as a section of a surface by its own chord plane. the R0 attempt of 2026-09-22 did not move any of those counts, which is the finding: they are not where a band truncated a region but where the *general* pass refused one - a claim whose boundary strays too far, a facet reaching too far round the axis, a sweep facet off its fit. Open item 27 |
 | C1 | `CIRCLE` on a quadric's rim | the surface's own axis and radius, where both ends share an axial level | D0 | **landed 2026-09-21**, 60 edges on lid10 |
 | C2 | `CIRCLE` / `ELLIPSE` / `HYPERBOLA` / `PARABOLA` | a **declared** plane cutting a declared quadric | D0 | implemented - but measured 0 of 78 on lid10 use a declared plane |
 | C3 | crossing of two declared surfaces (`B_SPLINE_CURVE`) | both declarations, solved to 1e-7 of each | D2 | implemented (`intersectionArc`), reached only when both sides are *written* as analytic faces |
@@ -52,8 +102,8 @@ Two consequences that have each cost a day:
 
 The gap that matters is **C0**, and it is not a curve at all: the commonest
 "conic" in this exporter is the seam of one surface against itself. R0 was
-expected to remove most of it and removed none of it - see *What the survey says
-to do*, below, and open item 27.
+expected to remove most of it and, measured, removed none of it - see *What the
+survey says to do*, below, and open item 27.
 
 ### Surfaces, by what determines them
 
@@ -68,30 +118,65 @@ to do*, below, and open item 27.
 
 | rung | rule | class | today |
 | --- | --- | --- | --- |
-| R0 | the whole connected region the surface covers | D0 | **landed 2026-09-22.** A band measures whether its ring is the whole of what its surface covers there, and gives the region up rather than truncating it. No surface is split on any reference part or fixture |
-| R1 | provenance: the facets whose maker owns this surface | D0 | used by R0 as its first question, and as a gate elsewhere |
-| R2 | whatever a recogniser's own form can express | D4 | what the band pass did until R0 |
+| R0 | the whole connected region the surface covers | D0 | **not implemented.** Attempted 2026-09-22 and reverted; the attempt is `claude/step-region-r0-optimistic-parked` and what it measured is below |
+| R1 | provenance: the facets whose maker owns this surface | D0 | available (`Provenance`), used only as a *gate*. Its **positive** form is what R0 needs and it does not exist |
+| R2 | whatever a recogniser's own form can express | D4 | what the band pass does today |
 
-**How R0 is decided, since the yardstick is the point.** The band asks
-`OnQuadric` - the *same* predicate `recogniseQuadricPatches` admits facets with -
-to grow its ring across mesh edges into every facet the surface runs through,
-with provenance asked first. One definition of "on this surface", so a band
-cannot keep a partial claim because its own test disagreed with the test that
-then claimed the rest.
+#### What the attempt got wrong, and it is a class error
 
-**And it runs after every band has claimed, not at the claim.** Asked inside the
-seed loop it judges a band against a state the pass has not finished producing.
-A sphere is a *stack* of bands and each ring's neighbours are siblings not yet
-claimed, so every ring looked truncated, every band was given up, and
-`step-sphere` came out as 482 planes. Run once the claims are in, a ring's
-neighbours are held and the walk stops at them. Claim, then revise - which is
-what open item 25 concluded the grid claim needs, reached from the other end.
+**R0 is D0**, and this table says what D0 means: *fixed by declarations alone -
+no fit, no tolerance, no sample*. The implementation asked whether a facet was
+within `min(bandOf(facet), max_off)` of the surface. `bandOf` is the
+**tessellation band**, a D4 quantity, and `max_off` is a tolerance. So the rung
+the survey calls D0 was decided by the tessellation, which is exactly what the
+line above the inventory forbids:
 
-**What the tier means here.** At 1e-7 no surface on lid10, the bayonet or
-`step-split-surface` is split at all - measured 2026-09-22 by exporting without
-`--enable=step-approximate-surfaces`. The region only exceeds the ring in the
-tier that spends the tessellation band, so R0 fires there and is silent in the
-exact tier, which is self-consistent rather than a special case.
+> A D4 may never be an input to a D0-D2.
+
+The code contradicted the document it claimed to implement, and nothing in the
+suite could see that, because the suite checks results and not classes.
+
+**The symptom, measured.** Run in the exact tier on lid10 it gave two regions
+up; the trimmed-quadric writer then refused them under its own rule - *"3
+trimmed quadric regions left faceted - the surface is exact but some of it is
+bounded off itself, and half a surface is worse than none"* - and 56 facets that
+had been an exact conical face came out as planes:
+
+| lid10, `--enable=step-analytic-surfaces` alone | before | after |
+| --- | --- | --- |
+| `Cone` faces, OCCT | 9 | **8** |
+| `Plane` faces | 1574 | 1630 |
+| `CIRCLE` | 413 | 411 |
+| `LINE` | 3466 | **3633** |
+
+Two rules each correct alone, composing into a loss. The exact tier got less
+exact, which is the one thing the rungs exist to prevent.
+
+**What R0 actually needs**, and it is two things, not one:
+
+1. **A region determined without a tolerance.** Provenance already has the
+   answer and `export_step.cc` already derives it: per original and per surface,
+   `covered` (every corner on the surface) and `covered_cut` - *"a cut facet has
+   lost a corner to the boolean and still belongs to the surface the other two
+   are on, which is the whole point of asking about origin rather than about
+   fit"*. That is D0 and the same in both tiers. What is missing is a positive
+   `Provenance` query; today it only answers `excludes`.
+2. **A closed form may be exchanged, never surrendered.** A band on a declared
+   cone and a trimmed patch on the same declared cone are both S0, both D0 -
+   moving between them costs no rank, and that part of the idea was sound. What
+   the attempt actually did was give the band up *in the hope* that the patch
+   would be written, and when the writer refused it the region fell all the way
+   to D4 planes. Nothing may fall down the ladder. So the band must *propose*
+   its ring and the patch *propose* the whole region, and the whole-region claim
+   win **only among claims that will actually be written** - propose, arbitrate,
+   assemble, from `doc/step-recognition-design.md`, which is the part that is
+   not built.
+
+**And the approximation tier is not a way round it.** Confining the rule to
+`--enable=step-approximate-surfaces`, where it was measured to cost nothing and
+buy 110 exact circles, was tried and rejected in the same session: it would
+relabel R0 as an approximation-tier rule, and R0 is D0. A D0 rung does not
+become sound by being switched off where it fails.
 
 ### Corners
 
@@ -101,14 +186,15 @@ and is not restated here.
 
 ## What the survey says to do, in order
 
-1. ~~**C0 and R0 are the same defect** and come first.~~ **R0 landed
-   2026-09-22, and the two turned out not to be the same defect.** Claiming
-   regions whole removed every split surface and bought 110 more exact circles
-   on lid10, and left C0's 78 seam edges exactly where they were. They share a
-   description - facets of a surface that an analytic face does not cover - and
-   not a cause: R0's were facets a *band* left behind because its form could not
-   hold them, C0's are facets the *general* pass refused, each with a reason it
-   states. The order below still holds; the reason for it was half wrong.
+1. ~~**C0 and R0 are the same defect** and come first.~~ **Measured
+   2026-09-22, and they are not the same defect.** The R0 attempt removed every
+   split surface and bought 110 more exact circles on lid10, and left C0's 78
+   seam edges exactly where they were. They share a description - facets of a
+   surface that an analytic face does not cover - and not a cause: R0's were
+   facets a *band* left behind because its form could not hold them, C0's are
+   facets the *general pass refused*, each with a reason it states. So **C0 can
+   be taken on its own**, and it no longer waits on R0. The order below still
+   holds; the reason given for it was half wrong.
 2. **C2 before C5.** Once regions are whole, a section plane is either declared
    or a genuine flat face; the facet case disappears rather than being refused.
 3. **C3 where two declarations genuinely meet** - already correct, and it will

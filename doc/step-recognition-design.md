@@ -341,73 +341,115 @@ looked like a defect, survived a precision check (0 misheld), survived a
 provenance check (0 separated), and only dissolved when the claims were asked
 what surface they were *for*. Every intermediate step read like progress.
 
-### R0, as landed - 2026-09-22
+### R0, attempted and reverted - 2026-09-22
 
-The band pass now measures whether the ring it found is the whole of what its
-surface covers there, and gives the region up rather than truncating it.
+The band pass was made to measure whether the ring it found is the whole of what
+its surface covers there, and to give the region up rather than truncate it.
+**It was landed, measured, and taken out again.** The code is parked on
+`claude/step-region-r0-optimistic-parked`. What it bought, what it cost and
+which of this document's own instructions it skipped are all worth keeping,
+because the next attempt is the same rung.
 
-**How it asks, and this is the part worth copying.** It asks with `OnQuadric`,
-which is `recogniseQuadricPatches`'s own per-facet admission test lifted into a
-shared class - lean, corners inside `max_off` and inside the mesh's own
-concession, interior inside the sagitta the facet's span implies - with
-provenance asked before any of it. One definition of *on this surface*, shared
-by the pass that gives a region up and the pass that takes it. Two definitions
-would let a band keep a partial claim because its own test disagreed with the
-test that then claimed the rest, which is the defect wearing a different hat.
-The extraction was landed and verified separately: byte-for-byte the same
-reports and the same volumes on lid10 and `step-split-surface`, suite 56 of 56.
+#### What it bought, measured on the same build
 
-**And it runs after the whole seed loop, which is the only reason it works.**
-The first version asked at the claim and regressed three fixtures. A sphere is
-written as a *stack* of bands - one per ring of its tessellation - so at the
-moment a ring is claimed its neighbours are siblings that do not exist yet;
-every ring therefore looked like a truncated region, every band was given up,
-one drop cascaded into the next through "the band sharing this rim was dropped",
-and `step-sphere` exported as 482 planes with 448 corners off their own
-surfaces. Run once every band has claimed, a ring's neighbours are *held* and
-the walk stops at them, which is what the chain means. This is the same lesson
-as open item 25's, reached from the other end: **claim, then revise.** The
-revision runs to a fixed point, because giving one band up frees its facets and
-a neighbour on the same surface should go with it rather than be left holding
-half a region; dropping is monotone, so it terminates.
-
-**What it cost and bought**, same build before and after:
-
-| | base | R0 |
+| | base | attempt |
 | --- | --- | --- |
-| lid10 split surfaces | 1 (cone 50) | **none** |
-| lid10 regions given up whole | - | surfaces 9 (4 of 76), 50 (56 of 62), 52 (36 of 61) |
-| lid10 facets covered analytically | 536 band + 377 patch = 913 | 480 + 433 = **913** |
-| lid10 `CIRCLE` | 300 | **410** |
-| lid10 census 7 / 16 / 13 / 21 / 17 | 0 / 0 / 0 / 3 / 162 | **identical, same worst 0.108893, same breakdown** |
-| lid10 faces, OCCT | 845, 1 solid, 1 shell | **845, 1 solid, 1 shell** |
-| `step-split-surface` volume | 15646.585807, **-1.0489 against the model** | **15647.634695, -1.9e-11** |
-| `step-bored-cylinder` approximation volume | 5298.405620 (derived 5298.405619) | **5298.405620** |
-| `step-bored-cylinder` cylinder faces | 8 | **4** |
+| lid10 split surfaces | 1 (cone 50) | none |
+| lid10 facets covered analytically | 913 (536 band + 377 patch) | 913 (480 + 433) |
+| lid10 `CIRCLE` | 300 | 410 |
+| lid10 census 7/16/13/21/17 (`fault-census.py`, this tree) | 0/0/0/3/162 | identical, same worst 0.108893 |
+| lid10 faces, OCCT | 845, 1 solid, 1 shell | identical |
+| `step-split-surface` volume | 15646.585807, -1.0489 against the model | **15647.634695, -1.9e-11** |
+| `step-bored-cylinder` approximation volume | 5298.405620 (derived 5298.405619) | unchanged |
+| `step-bored-cylinder` cylinder faces | 8 | 4 |
 
-The facet count is the line to read first: **the same facets are written
-analytically, in fewer faces, with more exact curves.** Nothing was given up to
-a fallback. `step-bored-cylinder` is the clearest case - the same exact volume,
-in six faces instead of ten, because the wall arrives at the trimmed-quadric
-pass in one piece instead of in the pieces a band's ring left between its two
-arc-bounded strips.
+The trimmed patch reproduces the proof of concept's +110 circles exactly, and
+`step-split-surface` - the fixture built for this question because it carries a
+**derived** volume - became exact. Those results stand; they are not why it was
+reverted.
 
-**What it did not do, and this was the expectation to lose.** `doc/step-rungs.md`
-said C0 and R0 were one defect from two ends. They are not. The 78 edges on
-lid10 written as a section of a surface by its own chord plane are **still 78**,
-18 on the bayonet and 31 on f04 unmoved. Those facets are not ones a band left
-behind; they are ones the *general* pass refused, each with a stated reason - a
-claim whose boundary strays 0.1094 where the tessellation allows 0.0067, 20
-facets reaching further round the axis than four times the typical span, 24
-sweep facets off their fit. C0 is a refusal problem, and open item 27 is where
-it goes.
+#### Why it was reverted: the rung was not the class it claimed
 
-**Unadjudicated.** lid10's own volume moved from 224683.668014 to 224711.283834
-by OpenCASCADE's reckoning, 1.2e-4 relative. lid10 has no derived volume, so
-nothing here says which is right; the direction is the one more analytic
-coverage predicts, since a chord plane cuts inside the surface it replaces, and
-the fixture that *does* have a derivation became exact. That is as far as the
-evidence goes.
+`doc/step-rungs.md` puts R0 in **D0**, and D0 means *fixed by declarations
+alone: no fit, no tolerance, no sample*. The implementation decided membership with
+`min(bandOf(facet), max_off)`: `bandOf` is the **tessellation band** and
+`max_off` is a tolerance. A D4 quantity was the yardstick of a D0 rung, which
+the survey forbids in the line directly under its own class table.
+
+**And this document had already said what the right test was.** Two sections
+up, under *region first, representation second*:
+
+> Determine the region from the declaration and provenance - the facets whose
+> maker owns this surface and which lie on it, connected.
+
+Neither the declaration nor provenance decided anything in the attempt;
+provenance was asked only for its veto. The instruction was written, and the
+implementation used a distance test instead.
+
+#### What the class error cost, and it is not academic
+
+Run in the exact tier on lid10, the rule gave two regions up. The
+trimmed-quadric writer then refused them under a rule of its own -
+
+```text
+3 trimmed quadric regions left faceted - the surface is exact but some of it is
+bounded off itself, and half a surface is worse than none
+```
+
+- and 56 facets that had been an exact conical face came out as planes:
+
+| lid10, `--enable=step-analytic-surfaces` alone | before | after |
+| --- | --- | --- |
+| `Cone` faces, OCCT | 9 | **8** |
+| `Plane` faces | 1574 | 1630 |
+| `CIRCLE` | 413 | 411 |
+| `LINE` | 3466 | **3633** |
+
+Two rules, each right on its own, composing into a loss - and the loss landed on
+the *exact* tier, which is the one the whole rung ordering exists to protect.
+**Nothing in the suite saw it**: lid10 is not a fixture, the flagship checks run
+with both flags, and no fixture asserts the exact tier's analytic coverage on a
+model where this fires. That gap is worth a fixture before the next attempt.
+
+#### The two things the next attempt needs
+
+1. **A region with no tolerance in it.** `export_step.cc` already derives it, per
+   original and per surface: `covered` (every corner on the surface) and
+   `covered_cut`, whose comment is the definition to use - *"a cut facet has lost
+   a corner to the boolean and still belongs to the surface the other two are
+   on, which is the whole point of asking about origin rather than about fit"*.
+   That is D0 and identical in both tiers. What is missing is a **positive**
+   `Provenance` query; today it answers only `excludes`.
+2. **A closed form may be exchanged, never surrendered.** This is the ladder's
+   governing philosophy and the deeper of the two errors. A band on a declared
+   cone and a trimmed patch on the same declared cone are both S0, both D0, so
+   moving between them costs no rank and that part of the idea was sound. What
+   the attempt did was give the band up *in the hope* that the patch would be
+   written; when the writer refused it, the region fell all the way to D4
+   planes. **Nothing may fall down the ladder.** So the band must *propose* its
+   ring, the patch *propose* the whole region, and the whole-region claim win
+   **only among claims that will actually be written** - this document's
+   Propose / Arbitrate / Assemble, which is the part that does not exist.
+
+#### The procedural lesson, and it is this document's own
+
+The migration plan below is five steps, and it says why: *"a wholesale rewrite
+validated against it is how a subtle regression ships"*. The attempt went
+straight to **step 4 - change policy** - while step 3, flipping the source of
+truth from `consumed` to the ledger, is not done and Propose is not pure. A
+subtle regression shipped, on the tier nobody was measuring. The plan was right
+and skipping it cost a landing.
+
+Two smaller notes from the same work, both kept:
+
+- `OnQuadric` - the trimmed-quadric pass's per-facet admission test, lifted into
+  one class so two passes cannot disagree about *"on this surface"* - was
+  landed separately, verified behaviour-neutral, and stays. It is the right
+  shape for the question it answers; it is simply not a D0 question.
+- **The exporter is not byte-deterministic.** The same binary exports the same
+  model twice with different entity numbering, most likely a `std::map` keyed on
+  a pointer. A behaviour-neutral change has to be verified by content - the
+  report text, the entity census, the derived volumes - never by diffing files.
 
 ### What this means for step 4
 

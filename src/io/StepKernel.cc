@@ -2029,22 +2029,8 @@ void StepKernel::build_tri_body(
     mesh.valid = &loop_valid;
     mesh.is_hole = &loop_is_hole;
     mesh.normals = &loop_normals;
-    AnalyticFeatures::Provenance provenance;
-    provenance.face_origin = &faceOrigin;
-    provenance.owned = &owned;
-    provenance.declared = surfaces.size();
-    // What the band pass needs to tell a whole region from a truncated one, and
-    // it is deliberately the *same* three things `recogniseQuadricPatches` is
-    // given below - the band asks its question of the pass that would take the
-    // remainder, not of itself. `max_off` is that pass's own tier: see
-    // AnalyticFeatures::WholeRegion.
-    AnalyticFeatures::WholeRegion whole;
-    whole.provenance = &provenance;
-    whole.smooth_angle = smooth_angle;
-    whole.max_off = approximate ? std::numeric_limits<double>::infinity() : 1e-7;
-    whole.enabled = true;
     features =
-      AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol, surfaces.size(), whole);
+      AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol, surfaces.size());
 
     // The approximation pass, and the only place in this exporter where a
     // surface is written that the model never declared.
@@ -2071,6 +2057,10 @@ void StepKernel::build_tri_body(
       }
       return std::size_t(-1);
     };
+    AnalyticFeatures::Provenance provenance;
+    provenance.face_origin = &faceOrigin;
+    provenance.owned = &owned;
+    provenance.declared = surfaces.size();
     if (approximate) {
       const std::vector<AnalyticFeatures::SmoothRegion> candidates =
         AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
@@ -2171,8 +2161,8 @@ void StepKernel::build_tri_body(
         // Re-run with the fits in hand. Cheaper than threading them through the
         // pass that has already run, and it means a fitted surface goes through
         // exactly the checks a declared one does.
-        features = AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol,
-                                                                   surfaces.size(), whole);
+        features =
+          AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol, surfaces.size());
         std::size_t lost = 0, demoted = 0;
         for (std::size_t f = 0; f < exact_consumed.size() && f < features.consumed.size(); f++) {
           if (exact_consumed[f] == 0) continue;  // the declared-only pass did not have it

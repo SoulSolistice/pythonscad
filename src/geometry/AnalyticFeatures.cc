@@ -2647,7 +2647,7 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
 
 Result recogniseSurfacesOfRevolution(const Mesh& mesh,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
-                                     std::size_t declared_count, const WholeRegion& whole)
+                                     std::size_t declared_count)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -2825,11 +2825,6 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     }
     return true;
   };
-
-  // Which surface each band answered to, parallel to `bands`. A Band records
-  // its own geometry but not which record matched it, and the region check
-  // below has to ask that record where its surface runs.
-  std::vector<std::size_t> band_surface;
 
   for (std::size_t seed = 0; seed < face_cnt; seed++) {
     if (!loop_valid[seed] || consumed[seed] || loop_is_hole[seed]) continue;
@@ -3134,143 +3129,12 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       for (const std::size_t f : walls) {
         consumed[f] = 1;
         result.consumed_by[f] = "a band's wall";
+        result.ledger.add({f, nullptr, ClaimPrecision::DeclaredExact, "a band's wall",
+                           "the facet walks out from the band's seed", true, matched});
         band_of_loop[f] = bands.size();
       }
-      band_surface.push_back(matched);
       bands.push_back(info);
       break;
-    }
-  }
-
-  // ---- R0: the region comes from the surface, the representation from the
-  // region - never the other way round ------------------------------------
-  //
-  // Every band has now measured a ring and found a surface that states it. The
-  // question left is whether each ring is the *whole* of what its surface
-  // covers there. Grow the ring across mesh edges into every facet the surface
-  // runs through, by the test the pass that would take the remainder uses, and
-  // stop at anything else. If the walk gets out of the ring, the region is
-  // larger than a band can write, and writing the ring anyway splits one
-  // surface into two kinds of face with a boundary the model never asked for.
-  // So the band gives the whole region up rather than truncating it.
-  //
-  // That is not a loss of exactness: a trimmed patch writes a CIRCLE for a
-  // circular run of its boundary just as a band does for a rim, and on
-  // step-split-surface the patch writes 96 arcs where the band wrote 11.
-  // Measured on that fixture, 2026-09-22: the band's ring is 28 of the 32
-  // facets of a declared cylinder and the solid it bounds is 1.0489 mm3 under
-  // the model's own closed form, where the whole region written as one patch is
-  // exact to 1.9e-11. Neither OpenCASCADE nor SOLIDWORKS can tell the two files
-  // apart - both read valid, zero faults - so the only thing that adjudicates
-  // this is the model's arithmetic.
-  //
-  // **It runs here and not at the claim, and that is the whole of it.** Asked
-  // inside the seed loop it judges a band against a state the pass has not
-  // finished producing, which is the trap this project has paid for four times:
-  // a nearly-right quantity answering a question it was not asked. A sphere is
-  // written as a *stack* of bands, one per ring of its tessellation, and each
-  // ring's neighbours are the siblings that have not been claimed yet - so
-  // every ring looked like a truncated region, every band was given up, and the
-  // sphere came out as 482 planes. Run once the claims are in, a ring's
-  // neighbours are held and the walk stops at them, which is what the chain
-  // means.
-  //
-  // To a fixed point, because giving one band up frees its facets and a
-  // neighbour on the same surface should go with it rather than be left holding
-  // half a region. Dropping is monotone, so it terminates.
-  std::map<std::size_t, std::pair<std::size_t, std::size_t>> given_up;  // surface -> ring, region
-  if (whole.enabled) {
-    std::vector<char> dropped(bands.size(), 0);
-    bool again = true;
-    while (again) {
-      again = false;
-      for (std::size_t bi = 0; bi < bands.size() && !again; bi++) {
-        if (dropped[bi]) continue;
-        const std::size_t matched = band_surface[bi];
-        if (matched >= surfaces.size()) continue;
-        const OnQuadric on_surface_whole(mesh, loop_edges_map, surfaces[matched].get(),
-                                         whole.smooth_angle);
-        if (!on_surface_whole.valid()) continue;
-        const std::vector<std::size_t>& walls = bands[bi].walls;
-        // `seen` starts as the ring, so anything the walk admits is by
-        // definition a facet of this surface the band would leave behind.
-        std::vector<std::size_t> stack(walls.begin(), walls.end());
-        std::set<std::size_t> seen(walls.begin(), walls.end());
-        std::size_t beyond = 0;
-        while (!stack.empty()) {
-          const std::size_t cur = stack.back();
-          stack.pop_back();
-          const auto& loop = loops[cur];
-          for (std::size_t j = 0; j < loop.size(); j++) {
-            const auto it = loop_edges_map.find(edge_key(loop[j], loop[(j + 1) % loop.size()]));
-            if (it == loop_edges_map.end()) continue;
-            for (const std::size_t nb : it->second) {
-              if (seen.count(nb) || consumed[nb]) continue;
-              // Ask the model before measuring: where the generator says this
-              // facet's maker does not own this surface, no distance test can
-              // make it part of the region. The same gate, and the same reason,
-              // as in recogniseQuadricPatches.
-              if (whole.provenance != nullptr && whole.provenance->excludes(nb, matched)) continue;
-              if (!on_surface_whole.covers(nb, whole.max_off)) continue;
-              seen.insert(nb);
-              stack.push_back(nb);
-              beyond++;
-            }
-          }
-        }
-        if (beyond == 0) continue;
-        // The whole region is walked rather than stopped at the first facet
-        // beyond the ring, because a count that is always one says nothing
-        // about how much of the surface a band was about to leave behind.
-        auto& entry_for = given_up[matched];
-        entry_for.first = std::max(entry_for.first, walls.size());
-        entry_for.second = std::max(entry_for.second, beyond);
-        dropped[bi] = 1;
-        for (const std::size_t f : walls) {
-          consumed[f] = 0;
-          result.consumed_by[f] = nullptr;
-          band_of_loop[f] = NO_BAND;
-        }
-        again = true;
-      }
-    }
-    // Compact rather than mark. Everything below indexes `bands` - the rim
-    // resolution, the zone merge, `band_of_loop` - and a band given up here was
-    // never formed as far as any of it is concerned, which is not the same
-    // state as one those rules drop later with a reason attached.
-    if (!given_up.empty()) {
-      std::vector<Band> kept;
-      std::vector<std::size_t> kept_surface;
-      std::vector<std::size_t> renumber(bands.size(), NO_BAND);
-      for (std::size_t bi = 0; bi < bands.size(); bi++) {
-        if (dropped[bi]) continue;
-        renumber[bi] = kept.size();
-        kept.push_back(std::move(bands[bi]));
-        kept_surface.push_back(band_surface[bi]);
-      }
-      bands = std::move(kept);
-      band_surface = std::move(kept_surface);
-      for (std::size_t f = 0; f < band_of_loop.size(); f++) {
-        if (band_of_loop[f] != NO_BAND) band_of_loop[f] = renumber[band_of_loop[f]];
-      }
-    }
-    for (const auto& kv : given_up) {
-      result.report.push_back(
-        format("%s %d is given up whole rather than written as a band: the ring a band can write "
-               "is %d facets and the region that surface covers there is %d, joined to it, so a "
-               "band would write part of one surface and leave the rest to another kind of face",
-               kv.first < declared_count ? "declared surface" : "fitted surface", int(kv.first),
-               int(kv.second.first), int(kv.second.first + kv.second.second)));
-    }
-  }
-
-  // The ledger records what survived the revision above, not what the seed loop
-  // proposed: a claim withdrawn before anything acted on it was never a claim,
-  // and the shadow check holds the ledger to what `consumed` says.
-  for (std::size_t bi = 0; bi < bands.size(); bi++) {
-    for (const std::size_t f : bands[bi].walls) {
-      result.ledger.add({f, nullptr, ClaimPrecision::DeclaredExact, "a band's wall",
-                         "the facet walks out from the band's seed", true, band_surface[bi]});
     }
   }
 

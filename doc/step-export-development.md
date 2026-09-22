@@ -723,46 +723,35 @@ where it lives. A fix aimed at those three surfaces would be worthless.
    / `runCircle`), so a trimmed patch keeps exact rims. Rim exactness is not a
    band privilege.
 
-**Landed 2026-09-22 as R0**, and the measurements are in
-`doc/step-recognition-design.md`, *R0, as landed*. Three things about it
-generalise past this one rung:
+**Attempted and reverted 2026-09-22**, and the full account is in
+`doc/step-recognition-design.md`, *R0, attempted and reverted*. The short form,
+because the failure is more useful than the feature would have been:
 
-- **One definition of "on this surface", shared by whoever gives a region up and
-  whoever takes it.** The band asks `OnQuadric`, which is the trimmed-quadric
-  pass's own admission test lifted into a class. A second definition would let a
-  band keep a partial claim because its own test disagreed with the test that
-  then claimed the rest - the defect in a different hat.
-- **Decide after the pass has finished claiming, not during it.** Asked at the
-  claim, the region test judged each band against a state that did not exist
-  yet: a sphere is a *stack* of bands, so every ring's neighbours were siblings
-  not yet claimed, every ring looked truncated, and `step-sphere` came out as
-  482 planes. This is *claim, then revise* - open item 25's conclusion, reached
-  from the other end - and it is the fifth time a provisional input has produced
-  a plausible wrong answer here.
-- **The same facets, in fewer faces, with more exact curves.** lid10 writes 913
-  facets analytically before and after; the division between band and patch
-  moved and the total did not. That is the line to read first when judging a
-  claim change, because a count of faces moves either way and says nothing.
+- **The rung is D0 and the implementation was not.** Membership was decided by
+  `min(bandOf(facet), max_off)` - the tessellation band, a D4 quantity, as the
+  yardstick of a rung `doc/step-rungs.md` classes D0. Step 1 above says *from
+  the declaration and provenance*, and neither decided anything.
+- **It cost the exact tier a conical face.** Two regions given up, the writer
+  refused them under *"half a surface is worse than none"*, and 56 facets that
+  were an exact cone came out as planes. Cone faces 9 to 8 on lid10, 167 more
+  `LINE`s, two fewer `CIRCLE`s - on the tier the rung ordering exists to
+  protect. Nothing in the suite saw it, because no fixture asserts the exact
+  tier's analytic coverage on a model where it fires.
+- **A region rule may not destroy a representation on its own.** Giving a band
+  up is a bet that something else writes the region; when nothing does, the
+  answer is planes. The whole-region claim has to win *among claims that can be
+  written*, which needs the arbiter that is not built.
+- **What was kept**: `OnQuadric`, one definition of "on this surface" shared by
+  the passes that ask it, verified behaviour-neutral. And the knowledge that the
+  exporter is not byte-deterministic, so a behaviour-neutral change is verified
+  by content and never by diffing exports.
 
-**And one expectation to unlearn.** `doc/step-rungs.md` had C0 and R0 as one
-defect from two ends. Claiming regions whole removed every split surface and
-left C0's 78 seam edges on lid10 exactly as they were. They share a description
-and not a cause: R0's facets were ones a *band* could not hold, C0's are ones
-the general pass **refused**, each with a stated reason. See open item 27.
-
-**And it is enforceable, not just stated.** The claim ledger makes the invariant
-checkable, which is the whole reason the ledger exists:
-
-> For every declared surface, the facets held for it are held by **one** kind of
-> recogniser, and are the whole connected region the declaration covers.
-
-The export already raises an `EXPORT-WARNING` naming any surface that fails it,
-with the division, the originals on each side, and how many mesh edges cross the
-divide - so a new geometry that trips this says so on the first export instead
-of being found years later as a strange effect in a CAD system. Two of the three
-questions a reader would ask are answered in the same line: whether the pieces
-touch (a boolean may legitimately leave two), and whether the model considers
-them one thing.
+**And one expectation to unlearn, which the attempt did establish.**
+`doc/step-rungs.md` had C0 and R0 as one defect from two ends. With regions
+claimed whole, every split surface went and C0's 78 seam edges on lid10 did not
+move at all. They share a description and not a cause: R0's facets were ones a
+*band* could not hold, C0's are ones the general pass **refused**, each with a
+stated reason. See open item 27.
 
 ### A point carries whether it has moved, and identity is never inferred from a coordinate
 

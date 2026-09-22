@@ -20,9 +20,10 @@ rules and the tooling. The session of 2026-09-16 to 18 is summarised under
 
 > **Superseded 2026-09-22 by `doc/step-export-next-session.md`**, which carries
 > the current doctrine, the current measurements and the current priming prompt.
-> The prompt immediately below is kept for its account of where the work stood
-> before R0 landed; its "where to start" is done. The standing rules further
-> down this section still bind.
+> The prompt immediately below is kept for its account of where the work stood;
+> its "where to start" item 1 was attempted and reverted, so it is still open,
+> but read open item 29 rather than the prompt for what it now needs. The
+> standing rules further down this section still bind.
 
 ### The priming prompt
 
@@ -261,11 +262,11 @@ not read its green as the defect being gone.
 `export-step-flagship-strict` was the second until 2026-09-16, when open item 11
 landed; it asserts that the plane veto never gives up the crossing-curve
 boundary and passes on its own merits.
-`export-step-representation` was the third until 2026-09-22, when R0 landed -
-a band gives a region up whole rather than writing part of one surface - ctest
-reported it as a *failure* because it had started passing, and the marking came
-off. It now also asserts the model's own derived volume for
-`step-split-surface`, 15647.634695, which the export meets to 1.9e-11.
+`export-step-representation` is the second, and it is still `WILL_FAIL`. On
+2026-09-22 R0 made it pass and ctest duly reported it as a *failure*, which is
+the marking working; the attempt was then reverted for reasons of its own, so
+the marking stays. It now also carries the model's derived volume for
+`step-split-surface`, 15647.634695, as a second assertion.
 `export-step-sanitytest_step-cap-meets-wall` was the third until 2026-09-16,
 when the placement onto the crossing of the two faces a corner bounds fixed the
 slack it was marked for - ctest reported it as a *failure* that day, which is
@@ -3687,12 +3688,59 @@ volume. **The lesson is the one the fixture was built for**: a defect found at a
 rim was closed at the rim, and the number that was left over belonged to a
 different mechanism entirely. Only the derived volume said so.
 
-**R0 closes it.** The region is claimed whole, the chamfer's facets go into the
-conical face they belong to, and the export measures **15647.634695** against
-the model's 15647.634695 - 1.9e-11 relative.
-`tests/step-representation-check.py` now asserts that absolute figure as well as
-the property, its `WILL_FAIL` marking is off, and the mutation check (the
-derived constant set to the old 15646.585807) fails the test as it must.
+**R0 would close it, and R0 is not landed.** With the region claimed whole the
+chamfer's facets go into the conical face they belong to and the export measures
+**15647.634695** against the model's 15647.634695 - 1.9e-11 relative. That was
+measured on 2026-09-22 and then reverted with the rest of the attempt, because
+the rule that produced it was decided by the tessellation band and cost the
+exact tier a conical face; see `doc/step-recognition-design.md`, *R0, attempted
+and reverted*. So this item stays open at **-1.0489 mm3**, with the cause known
+and the fix blocked on R0 rather than on anything of its own.
+
+`tests/step-representation-check.py` now carries the derived figure as a second
+assertion beside the property, mutation-checked (set to the old 15646.585807 it
+fails on a patch export measuring 15647.634695). It is not reached while the
+property still fails, which is what the test's `WILL_FAIL` records.
+
+### 29. R0's region must be provenance's positive answer, and nothing can decide it alone
+
+**Opened 2026-09-22**, when the first attempt at R0 was reverted. The full
+account is in `doc/step-recognition-design.md`, *R0, attempted and reverted*;
+the code is on `claude/step-region-r0-optimistic-parked`. Two things have to be
+built, and the second is the one that was not even attempted.
+
+**1. A region with no tolerance in it.** R0 is D0 - *fixed by declarations
+alone, no fit, no tolerance, no sample* - and the attempt decided membership
+with `min(bandOf(facet), max_off)`, which is the tessellation band. The D0
+answer already exists in `export_step.cc`, computed per original and per
+surface as `covered` and `covered_cut`:
+
+> a cut facet has lost a corner to the boolean and still belongs to the surface
+> the other two are on, which is the whole point of asking about origin rather
+> than about fit
+
+`Provenance` needs a **positive** query - *does this facet belong to this
+surface* - where today it answers only `excludes`. Note that `runsThrough`
+carries a 1e-7, and that is a different animal from a band: it is float equality
+for a point the generator emitted against the surface it emitted it on, not an
+allowance for points that are off the surface.
+
+**2. An arbiter, because a region rule may not destroy a representation.** Even
+with a D0 region, a band giving up its ring is a bet that something else writes
+the region. When nothing does, the result is planes - measured: lid10's exact
+tier lost a conical face and 56 facets to `Plane` when the trimmed-quadric
+writer refused the region under *"half a surface is worse than none"*. The
+whole-region claim must win **only among claims that can be written**, which is
+Propose / Arbitrate / Assemble and is step 4 of the migration plan. The attempt
+jumped to step 4 with step 3 undone and Propose impure, which is exactly the
+failure mode that plan is written to prevent.
+
+**3. A fixture first.** Nothing in the suite noticed the regression: lid10 is
+not a fixture, the flagship checks run with both feature flags, and no fixture
+asserts the **exact tier's** analytic coverage on a model where R0 fires. Before
+the next attempt, a fixture that does - a declared cone whose region exceeds a
+band's ring, asserting `ROUNDTRIP: Cone=1` at the exact tier - would have caught
+it in one run.
 
 ### 27. C0 is a refusal problem, not a claim one - the 78 seam edges R0 did not touch
 

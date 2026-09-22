@@ -6,13 +6,43 @@ prompt to paste.
 
 Branch `claude/step-claim-two-pass`, suite **56 of 56**, nothing pushed.
 
+**This session attempted R0 and reverted it.** The exporter's behaviour is
+exactly what it was at `006ab3b45`; what is new is one behaviour-neutral
+refactor, a great deal of measurement, and a sharper statement of the ladder's
+governing philosophy. Read section 1.2 and section 2 before touching regions.
+
 ---
 
 ## 1. The doctrine
 
-Six rules, each paid for. The last one is new today.
+### 1.1 The ladder is a covering order, and nothing falls down it
 
-### 1.1 Catalogue first, arbitrate second
+**This is the core, and everything else is a consequence of it:**
+
+> A closed form is exact by definition and has to stay.
+
+So the classes are a **covering order**, not a tie-break. Every D0
+representation is covered first, then D1 takes what is left, then D2, then D3,
+and D4 takes only what nothing above it could. A lower rank never drives a
+higher one. An entity already written in closed form may be **exchanged for
+another closed form and never surrendered** to a chord or a facet plane.
+
+Days of debugging are in that sentence. `doc/step-rungs.md` is the survey that
+applies it entity by entity; read it before adding or changing a rung.
+
+### 1.2 The representation fits the region, never the region the representation
+
+> A recogniser decides *which* facets it takes - and a writer decides *which
+> curve* it writes - by what the **declaration** covers, never by what its own
+> form can express.
+
+**Attempted as R0 on 2026-09-22 and reverted.** It is still the right rule and
+the implementation was wrong in two ways, both of them instances of 1.1. Read
+`doc/step-recognition-design.md`, *R0, attempted and reverted*, in full before
+the next attempt - the measurements are worth more than the feature would have
+been.
+
+### 1.3 Catalogue first, arbitrate second
 
 A decision with more than one possible claimant is taken in two phases. Phase
 one **catalogues** who claims what and on what evidence; phase two
@@ -26,42 +56,24 @@ recognition: `AnalyticFeatures.cc:1170, 1806, 2282, 2652`.
 
 **And phase one is the half that matters.** An arbiter can only choose between
 claims that were *made*. A recogniser that truncates its own claim to fit its
-own form silently removes the option the arbiter would have chosen, and no
-amount of arbitration downstream can recover it.
+own form silently removes the option the arbiter would have chosen.
 
-### 1.2 The representation fits the region, never the region the representation
+### 1.4 Decide after the pass has finished claiming - claim, then revise
 
-> A recogniser decides *which* facets it takes - and a writer decides *which
-> curve* it writes - by what the **declaration** covers, never by what its own
-> form can express.
+**Paid for twice now.** A region test asked *inside* the band pass's seed loop
+judges each band against a state the pass has not finished producing. A sphere
+is a *stack* of bands, one per ring of its tessellation, so at the moment a ring
+is claimed its neighbours are siblings that do not exist yet: every ring looked
+truncated, every band was given up, the drops cascaded through "the band sharing
+this rim was dropped", and `step-sphere` exported as 482 planes with 448 corners
+off their own surfaces. Moved to run once every band has claimed, a ring's
+neighbours are *held* and the walk stops at them.
 
-**Landed 2026-09-22 as R0**, for the band pass. A band measures whether the ring
-it found is the whole of what its surface covers there, and gives the region up
-rather than truncating it. Every split surface is gone from every reference
-part; `step-split-surface` now exports the model's own derived volume to
-1.9e-11; lid10 writes the same 913 facets analytically in fewer faces with 110
-more exact circles.
+This is open item 25's conclusion for the grid claim, reached from the other
+end. **If a test asks "what would this pass leave behind", it may not run inside
+that pass.**
 
-### 1.3 Decide after the pass has finished claiming - claim, then revise
-
-**New, and paid for on the first attempt at R0.** The region test asked inside
-the band pass's seed loop judged each band against a state the pass had not
-finished producing. A sphere is a *stack* of bands, one per ring of its
-tessellation, so at the moment a ring is claimed its neighbours are siblings
-that do not exist yet: every ring looked like a truncated region, every band was
-given up, the drops cascaded through "the band sharing this rim was dropped",
-and `step-sphere` exported as 482 planes with 448 corners off their own
-surfaces. Moved to run once every band has claimed, a ring's neighbours are
-*held* and the walk stops at them.
-
-This is open item 25's conclusion for the grid claim, reached independently from
-the other end, and it is the fifth time a provisional input has produced a
-plausible wrong answer in this work. **If a test asks "what would this pass
-leave behind", it may not run inside that pass.**
-
-### 1.4 Qualification: rank by what *determines* the answer
-
-`doc/step-rungs.md` is the survey. Classes, not accuracies:
+### 1.5 Qualification: rank by what *determines* the answer
 
 | class | meaning |
 | --- | --- |
@@ -71,28 +83,38 @@ leave behind", it may not run inside that pass.**
 | **D3** | fitted to the mesh |
 | **D4** | the tessellation itself - a chord, a facet plane |
 
-Two consequences:
-
-- **A D4 may never be an input to a D0-D2.** A facet's plane is not a plane.
+- **A D4 may never be an input to a D0-D2.** A facet's plane is not a plane. The
+  R0 attempt broke this and it is what disqualified it.
 - **"On the surface" is not "the right curve."** A section of a quadric by its
-  own chord plane lies *exactly* on it and bounds nothing. Code 17 cannot see
-  the difference.
+  own chord plane lies *exactly* on it and bounds nothing.
+- **A D0 may not carry an accuracy threshold**; it is exact by construction.
+  Float equality for a declared point against the surface that emitted it -
+  `runsThrough`'s 1e-7 - is not a threshold in this sense. A *band* that admits
+  points known to be off the surface is.
+- **Each primitive has its own ladder.** Curves C0-C6, surfaces S0-S3, regions
+  R0-R2, corners their own two tables. Each is resolved on its own ladder, exact
+  first; they do not borrow one another's evidence, and a decision on one may
+  not demote an entity on another. The R0 attempt crossed both: a *region*
+  question decided by a *surface-membership distance*, whose answer then took a
+  *surface* from S0 to S3.
 
 **Adding a rung requires three things**: name its class; state what it is
 measured against and make that something the model says; prove it fires *and*
 that the suite fails without it.
 
-### 1.5 Provenance is identity, not measurement; and a point carries whether it has moved
+### 1.6 Provenance is identity, not measurement
 
 The model knows which original made each facet and which surfaces that original
-owns. That needs no tolerance and does not care what order anything runs in. R0
-asks it first, before any distance test.
+owns. That needs no tolerance and does not care what order anything runs in.
+`Provenance` today answers only `excludes` - *this facet's maker does not own
+that surface*. Its **positive** form is what R0 needs and does not exist; the
+answer is already derived in `export_step.cc` as `covered` / `covered_cut`.
 
 `AnalyticFeatures::PointOrigin`: **Provisional** (it will be placed and has not
 been - *no decision may be taken on it*), **Declared**, **Tessellation**,
 **Placed**, **ReaderInvented**. Derived where reported, cached nowhere.
 
-### 1.6 The standing rules that did not change
+### 1.7 The standing rules that did not change
 
 Kernel agreement is not proof. Exactness takes precedence. Magic numbers and
 statistical thresholds need explicit approval - declared values and closed
@@ -103,49 +125,80 @@ with named branches, and record the refuted ones.
 
 ## 2. What was measured (do not re-derive)
 
-### R0, landed
+### The R0 attempt, in both directions
 
-Same build before and after:
+Parked on `claude/step-region-r0-optimistic-parked`. The band pass measured
+whether its ring was the whole of what its surface covers there and gave the
+region up if not, deciding membership with `min(bandOf(facet), max_off)`.
 
-| | base | R0 |
+**What it bought**, approximation tier, same build before and after:
+
+| | base | attempt |
 | --- | --- | --- |
-| lid10 split surfaces | 1 (cone 50) | **none** |
-| lid10 regions given up whole | - | surfaces 9 (4 of 76), 50 (56 of 62), 52 (36 of 61) |
-| lid10 facets covered analytically | 536 band + 377 patch = 913 | 480 + 433 = **913** |
-| lid10 `CIRCLE` | 300 | **410** |
-| lid10 census 7 / 16 / 13 / 21 / 17 | 0 / 0 / 0 / 3 / 162 | **identical**, same worst 0.108893, same breakdown |
-| lid10 OCCT | 845 faces, 1 solid, 1 shell | **identical** |
-| lid10 OCCT volume | 224683.668014 | 224711.283834 - *nothing adjudicates this* |
+| lid10 split surfaces | 1 (cone 50) | none |
+| lid10 facets covered analytically | 913 (536 band + 377 patch) | 913 (480 + 433) |
+| lid10 `CIRCLE` | 300 | 410 |
+| lid10 census 7/16/13/21/17 | 0/0/0/3/162 | identical, same worst 0.108893 |
+| lid10 OCCT | 845 faces, 1 solid, 1 shell | identical |
 | `step-split-surface` volume | 15646.585807, **-1.0489 against the model** | **15647.634695, -1.9e-11** |
-| `step-bored-cylinder` approx volume | 5298.405620 (derived 5298.405619) | **5298.405620** |
-| `step-bored-cylinder` cylinder faces | 8 | **4** |
+| `step-bored-cylinder` cylinder faces | 8 | 4, same derived volume |
 
-**Read the facet count first.** The same facets are written analytically, in
-fewer faces, with more exact curves; nothing fell back. A face count moves
-either way and says nothing on its own.
+**What it cost**, exact tier (`--enable=step-analytic-surfaces` alone), lid10:
 
-### Three things that turned out not to be true
+| | base | attempt |
+| --- | --- | --- |
+| `Cone` faces, OCCT | 9 | **8** |
+| `Plane` faces | 1574 | 1630 |
+| `CIRCLE` | 413 | 411 |
+| `LINE` | 3466 | **3633** |
 
-- **C0 and R0 are not one defect.** The rungs survey said the seam-conics would
-  go with the split. They did not move at all: 78 on lid10, 18 on the bayonet,
-  31 on f04. R0's facets were ones a *band* could not hold; C0's are ones the
-  *general pass refused*, each with a stated reason. Open item 27.
-- **The split only exists in the approximation tier.** Exported without
-  `--enable=step-approximate-surfaces`, no surface on lid10, the bayonet or
-  `step-split-surface` is split at all. At 1e-7 the region of a declared surface
-  *is* the ring, so R0 is correctly silent there.
-- **The residual 1.0489 mm3 was not another ellipse.** Item 26's rim fix took
-  1.2126 to 1.0489, and the rest was three facets of a chamfer **cone** left
-  planar by the truncated region - a chord plane sits inside the cone it
-  replaces. The two `ELLIPSE`s still in that file are semi-axes 20 by 20, which
-  is a circle spelled oddly and worth nothing to the volume.
+Two regions given up; the trimmed-quadric writer refused them under *"half a
+surface is worse than none"*; 56 facets that had been an exact conical face came
+out as planes. **A closed form was surrendered, not exchanged**, which is 1.1.
+
+### Three corrections to things previously believed
+
+- **"No surface is split at the exact tier" was an artefact of the report.** The
+  split warning counts only facets *another recogniser claimed*; facets of a
+  declared surface left planar are invisible to it. Measured directly, lid10's
+  cone 50 has 59 facets exactly on it against a ring of 56, and cylinder 52 has
+  38 against 36 - at 1e-7, with no approximation flag. The regions do exceed the
+  rings in the exact tier. **The instrument under-reports; do not read its
+  silence as absence.**
+- **C0 and R0 are not one defect.** `doc/step-rungs.md` had them as one from two
+  ends. The attempt removed every split surface and left C0's seam edges exactly
+  where they were - 78 on lid10, 18 on the bayonet, 31 on f04. R0's facets were
+  ones a *band* could not hold; C0's are ones the *general pass refused*, each
+  with a stated reason. **C0 can therefore be taken on its own.**
+- **The residual 1.0489 mm3 of open item 26 was not another ellipse.** The rim
+  fix took 1.2126 to 1.0489; `reader-diff.py` showed the rest was three facets
+  of the chamfer **cone** left planar, a chord plane sitting inside the cone it
+  replaces. The two `ELLIPSE`s still in that file have semi-axes 20 by 20 - a
+  circle spelled oddly, worth nothing to the volume.
+
+### Two gaps in the instruments
+
+- **The suite cannot see an exact-tier regression on a reference part.** lid10 is
+  not a fixture, the flagship checks run with both feature flags, and no fixture
+  asserts the exact tier's analytic coverage on a model where a region rule
+  fires. The whole regression above passed 56 of 56.
+- **The fault census is not the exactness metric.** It was *identical* across
+  the R0 attempt - 0/0/0/3/162, same worst, same breakdown - while the exact
+  tier lost a conical face and 56 facets to planes. And in the other direction,
+  a *rising* code 17 is not by itself a regression: greedy consumption hides
+  edges that do not lie on their face by absorbing them into something
+  tolerant, and every step towards exactness exposes them. Watch closed-form
+  coverage per declared surface and the derived volume, not the census.
+- **The exporter is not byte-deterministic.** The same binary exports the same
+  model twice with different entity numbering, most likely a `std::map` keyed on
+  a pointer. Verify a behaviour-neutral change by *content* - the report text,
+  the entity census, the derived volumes - never by diffing files. Open item 28.
 
 ### Still true from the previous session
 
 - **Facet ownership is not a contest.** Every contested facet is a precision tie
-  naming the same declared surface as the claim holding it. An ownership arbiter
-  by precision would have been a no-op.
-- **Refusing the facet-plane conics makes it worse**: code 17 went 42 -> 198 on
+  naming the same declared surface as the claim holding it.
+- **Refusing the facet-plane conics makes it worse**: code 17 went 42 to 198 on
   lid10, because the chord they fall back to is further off the face.
 - **Neither kernel can adjudicate geometry.** SOLIDWORKS and OpenCASCADE both
   read a file with a 1.2 mm3 error as `valid=1 faults=0`.
@@ -154,28 +207,31 @@ either way and says nothing on its own.
 
 ## 3. Next steps, in order
 
-1. **Open item 27 - C0, and it is a refusal problem.** Work down lid10's own
-   list of refusals: a claim whose boundary strays 0.1094 where the tessellation
-   allows 0.0067 (192 facets); 20 facets reaching further round the axis than
-   four times the typical span; 24 sweep facets off their fit. Two of those are
-   4x-median statistics, which is the shape open item 25 refused on its own rung.
-2. **Then C2 before C5.** With regions whole, a section plane is either declared
-   or a genuine flat face. **Do not retire C5 first.**
-3. **Close the ledger's own gap**: the smooth-region pass takes facets without
-   recording a claim. A recogniser absent from the ledger cannot lose a contest
-   it should win.
-4. **Open item 28 - the exporter is not byte-deterministic.** Cheap and worth
-   doing: export one model a hundred times and diff the *reports*. If any
-   decision is "first surface to accept it wins" over a pointer-keyed container,
-   the geometry itself is non-deterministic and nothing today would notice.
+1. **A fixture that can see an exact-tier loss.** Cheapest, and it gates
+   everything else: a declared cone whose region exceeds a band's ring,
+   asserting `ROUNDTRIP: Cone=1` with `--enable=step-analytic-surfaces` alone.
+   The regression above would have been caught in one run.
+2. **Open item 27 - C0, and it no longer waits on R0.** Work down lid10's own
+   refusals: a claim whose boundary strays 0.1094 where the tessellation allows
+   0.0067 (192 facets); 20 facets reaching further round the axis than four
+   times the typical span; 24 sweep facets off their fit. Two of those are
+   4x-median statistics - a yardstick made of the error it grades.
+3. **Open item 29 - R0, properly.** Two things: provenance's *positive* query so
+   the region carries no tolerance, and an arbiter so a closed form is exchanged
+   rather than surrendered. Do step 3 of the migration plan first (flip the
+   source of truth from `consumed` to the ledger); the attempt jumped to step 4
+   with Propose impure, which is the failure that plan exists to prevent.
+4. **Open item 28 - determinism.** Export one model a hundred times and diff the
+   *reports*. If any decision is "first surface to accept it wins" over a
+   pointer-keyed container, the geometry is non-deterministic and nothing today
+   would notice.
 5. **lid10's two code-21 faces** - planes of area 1.466 at
    `(-56.999, -55.863, 89.788)` and `(-55.863, 56.999, 89.788)`, never
    investigated.
 6. **Open item 21's corner**, and the 1% volume question in item 23's
    SOLIDWORKS run.
 7. **Banked**: item 24, the flagship third of the suite doing 18 exports where 6
-   would do. Worth ~3 minutes a run; take it when something else forces a
-   configure.
+   would do.
 
 ---
 
@@ -193,24 +249,25 @@ powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 census <file.stp>
 `scripts/step-dev.sh` is the same from bash. Verify with `test` before and after
 any change. **Never run two builds or two suites at once.**
 
+**The exact tier is a separate measurement and the dev loop does not make it.**
+`step-dev export` always passes both feature flags. To see what the exact tier
+does, run the staged binary with `--enable=step-analytic-surfaces` alone.
+
 **Environment facts, all measured on this machine:**
 
 - 16 cores, 64 GB. A **cold** build of a fresh worktree is ~10 minutes of
   compiling plus the bundle and install; an incremental one ~2 minutes; the
-  suite ~4 minutes; a **configure over an existing cache is cheap** - measured
-  again 2026-09-22, about 12 targets rebuilt after a `tests/CMakeLists.txt`
-  change. What costs an hour is a cache whose *settings* changed.
+  suite ~4 minutes; a **configure over an existing cache is cheap** - about 12
+  targets after a `tests/CMakeLists.txt` change.
 - **A worktree has no submodules and no `libraries/MCAD`.** Copy them from the
   main checkout and repoint each `.git` file at
   `<main>/.git/modules/<path>`; do not re-clone.
 - **`CMAKE_BUILD_TYPE` must be Release.** An empty build type runs **26x**
-  slower with byte-identical output. `msys2-build.sh` passes it on both paths.
-- Adding a fixture or test needs `--configure`, or ctest never sees it.
-- A STEP fixture needs an empty `-expected.txt` in
-  `tests/regression/export-step-sanitytest/`.
-- `scripts/step-dev.ps1 build` must be invoked from PowerShell with backslashes
-  (`scripts\step-dev.ps1`); a bash tool eats them and PowerShell then says the
-  file does not exist.
+  slower with byte-identical output.
+- Adding a fixture or test needs `--configure`, or ctest never sees it, plus an
+  empty `-expected.txt` in `tests/regression/export-step-sanitytest/`.
+- Invoke `scripts\step-dev.ps1` from PowerShell with backslashes; a bash tool
+  eats them and PowerShell then reports the file as missing.
 
 **Diagnostics are catalogued by the question they answer** in
 `scripts/step-diagnostics/README.md`. Read it before writing one.
@@ -222,36 +279,32 @@ any change. **Never run two builds or two suites at once.**
 In this order. Each step exists because skipping it cost a day.
 
 1. **The census, on our own file.** `fault-census.py` keys every property known
-   to become a CAD fault by the code it becomes. Our file is the part we
-   control; a reader's verdict is the last thing to ask.
-2. **The export's own report.** It says: the claim ledger's agreement and its
-   contested / tied counts; any declared surface split between recogniser kinds,
-   with the division, the originals on each side and the edges across the
-   divide; **any region given up whole rather than written as a band**, with the
-   ring and the region; how many section planes were facets of the surface being
-   cut; how many rims the declaration settled. Most questions are answered here.
+   to become a CAD fault by the code it becomes.
+2. **The export's own report** - the claim ledger's agreement, any declared
+   surface split between recogniser kinds, how many section planes were facets
+   of the surface being cut, how many rims the declaration settled. **But know
+   what each line cannot see**: the split warning counts only facets another
+   recogniser claimed, so a region left planar does not appear in it.
 3. **The catalogued instruments**, by question - `reader-diff.py` (what do these
-   two files differ *by*? - it is what found the three planar chamfer facets
-   behind the last 1.0489 mm3), `sweep-chords.py`, `planes-at-sweep.py`,
-   `at-vertex.py`, `point-vs-faces.py`.
-4. **Derive the expectation from the model.** The mistake to avoid is
-   integrating the *tessellation* when the exporter writes the *analytic*
-   surface. Where no absolute is available, assert a **property**:
-   representation-independence needs no ground truth at all.
-5. **A kernel, last.** OpenCASCADE heals silently; SOLIDWORKS reports faults
-   orthogonal to correctness. Interrogate rather than read a verdict: `-Raw
-   -RoundTrip [-Heal] -FaultDetail`, always with the control
-   `f02-band-fn032-analytic.stp` (`faults=2 faultyfaces=2 codes=17`).
-6. **Mutation-check every zero and every total.** A zero from a new instrument
-   is not a result. Today: the new derived-volume assertion was mutated to the
-   old wrong figure and confirmed to fail.
-7. **Do not verify a behaviour-neutral change by diffing files.** The exporter
-   is not byte-deterministic (open item 28). Compare the report text, the entity
-   census and the derived volumes.
+   two files differ *by*? - it found the three planar chamfer facets behind the
+   last 1.0489 mm3), `sweep-chords.py`, `planes-at-sweep.py`, `at-vertex.py`,
+   `point-vs-faces.py`.
+4. **Measure both tiers.** A change that is a pure win with both feature flags
+   can be a regression with only `--enable=step-analytic-surfaces`, and the
+   suite will not say so.
+5. **Derive the expectation from the model.** Never integrate the tessellation
+   when the exporter writes the analytic surface. Where no absolute is
+   available, assert a **property**.
+6. **A kernel, last.** Interrogate rather than read a verdict: `-Raw -RoundTrip
+   [-Heal] -FaultDetail`, always with the control `f02-band-fn032-analytic.stp`
+   (`faults=2 faultyfaces=2 codes=17`).
+7. **Mutation-check every zero and every total**, and never verify a
+   behaviour-neutral change by diffing exports.
 
 **The trap, in yet another costume**: *a nearly-right quantity answering a
-question it was not asked.* Today it was a region test asked before the pass
-that makes the regions had finished.
+question it was not asked.* This session it was the tessellation band standing
+in for "what this surface covers", and a split report's silence standing in for
+"nothing is split".
 
 ---
 
@@ -265,12 +318,26 @@ E:\29_Git_Soulsolistice\pythonscad. Branch: claude/step-claim-two-pass, suite
 56 of 56, nothing pushed.
 
 Read first, in this order: CLAUDE.md (build, test, the dev loop), then
-doc/step-export-next-session.md in full - it carries the doctrine, what has
-already been measured, the tooling and the diagnostic method - then
-doc/step-rungs.md (what determines each entity, and therefore which rung it is)
-and doc/step-recognition-design.md (the claim ledger, region before
-representation, and R0 as landed). doc/step-export-wip.md open items 21, 23, 24,
-25, 27 and 28 are the detail.
+doc/step-export-next-session.md in full, then doc/step-rungs.md and
+doc/step-recognition-design.md. Those last two are the core of this work and are
+earned through days of debugging - read them carefully and do not weaken them.
+doc/step-export-wip.md open items 21, 23, 24, 25, 27, 28 and 29 are the detail.
+
+The philosophy everything rests on: a closed form is exact by definition and has
+to stay. The classes are a covering order - every D0 representation is covered
+first, then D1 takes what is left, then D2, D3, and D4 only what nothing above
+it could. A lower rank never drives a higher one, and nothing falls down the
+ladder: a closed form may be exchanged for another closed form, never
+surrendered to a chord or a facet plane. A D0 carries no accuracy threshold; it
+is exact by construction.
+
+The previous session attempted R0 - claim a declared surface's region whole -
+and reverted it. It removed every split surface, bought 110 exact circles on
+lid10 and made step-split-surface exact against its derived volume, and it still
+had to come out: membership was decided by the tessellation band, a D4, and in
+the exact tier a declared cone fell to planes (Cone faces 9 to 8, LINE 3466 to
+3633). Read doc/step-recognition-design.md, *R0, attempted and reverted*, before
+going near it again. The code is on claude/step-region-r0-optimistic-parked.
 
 The development loop is committed; do not write your own build or export
 scripts:
@@ -280,39 +347,33 @@ scripts:
   powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 export lid10
   powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 census <file.stp>
 
-A worktree has no submodules: copy them from the main checkout and repoint each
-.git file at <main>/.git/modules/<path>. Verify with `test` (56 of 56) before
-and after any change. Never run two builds or two suites at once. Every
-diagnostic is catalogued by the question it answers in
-scripts/step-diagnostics/README.md - read it before writing an instrument.
+It always passes both feature flags, so it does not measure the exact tier. Run
+the staged binary with --enable=step-analytic-surfaces alone for that, and
+measure both tiers on any change to recognition - the suite cannot see an
+exact-tier loss on a reference part. A worktree has no submodules: copy them
+from the main checkout and repoint each .git file at <main>/.git/modules/<path>.
+Verify with `test` (56 of 56) before and after any change. Never run two builds
+or two suites at once. Every diagnostic is catalogued by the question it answers
+in scripts/step-diagnostics/README.md.
 
-Where to start: open item 27, C0 - the 78 edges on lid10 (18 on the bayonet, 31
-on f04) written as a section of a surface by its own chord plane, which is a
-boundary of nothing. R0 landed on 2026-09-22 and did NOT move that count, which
-is the finding: those facets are not ones a band truncated away, they are ones
-the general pass refused, each with a reason the export already prints - a
-claim whose boundary strays 0.1094 where the tessellation allows 0.0067, 20
-facets reaching further round the axis than four times the typical span, 24
-sweep facets off their fit. Two of those refusals are 4x-median statistics,
-which is a yardstick made of the error it grades.
+Where to start: (1) a fixture that can see an exact-tier loss - a declared cone
+whose region exceeds a band's ring, asserting ROUNDTRIP: Cone=1 with the
+analytic flag alone; it would have caught the regression above in one run.
+(2) Open item 27, C0: the 78 edges on lid10 written as a section of a surface by
+its own chord plane, a boundary of nothing. It no longer waits on R0 - measured,
+R0 moved that count by zero, because those facets are ones the general pass
+*refused*, each with a reason the export prints.
 
 Do NOT start by arbitrating facet ownership, and do NOT start by refusing the
 wrong curves. Both were measured: every contested facet is a precision tie
-naming the same surface as the claim holding it, so an ownership arbiter is a
-no-op; and refusing facet-plane conics takes code 17 from 42 to 198 on lid10
-because the chord they fall back to is worse.
-
-Four doctrines bind. Catalogue first and arbitrate second, with phase one never
-truncating a claim to fit a form. The representation fits the region, never the
-region the representation. Decide after the pass has finished claiming, never
-inside it - a region test asked inside the band pass judged each band against a
-state that did not exist yet and exported a sphere as 482 planes. And rank rungs
-by what determines the answer (D0 declarations alone, down to D4 the
-tessellation), where a D4 may never be an input to anything above it.
+naming the same surface as the claim holding it; and refusing facet-plane conics
+takes code 17 from 42 to 198 on lid10 because the chord they fall back to is
+worse.
 
 Derive expectations from the model, never from a kernel: both OpenCASCADE and
 SOLIDWORKS called a file with a 1.2 mm3 error valid with zero faults. Mutation-
-check every zero an instrument reports. And do not verify a behaviour-neutral
-change by diffing two exports - the exporter is not byte-deterministic (open
-item 28); compare the report, the entity census and the derived volumes.
+check every zero an instrument reports, and know what each instrument cannot
+see - the split-surface warning counts only facets another recogniser claimed,
+so a region left planar never appears in it. Do not verify a behaviour-neutral
+change by diffing two exports; the exporter is not byte-deterministic.
 ```

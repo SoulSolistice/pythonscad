@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """How a surface is written must not change the solid.
 
 A declared cylinder or cone can be written two ways: as a band's wall, which is
@@ -30,21 +30,14 @@ The two representations are obtained with OPENSCAD_STEP_YIELD_SURFACE, which
 makes the band pass skip one declared surface so the general pass covers its
 whole region instead.
 
-**It passed on 2026-09-22, and the WILL_FAIL marking came off.** R0 landed: the
-band pass now measures whether its ring is the whole of what its surface covers
-and gives the region up rather than truncating it, so on this model the default
-export *is* the trimmed patch and the volume is the derived one to eleven
-digits. It had failed by 1.2126 mm3, then by 1.0489 after the rim fix of open
-item 26.
-
-Which changes what each half of this check is worth, and it is worth saying
-plainly rather than leaving the name to imply the old thing. The comparison is
-now between two exports that come out the same, so it no longer *demonstrates*
-the defect - it guards against R0 being lost, since the day a band truncates
-this region again the two stop agreeing. **The assertion that carries is the
-derived volume**, which is the model's own arithmetic and answers to no
-representation at all. Both halves are checked, and either one failing fails the
-test.
+**Registered WILL_FAIL.** It fails today, on
+`tests/data/scad/step-export/step-split-surface.scad`, by 1.2126 mm3 of volume
+and 0.4700 of area - 7.75e-5 and 1.19e-4 relative. That is the defect, not the
+test being wrong: the same declared cylinder written two ways bounds two
+different solids. lid10 shows the same thing at 2.0818 mm3, there with the area
+*identical* to the last digit, which is a second mechanism this fixture may also
+be exposing. When this starts passing ctest reports it as a failure, which is
+how the fix announces itself.
 """
 
 import argparse
@@ -62,12 +55,17 @@ EXACT = 1e-9
 
 # The model's own volume, in closed form - the derivation is in the docstring
 # above, and it was confirmed by independent numerical integration before any
-# export was measured against it. Held to the same floor: the measured export
-# agrees to 1.9e-11 relative, so 1e-9 is fifty times the observed slack and
-# still four orders tighter than the 1.0489 mm3 the truncated claim cost.
+# export was measured against it.
 #
-# It belongs to step-split-surface.scad and nothing else, so a caller pointing
-# --source elsewhere gets the property check alone.
+# This is the half that answers to no representation at all. The comparison
+# above says the two descriptions agree; only this says the solid is the one the
+# model describes. Both kernels called the 1.2126 mm3 file valid with zero
+# faults, so nothing else here would have refused it.
+#
+# It is not reached while the property above still fails, which is the state
+# this test is registered WILL_FAIL for. It was mutation-checked when it was
+# written - set to the band representation's 15646.585807, it fails as it must
+# on a patch export measuring 15647.634695.
 DERIVED_SOURCE = "tests/data/scad/step-export/step-split-surface.scad"
 DERIVED_VOLUME = 15647.634695
 
@@ -159,9 +157,7 @@ def main():
         return 1
     print("\nthe solid is the same whichever way its surface is written", file=sys.stderr)
 
-    # And the same solid as the model's, which is the half no representation can
-    # satisfy by agreeing with itself. Both kernels called the 1.2126 mm3 file
-    # valid with zero faults; only this line would have refused it.
+    # And the same solid as the model's.
     if os.path.normpath(args.source) != os.path.normpath(DERIVED_SOURCE):
         print("no derived volume for %s, so only the property was checked" % args.source,
               file=sys.stderr)
