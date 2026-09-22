@@ -458,6 +458,50 @@ rank the evidence, and let the arbiter decide - with the tie count above as the
 before-measurement. A change that leaves 452 ties at 452 has done nothing,
 whatever else it reports.
 
+## The claim trinity was malformed, and every number read off it inherited that
+
+**Found 2026-09-22 by doubting the census's own output.** `Claim { facet,
+surface, precision, by, evidence }` is only worth what its fields are worth, and
+two of them were being filled wrongly at the sites that matter most - the
+*honoured* ones, which are the only claims anything downstream acts on.
+
+**A band's cap named no surface at all.** `result.ledger.add({cap_low, nullptr,
+DeclaredExact, "a band's cap", ..., true})` - no `surface`, and no
+`surface_index`, so it took the `std::size_t(-1)` default that
+`Claim::surface_index` documents as *"where the claimant cannot name one"*.
+Nothing reading the ledger can tell that from a claim on a **fitted** surface,
+whose index is simply past the declarations. The declaration census duly
+reported step-sphere's two polar caps as *"written on a surface the
+approximation fitted"* - **at the exact tier, where nothing can be fitted at
+all**, a number contradicted by the flag it was exported under. The caps are
+part of the zone's face, so the claim now says so.
+
+**And the honoured claims hardcoded their precision.** The *contested* claim in
+`recogniseQuadricPatches` correctly writes `surface_index < declared_count ?
+DeclaredExact : Fitted`; the honoured one, twenty lines later, wrote
+`DeclaredExact` unconditionally. The grid and Bezier claims wrote
+`DeclaredInterpolant` unconditionally the same way. **So a fit that *won* was
+recorded as a declaration**, and `ClaimLedger::misheld` - whose entire job is to
+find a facet held by a claimant less precise than one that also covered it -
+reads that label. It could never count a winning fit. That is why the number has
+been 0 on every part ever measured, and the design's own warning about the tie
+table applies to it word for word: *the zero reads as "no damage" and means "my
+key cannot see the damage"*.
+
+Both are fixed, an `EXPORT-ERROR` now fires on any honoured claim that cannot
+name its surface (measured firing twice on step-sphere before the fix, silent
+after), and the suite did not move: 58 of 58.
+
+**What it did not change, and this is the part to keep.** lid10's 452 contested
+facets are still 452 ties of equal precision. They were not an artefact of the
+hardcoding - no fit holds anything on lid10, so every one of those claims was
+legitimately `DeclaredExact`. **A tie means the rung system has not
+distinguished the two claimants**, and no amount of correct labelling will: a
+band's wall and a quadric face are the same precision on the same declared
+surface because they are not a precision question at all. They are the
+*representation* question this document already isolates, and the only thing
+that resolves a tie is deciding it on purpose rather than by call order.
+
 ## The declaration census against this design - 2026-09-22
 
 A census was built to answer *is everything that could be D0 actually D0*. It

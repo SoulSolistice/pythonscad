@@ -2834,6 +2834,18 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
   auto note_evidence = [&](std::size_t which) {
     if (which < result.evidence.size()) result.evidence[which] = 1;
   };
+  // Which entry of the caller's list a surface is, so that a claim can name it.
+  // A claim that cannot name its surface index cannot be arbitrated by the
+  // model's own statement of who owns what - see Claim::surface_index - and
+  // cannot be told apart from a claim on a *fitted* surface by anything reading
+  // the ledger afterwards.
+  auto index_of = [&](const std::shared_ptr<const Surface>& s) {
+    if (s == nullptr) return std::size_t(-1);
+    for (std::size_t i = 0; i < surfaces.size(); i++) {
+      if (surfaces[i].get() == s.get() || (surfaces[i] && surfaces[i]->sameAs(*s))) return i;
+    }
+    return std::size_t(-1);
+  };
 
   for (std::size_t seed = 0; seed < face_cnt; seed++) {
     if (!loop_valid[seed] || consumed[seed] || loop_is_hole[seed]) continue;
@@ -3149,8 +3161,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       for (const std::size_t f : walls) {
         consumed[f] = 1;
         result.consumed_by[f] = "a band's wall";
-        result.ledger.add({f, nullptr, ClaimPrecision::DeclaredExact, "a band's wall",
-                           "the facet walks out from the band's seed", true, matched});
+        result.ledger.add(
+          {f, surfaces[matched],
+           matched < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted,
+           "a band's wall", "the facet walks out from the band's seed", true, matched});
         band_of_loop[f] = bands.size();
       }
       bands.push_back(info);
@@ -3778,10 +3792,20 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
           consumed[cap_high] = 1;
           result.consumed_by[cap_low] = "a band's cap";
           result.consumed_by[cap_high] = "a band's cap";
-          result.ledger.add({cap_low, nullptr, ClaimPrecision::DeclaredExact, "a band's cap",
-                             "the loop closing the band", true});
-          result.ledger.add({cap_high, nullptr, ClaimPrecision::DeclaredExact, "a band's cap",
-                             "the loop closing the band", true});
+          // The caps are part of the zone's face now, so the claim is *on the
+          // zone* and says so. Left unnamed, these two were honoured claims
+          // with `surface_index` at its `size_t(-1)` default, which anything
+          // reading the ledger cannot tell from a claim on a fitted surface:
+          // measured 2026-09-22, the declaration census read step-sphere's two
+          // polar caps as "written on a surface the approximation fitted" at
+          // the *exact* tier, where nothing can be fitted at all.
+          const std::size_t zone_index = index_of(surface);
+          const ClaimPrecision zone_precision =
+            zone_index < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted;
+          result.ledger.add({cap_low, surface, zone_precision, "a band's cap",
+                             "the loop closing the band", true, zone_index});
+          result.ledger.add({cap_high, surface, zone_precision, "a band's cap",
+                             "the loop closing the band", true, zone_index});
         }
         rims[seed] = ends;
         for (const std::size_t bi : run) {

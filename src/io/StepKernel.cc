@@ -2293,7 +2293,10 @@ void StepKernel::build_tri_body(
       for (const std::size_t f : patch.facets) features.consumed[f] = 1;
       for (const std::size_t f : patch.facets) features.consumed_by[f] = "a Bezier patch";
       for (const std::size_t f : patch.facets)
-        features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredInterpolant,
+        features.ledger.add({f, patch.surface,
+                             indexOf(patch.surface) < surfaces.size()
+                               ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
+                               : AnalyticFeatures::ClaimPrecision::Fitted,
                              "a Bezier patch", "the facet lies on the declared Bezier patch", true,
                              indexOf(patch.surface)});
     }
@@ -2487,7 +2490,10 @@ void StepKernel::build_tri_body(
           for (const std::size_t f : patch.facets) features.consumed[f] = 1;
           for (const std::size_t f : patch.facets) features.consumed_by[f] = "a declared sweep";
           for (const std::size_t f : patch.facets)
-            features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredInterpolant,
+            features.ledger.add({f, patch.surface,
+                                 indexOf(patch.surface) < surfaces.size()
+                                   ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
+                                   : AnalyticFeatures::ClaimPrecision::Fitted,
                                  "a declared sweep", "the sweep's patch is written and takes it", true,
                                  indexOf(patch.surface)});
         }
@@ -2864,7 +2870,17 @@ void StepKernel::build_tri_body(
         for (const std::size_t f : patch.facets) features.consumed[f] = 1;
         for (const std::size_t f : patch.facets) features.consumed_by[f] = "a quadric face";
         for (const std::size_t f : patch.facets)
-          features.ledger.add({f, patch.surface, AnalyticFeatures::ClaimPrecision::DeclaredExact,
+          // The precision a claim carries has to be the one its *index* implies,
+          // as the contested claim in the same pass already does. Hardcoding
+          // DeclaredExact here labelled a winning **fit** as a declaration, and
+          // `ClaimLedger::misheld` - whose whole job is to find a facet held by
+          // a claimant less precise than one that also covered it - reads that
+          // label. A fit that wins could therefore never be counted as misheld,
+          // which is why that number has been 0 on every part ever measured.
+          features.ledger.add({f, patch.surface,
+                               indexOf(patch.surface) < surfaces.size()
+                                 ? AnalyticFeatures::ClaimPrecision::DeclaredExact
+                                 : AnalyticFeatures::ClaimPrecision::Fitted,
                                "a quadric face", "the quadric's patch is written and takes it", true,
                                indexOf(patch.surface)});
       }
@@ -6471,13 +6487,14 @@ void StepKernel::build_tri_body(
     // admired: D0 is covered first precisely so that a D3 fit never gets the
     // chance to take exact ground and strand the remainder.
     {
-      std::size_t by_plane = 0, by_declared = 0, by_fit = 0, by_mesh = 0;
+      std::size_t by_plane = 0, by_declared = 0, by_fit = 0, by_mesh = 0, unnamed = 0;
       for (std::size_t f = 0; f < facet_class.size() && f < loops.size(); f++) {
         if (!loop_valid[f] || loop_is_hole[f]) continue;
         switch (facet_class[f]) {
         case 1:  by_plane++; break;
         case 2:  by_declared++; break;
         case 3:  by_fit++; break;
+        case 4:  unnamed++; break;
         default: by_mesh++; break;
         }
       }
@@ -6485,6 +6502,20 @@ void StepKernel::build_tri_body(
         "STEP export:   by facet: %1$d written on a declared surface, %2$d on a declared plane, "
         "%3$d on a surface the approximation fitted, %4$d left to the tessellation",
         int(by_declared), int(by_plane), int(by_fit), int(by_mesh));
+      // Loud, because every number on the line above is only as good as the
+      // claims behind it. A claim the exporter *acted on* that cannot say which
+      // surface it was for leaves the census unable to tell a declaration from
+      // a fit, and an unreliable number is worse than none when rungs are being
+      // designed against it. Measured unreachable before this was made an
+      // error: step-sphere and step-sphere-closed had two facets each - their
+      // polar caps - until the band's cap claims were given their zone.
+      if (unnamed > 0) {
+        LOG(message_group::Export_Error,
+            "STEP export:   %1$d facets are held by an honoured claim that cannot name its "
+            "surface, so the census above cannot tell a declaration from a fit on them - the "
+            "claim is malformed; see AnalyticFeatures::Claim::surface_index",
+            int(unnamed));
+      }
       // **What this cannot yet say, and it is the number that matters most.**
       // How many of the fitted and tessellated facets had a *declaration
       // available* - exact ground that did not come out exact - needs a
