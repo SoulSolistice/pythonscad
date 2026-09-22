@@ -97,6 +97,15 @@ that pass.**
   not demote an entity on another. The R0 attempt crossed both: a *region*
   question decided by a *surface-membership distance*, whose answer then took a
   *surface* from S0 to S3.
+- **A rung may never manufacture a boundary.** A curve is written *because* a
+  boundary exists, not the other way round. C5 - the conic a *facet* plane cuts
+  from the quadric beside it - splits one declared surface against itself 78
+  times on lid10. That is a curve rung reaching into the surface ladder, and it
+  is what C0 is for.
+- **Consuming less is not a fault when the reason is exactness.** A smaller
+  exact claim beats a larger inexact one. Ask *why* a rung declined, not how
+  much - a form that could not express the region, an order that got there
+  first, and a threshold that happened to bite are three different answers.
 
 **Adding a rung requires three things**: name its class; state what it is
 measured against and make that something the model says; prove it fires *and*

@@ -74,6 +74,21 @@ declared surface, and whether any closed form was **surrendered** rather than
 exchanged. Analytic face counts by kind, exact curve counts, and the derived
 volume where the model has one. Those are the measures the ladder is about.
 
+**And coverage is not the criterion either.** A rung that consumes *less* is not
+thereby worse: refusing what it cannot state exactly is the rung doing its job,
+and a smaller exact claim beats a larger inexact one every time. What makes a
+smaller claim a defect is not its size but its reason - a form that could not
+express the region, an order that got there first, a threshold that happened to
+bite. Ask why the rung declined, not how much it declined.
+
+**The one thing a rung may never do is manufacture a boundary.** A curve is
+written *because* a boundary exists; a boundary does not exist because a curve
+was written. So no curve rung may take a part of a surface and split it: C5 -
+the conic a *facet* plane cuts from the quadric beside it - does exactly that
+78 times on lid10, writing a seam across one declared surface against itself.
+That is a curve rung reaching into the surface ladder, and it is why C0 is
+where the survey says to start.
+
 ## The inventory
 
 **Each geometric primitive carries its own deterministic ladder, and that is
