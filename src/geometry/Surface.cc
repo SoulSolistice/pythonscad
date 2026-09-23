@@ -105,7 +105,7 @@ bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
 {
   for (const auto& s : list) {
     if (s == surface) return true;
-    if (s && surface && s->sameAs(*surface)) return true;
+    if (s && surface && describesSameSurface(*s, *surface)) return true;
   }
   return false;
 }
@@ -176,7 +176,13 @@ void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
   for (const auto& surface : from) {
     bool found = false;
     for (auto& s : into) {
-      if (s == surface || (s && surface && s->sameAs(*surface))) {
+      // By the surface, not the record: one infinite cylinder declared from
+      // two heights is one surface, and two records of it made ownership, the
+      // ledger and the declaration census each count it twice - lid10's channel
+      // and entry slot both declare r = 79.8094, and came out as two surfaces,
+      // one of them "unexplained". Measured neutral on geometry when first
+      // tried (open item 17); it matters now because identity is per record.
+      if (s == surface || (s && surface && describesSameSurface(*s, *surface))) {
         // The same surface declared by two originals is declared by both.
         if (surface) s = withDeclarersOf(s, *surface);
         found = true;

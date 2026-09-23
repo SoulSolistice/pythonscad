@@ -864,8 +864,18 @@ module bayonetChannel(rInner, rOuter, lugAngle, zBottom, height, entryRotation,
 		[ [steps*np + 3, steps*np + 2, steps*np + 1, steps*np] ]
 	);
 
+	// The channel's inner and outer walls are cylinders: every station puts two
+	// profile points at rInner and two at rOuter, and the sweep turns them about
+	// z. A polyhedron over a point list says none of that, so it is declared -
+	// the same two circles the entry slots' smallArc declares, since the callers
+	// pass the same rInner and rOuter. Without it the exporter has only the
+	// slots' records, which a different solid made, and nothing saying this one
+	// meant them. The ramped roof and floor are not cylinders and stay as they
+	// are.
 	for (i = [0 : starts - 1])
 	rotate([0, 0, i*360/starts])
+	declare_cylinder(r = rOuter)
+	declare_cylinder(r = rInner)
 	polyhedron(points = points, faces = faces, convexity = 8);
 }
 

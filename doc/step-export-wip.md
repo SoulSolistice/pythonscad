@@ -2567,6 +2567,10 @@ suite fails without it, so it did not land. It is still the tidier rule, and the
 cone case (same axis line, same half angle, radius agreeing) is not covered by
 it at all.
 
+**Superseded 2026-09-23**: the record rule is now `describesSameSurface`, because
+identity is carried per record and a duplicate counted one surface twice in
+ownership, the ledger and the census - see item 31.
+
 **What the measurement leaves.** Which surface a facet lies on is never decided
 by order on anything measured here. Where the recogniser is actually short is
 provenance being silent - item 13 - and that is a question about ownership, not
@@ -3910,6 +3914,35 @@ strict identity (the 188 facets stop being on cylinder 12, which was never
 theirs), or find what they are and make their generator declare the surface it
 cuts exactly (the feedstock fix), with "owns nothing" then meaning *excluded*
 for any original whose ids are present. Not taken without the author.
+
+**The four originals, traced to the model and fixed there (2026-09-23).** The
+ledger dump's centroids and `.surfaces.tsv` put originals 26-32 at r = 79.8094,
+z 87.3-87.5, four arcs of 76 degrees: the four copies of `bayonetChannel`, a
+`polyhedron()` whose outer and inner walls are point lists at `rOuter` and
+`rInner` - the same two cylinders the entry slots' `smallArc` declares, because
+the callers pass the same parameters. A polyhedron declares nothing, so the
+channel's walls had no declaration of their own and the measured rule credited
+them with the slots'. **Fixed in the specimens**: `lid10.scad` and
+`bayonet_container_v1-2.scad` now wrap the channel in
+`declare_cylinder(r = rOuter)` and `declare_cylinder(r = rInner)` (the bayonet's
+already carried a `declare_grid`; its customizer exports `_part = base`, which
+has no channel, so that half is correct and unexercised). lid10's measured-only
+ownership went from 4 to 0.
+
+**And one surface is now one record.** The channel declares r = 79.8094 from
+z = 0, the slot from z = 84.9, and `mergeSurfaces` merged by `sameAs` - exact
+reference point - so one infinite cylinder became two records, and ownership,
+the ledger and the census, all per record, counted it twice: a new "unexplained"
+declaration and 188 false "different surface" contests. `containsSurface` and
+`mergeSurfaces` now match by `describesSameSurface` (item 17's rule, cones
+included) and unite the declarers; every `addSurface` merges; and
+`ManifoldGeometry::addSurface` stamps a declaration made over a Manifold
+subtree with that subtree's originals, which `declare_cone` over a boolean
+result had come out without. Geometry identical on all 104 exports (entity
+census); lid10 goes from 27 records to 22 and its unexplained declarations from
+4 to **1** (cylinder 12, approximation tier - item 30) and 5 to **2** (cone 52,
+sweep 62, exact tier). `step-declare-cone`'s fixtures asserted the duplicated
+count and now assert the derived one, 4 surfaces.
 
 **Why it comes before R0.** R0's region is *"the facets whose maker owns this
 surface"*. If *owns* is a measurement with a magic 3 and a 60 degree band, a

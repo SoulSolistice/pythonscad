@@ -45,7 +45,7 @@ public:
   void transform(const Transform3d& matrix) override;
   void addSurface(const std::shared_ptr<Surface>& surface) override
   {
-    if (!containsSurface(surfaces, surface)) surfaces.push_back(surface);
+    mergeSurfaces(surfaces, {surface});  // a duplicate unites its declarers
   }
   void resize(const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize) override;
 

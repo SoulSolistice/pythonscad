@@ -16,7 +16,12 @@ would notice.
 The body is a cone truncated by an intersection, so the surviving frustum runs
 from a declared r=10 to an r=6 that no primitive named.
 """
-# EXPECT: 5 analytic surfaces available (4 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
+# Derived from the model, one record per geometric surface: cylinders r = 10
+# (the first wall and the frustum's lower rim are one infinite cylinder), r = 2
+# (the upper rim) and r = 100 (the intersection tool); one cone (the frustum's
+# own and declare_cone's are the same surface). Was 5 / 4 while one surface
+# could be held as two records - see doc/step-export-wip.md, open item 17.
+# EXPECT: 4 analytic surfaces available (3 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 # EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 64 facets replaced
 # EXPECT-NOT: left faceted
 # ROUNDTRIP: Cone=1 Cylinder=1 Plane=2

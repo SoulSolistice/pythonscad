@@ -80,7 +80,13 @@ public:
   [[nodiscard]] const std::vector<std::shared_ptr<Surface>>& getSurfaces() const { return surfaces_; }
   void addSurface(const std::shared_ptr<Surface>& surface) override
   {
-    if (!containsSurface(surfaces_, surface)) surfaces_.push_back(surface);
+    // A declaration on a subtree that is already a Manifold is declared by the
+    // originals that subtree carries - stamped here, or it has no owner at all,
+    // which is what `declare_cone` over a boolean result came out as. A hull
+    // keeps its id on the Manifold rather than in originalIDs_.
+    std::set<uint32_t> ids = originalIDs_;
+    if (ids.empty() && manifold_.OriginalID() >= 0) ids.insert(uint32_t(manifold_.OriginalID()));
+    mergeSurfaces(surfaces_, stampOwners({surface}, ids));
   }
 
 private:

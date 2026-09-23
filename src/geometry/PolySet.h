@@ -71,7 +71,7 @@ public:
   void setColor(const Color4f& c) override;
   void addSurface(const std::shared_ptr<Surface>& surface) override
   {
-    if (!containsSurface(surfaces, surface)) surfaces.push_back(surface);
+    mergeSurfaces(surfaces, {surface});  // a duplicate unites its declarers
   }
 
   bool isConvex() const;

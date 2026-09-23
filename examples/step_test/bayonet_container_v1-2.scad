@@ -894,8 +894,16 @@ module bayonetChannel(rInner, rOuter, lugAngle, zBottom, height, entryRotation,
 	// world coordinates and carried by the transforms above them, so each
 	// instance declares the surface it actually sweeps rather than the one the
 	// first copy would have.
+	//
+	// The inner and outer walls are more than a sweep: every station puts two
+	// profile points at rInner and two at rOuter, so those two strips are
+	// cylinders, a closed form where the grid is an interpolant. Declared as
+	// such, so the walls can be written exactly and the grid keeps the ramped
+	// roof and floor it alone describes.
 	for (i = [0 : starts - 1])
 	rotate([0, 0, i*360/starts])
+	declare_cylinder(r = rOuter)
+	declare_cylinder(r = rInner)
 	declare_grid(points = rows, closed = true) {
 		polyhedron(points = points, faces = faces, convexity = 8);
 	}
