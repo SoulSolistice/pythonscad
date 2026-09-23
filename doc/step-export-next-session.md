@@ -65,21 +65,21 @@ one geometric surface is one record.
 2. **The D0 presence test**, then the provenance switch again, judged by
    `flagship-strict`, `step-cylinder-cross`, `step-declare-cone` and
    `step-shared-arc`.
-3. **The rest of the structure** - wanted, and warranted by what step 1 cost (a
-   claim's fate is decided in three places): a `src/geometry/recognition/`
-   module of `FacetGraph`, `Provenance`, pure `Proposer`s, an `Assembler` that
-   asks writability *before* arbitration, and an `Arbiter` whose first policy is
-   today's call order as a table. Oracle for every structural step: the
-   **honoured assignment per facet identical on all 104 exports**, from the
-   ledger dump - far stronger than the suite.
+3. **The rest of the structure** - the three pieces
+   `doc/step-recognition-design.md`, *The recognition module, as built*, names as
+   not done: loser claims through the arbiter, the band pass split into propose
+   and form, and each recogniser moved out of `AnalyticFeatures.cc` into its own
+   file. Pure moves; the oracle proves each.
 4. Then the remaining policy, one landing each with a fixture first: provenance-first regions
    (R0), exchange-never-surrender (item 30), D4 tests out of D0 membership, the
    4x-median statistics (item 27), the global objective.
 
-**Tooling added this session:** the ledger dump; a measurement loop that exports
-the four parts and every fixture in both tiers into `build/<name>/` and compares
-report (minus the ledger's own and timing lines) and entity census - a scratch
-script, worth committing as `scripts/step-dev.sh measure` next.
+**Tooling added this session:** the ledger dump (`OPENSCAD_STEP_LEDGER`, with
+centroids and a `.surfaces.tsv`), and the oracle in the dev loop:
+`scripts/step-dev.sh measure <name>` exports the four parts and every fixture in
+both tiers with ledgers, `compare <a> <b>` runs
+`scripts/step-diagnostics/measure-compare.py` over two runs. Self-compares to 0,
+catches a one-field mutation, and explains a difference by an ordered diff.
 
 ---
 
