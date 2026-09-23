@@ -268,7 +268,7 @@ void PolySetBuilder::addSurface(std::shared_ptr<Surface> new_surface)
       auto cyl_surface = std::dynamic_pointer_cast<CylinderSurface>(surface);
       if (cyl_surface != nullptr) {
         if (cyl_surface->operator==(*cyl_new_surface)) {
-          surface = withOwners(surface, new_surface->owners);
+          surface = withDeclarersOf(surface, *new_surface);
           return;
         }
       }
@@ -276,7 +276,7 @@ void PolySetBuilder::addSurface(std::shared_ptr<Surface> new_surface)
   }
   for (auto& surface : surfaces) {
     if (surface->operator==(*new_surface)) {
-      surface = withOwners(surface, new_surface->owners);
+      surface = withDeclarersOf(surface, *new_surface);
       return;
     }
   }

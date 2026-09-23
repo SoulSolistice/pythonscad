@@ -180,14 +180,24 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
   // declared twice, and a record is only ever matched on its radius and axis -
   // the height it carries says where the circle was, not how far the surface
   // reaches, since a boolean may since have cut it back.
+  //
+  // A vertical edge sweeps a wall on that cylinder, a face of this solid. A
+  // sloped edge sweeps a cone and declares the cylinders at its two ends only as
+  // *evidence* - rims the band pass identifies the cone by - and no facet lies
+  // on them. Where one radius is both, the face wins (addSurfaceUnique merges
+  // the roles). See Surface::witnesses.
   std::vector<double> declared;
-  auto declare = [&](const Vector2d& p) {
+  auto declare = [&](const Vector2d& p, bool face) {
+    auto record = std::make_shared<CylinderSurface>(Vector3d(0, 0, p[1]), Vector3d(0, 0, 1), p[0]);
+    record->evidence_only = !face;
     for (const double r : declared) {
-      if (fabs(r - p[0]) <= eps * std::max(1.0, r)) return;
+      if (fabs(r - p[0]) <= eps * std::max(1.0, r)) {
+        if (face) addSurfaceUnique(polyset.surfaces, record);  // upgrades the kept record to a face
+        return;
+      }
     }
     declared.push_back(p[0]);
-    addSurfaceUnique(polyset.surfaces,
-                     std::make_shared<CylinderSurface>(Vector3d(0, 0, p[1]), Vector3d(0, 0, 1), p[0]));
+    addSurfaceUnique(polyset.surfaces, record);
   };
 
   for (const auto& profile : profiles) {
@@ -209,8 +219,9 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
         continue;
       }
       if (a[0] <= eps || b[0] <= eps) continue;
-      declare(a);
-      if (fabs(a[0] - b[0]) > eps) declare(b);
+      const bool wall = fabs(a[0] - b[0]) <= eps;
+      declare(a, wall);
+      if (!wall) declare(b, false);
     }
   }
 

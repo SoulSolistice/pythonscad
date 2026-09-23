@@ -454,12 +454,20 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
   //
   // An apex is not a rim and no circle is declared there: there is nothing to
   // collapse, and a radius of zero would match every other radius of zero.
+  //
+  // A frustum's rims are *evidence*, not faces: no facet of it lies on either
+  // cylinder, and the cone it is made of is declared below. Marked so, or
+  // provenance hands the frustum two walls it does not have - measured on
+  // step-declare-cone, see doc/step-export-wip.md, open item 31. A straight
+  // cylinder's one record is its wall, a face.
   if (!cone && !inverted_cone) {
-    polyset->surfaces.push_back(
-      std::make_shared<CylinderSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1), r1));
+    auto rim1 = std::make_shared<CylinderSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1), r1);
+    rim1->evidence_only = r2 != r1;
+    polyset->surfaces.push_back(rim1);
     if (r2 != r1) {
-      polyset->surfaces.push_back(
-        std::make_shared<CylinderSurface>(Vector3d(0, 0, z2), Vector3d(0, 0, 1), r2));
+      auto rim2 = std::make_shared<CylinderSurface>(Vector3d(0, 0, z2), Vector3d(0, 0, 1), r2);
+      rim2->evidence_only = true;
+      polyset->surfaces.push_back(rim2);
     }
   }
 

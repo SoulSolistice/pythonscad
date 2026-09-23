@@ -158,8 +158,13 @@ bool addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
                       const std::shared_ptr<Surface>& surface)
 {
   if (surface == nullptr) return false;
-  for (const auto& s : list) {
-    if (s != nullptr && describesSameSurface(*s, *surface)) return false;
+  for (auto& s : list) {
+    // Not added, but its declarers are: a face offered after the same surface
+    // was offered as evidence makes the kept record a face.
+    if (s != nullptr && describesSameSurface(*s, *surface)) {
+      s = withDeclarersOf(s, *surface);
+      return false;
+    }
   }
   list.push_back(surface);
   return true;
@@ -172,8 +177,8 @@ void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
     bool found = false;
     for (auto& s : into) {
       if (s == surface || (s && surface && s->sameAs(*surface))) {
-        // The same surface declared by two originals is owned by both.
-        if (surface) s = withOwners(s, surface->owners);
+        // The same surface declared by two originals is declared by both.
+        if (surface) s = withDeclarersOf(s, *surface);
         found = true;
         break;
       }
@@ -182,17 +187,32 @@ void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
   }
 }
 
-std::shared_ptr<Surface> withOwners(const std::shared_ptr<Surface>& surface,
-                                    const std::vector<int32_t>& more)
+std::shared_ptr<Surface> withDeclarersOf(const std::shared_ptr<Surface>& kept, const Surface& twin)
 {
-  if (surface == nullptr || more.empty()) return surface;
-  std::vector<int32_t> merged = surface->owners;
-  merged.insert(merged.end(), more.begin(), more.end());
-  std::sort(merged.begin(), merged.end());
-  merged.erase(std::unique(merged.begin(), merged.end()), merged.end());
-  if (merged == surface->owners) return surface;
-  auto copy = surface->clone();
-  copy->owners = std::move(merged);
+  if (kept == nullptr) return kept;
+  // A twin nobody has stamped says nothing about who declared a record that has
+  // been stamped: its role flag belongs to the moment before ids existed. This
+  // is also what keeps a *fit* offered to the approximation's list from
+  // replacing the declared record it duplicates.
+  const bool kept_stamped = !kept->owners.empty() || !kept->witnesses.empty();
+  const bool twin_stamped = !twin.owners.empty() || !twin.witnesses.empty();
+  if (kept_stamped && !twin_stamped) return kept;
+  auto unite = [](std::vector<int32_t> a, const std::vector<int32_t>& b) {
+    a.insert(a.end(), b.begin(), b.end());
+    std::sort(a.begin(), a.end());
+    a.erase(std::unique(a.begin(), a.end()), a.end());
+    return a;
+  };
+  std::vector<int32_t> owners = unite(kept->owners, twin.owners);
+  std::vector<int32_t> witnesses = unite(kept->witnesses, twin.witnesses);
+  const bool evidence_only = kept->evidence_only && twin.evidence_only;
+  if (owners == kept->owners && witnesses == kept->witnesses && evidence_only == kept->evidence_only) {
+    return kept;
+  }
+  auto copy = kept->clone();
+  copy->owners = std::move(owners);
+  copy->witnesses = std::move(witnesses);
+  copy->evidence_only = evidence_only;
   return copy;
 }
 
@@ -207,7 +227,13 @@ std::vector<std::shared_ptr<Surface>> stampOwners(const std::vector<std::shared_
   for (const auto& surface : list) {
     if (surface == nullptr) continue;
     auto copy = surface->clone();
-    copy->owners = owners;
+    if (surface->declaresFace()) {
+      copy->owners = owners;
+      copy->witnesses.clear();
+    } else {
+      copy->owners.clear();
+      copy->witnesses = owners;
+    }
     out.push_back(copy);
   }
   return out;

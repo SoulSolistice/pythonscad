@@ -25,8 +25,30 @@ public:
    * where an id is minted (stampOwners), copied by clone() and so by every
    * transform, and unioned wherever two records are deduplicated into one, so
    * it answers "did this facet's maker declare this surface?" without a
-   * tolerance. See doc/step-export-wip.md, open item 31. */
+   * tolerance. See doc/step-export-wip.md, open item 31.
+   *
+   * Only originals that declared it as a **face** - a surface their own facets
+   * lie on. See `witnesses` for the other kind. */
   std::vector<int32_t> owners;
+  /*! Originals that declared this surface as **evidence** rather than as a face
+   * of their own: `cylinder(r1, r2)` declares its two rim cylinders so the band
+   * pass can identify the frustum from both rims, and its facets lie on
+   * neither. Kept apart from `owners` because the same geometric surface can be
+   * a face of one original and evidence from another - `cylinder(r = 10)` beside
+   * a frustum whose rim is r = 10 - and one list would hand the frustum a face it
+   * never had. Measured, it did: see open item 31. */
+  std::vector<int32_t> witnesses;
+  /*! Set by a generator on a record it offers as evidence, before any original
+   * id exists; `stampOwners` reads it to decide which list the minted ids go
+   * to. Where two records of one surface are merged the face wins, because a
+   * surface some original is made of is a face whoever else points at it. */
+  bool evidence_only = false;
+  /*! Whether this record declares a face: after stamping, whether any original
+   * owns it; before, whether its generator did not mark it as evidence. */
+  [[nodiscard]] bool declaresFace() const
+  {
+    return !owners.empty() || (witnesses.empty() && !evidence_only);
+  }
   virtual void reverse(void);
   virtual int operator==(const Surface& other);
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
@@ -90,18 +112,21 @@ bool addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
 void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
                    const std::vector<std::shared_ptr<Surface>>& from);
 
-/*! The records of `list`, each owned by exactly `ids` - the ids just minted for
- * the geometry that carries them. Copies rather than mutates: a record may be
- * shared with a cached geometry. Returns `list` unchanged when `ids` is empty,
- * because no id means nothing to say, not "owned by nobody". */
+/*! The records of `list`, each declared by exactly `ids` - the ids just minted
+ * for the geometry that carries them - as a face where the record declares one
+ * (`declaresFace`) and as evidence where it does not. Copies rather than
+ * mutates: a record may be shared with a cached geometry. Returns `list`
+ * unchanged when `ids` is empty, because no id means nothing to say, not
+ * "declared by nobody". */
 [[nodiscard]] std::vector<std::shared_ptr<Surface>> stampOwners(
   const std::vector<std::shared_ptr<Surface>>& list, const std::set<uint32_t>& ids);
 
-/*! `surface` with `more` added to its owners - itself when nothing is new, a
- * copy otherwise. What deduplication has to do with the record it keeps, or the
- * dropped twin's owner is lost. */
-[[nodiscard]] std::shared_ptr<Surface> withOwners(const std::shared_ptr<Surface>& surface,
-                                                  const std::vector<int32_t>& more);
+/*! `kept` carrying the declarers of `twin` as well - owners, witnesses, and the
+ * face winning over evidence - itself when nothing is new, a copy otherwise.
+ * What deduplication has to do with the record it keeps, or the dropped twin's
+ * declarers are lost. */
+[[nodiscard]] std::shared_ptr<Surface> withDeclarersOf(const std::shared_ptr<Surface>& kept,
+                                                       const Surface& twin);
 
 /*! A sphere, declared by the primitive that drew it.
  *

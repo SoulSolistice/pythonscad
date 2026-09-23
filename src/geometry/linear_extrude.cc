@@ -395,10 +395,15 @@ void declareExtrudedCylinders(const LinearExtrudeNode& node, const Polygon2d& pr
     // A taper. Only an arc about the scaling origin stays concentric as it
     // shrinks; any other one slides sideways too and sweeps an oblique cone.
     if (arc.centre.norm() > 1e-12 * std::max(1.0, arc.r)) continue;
-    addSurfaceUnique(polyset.surfaces, std::make_shared<CylinderSurface>(centre, axis, radius));
+    // Both are rims of the cone the taper sweeps - evidence, not faces: no facet
+    // of this solid lies on either. See Surface::witnesses.
+    auto base_rim = std::make_shared<CylinderSurface>(centre, axis, radius);
+    base_rim->evidence_only = true;
+    addSurfaceUnique(polyset.surfaces, base_rim);
     if (taper > 0) {
-      addSurfaceUnique(polyset.surfaces,
-                       std::make_shared<CylinderSurface>(centre + height, axis, radius * taper));
+      auto top_rim = std::make_shared<CylinderSurface>(centre + height, axis, radius * taper);
+      top_rim->evidence_only = true;
+      addSurfaceUnique(polyset.surfaces, top_rim);
     }
   }
 }
