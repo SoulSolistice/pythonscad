@@ -1,7 +1,68 @@
 # STEP export: handover, 2026-09-23
 
-Branch `claude/step-claim-two-pass`, suite **58 of 58**, nothing pushed, working
-tree clean.
+Branch `claude/step-claim-ledger`, suite **58 of 58**, nothing pushed, working
+tree clean. It continues `claude/step-claim-two-pass-cf4565` with the session of
+2026-09-23 - read **"The session of 2026-09-23"** directly below first; sections
+0-8 underneath are the previous handover and still hold.
+
+## The session of 2026-09-23 - read this first
+
+**What landed** (each behaviour-neutral, proven on 104 exports - lid10, bayonet,
+f02, f04 and all 48 fixtures, both tiers - by identical report and entity
+census, suite 58 of 58):
+
+| commit | what |
+| --- | --- |
+| `18ba4071b` | **Migration step 1 finished.** Every pass records every claim it would make, once, with a `ClaimFate` (honoured / withdrawn / held / declined / refused, with the rule) and an `EvidenceClass` (D0-D4, weakest of what decided it). The band pass names its surface as soon as its walk is confined and records every shape refusal; the Bezier pass examines held facets; each writer records every patch it does not write. The census now reads the catalogue: *why N facets are fitted or left to the tessellation*, by rule. `OPENSCAD_STEP_LEDGER=<file>` dumps the ledger as a table |
+| `b72449eb3` | **Provenance carried, not measured.** `Surface::owners` is stamped with the Manifold original ids where they are minted and carried through every boolean; reported against the old position-derived `owned`, which still decides |
+| `de85ea6f0` | **Face or evidence.** A record now says whether its declarer is made of it (`owners`) or offers it as evidence (`witnesses`) - the frustum's rims, a sloped revolve edge's radii, a taper's rims |
+
+**The foundation, recorded in `doc/step-recognition-design.md`, *Determinacy*:**
+a D0 with **correct provenance** is the anchor; an entity is as precise as the
+**independent** closed forms that fix it (weakest needed class, freedom left,
+corroboration - algebraic independence, not a count of names); determinacy is
+judged **globally** over the whole cover, stranded facets included; and wherever
+a less precise rung holds ground the question is *why*. Claims that follow the
+rung from D0 upward, decided by provenance, evidence and precision, dissolve the
+boundary violations.
+
+**What the catalogue showed** (lid10 until fixtures isolate it):
+
+- **Open item 30** - the approximation tier surrenders 188 facets of declared
+  cylinder 12 that the exact tier writes as a quadric face; proven by joining the
+  two tiers' ledger dumps facet by facet.
+- **Open item 31** - provenance's ownership was measured. Identity overturns it
+  on 180 held band walls; `step-cylinder-cross` isolates the measured rule's
+  failure (crease slivers "own" the other cylinder). The switch to identity is
+  parked on `claude/step-provenance-identity-parked`: it fails
+  `flagship-strict`, because identity says *declared* and junctions need
+  *present* too - a D0 presence test, the other half of the positive query R0
+  needs.
+- **Open item 32** - the fixture sanity test never checks `EXPORT-ERROR`.
+- The code as it stands breaks the two mandatory documents in eight named ways,
+  each now counted by the ledger; the list and its numbers are in
+  `doc/step-recognition-design.md`, *Step 1, finished*.
+
+**Next, in order:**
+
+1. **The D0 presence test**, then the provenance switch again, judged by
+   `flagship-strict`, `step-cylinder-cross`, `step-declare-cone` and
+   `step-shared-arc`.
+2. **The structural refactor** - wanted, and warranted by what step 1 cost (a
+   claim's fate is decided in three places): a `src/geometry/recognition/`
+   module of `FacetGraph`, `Provenance`, pure `Proposer`s, an `Assembler` that
+   asks writability *before* arbitration, and an `Arbiter` whose first policy is
+   today's call order as a table. Oracle for every structural step: the
+   **honoured assignment per facet identical on all 104 exports**, from the
+   ledger dump - far stronger than the suite.
+3. Then policy, one landing each with a fixture first: provenance-first regions
+   (R0), exchange-never-surrender (item 30), D4 tests out of D0 membership, the
+   4x-median statistics (item 27), the global objective.
+
+**Tooling added this session:** the ledger dump; a measurement loop that exports
+the four parts and every fixture in both tiers into `build/<name>/` and compares
+report (minus the ledger's own and timing lines) and entity census - a scratch
+script, worth committing as `scripts/step-dev.sh measure` next.
 
 ---
 

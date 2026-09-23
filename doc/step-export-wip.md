@@ -3860,6 +3860,34 @@ will meet: the claim on `step-bored-cone` widens from 32 to 52 facets and the
 trimmed-quadric bounding is then wrong by 2.75% of the derived volume - so it
 lands with that fixture's `VOLUME-APPROX` as its judge.
 
+**The role landed (`de85ea6f0`), and the switch was measured again on top of
+it.** `Surface` now keeps face declarers (`owners`) apart from evidence
+declarers (`witnesses`); the frustum's rims, a sloped `rotate_extrude` edge's
+endpoint radii and a tapered extrusion's rims are marked evidence. Neutral on
+its own, and it takes carried-only disagreements from 18 to 4 on lid10 and 11
+to 7 on the bayonet. The switch on top of it then changes 14 reports and lid10's
+approximation-tier geometry, and **fails `export-step-flagship-strict`**:
+*"lid10: the corner placement gave up corners to protect a planar face"*. It
+stays parked. What the diffs say, fixture by fixture:
+
+- **better**, as identity predicts: `step-cylinder-cross` spares 128
+  facet-surface tests the crease slivers used to pass; on `step-shared-arc` 2
+  junctions the nearest-surface rule got wrong get their two declared owners;
+- **wrong in a new way**: on `step-declare-cone` a junction pair now reaches its
+  "crossing" by moving **132.9 mm**. Original 7, the `r = 100` intersection
+  tool, did declare its wall as a face - and the intersection removed all of it.
+  *Declared a face* is true; *this surface is present here* is not, and the
+  junction code asks the second question. The arbiter moved nothing (every
+  corner at most 0.0000), but a candidate 132 mm away should never be offered;
+- the bayonet's junctions with more than two owners go from 2 to 226.
+
+**So identity is necessary and not sufficient.** Junction ownership needs
+identity *and* a D0 presence test - a facet of this maker lying on this surface
+by the generator's own points at float equality (`runsThrough`), with no 60
+degree band and no count of three. That is the positive `Provenance` query R0
+needs too, now with its two halves named: *declared as a face* (carried) and
+*present* (D0 membership).
+
 **Why it comes before R0.** R0's region is *"the facets whose maker owns this
 surface"*. If *owns* is a measurement with a magic 3 and a 60 degree band, a
 provenance region is a measured region wearing a D0 label - the class error
