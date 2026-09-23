@@ -3888,6 +3888,29 @@ degree band and no count of three. That is the positive `Provenance` query R0
 needs too, now with its two halves named: *declared as a face* (carried) and
 *present* (D0 membership).
 
+**Identity plus presence, measured and parked too (`73a42f3aa`).** `owned[id]`
+holds a surface when the original declared it as a face *and* a whole facet of
+its own has every corner on it by `runsThrough` - no facing band, no count. It
+does what it was built for: `step-declare-cone` is back to 32 one-owner and 32
+two-owner junctions with no 132 mm candidate, `step-cylinder-cross` and
+`step-shared-arc` keep identity's gains, and the bayonet's over-owned
+junctions are 122. It still fails `flagship-strict` on lid10, for one reason
+that is not a bug in either half:
+
+**Four originals of lid10 (26, 28, 30, 32) lie exactly on cylinder 12 and
+declared nothing curved.** Only original 21 declared that cylinder. Under
+identity they own nothing, and `Provenance::excludes` reads "owns nothing" as
+*silent*, so their facets go unconstrained and "provenance spared" falls from
+54325 to 39254. Measured ownership had called them owners of cylinder 12 by
+position, which is how their 188 facets became a quadric face (item 30).
+
+That is a **missing declaration**, the branch of the *why* the census exists
+to name, and it is a decision rather than a measurement: exclude them under
+strict identity (the 188 facets stop being on cylinder 12, which was never
+theirs), or find what they are and make their generator declare the surface it
+cuts exactly (the feedstock fix), with "owns nothing" then meaning *excluded*
+for any original whose ids are present. Not taken without the author.
+
 **Why it comes before R0.** R0's region is *"the facets whose maker owns this
 surface"*. If *owns* is a measurement with a magic 3 and a 60 degree band, a
 provenance region is a measured region wearing a D0 label - the class error
