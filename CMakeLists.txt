@@ -1622,6 +1622,12 @@ set(CORE_SOURCES
   src/ext/lodepng/lodepng.cpp
   src/geometry/AnalyticFeatures.cc
   src/geometry/recognition/FacetGraph.cc
+  src/geometry/recognition/Bands.cc
+  src/geometry/recognition/Bezier.cc
+  src/geometry/recognition/Fits.cc
+  src/geometry/recognition/Grids.cc
+  src/geometry/recognition/Quadrics.cc
+  src/geometry/recognition/Regions.cc
   src/geometry/recognition/Pipeline.cc
   src/geometry/recognition/Reports.cc
   src/geometry/ClipperUtils.cc
