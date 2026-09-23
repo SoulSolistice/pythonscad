@@ -18,6 +18,8 @@ point and sometimes a trap — see *Kernel agreement is not proof* in
 | `scripts/step-dev.sh flagship` | the three flagship tests alone |
 | `scripts/step-dev.sh export lid10\|bayonet\|f02\|f04\|<file.scad>` | export with both feature flags and the right customizer set, into `build/step-dev/` |
 | `scripts/step-dev.sh census <file.stp>…` | the fault census, with the OCP-capable interpreter |
+| `scripts/step-dev.sh measure <name>` | every reference part and fixture, both tiers, ledgers dumped, into `build/measure/<name>/` |
+| `scripts/step-dev.sh compare <a> <b>` | the behaviour-neutral oracle: `measure-compare.py` - report less timings, entity census, sorted ledger and surfaces, per export. Self-compares to 0 and catches a one-field mutation |
 | `scripts/step-dev.ps1 <same>` | the same from PowerShell, with MSYS2 set up and arguments passed untouched |
 
 Use these rather than inline commands. A command passed from PowerShell to bash

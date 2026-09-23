@@ -22,6 +22,15 @@
 #                                          other. STEP_DEV_TIER=approx skips the second.
 #   scripts/step-dev.sh census <file.stp>...
 #                                          scripts/step-diagnostics/fault-census.py
+#   scripts/step-dev.sh measure <name>     every reference part and every fixture, both
+#                                          tiers, with the claim ledger dumped, into
+#                                          build/measure/<name>/
+#   scripts/step-dev.sh compare <a> <b>    two measure runs by content: the report less
+#                                          timings, the entity census, and the ledger
+#                                          sorted row by row. The oracle for a change
+#                                          that claims to change no behaviour - the
+#                                          exporter is not byte-deterministic, so files
+#                                          are never diffed.
 #   scripts/step-dev.sh python             print the interpreter ctest uses (has OCP)
 #
 # From PowerShell, go through scripts/step-dev.ps1, which sets up MSYS2 correctly.
@@ -82,6 +91,9 @@ export_part() {
   local name="${part##*/}"; name="${name%.*}"
   local target="$out/$name.stp" log="$out/$name.log"
   local exact="$out/$name-exact.stp" exact_log="$out/$name-exact.log"
+  # STEP_DEV_LEDGER=1 dumps the claim ledger beside each export - see
+  # OPENSCAD_STEP_LEDGER in StepKernel.cc and scripts/step-diagnostics/README.md.
+  if [ "${STEP_DEV_LEDGER:-0}" = "1" ]; then export OPENSCAD_STEP_LEDGER="$out/$name.ledger.tsv"; fi
   "$BIN" "${args[@]}" -o "$target" --trust-python "${FLAGS[@]}" >"$log" 2>&1
   local rc=$?
   echo "$name: exit $rc -> $target"
@@ -89,13 +101,38 @@ export_part() {
   # And the exact tier, always. Skipped only with STEP_DEV_TIER=approx, which is
   # for a loop that has already established the exact tier does not move.
   if [ "${STEP_DEV_TIER:-both}" != "approx" ]; then
+    if [ "${STEP_DEV_LEDGER:-0}" = "1" ]; then export OPENSCAD_STEP_LEDGER="$out/$name-exact.ledger.tsv"; fi
     "$BIN" "${args[@]}" -o "$exact" --trust-python "${EXACT_FLAGS[@]}" >"$exact_log" 2>&1
     local erc=$?
     echo "$name: exit $erc -> $exact   (exact tier, --enable=step-analytic-surfaces alone)"
     grep -E "EXPORT-ERROR" "$exact_log" && echo "   ^ the exporter says its own output is wrong" >&2
     [ $rc -eq 0 ] && rc=$erc
   fi
+  unset OPENSCAD_STEP_LEDGER
   return $rc
+}
+
+# Everything that can move when recognition moves, in one directory: the four
+# reference parts and every fixture, both tiers, ledgers dumped.
+measure_all() {
+  local out="$ROOT/build/measure/$1"
+  rm -rf "$out"
+  mkdir -p "$out/parts" "$out/fixtures"
+  export STEP_DEV_LEDGER=1
+  for part in lid10 bayonet f02 f04; do export_part "$part" "$out/parts" >/dev/null; done
+  for f in tests/data/scad/step-export/*.scad tests/data/pythonscad-step-export/*.py; do
+    export_part "$f" "$out/fixtures" >/dev/null
+  done
+  echo "measured $(ls "$out"/*/*.stp | wc -l) exports into $out"
+  grep -l "EXPORT-ERROR" "$out"/*/*.log 2>/dev/null | sed 's/^/EXPORT-ERROR in /'
+}
+
+# The oracle: scripts/step-diagnostics/measure-compare.py, in Python because a
+# shell comparison depends on tools MSYS2 does not ship by default - a missing
+# `diff` once made this compare nothing and report nothing.
+compare_runs() {
+  local py; py="$(ocp_python)"
+  "${py:-python}" "$ROOT/scripts/step-diagnostics/measure-compare.py"     "$ROOT/build/measure/$1" "$ROOT/build/measure/$2"
 }
 
 case "${1:-}" in
@@ -123,8 +160,16 @@ case "${1:-}" in
   python)
     ocp_python
     ;;
+  measure)
+    [ $# -ge 2 ] || { echo "measure <name>" >&2; exit 2; }
+    measure_all "$2"
+    ;;
+  compare)
+    [ $# -ge 3 ] || { echo "compare <a> <b>" >&2; exit 2; }
+    compare_runs "$2" "$3"
+    ;;
   *)
-    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac
