@@ -171,7 +171,7 @@ void runFits(Context& ctx)
 
   if (approximate) {
     const std::vector<AnalyticFeatures::SmoothRegion> candidates =
-      AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
+      AnalyticFeatures::uncoveredRegions(mesh, ctx.arbiter.held(), smooth_angle);
     std::size_t fitted = 0, recovered = 0, turned = 0, tried = 0, coned = 0;
     // Fits the model had already declared. A guess that duplicates a declaration
     // is not a surface gained: it is a declaration something refused, and the
@@ -262,7 +262,7 @@ void runFits(Context& ctx)
     // to keep what it recognised: a fit is a measurement of the mesh, a
     // declaration is what the model said, and no combination of the two may
     // end with the measurement holding ground the declaration had.
-    std::vector<char> exact_consumed = features.consumed;
+    std::vector<char> exact_consumed = ctx.arbiter.held();
     // `coned` belongs in this condition as much as the others: a fit the band
     // pass never sees is a fit that cannot become a face.
     if (fitted + coned + turned + recovered > 0) {
@@ -272,9 +272,10 @@ void runFits(Context& ctx)
       features =
         AnalyticFeatures::recogniseSurfacesOfRevolution(graph, effective, model_tol, surfaces.size());
       std::size_t lost = 0, demoted = 0;
-      for (std::size_t f = 0; f < exact_consumed.size() && f < features.consumed.size(); f++) {
+      const std::vector<char> rerun_held = ctx.arbiter.held();
+      for (std::size_t f = 0; f < exact_consumed.size() && f < rerun_held.size(); f++) {
         if (exact_consumed[f] == 0) continue;  // the declared-only pass did not have it
-        if (features.consumed[f] == 0) {
+        if (rerun_held[f] == 0) {
           lost++;
           continue;
         }
@@ -380,7 +381,7 @@ void runBezier(Context& ctx)
 
   std::vector<std::string> patch_report;
   std::vector<AnalyticFeatures::Patch> patches =
-    AnalyticFeatures::formBezierPatches(graph, effective, features.consumed, patch_report,
+    AnalyticFeatures::formBezierPatches(graph, effective, ctx.arbiter.held(), patch_report,
                                         &features.ledger, surfaces.size(), ctx.bezier_proposals);
   for (const auto& line : patch_report) LOG("STEP export: %1$s", line);
   std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
@@ -616,8 +617,8 @@ void runGrids(Context& ctx)
   // sweep that was never declared.
   std::vector<std::string> grid_report;
   const std::vector<AnalyticFeatures::Patch> grid_patches =
-    AnalyticFeatures::formGridPatches(graph, effective, features.consumed, grid_report, &features.ledger,
-                                      surfaces.size(), ctx.grid_proposals);
+    AnalyticFeatures::formGridPatches(graph, effective, ctx.arbiter.held(), grid_report,
+                                      &features.ledger, surfaces.size(), ctx.grid_proposals);
   for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
 
   // Where the claimed region sits on the sweep, which is the question a face
@@ -746,7 +747,7 @@ void runQuadrics(Context& ctx)
     const double max_off = ctx.quadric_max_off;
     std::vector<std::string> quadric_report;
     const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::formQuadricPatches(
-      graph, effective, features.consumed, provenance, smooth_angle, max_off, quadric_report,
+      graph, effective, ctx.arbiter.held(), provenance, smooth_angle, max_off, quadric_report,
       &features.ledger, surfaces.size(), ctx.quadric_proposals);
     for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
     // Corners on the surface are not enough to call a face exact. The
@@ -878,7 +879,7 @@ void runLeftover(Context& ctx)
     // written exactly as a PLANE, and reporting it as something left faceted
     // says a surface was lost where none was.
     std::vector<AnalyticFeatures::SmoothRegion> regions;
-    for (auto& region : AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle)) {
+    for (auto& region : AnalyticFeatures::uncoveredRegions(mesh, ctx.arbiter.held(), smooth_angle)) {
       if (region.facets.size() >= 3) regions.push_back(std::move(region));
     }
     std::size_t left = 0;
@@ -981,6 +982,14 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
     }
     stage.run(ctx);
     produced |= stage.writes;
+  }
+  // The ledger is the source of truth for who holds a facet; `consumed` is the
+  // cache the writer reads. Loud if they part, because everything downstream
+  // trusts the cache.
+  if (!ctx.arbiter.cacheAgrees()) {
+    LOG(message_group::Export_Error,
+        "STEP export: the facets recognition holds by its ledger and by its `consumed` cache "
+        "differ - a grant was made outside the arbiter; see recognition::Arbiter");
   }
 }
 

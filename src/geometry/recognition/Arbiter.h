@@ -56,8 +56,23 @@ public:
   {
   }
 
-  /*! What the policy in force holds: every facet an honoured region took. */
-  [[nodiscard]] const std::vector<char>& held() const { return state_.consumed; }
+  /*! What the policy in force holds: every facet with an honoured claim.
+   *
+   * Read from the ledger, not from `consumed` - migration step 3, *flip the
+   * source of truth*. `consumed` is kept as a cache the writer reads, and
+   * `cacheAgrees` says whether it still says the same thing; the shadow check
+   * proved it did on every export before the flip. */
+  [[nodiscard]] std::vector<char> held() const
+  {
+    std::vector<char> out(state_.consumed.size(), 0);
+    for (const Claim& claim : state_.ledger.all()) {
+      if (claim.honoured() && claim.facet < out.size()) out[claim.facet] = 1;
+    }
+    return out;
+  }
+
+  /*! Whether the `consumed` cache still holds exactly what the ledger does. */
+  [[nodiscard]] bool cacheAgrees() const { return held() == state_.consumed; }
 
   /*! Record what became of `region`, claimed by `who` for `surface_index`.
    * Honoured, it takes its facets; any other fate is recorded and takes
