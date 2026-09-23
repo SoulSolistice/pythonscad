@@ -21,6 +21,7 @@ assumes both.
 | `src/io/export_step.cc` | entry point: mesh to `StepKernel`, then the ISO-10303-21 header |
 | `src/io/StepKernel.cc/.h` | the entity model, and turning recognised surfaces into entities |
 | `src/geometry/AnalyticFeatures.cc/.h` | the recogniser: which facets were modelled as a surface |
+| `src/geometry/recognition/` | the recognition module: `FacetGraph`, `Provenance`, `Ledger`, `Arbiter`, `Pipeline` (the stages and their checked table), `Reports`. See `doc/step-recognition-design.md`, *The recognition module, as built* |
 | `src/io/import_step.cc` | the reader, useful as a round-trip oracle |
 | `src/geometry/Surface.h/.cc` | the declarable surface types and their membership tests |
 | `src/core/primitives.cc` | what `cube()`, `cylinder()`, `sphere()` declare |

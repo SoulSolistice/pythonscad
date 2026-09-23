@@ -721,17 +721,74 @@ against it is how a subtle regression ships. So:
    which function runs first, with no record kept. Suite 54 of 54, including all
    45 fixtures, so the agreement holds on every model the suite covers.
 3. **Flip the source of truth** from `consumed` to the ledger. The suite must
-   not move a single number.
+   not move a single number. *(Done 2026-09-23, `d64877cad`: `Arbiter::held()`
+   is read from the ledger's honoured claims, every stage reads it, `consumed`
+   is a cache checked against the ledger at the end of every run.)*
 4. **Change policy**, one tier at a time, measuring each: this is where the 56
    contested facets get decided by precision instead of by call order, and where
    each change is a separate landing with its own numbers.
 5. **Structure**: recognisers become objects with declared inputs and outputs,
    and the dependency graph is derived from those declarations and asserted
    against the real call order - which is what would have caught
-   `crossing_edges` as a declaration mismatch instead of an open shell.
+   `crossing_edges` as a declaration mismatch instead of an open shell. *(The
+   pipeline and its checked stage table landed 2026-09-23; see "The recognition
+   module, as built", below. The recognisers themselves are still functions in
+   `AnalyticFeatures.cc`.)*
 
 Steps 1-3 change no behaviour and are individually verifiable. Step 4 is where
 the wins are, and by then every one of them is measurable in isolation.
+
+### The recognition module, as built - 2026-09-23
+
+`src/geometry/recognition/`, STEP-agnostic. Every piece landed behaviour-neutral,
+each proven by `scripts/step-dev.sh compare` reporting **0 differences over 104
+exports** - the four reference parts and all 48 fixtures, both tiers, compared
+by report, entity census, and the ledger and surfaces tables sorted.
+
+| unit | what it is | reads | writes |
+| --- | --- | --- | --- |
+| `FacetGraph` | the mesh and its edge -> loops adjacency, built once (four passes each built their own) | mesh | - |
+| `Provenance` | facet -> original; surface -> the originals that declared it, carried (`Surface::owners`) | - | - |
+| `Ledger` | `Claim { facet, surface, precision, by, why, fate, surface_index, evidence }` | - | - |
+| `propose*` (in `AnalyticFeatures.cc`) | **pure**: every facet each surface covers, with what its region rules read. `proposeBezierPatches`, `proposeGrids`, `proposeQuadrics` | graph, surfaces, provenance | proposals |
+| `form*` (in `AnalyticFeatures.cc`) | the region rules over what the policy grants from a proposal | proposals, `held()` | regions, loser claims |
+| `Arbiter` | the **only** place a facet becomes held (`settle`), and `held()` read from the ledger. A `Claimant` states once what precision and evidence class its claims carry | ledger | grants |
+| `Writability` | the writer's half of "can this region be written" - sections and crossing curves - implemented by `StepKernel`, asked by the quadric stage | standing regions | yes/no each |
+| `Pipeline` | six stages over one `Context`, `band -> fit -> propose -> Bezier -> grid -> quadric -> leftover`, from a **stage table declaring what each reads and writes**, checked every run | all | `Recognition` |
+| `Reports` | `dumpLedger`, `reportArbitration`, `reportDeclarationCensus` - every line recognition prints about itself, as a query over the ledger | ledger, result | report lines |
+
+Two assertions guard the structure, both mutation-checked: a stage table whose
+order contradicts its declarations (swapping grid and quadric fires it - the
+quadric stage's writability walks the sweep faces), and a `consumed` cache that
+parts from the ledger. A unit test (`[purity]`) guards that no proposal moves
+with what is held or with the order proposers run in.
+
+**How to add a recogniser, now.** (1) A `propose*` that reads only the graph,
+the surfaces and provenance - if it wants anything a pass holds, it is not a
+proposal. (2) A `form*` over its proposals and `Arbiter::held()`. (3) A
+`Claimant` naming its precision and the class of what decides it - honestly: a
+declared surface in the sentence does not make it D0. (4) A row in `kStages`
+saying what it reads and writes; the order check does the rest. (5) The oracle:
+`measure` before and after, `compare` - and if it is meant to change behaviour,
+a fixture that asserts the change first.
+
+**What is not done, named so it is not mistaken for done:**
+
+- **Step 4, the policy.** The arbiter's grant is still today's call order - pass
+  order, then surface order - held in the `form*` functions as
+  `held() || taken`. Moving that decision into the arbiter's table, keyed on
+  provenance first and then determinacy, is the step every earlier one exists
+  for, and the design's shuffled-order test becomes meaningful with it.
+- **The band pass grants inside itself.** Its walls and caps are claimed
+  honoured in `recogniseSurfacesOfRevolution`'s own `Result`, which the arbiter
+  then adopts; it has no separate propose. It reads no other pass, so it is
+  pure *between* recognisers, not within.
+- **Loser claims** (held, declined) are written by the `form*` functions straight
+  into the ledger rather than through the arbiter.
+- **`AnalyticFeatures.cc`** still holds every recogniser and its geometry
+  helpers in one file of ~4700 lines. The seams are cut now; moving each
+  recogniser to its own file is a pure move the oracle can prove.
+- Report strings still say `STEP export:`.
 
 ### The structural work is sanctioned - do not tiptoe around it
 

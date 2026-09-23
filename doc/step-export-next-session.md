@@ -43,19 +43,36 @@ boundary violations.
   each now counted by the ledger; the list and its numbers are in
   `doc/step-recognition-design.md`, *Step 1, finished*.
 
+**The recognition refactor, 2026-09-23 (later the same day)** - on the user's
+instruction "start the full refactor ... the goal is the purity rung and being
+future proof without creating yet another spaghetti monster". Landed in seven
+commits, every one behaviour-neutral by the new oracle
+(`scripts/step-dev.sh measure <name>` / `compare <a> <b>`, 0 differences over
+104 exports): the `src/geometry/recognition/` module, pure proposers, the
+pipeline out of `build_tri_body` with a checked stage table, the `Arbiter`,
+reports as ledger queries, and **migration step 3 - the ledger is the source of
+truth**. `StepKernel.cc` 7072 -> 6371 lines. The architecture, how to add a
+recogniser, and what is not done yet are in `doc/step-recognition-design.md`,
+*The recognition module, as built*. Before any of it: the specimens now declare
+the bayonet channel's walls (the root cause of lid10's 188 disputed facets), and
+one geometric surface is one record.
+
 **Next, in order:**
 
-1. **The D0 presence test**, then the provenance switch again, judged by
+1. **Migration step 4 - the policy in the arbiter's table**, keyed on provenance
+   first and then determinacy, one landing at a time, each with a fixture first.
+   The shuffled-order test becomes meaningful with it.
+2. **The D0 presence test**, then the provenance switch again, judged by
    `flagship-strict`, `step-cylinder-cross`, `step-declare-cone` and
    `step-shared-arc`.
-2. **The structural refactor** - wanted, and warranted by what step 1 cost (a
+3. **The rest of the structure** - wanted, and warranted by what step 1 cost (a
    claim's fate is decided in three places): a `src/geometry/recognition/`
    module of `FacetGraph`, `Provenance`, pure `Proposer`s, an `Assembler` that
    asks writability *before* arbitration, and an `Arbiter` whose first policy is
    today's call order as a table. Oracle for every structural step: the
    **honoured assignment per facet identical on all 104 exports**, from the
    ledger dump - far stronger than the suite.
-3. Then policy, one landing each with a fixture first: provenance-first regions
+4. Then the remaining policy, one landing each with a fixture first: provenance-first regions
    (R0), exchange-never-surrender (item 30), D4 tests out of D0 membership, the
    4x-median statistics (item 27), the global objective.
 
