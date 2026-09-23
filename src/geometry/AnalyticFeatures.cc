@@ -1253,12 +1253,9 @@ std::vector<Patch> formBezierPatches(const recognition::FacetGraph& graph,
       const bool held = consumed[f] != 0 || taken[f] != 0;
       if (held) {
         if (ledger != nullptr) {
-          ledger->add({f, surface,
-                       surface_index < declared_count ? ClaimPrecision::DeclaredInterpolant
-                                                      : ClaimPrecision::Fitted,
-                       "a Bezier patch", "covered, but already held when this pass looked",
-                       ClaimFate::Held, surface_index,
-                       surface_index < declared_count ? EvidenceClass::D1 : EvidenceClass::D3});
+          recognition::recordClaim(*ledger, recognition::kBezierPatch, f, surface, surface_index,
+                                   declared_count, ClaimFate::Held,
+                                   "covered, but already held when this pass looked");
         }
         continue;
       }
@@ -1965,12 +1962,10 @@ std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
     // A declared sweep is an interpolant through the model's stations and
     // publishes its band, which is D1; a sweep the approximation recovered from
     // the mesh is past `declared_count` and is D3 whatever it interpolates.
-    const bool declared = surface_index < declared_count;
     auto record = [&](std::size_t f, ClaimFate fate, const char *why) {
       if (ledger == nullptr) return;
-      ledger->add({f, surface, declared ? ClaimPrecision::DeclaredInterpolant : ClaimPrecision::Fitted,
-                   "a declared sweep", why, fate, surface_index,
-                   declared ? EvidenceClass::D1 : EvidenceClass::D3});
+      recognition::recordClaim(*ledger, recognition::kDeclaredSweep, f, surface, surface_index,
+                               declared_count, fate, why);
     };
     std::vector<std::size_t> claimed;
     std::vector<std::size_t> contested;  // on this sweep, but already held elsewhere
@@ -2673,12 +2668,10 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
     // 1.25 x the facet's own sagitta - the tessellation deciding, even where
     // max_off is 1e-7. A declared surface in the claim does not make it D0; see
     // doc/step-rungs.md, *a rung is as exact as its evidence*.
-    const ClaimPrecision precision =
-      surface_index < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted;
     auto record = [&](std::size_t f, ClaimFate fate, const char *why) {
       if (ledger == nullptr) return;
-      ledger->add(
-        {f, surface, precision, "a quadric face", why, fate, surface_index, EvidenceClass::D4});
+      recognition::recordClaim(*ledger, recognition::kQuadricFace, f, surface, surface_index,
+                               declared_count, fate, why);
     };
     std::vector<std::size_t> claimed;
     std::vector<std::size_t> contested;  // on this quadric, but already held elsewhere
@@ -3459,11 +3452,9 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         // match the declaration to 1e-7, and no band or statistic takes part.
         // That is membership only; *which* facets is still what a band can
         // express, which is R2 and D4, and the declines above are its record.
-        result.ledger.add(
-          {f, surfaces[matched],
-           matched < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted,
-           "a band's wall", "the facet walks out from the band's seed", ClaimFate::Honoured, matched,
-           matched < declared_count ? EvidenceClass::D0 : EvidenceClass::D3});
+        recognition::recordClaim(result.ledger, recognition::kBandWall, f, surfaces[matched], matched,
+                                 declared_count, ClaimFate::Honoured,
+                                 "the facet walks out from the band's seed");
         band_of_loop[f] = bands.size();
       }
       bands.push_back(info);
@@ -4099,17 +4090,13 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
           // polar caps as "written on a surface the approximation fitted" at
           // the *exact* tier, where nothing can be fitted at all.
           const std::size_t zone_index = index_of(surface);
-          const ClaimPrecision zone_precision =
-            zone_index < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted;
           // D4: a cap is absorbed because the gap it spans is under one ring
           // step of this tessellation - the tessellation deciding, however
           // exact the sphere it closes.
-          result.ledger.add({cap_low, surface, zone_precision, "a band's cap",
-                             "the loop closing the band", ClaimFate::Honoured, zone_index,
-                             EvidenceClass::D4});
-          result.ledger.add({cap_high, surface, zone_precision, "a band's cap",
-                             "the loop closing the band", ClaimFate::Honoured, zone_index,
-                             EvidenceClass::D4});
+          for (const std::size_t cap : {cap_low, cap_high}) {
+            recognition::recordClaim(result.ledger, recognition::kBandCap, cap, surface, zone_index,
+                                     declared_count, ClaimFate::Honoured, "the loop closing the band");
+          }
         }
         rims[seed] = ends;
         for (const std::size_t bi : run) {
@@ -4264,11 +4251,9 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
   // The refusals, once each. See `declined` above.
   for (const auto& entry : declined) {
     const std::size_t f = entry.first.first, si = entry.first.second;
-    if (result.ledger.has(f, "a band's wall", si)) continue;
-    result.ledger.add({f, surfaces[si],
-                       si < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted,
-                       "a band's wall", entry.second, ClaimFate::Declined, si,
-                       si < declared_count ? EvidenceClass::D0 : EvidenceClass::D3});
+    if (result.ledger.has(f, recognition::kBandWall.by, si)) continue;
+    recognition::recordClaim(result.ledger, recognition::kBandWall, f, surfaces[si], si, declared_count,
+                             ClaimFate::Declined, entry.second);
   }
 
   return result;

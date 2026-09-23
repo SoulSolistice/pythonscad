@@ -256,4 +256,50 @@ private:
   std::map<std::size_t, std::vector<std::size_t>> by_facet_;
 };
 
+/*! Who claims, as the ledger names it, and what decides its membership.
+ *
+ * Precision is the surface's (a declaration or a fit); evidence is what put
+ * the facet on it - see EvidenceClass. They are stated once per recogniser
+ * here rather than at every site that records a claim. */
+struct Claimant {
+  const char *by;
+  ClaimPrecision if_declared;          // DeclaredExact or DeclaredInterpolant
+  EvidenceClass evidence_if_declared;  // what decides membership on a declaration
+  EvidenceClass evidence_if_fitted;    // ... and on a surface the approximation fitted
+};
+
+/*! A band's wall: every corner on the declared surface to 1e-7 and the rims
+ * matched to it at 1e-7, no band or statistic - D0 on a declaration. Which
+ * facets a band takes is still what a ring can express (R2, D4); its declines
+ * are the record of that. */
+inline constexpr Claimant kBandWall{"a band's wall", ClaimPrecision::DeclaredExact, EvidenceClass::D0,
+                                    EvidenceClass::D3};
+/*! A band's polar cap, absorbed because the gap it spans is under one ring step
+ * of the tessellation - the tessellation deciding, however exact the sphere. */
+inline constexpr Claimant kBandCap{"a band's cap", ClaimPrecision::DeclaredExact, EvidenceClass::D4,
+                                   EvidenceClass::D4};
+/*! A declared Bezier patch: every corner on the model's own net - D1. */
+inline constexpr Claimant kBezierPatch{"a Bezier patch", ClaimPrecision::DeclaredInterpolant,
+                                       EvidenceClass::D1, EvidenceClass::D3};
+/*! A declared sweep: the model's stations, interpolated, band published - D1. */
+inline constexpr Claimant kDeclaredSweep{"a declared sweep", ClaimPrecision::DeclaredInterpolant,
+                                         EvidenceClass::D1, EvidenceClass::D3};
+/*! A trimmed quadric: OnQuadric::covers, which the tessellation band and the
+ * facet's sagitta decide even at max_off = 1e-7 - D4, declared or not. */
+inline constexpr Claimant kQuadricFace{"a quadric face", ClaimPrecision::DeclaredExact,
+                                       EvidenceClass::D4, EvidenceClass::D4};
+
+/*! Record one claim by `who` on `facet` for the surface at `surface_index`,
+ * whose first `declared_count` entries are the model's own. The one rule for
+ * what precision and evidence class a claim carries - every site that records a
+ * claim, honoured or lost, goes through it. */
+inline void recordClaim(ClaimLedger& ledger, const Claimant& who, std::size_t facet,
+                        const std::shared_ptr<const Surface>& surface, std::size_t surface_index,
+                        std::size_t declared_count, ClaimFate fate, const char *why)
+{
+  const bool declared = surface_index < declared_count;
+  ledger.add({facet, surface, declared ? who.if_declared : ClaimPrecision::Fitted, who.by, why, fate,
+              surface_index, declared ? who.evidence_if_declared : who.evidence_if_fitted});
+}
+
 }  // namespace recognition

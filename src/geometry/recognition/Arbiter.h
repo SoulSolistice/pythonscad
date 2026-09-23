@@ -23,29 +23,6 @@
 
 namespace recognition {
 
-/*! Who claims, as the ledger names it, and what decides its membership.
- *
- * Precision is the surface's (a declaration or a fit); evidence is what put
- * the facet on it - see EvidenceClass. They are stated once per recogniser
- * here rather than at every site that records a claim. */
-struct Claimant {
-  const char *by;
-  ClaimPrecision if_declared;          // DeclaredExact or DeclaredInterpolant
-  EvidenceClass evidence_if_declared;  // what decides membership on a declaration
-  EvidenceClass evidence_if_fitted;    // ... and on a surface the approximation fitted
-};
-
-/*! A declared Bezier patch: every corner on the model's own net - D1. */
-inline constexpr Claimant kBezierPatch{"a Bezier patch", ClaimPrecision::DeclaredInterpolant,
-                                       EvidenceClass::D1, EvidenceClass::D3};
-/*! A declared sweep: the model's stations, interpolated, band published - D1. */
-inline constexpr Claimant kDeclaredSweep{"a declared sweep", ClaimPrecision::DeclaredInterpolant,
-                                         EvidenceClass::D1, EvidenceClass::D3};
-/*! A trimmed quadric: OnQuadric::covers, which the tessellation band and the
- * facet's sagitta decide even at max_off = 1e-7 - D4, declared or not. */
-inline constexpr Claimant kQuadricFace{"a quadric face", ClaimPrecision::DeclaredExact,
-                                       EvidenceClass::D4, EvidenceClass::D4};
-
 class Arbiter
 {
 public:
@@ -80,7 +57,6 @@ public:
   void settle(const Claimant& who, const AnalyticFeatures::Patch& region, std::size_t surface_index,
               ClaimFate fate, const char *why)
   {
-    const bool declared = surface_index < declared_count_;
     if (fate == ClaimFate::Honoured) {
       for (const std::size_t f : region.facets) {
         state_.consumed[f] = 1;
@@ -88,9 +64,7 @@ public:
       }
     }
     for (const std::size_t f : region.facets) {
-      state_.ledger.add({f, region.surface, declared ? who.if_declared : ClaimPrecision::Fitted, who.by,
-                         why, fate, surface_index,
-                         declared ? who.evidence_if_declared : who.evidence_if_fitted});
+      recordClaim(state_.ledger, who, f, region.surface, surface_index, declared_count_, fate, why);
     }
   }
 
