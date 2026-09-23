@@ -999,3 +999,55 @@ TEST_CASE("a line lying along a cylinder's ruling is refused", "[surfaceandplane
   CHECK_FALSE(projectOntoSurfaceAndPlanes(cyl.get(), Vector3d(1, 0, 0), 10.5, Vector3d(0, 1, 0), 0.0,
                                           off, 1e-12, 5.0));
 }
+
+// doc/step-recognition-design.md, *Why purity is the whole point*: "Run the
+// recognisers in a shuffled order. The ledger must be identical." That full
+// test waits on migration step 4 - while the policy is still call order, the
+// ledger depends on order by design. What holds already, and must keep holding,
+// is the half it rests on: a proposal is a function of the mesh, the
+// declarations and provenance alone. No holding and no running order may move
+// it. Guarded here so that a proposer quietly reading `consumed` again fails.
+TEST_CASE("proposals do not depend on what is held or on the order proposers run in",
+          "[analytic][purity]")
+{
+  const int fn = 16;
+  const double r = 10.0, h = 5.0;
+  const FacetedCylinder cyl(fn, r, h);
+  const Mesh mesh = cyl.mesh();
+  const recognition::FacetGraph graph(mesh);
+  const std::vector<std::shared_ptr<Surface>> surfaces = declaredCylinder(r);
+  const Provenance provenance;  // silent: no ids, so it gates nothing
+  const double smooth = 25.0 * M_PI / 180.0;
+
+  const std::vector<QuadricProposal> first = proposeQuadrics(graph, surfaces, provenance, smooth, 1e-7);
+  REQUIRE(first.size() == 1);
+  REQUIRE(first[0].facets.size() == (std::size_t)fn);  // every wall facet is on the declared cylinder
+
+  // Holding decides what form grants: with nothing held the walls form a region,
+  // with everything held they form none. So holding is live in this setup, and
+  // the equalities below are not an accident of a case where it does nothing.
+  std::vector<char> nothing_held(mesh.loops->size(), 0), all_held(mesh.loops->size(), 1);
+  std::vector<std::string> report;
+  const auto granted = formQuadricPatches(graph, surfaces, nothing_held, provenance, smooth, 1e-7,
+                                          report, nullptr, surfaces.size(), first);
+  const auto refused = formQuadricPatches(graph, surfaces, all_held, provenance, smooth, 1e-7, report,
+                                          nullptr, surfaces.size(), first);
+  CHECK_FALSE(granted.empty());
+  CHECK(refused.empty());
+
+  // Proposers run in the other order, after passes have run and held facets:
+  // the proposal is the same, field for field.
+  const Result bands = recogniseSurfacesOfRevolution(graph, surfaces, 1e-6, surfaces.size());
+  CHECK(!bands.bands.empty());
+  const std::vector<GridProposal> grids = proposeGrids(graph, surfaces);
+  const std::vector<BezierProposal> beziers = proposeBezierPatches(graph, surfaces);
+  const std::vector<QuadricProposal> again = proposeQuadrics(graph, surfaces, provenance, smooth, 1e-7);
+  CHECK(grids.empty());
+  CHECK(beziers.empty());
+  REQUIRE(again.size() == first.size());
+  CHECK(again[0].surface_index == first[0].surface_index);
+  CHECK(again[0].facets == first[0].facets);
+  CHECK(again[0].off == first[0].off);
+  CHECK(again[0].span == first[0].span);
+  CHECK(again[0].gated == first[0].gated);
+}

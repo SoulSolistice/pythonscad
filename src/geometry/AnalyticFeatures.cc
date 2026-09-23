@@ -1210,6 +1210,16 @@ std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
                                           std::vector<std::string>& report, ClaimLedger *ledger,
                                           std::size_t declared_count)
 {
+  return formBezierPatches(graph, surfaces, consumed, report, ledger, declared_count,
+                           proposeBezierPatches(graph, surfaces));
+}
+
+std::vector<Patch> formBezierPatches(const recognition::FacetGraph& graph,
+                                     const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                     const std::vector<char>& consumed, std::vector<std::string>& report,
+                                     ClaimLedger *ledger, std::size_t declared_count,
+                                     const std::vector<BezierProposal>& proposals)
+{
   const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -1218,9 +1228,6 @@ std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
 
   std::vector<Patch> patches;
   std::vector<char> taken(loops.size(), 0);
-
-  // Propose first, and purely - see proposeBezierPatches.
-  const std::vector<BezierProposal> proposals = proposeBezierPatches(graph, surfaces);
 
   for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
     const auto& surface = surfaces[surface_index];
@@ -1914,6 +1921,16 @@ std::vector<Patch> recogniseGridPatches(const recognition::FacetGraph& graph,
                                         std::vector<std::string>& report, ClaimLedger *ledger,
                                         std::size_t declared_count)
 {
+  return formGridPatches(graph, surfaces, consumed, report, ledger, declared_count,
+                         proposeGrids(graph, surfaces));
+}
+
+std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
+                                   const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                   const std::vector<char>& consumed, std::vector<std::string>& report,
+                                   ClaimLedger *ledger, std::size_t declared_count,
+                                   const std::vector<GridProposal>& proposals)
+{
   const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -1934,9 +1951,6 @@ std::vector<Patch> recogniseGridPatches(const recognition::FacetGraph& graph,
   // split *is* by neighbour - see below.
   // The adjacency every recogniser walks, built once - see recognition::FacetGraph.
   const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops = graph.edgeLoops();
-
-  // Propose first, and purely - see proposeGrids.
-  const std::vector<GridProposal> proposals = proposeGrids(graph, surfaces);
 
   for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
     const auto& surface = surfaces[surface_index];
@@ -2579,6 +2593,19 @@ std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
                                            double max_off, std::vector<std::string>& report,
                                            ClaimLedger *ledger, std::size_t declared_count)
 {
+  return formQuadricPatches(graph, surfaces, consumed, provenance, smooth_angle, max_off, report, ledger,
+                            declared_count,
+                            proposeQuadrics(graph, surfaces, provenance, smooth_angle, max_off));
+}
+
+std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
+                                      const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                      const std::vector<char>& consumed, const Provenance& provenance,
+                                      double smooth_angle, double max_off,
+                                      std::vector<std::string>& report, ClaimLedger *ledger,
+                                      std::size_t declared_count,
+                                      const std::vector<QuadricProposal>& proposals)
+{
   const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -2593,11 +2620,8 @@ std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
   // The adjacency every recogniser walks, built once - see recognition::FacetGraph.
   const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops = graph.edgeLoops();
 
-  // Propose first, and purely: nothing above this line reads what any pass
-  // holds. See doc/step-recognition-design.md, *Three phases, and the first
-  // one is pure*.
-  const std::vector<QuadricProposal> proposals =
-    proposeQuadrics(graph, surfaces, provenance, smooth_angle, max_off);
+  // `proposals` came from proposeQuadrics, which reads what no pass holds. See
+  // doc/step-recognition-design.md, *Three phases, and the first one is pure*.
 
   // The band a region of facets leaves open, by the same sagitta the
   // approximation pass measures: over every interior edge,

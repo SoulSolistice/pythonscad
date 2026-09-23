@@ -51,6 +51,11 @@ struct Context {
   std::vector<std::shared_ptr<Surface>> effective;
   AnalyticFeatures::Provenance provenance;
   Arbiter arbiter;
+  // Filled by the propose stage, read by the form stages. Pure: see runPropose.
+  std::vector<AnalyticFeatures::BezierProposal> bezier_proposals;
+  std::vector<AnalyticFeatures::GridProposal> grid_proposals;
+  std::vector<AnalyticFeatures::QuadricProposal> quadric_proposals;
+  double quadric_max_off = 0;
 
   Context(const Inputs& inputs, Writability& w, Recognition& result)
     : in(inputs),
@@ -323,6 +328,31 @@ void runFits(Context& ctx)
   }
 }
 
+/*! The propose stage: what every patch recogniser wants, computed up front and
+ * purely. Each proposer reads the graph, the surface list the passes walk and
+ * provenance - and nothing any stage has claimed, so no order they are run in,
+ * and no holding, can change a proposal. doc/step-recognition-design.md,
+ * *Propose*: "Each recogniser reads the mesh and the declarations and writes
+ * claims. It mutates nothing shared." The form stages below grant from these.
+ *
+ * Which tier the quadric proposer runs in is decided by proof rather than by
+ * the flag. A region cut from a declared surface is mostly exact - a boolean
+ * puts its new vertices on the facet planes, so it is the fringe where the cut
+ * landed that strays off the surface and not the interior - and a face whose
+ * every corner is on the surface to 1e-7 asserts nothing the mesh does not
+ * already state. Spending the tessellation band still needs the approximation
+ * flag. */
+void runPropose(Context& ctx)
+{
+  const FacetGraph& graph = ctx.graph;
+  const std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
+  ctx.quadric_max_off = ctx.in.approximate ? std::numeric_limits<double>::infinity() : 1e-7;
+  ctx.bezier_proposals = AnalyticFeatures::proposeBezierPatches(graph, effective);
+  ctx.grid_proposals = AnalyticFeatures::proposeGrids(graph, effective);
+  ctx.quadric_proposals = AnalyticFeatures::proposeQuadrics(graph, effective, ctx.provenance,
+                                                            ctx.smooth_angle, ctx.quadric_max_off);
+}
+
 /*! The Bezier stage: declared fillet patches, and which of them are exactly quadrics. */
 void runBezier(Context& ctx)
 {
@@ -349,8 +379,9 @@ void runBezier(Context& ctx)
   [[maybe_unused]] std::set<std::set<int>>& circular_runs = ctx.out.circular_runs;
 
   std::vector<std::string> patch_report;
-  std::vector<AnalyticFeatures::Patch> patches = AnalyticFeatures::recogniseBezierPatches(
-    graph, effective, features.consumed, patch_report, &features.ledger, surfaces.size());
+  std::vector<AnalyticFeatures::Patch> patches =
+    AnalyticFeatures::formBezierPatches(graph, effective, features.consumed, patch_report,
+                                        &features.ledger, surfaces.size(), ctx.bezier_proposals);
   for (const auto& line : patch_report) LOG("STEP export: %1$s", line);
   std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
   for (const auto& patch : patches) {
@@ -584,8 +615,9 @@ void runGrids(Context& ctx)
   // that cannot be made into a face has to say so, rather than looking like a
   // sweep that was never declared.
   std::vector<std::string> grid_report;
-  const std::vector<AnalyticFeatures::Patch> grid_patches = AnalyticFeatures::recogniseGridPatches(
-    graph, effective, features.consumed, grid_report, &features.ledger, surfaces.size());
+  const std::vector<AnalyticFeatures::Patch> grid_patches =
+    AnalyticFeatures::formGridPatches(graph, effective, features.consumed, grid_report, &features.ledger,
+                                      surfaces.size(), ctx.grid_proposals);
   for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
 
   // Where the claimed region sits on the sweep, which is the question a face
@@ -711,11 +743,11 @@ void runQuadrics(Context& ctx)
   // the tessellation band, which is what makes a face this exporter cannot
   // prove, still needs the approximation flag.
   {
-    const double max_off = approximate ? std::numeric_limits<double>::infinity() : 1e-7;
+    const double max_off = ctx.quadric_max_off;
     std::vector<std::string> quadric_report;
-    const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::recogniseQuadricPatches(
+    const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::formQuadricPatches(
       graph, effective, features.consumed, provenance, smooth_angle, max_off, quadric_report,
-      &features.ledger, surfaces.size());
+      &features.ledger, surfaces.size(), ctx.quadric_proposals);
     for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
     // Corners on the surface are not enough to call a face exact. The
     // boundary between two of them is a straight edge in the mesh, and a
@@ -904,6 +936,7 @@ enum Product : unsigned {
   kSweepFaces = 1u << 6,
   kQuadricFaces = 1u << 7,
   kLeftover = 1u << 8,
+  kProposals = 1u << 9,  // what every patch recogniser wants - pure
 };
 
 /*! The stages, in the order the policy in force runs them, each with what it
@@ -925,10 +958,11 @@ struct Stage {
 constexpr Stage kStages[] = {
   {"band", kGraph | kDeclarations, kBands, runBands},
   {"fit", kGraph | kDeclarations | kBands, kFits | kBands, runFits},
-  {"Bezier", kGraph | kFits | kBands, kBezierFaces, runBezier},
-  {"grid", kGraph | kFits | kBands | kBezierFaces, kSweepFaces, runGrids},
-  {"quadric", kGraph | kFits | kProvenance | kBands | kBezierFaces | kSweepFaces, kQuadricFaces,
-   runQuadrics},
+  {"propose", kGraph | kFits | kProvenance, kProposals, runPropose},
+  {"Bezier", kGraph | kFits | kProposals | kBands, kBezierFaces, runBezier},
+  {"grid", kGraph | kFits | kProposals | kBands | kBezierFaces, kSweepFaces, runGrids},
+  {"quadric", kGraph | kFits | kProvenance | kProposals | kBands | kBezierFaces | kSweepFaces,
+   kQuadricFaces, runQuadrics},
   {"leftover", kGraph | kBands | kBezierFaces | kSweepFaces | kQuadricFaces, kLeftover, runLeftover},
 };
 

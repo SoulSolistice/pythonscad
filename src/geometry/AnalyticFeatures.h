@@ -485,6 +485,13 @@ std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
                                           const std::vector<char>& consumed,
                                           std::vector<std::string>& report, ClaimLedger *ledger,
                                           std::size_t declared_count);
+/*! Form: the region rules over what `proposals` offer, granted by the policy
+ * in force. `recogniseBezierPatches` is propose-then-form. */
+std::vector<Patch> formBezierPatches(const recognition::FacetGraph& graph,
+                                     const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                     const std::vector<char>& consumed, std::vector<std::string>& report,
+                                     ClaimLedger *ledger, std::size_t declared_count,
+                                     const std::vector<BezierProposal>& proposals);
 
 /*! What one declared sweep proposes: every facet it covers, whoever holds it,
  * with what its region rules read. Pure data - see proposeGrids. */
@@ -526,6 +533,13 @@ std::vector<Patch> recogniseGridPatches(const recognition::FacetGraph& graph,
                                         const std::vector<char>& consumed,
                                         std::vector<std::string>& report, ClaimLedger *ledger,
                                         std::size_t declared_count);
+/*! Form: the region rules over what `proposals` offer, granted by the policy
+ * in force. `recogniseGridPatches` is propose-then-form. */
+std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
+                                   const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                   const std::vector<char>& consumed, std::vector<std::string>& report,
+                                   ClaimLedger *ledger, std::size_t declared_count,
+                                   const std::vector<GridProposal>& proposals);
 
 /*! What one quadric proposes: every facet it covers, whoever holds it, with
  * the measurements its region rules read. Pure data - see proposeQuadrics. */
@@ -585,6 +599,15 @@ std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
                                            const Provenance& provenance, double smooth_angle,
                                            double max_off, std::vector<std::string>& report,
                                            ClaimLedger *ledger, std::size_t declared_count);
+/*! Form: the region rules over what `proposals` offer, granted by the policy
+ * in force. `recogniseQuadricPatches` is propose-then-form. */
+std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
+                                      const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                      const std::vector<char>& consumed, const Provenance& provenance,
+                                      double smooth_angle, double max_off,
+                                      std::vector<std::string>& report, ClaimLedger *ledger,
+                                      std::size_t declared_count,
+                                      const std::vector<QuadricProposal>& proposals);
 
 /*! Find the bands of facets which were modelled as a surface of revolution.
  *
