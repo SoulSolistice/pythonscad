@@ -1623,6 +1623,7 @@ set(CORE_SOURCES
   src/geometry/AnalyticFeatures.cc
   src/geometry/recognition/FacetGraph.cc
   src/geometry/recognition/Pipeline.cc
+  src/geometry/recognition/Reports.cc
   src/geometry/ClipperUtils.cc
   src/geometry/Geometry.cc
   src/geometry/GeometryCache.cc
