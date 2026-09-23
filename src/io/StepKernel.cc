@@ -2046,8 +2046,10 @@ void StepKernel::build_tri_body(
     mesh.valid = &loop_valid;
     mesh.is_hole = &loop_is_hole;
     mesh.normals = &loop_normals;
+    // The adjacency every recogniser walks, built once for all of them.
+    const recognition::FacetGraph graph(mesh);
     features =
-      AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, surfaces, model_tol, surfaces.size());
+      AnalyticFeatures::recogniseSurfacesOfRevolution(graph, surfaces, model_tol, surfaces.size());
 
     // The approximation pass, and the only place in this exporter where a
     // surface is written that the model never declared.
@@ -2179,7 +2181,7 @@ void StepKernel::build_tri_body(
         // pass that has already run, and it means a fitted surface goes through
         // exactly the checks a declared one does.
         features =
-          AnalyticFeatures::recogniseSurfacesOfRevolution(mesh, effective, model_tol, surfaces.size());
+          AnalyticFeatures::recogniseSurfacesOfRevolution(graph, effective, model_tol, surfaces.size());
         std::size_t lost = 0, demoted = 0;
         for (std::size_t f = 0; f < exact_consumed.size() && f < features.consumed.size(); f++) {
           if (exact_consumed[f] == 0) continue;  // the declared-only pass did not have it
@@ -2238,7 +2240,7 @@ void StepKernel::build_tri_body(
 
     std::vector<std::string> patch_report;
     std::vector<AnalyticFeatures::Patch> patches = AnalyticFeatures::recogniseBezierPatches(
-      mesh, effective, features.consumed, patch_report, &features.ledger, surfaces.size());
+      graph, effective, features.consumed, patch_report, &features.ledger, surfaces.size());
     for (const auto& line : patch_report) LOG("STEP export: %1$s", line);
     std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
     for (const auto& patch : patches) {
@@ -2460,7 +2462,7 @@ void StepKernel::build_tri_body(
     // sweep that was never declared.
     std::vector<std::string> grid_report;
     const std::vector<AnalyticFeatures::Patch> grid_patches = AnalyticFeatures::recogniseGridPatches(
-      mesh, effective, features.consumed, grid_report, &features.ledger, surfaces.size());
+      graph, effective, features.consumed, grid_report, &features.ledger, surfaces.size());
     for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
 
     // Where the claimed region sits on the sweep, which is the question a face
@@ -2575,7 +2577,7 @@ void StepKernel::build_tri_body(
       const double max_off = approximate ? std::numeric_limits<double>::infinity() : 1e-7;
       std::vector<std::string> quadric_report;
       const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::recogniseQuadricPatches(
-        mesh, effective, features.consumed, provenance, smooth_angle, max_off, quadric_report,
+        graph, effective, features.consumed, provenance, smooth_angle, max_off, quadric_report,
         &features.ledger, surfaces.size());
       for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
       // Corners on the surface are not enough to call a face exact. The

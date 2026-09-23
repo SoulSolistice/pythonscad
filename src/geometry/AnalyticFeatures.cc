@@ -1145,12 +1145,13 @@ const char *boundaryCycles(const std::vector<std::vector<int>>& loops,
 
 }  // namespace
 
-std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
+std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
                                           const std::vector<char>& consumed,
                                           std::vector<std::string>& report, ClaimLedger *ledger,
                                           std::size_t declared_count)
 {
+  const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
   const std::vector<char>& loop_valid = *mesh.valid;
@@ -1300,14 +1301,8 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
     // patch; an O kept eight of its nineteen. The band path has always used every
     // valid loop for the same lookup, and the emitter already substitutes into a
     // hole loop and builds a FaceBound for it.
-    std::map<EdgeKey, std::vector<std::size_t>> edge_loops;
-    for (std::size_t f = 0; f < loops.size(); f++) {
-      if (!loop_valid[f]) continue;
-      const std::vector<int>& loop = loops[f];
-      for (std::size_t i = 0; i < loop.size(); i++) {
-        edge_loops[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
-      }
-    }
+    // The adjacency every recogniser walks, built once - see recognition::FacetGraph.
+    const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops = graph.edgeLoops();
     std::map<std::size_t, std::size_t> patch_of_loop;
     for (std::size_t pi = 0; pi < patches.size(); pi++) {
       if (!patches[pi].alive) continue;
@@ -1778,12 +1773,13 @@ Patch patchFromFacets(const std::vector<std::vector<int>>& loops,
   return patch;
 }
 
-std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
+std::vector<Patch> recogniseGridPatches(const recognition::FacetGraph& graph,
                                         const std::vector<std::shared_ptr<Surface>>& surfaces,
                                         const std::vector<char>& consumed,
                                         std::vector<std::string>& report, ClaimLedger *ledger,
                                         std::size_t declared_count)
 {
+  const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
   const std::vector<char>& loop_valid = *mesh.valid;
@@ -1801,14 +1797,8 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
   // Which faces sit on either side of every edge of the mesh. Needed before the
   // boundaries are split rather than after, because for a declared grid the
   // split *is* by neighbour - see below.
-  std::map<EdgeKey, std::vector<std::size_t>> edge_loops;
-  for (std::size_t f = 0; f < loops.size(); f++) {
-    if (!loop_valid[f]) continue;
-    const std::vector<int>& loop = loops[f];
-    for (std::size_t i = 0; i < loop.size(); i++) {
-      edge_loops[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
-    }
-  }
+  // The adjacency every recogniser walks, built once - see recognition::FacetGraph.
+  const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops = graph.edgeLoops();
 
   for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
     const auto& surface = surfaces[surface_index];
@@ -2428,13 +2418,14 @@ private:
  * rest of the approximation pass runs on, and a claim which cannot show that is
  * dropped rather than written.
  */
-std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
+std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
                                            const std::vector<std::shared_ptr<Surface>>& surfaces,
                                            const std::vector<char>& consumed,
                                            const Provenance& provenance, double smooth_angle,
                                            double max_off, std::vector<std::string>& report,
                                            ClaimLedger *ledger, std::size_t declared_count)
 {
+  const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
   const std::vector<char>& loop_valid = *mesh.valid;
@@ -2445,14 +2436,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
   std::size_t gated = 0;
   std::vector<char> taken(loops.size(), 0);
 
-  std::map<EdgeKey, std::vector<std::size_t>> edge_loops;
-  for (std::size_t f = 0; f < loops.size(); f++) {
-    if (!loop_valid[f]) continue;
-    const std::vector<int>& loop = loops[f];
-    for (std::size_t i = 0; i < loop.size(); i++) {
-      edge_loops[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
-    }
-  }
+  // The adjacency every recogniser walks, built once - see recognition::FacetGraph.
+  const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops = graph.edgeLoops();
 
   // The band a region of facets leaves open, by the same sagitta the
   // approximation pass measures: over every interior edge,
@@ -2712,10 +2697,11 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
   return patches;
 }
 
-Result recogniseSurfacesOfRevolution(const Mesh& mesh,
+Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
                                      std::size_t declared_count)
 {
+  const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
   const std::vector<char>& loop_valid = *mesh.valid;
@@ -2735,15 +2721,8 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
   std::vector<std::size_t>& band_of_loop = result.band_of_loop;
   std::vector<std::pair<RimRef, RimRef>>& rims = result.rims;
 
-  std::map<std::pair<int, int>, std::vector<std::size_t>> loop_edges_map;
-  for (std::size_t i = 0; i < face_cnt; i++) {
-    if (!loop_valid[i]) continue;
-    const auto& loop = loops[i];
-    for (std::size_t j = 0; j < loop.size(); j++) {
-      const int a = loop[j], b = loop[(j + 1) % loop.size()];
-      loop_edges_map[{std::min(a, b), std::max(a, b)}].push_back(i);
-    }
-  }
+  // The adjacency every recogniser walks, built once - see recognition::FacetGraph.
+  const std::map<std::pair<int, int>, std::vector<std::size_t>>& loop_edges_map = graph.edgeLoops();
 
   auto edge_key = [](int a, int b) { return std::make_pair(std::min(a, b), std::max(a, b)); };
 
@@ -4618,6 +4597,45 @@ bool projectOntoSurfaceAndPlanes(const Surface *surface, const Vector3d& n1, dou
   if (!std::isfinite(best)) return false;
   p = base + dhat * best_t;
   return best <= tol;
+}
+
+// Forwarding overloads for callers holding a Mesh rather than the graph.
+std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
+                                          const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                          const std::vector<char>& consumed,
+                                          std::vector<std::string>& report, ClaimLedger *ledger,
+                                          std::size_t declared_count)
+{
+  return recogniseBezierPatches(recognition::FacetGraph(mesh), surfaces, consumed, report, ledger,
+                                declared_count);
+}
+
+std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
+                                        const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                        const std::vector<char>& consumed,
+                                        std::vector<std::string>& report, ClaimLedger *ledger,
+                                        std::size_t declared_count)
+{
+  return recogniseGridPatches(recognition::FacetGraph(mesh), surfaces, consumed, report, ledger,
+                              declared_count);
+}
+
+std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
+                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                           const std::vector<char>& consumed,
+                                           const Provenance& provenance, double smooth_angle,
+                                           double max_off, std::vector<std::string>& report,
+                                           ClaimLedger *ledger, std::size_t declared_count)
+{
+  return recogniseQuadricPatches(recognition::FacetGraph(mesh), surfaces, consumed, provenance,
+                                 smooth_angle, max_off, report, ledger, declared_count);
+}
+
+Result recogniseSurfacesOfRevolution(const Mesh& mesh,
+                                     const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
+                                     std::size_t declared_count)
+{
+  return recogniseSurfacesOfRevolution(recognition::FacetGraph(mesh), surfaces, tol, declared_count);
 }
 
 }  // namespace AnalyticFeatures
