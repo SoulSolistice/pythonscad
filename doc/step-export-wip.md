@@ -3825,6 +3825,41 @@ and two small fixtures show it besides lid10: `step-cylinder-cross` (original 3
 on surface 0) and `step-declare-cone` (original 7 on surface 6). Those are where
 to isolate the mechanism before provenance is switched to identity.
 
+**The switch was tried, and it parks.** `owned` rebuilt from the carried
+owners, measured on the same 104 exports: 20 reports and one entity census
+(lid10, approximation tier) changed, and the bayonet's junctions with more than
+two owners went from **2 to 900**. Parked on
+`claude/step-provenance-identity-parked` (`f6a3f9448`).
+
+**Why, and it is the declaration channel, not identity.** A record in
+`PolySet::surfaces` says *declared*, and a primitive declares two different
+kinds of thing without saying which:
+
+- **a face it is made of** - `cylinder(r = 10)`'s wall; its facets lie on it;
+- **evidence** - `cylinder(r1 = 10, r2 = 2)` declares its two *rim cylinders*
+  and not its cone, so the band pass can identify the frustum from both rims
+  (`primitives.cc`; `OnQuadric`'s constructor comment and `doc/step-rungs.md`
+  both record it). Its facets lie on neither.
+
+Carried ownership faithfully reports *declared*, so on `step-declare-cone` the
+frustum's original "owns" both rim cylinders and every junction becomes a
+contest of more surfaces than meet there. The measured rule was wrong the other
+way on the same fixture: original 7, the `r = 100` intersection tool, "owned"
+cone 6 through its 30 cap facets - every corner on the cut circle, normals
+inside 60 degrees of a 45 degree cone - which is the documented *a cap over a
+bore has every vertex on the rim*. Neither map is the D0 answer.
+
+**What provenance needs, then, is a role on each record**: *a face of its
+declarer* or *evidence offered by its declarer*. Then ownership - the facets of
+this original may lie on this surface - is identity over face records only, and
+evidence records stay available to the recognisers that read them. The cleaner
+fix underneath is feedstock: `cylinder(r1, r2)` declaring its **cone**, the
+closed form it is, with the rims as evidence. That is the handover's step 6
+(*one derivation, not five guards*), and `OnQuadric`'s comment records what it
+will meet: the claim on `step-bored-cone` widens from 32 to 52 facets and the
+trimmed-quadric bounding is then wrong by 2.75% of the derived volume - so it
+lands with that fixture's `VOLUME-APPROX` as its judge.
+
 **Why it comes before R0.** R0's region is *"the facets whose maker owns this
 surface"*. If *owns* is a measurement with a magic 3 and a 60 degree band, a
 provenance region is a measured region wearing a D0 label - the class error
