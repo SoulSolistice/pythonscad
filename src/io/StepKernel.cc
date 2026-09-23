@@ -29,6 +29,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <limits>
 #include "StepKernel.h"
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/recognition/Pipeline.h"
 #include "utils/printutils.h"
 #include <algorithm>  // std::reverse
 #include <iostream>
@@ -1951,17 +1952,20 @@ void StepKernel::build_tri_body(
   // revolution. The recogniser is format neutral and lives in
   // geometry/AnalyticFeatures - everything below this point is the STEP
   // specific half, turning its answer into entities.
-  AnalyticFeatures::Result features;
-  std::vector<AnalyticFeatures::Patch> bezier_patches;
+  // What recognition hands the writer - see recognition::runPipeline. The
+  // names below are views into it, so the writer reads as it always has.
+  recognition::Recognition rec;
+  AnalyticFeatures::Result& features = rec.features;
+  std::vector<AnalyticFeatures::Patch>& bezier_patches = rec.bezier_patches;
   // Runs whose curve is exactly a circular arc, keyed by their vertices - which
   // is how the emitter shares one EdgeCurve between the two faces that meet
   // there. Decided per run rather than per face; see where it is filled.
-  std::set<std::set<int>> circular_runs;
+  std::set<std::set<int>>& circular_runs = rec.circular_runs;
   // Declared sweeps whose claimed region can be written as one face: a strip,
   // whose boundary stays inside the surface's parameter rectangle. One closing
   // around its profile crosses the surface's seam and is left faceted.
-  std::vector<AnalyticFeatures::Patch> grid_faces;
-  std::vector<AnalyticFeatures::Patch> quadric_faces;
+  std::vector<AnalyticFeatures::Patch>& grid_faces = rec.grid_faces;
+  std::vector<AnalyticFeatures::Patch>& quadric_faces = rec.quadric_faces;
   // The plane sections that both of their two faces agree to write as one
   // conic, each named by the set of mesh vertices it runs through. A curve one
   // face writes and its neighbour does not is a hole in the shell, so this is a
@@ -2026,981 +2030,300 @@ void StepKernel::build_tri_body(
   std::map<const Surface *, std::vector<CutPlane>> section_planes;
   // Parallel to `bezier_patches`: the exact quadric that patch lies on, or null
   // where it is written as the spline it is in general. See quadricOfPatch.
-  std::vector<std::shared_ptr<Surface>> patch_quadric;
+  std::vector<std::shared_ptr<Surface>>& patch_quadric = rec.patch_quadric;
   features.consumed.assign(face_cnt, 0);  // nothing collapsed unless it says so
   if (analytic) {
-    // Say so even when there is nothing, so that a model whose declarations
-    // never arrived cannot be mistaken for a build that predates them. The
-    // availability line above prints only when the list is non-empty, which
-    // makes those two cases look identical - silence.
-    if (surfaces.empty()) LOG("STEP export: no analytic surfaces were declared");
-    // How sharp an edge still counts as one surface. It is the whole of the
-    // intent judgement the approximation pass makes, so it is read once, here,
-    // and used by both the fitting and the measuring below.
-    double smooth_angle = 25.0;
-    if (const char *env = getenv("OPENSCAD_STEP_SMOOTH_ANGLE")) smooth_angle = atof(env);
-    smooth_angle *= M_PI / 180.0;
-    AnalyticFeatures::Mesh mesh;
-    mesh.vertices = &vertices;
-    mesh.loops = &loops;
-    mesh.valid = &loop_valid;
-    mesh.is_hole = &loop_is_hole;
-    mesh.normals = &loop_normals;
-    // The adjacency every recogniser walks, built once for all of them.
-    const recognition::FacetGraph graph(mesh);
-    features =
-      AnalyticFeatures::recogniseSurfacesOfRevolution(graph, surfaces, model_tol, surfaces.size());
-
-    // The approximation pass, and the only place in this exporter where a
-    // surface is written that the model never declared.
-    //
-    // It runs on what the declared pass left over, fits a cylinder to each
-    // smooth region there, and then simply *declares* it - after which the
-    // ordinary recogniser does everything else, including refusing the fit if
-    // the mesh does not lie on it after all. That is the whole design: the
-    // approximation contributes a declaration, not a face, so nothing
-    // downstream has to trust it.
-    //
-    // What makes declaring on the model's behalf defensible is the region
-    // rather than the fit. Regions are grown across edges meeting at less than
-    // the smoothing angle, so a hexagonal prism - which is the same mesh as a
-    // six sided tessellation of a cylinder, and the reason the exact path
-    // refuses to guess - never forms one.
-    std::vector<std::shared_ptr<Surface>> effective = surfaces;
-    // A patch names its surface by pointer; the ledger and Provenance both work
-    // in indices into this list, so the winning claim needs the translation.
-    auto indexOf = [&effective](const std::shared_ptr<const Surface>& s) {
-      if (s == nullptr) return std::size_t(-1);
-      for (std::size_t i = 0; i < effective.size(); i++) {
-        if (effective[i].get() == s.get() || (effective[i] && effective[i]->sameAs(*s))) return i;
+    // The writer's half of "can this region be written": the sections a
+    // standing set of quadric regions agree on, and whether each one's whole
+    // boundary then lies on its surface. Defined here, ahead of recognition,
+    // because it is this file's boundary machinery; recognition asks it
+    // through recognition::Writability and decides what to do with the answer.
+    auto boundary_lies_on_surface = [&](const AnalyticFeatures::Patch& patch,
+                                        const std::set<std::set<int>>& agreed) {
+      Vector3d axis, origin;
+      double radius = 0, slope = 0;
+      if (const auto *cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get())) {
+        axis = cyl->normdir.normalized();
+        origin = cyl->refpt;
+        radius = cyl->r;
+      } else if (const auto *con = dynamic_cast<const ConeSurface *>(patch.surface.get())) {
+        axis = con->normdir.normalized();
+        origin = con->refpt;
+        radius = con->r;
+        slope = con->slope;
+      } else {
+        return false;
       }
-      return std::size_t(-1);
+      for (const auto& entry : boundaryCycles(patch, vertices, loops, loop_valid, taken,
+                                              section_planes[patch.surface.get()], crossing_keys)) {
+        const BoundaryCycle& cycle = entry.second;
+        const std::size_t n = cycle.verts.size();
+        if (n < 3) continue;
+        // Edges a plane section covers are exact as the conic written for
+        // them, so they are not asked to lie on the surface as chords - but
+        // only where the face on the other side writes the same conic, which
+        // is what `agreed` records, decided over all the faces at once.
+        std::vector<char> covered(n, 0);
+        for (const auto& bs : cycle.sections) {
+          std::set<int> key;
+          for (std::size_t k = 0; k < bs.count; k++) key.insert(cycle.verts[(bs.start + k) % n]);
+          if (agreed.find(key) == agreed.end()) continue;
+          for (std::size_t k = 0; k + 1 < bs.count; k++) covered[(bs.start + k) % n] = 1;
+        }
+        // How far a point is off the surface, radially. A cone's radius is a
+        // function of height, which is the whole of the difference.
+        auto off_surface = [&](const Vector3d& p) {
+          const Vector3d rel = p - origin;
+          const double along = rel.dot(axis);
+          const double want = radius + slope * along;
+          return fabs((rel - axis * along).norm() - want);
+        };
+        for (std::size_t i = 0; i < n; i++) {
+          if (covered[i]) continue;
+          // An edge on the curve where this surface crosses another declared
+          // one is written as that curve, so it is not asked to be a chord.
+          const int u = cycle.verts[i], v = cycle.verts[(i + 1) % n];
+          if (crossing_edges.count({std::min(u, v), std::max(u, v)}) != 0) continue;
+          const Vector3d a = vertices[cycle.verts[i]] - origin;
+          const Vector3d b = vertices[cycle.verts[(i + 1) % n]] - origin;
+          const Vector3d along = b - a;
+          const double rise = fabs(along.dot(axis));
+          // Round the axis at constant height is exact as the arc the
+          // post-pass will write. A straight edge is exact when the surface
+          // contains the whole line, and the midpoint settles that on its own:
+          // a line meets a quadric twice unless it lies in it, so a third
+          // point on the surface means every point of it is. That is the test
+          // rather than "parallel to the axis", which is only a cylinder's
+          // answer - a cone's rulings run to its apex, and calling those
+          // chords refused four regions of step-cut-cone for edges that were
+          // exactly on the cone all along.
+          const Vector3d mid = origin + (a + b) * 0.5;
+          if (rise > 1e-7 && off_surface(mid) > 1e-7) return false;
+        }
+      }
+      return true;
     };
-    AnalyticFeatures::Provenance provenance;
-    provenance.face_origin = &faceOrigin;
-    provenance.owned = &owned;
-    provenance.declared = surfaces.size();
-    if (approximate) {
-      const std::vector<AnalyticFeatures::SmoothRegion> candidates =
-        AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
-      std::size_t fitted = 0, recovered = 0, turned = 0, tried = 0, coned = 0;
-      // Fits the model had already declared. A guess that duplicates a declaration
-      // is not a surface gained: it is a declaration something refused, and the
-      // refusal is upstream - see open item 19.
-      std::size_t already_declared = 0;
-      std::map<std::string, int> turned_refusals;
-      double coarsest = 0;
-      for (const auto& region : candidates) {
-        if (region.facets.size() < 3) continue;
-        tried++;
-        std::shared_ptr<Surface> guess = AnalyticFeatures::fitCylinder(mesh, region, model_tol);
-        if (guess != nullptr) {
-          fitted++;
-          coarsest = std::max(coarsest, region.band);
-          if (!addSurfaceUnique(effective, guess)) already_declared++;
-          continue;
-        }
-        // A cone, which is a quadric fitCylinder cannot describe and correctly
-        // refuses - its normals make a constant angle with the axis rather than
-        // lying in a plane. The reference lid's hose socket is bored as a cone
-        // over most of its depth, so without this most of its wall area has no
-        // quadric to be written on at all.
-        guess = AnalyticFeatures::fitCone(mesh, region, model_tol);
-        if (guess != nullptr) {
-          coned++;
-          coarsest = std::max(coarsest, region.band);
-          if (!addSurfaceUnique(effective, guess)) already_declared++;
-          continue;
-        }
-        // Not a quadric, but perhaps still a sweep. `regularity` is what says
-        // whether that question can even be asked: fitting needs the facets'
-        // ordering, a mesh straight from a generator still has it at every
-        // interior vertex, and a mesh a boolean has been through does not.
-        // Below the threshold there is nothing to recover and the region is
-        // left alone rather than fitted to something plausible.
-        // Or a surface of revolution the model turned but could not name. A
-        // cone and a sphere are declared here as rings rather than as shapes,
-        // so this contributes one cylinder per ring and the band pass makes
-        // the cones out of them.
-        const char *not_turned = "no reason was given";
-        const std::vector<std::shared_ptr<Surface>> rings =
-          AnalyticFeatures::fitRevolved(mesh, region, model_tol, &not_turned);
-        if (rings.empty()) turned_refusals[not_turned]++;
-        if (!rings.empty()) {
-          turned++;
-          coarsest = std::max(coarsest, region.band);
-          for (const auto& ring : rings) addSurfaceUnique(effective, ring);
-          continue;
-        }
-        if (region.regularity < 0.95 || region.interior_vertices == 0) continue;
-        const char *why = "no reason was given";
-        guess = AnalyticFeatures::gridFromRegion(mesh, region, model_tol, &why);
-        if (guess == nullptr) {
-          // A region this regular is one the measurement said could be fitted,
-          // so failing to recover it is worth a line rather than a silence.
-          LOG("STEP export: a region of %1$d facets kept its ordering but was not recovered: %2$s",
-              int(region.facets.size()), why);
-          continue;
-        }
-        recovered++;
-        coarsest = std::max(coarsest, region.band);
-        addSurfaceUnique(effective, guess);
-      }
-      for (const auto& entry : turned_refusals) {
-        LOG("STEP export: %1$d regions are not turned surfaces because %2$s", int(entry.second),
-            entry.first.c_str());
-      }
-      if (tried > 0) {
-        LOG(
-          "STEP export: approximation took %1$d of %2$d uncovered regions - %3$d as cylinders, "
-          "%4$d as cones, %5$d as rings of a turned surface, %6$d as swept grids - the coarsest "
-          "tessellated to %7$.4f",
-          int(fitted + coned + turned + recovered), int(tried), int(fitted), int(coned), int(turned),
-          int(recovered), coarsest);
-      }
-      if (already_declared > 0) {
-        // Not a degradation in itself - the region is written by whichever pass
-        // can take it - but it says a declaration was refused upstream and the
-        // approximation then re-derived the same surface by measurement. The
-        // rule that refused it is in the band report above. See open item 19.
-        LOG(message_group::Export_Warning,
-            "STEP export: %1$d region%2$s fitted to a surface the model had already declared, so "
-            "the fit gained nothing - a declaration was refused upstream and re-derived here",
-            int(already_declared), already_declared == 1 ? " is" : "s are");
-      }
-      // What the declared surfaces alone had already claimed. The re-run below
-      // starts from scratch with the fits in hand, and an exact declaration has
-      // to keep what it recognised: a fit is a measurement of the mesh, a
-      // declaration is what the model said, and no combination of the two may
-      // end with the measurement holding ground the declaration had.
-      std::vector<char> exact_consumed = features.consumed;
-      // `coned` belongs in this condition as much as the others: a fit the band
-      // pass never sees is a fit that cannot become a face.
-      if (fitted + coned + turned + recovered > 0) {
-        // Re-run with the fits in hand. Cheaper than threading them through the
-        // pass that has already run, and it means a fitted surface goes through
-        // exactly the checks a declared one does.
-        features =
-          AnalyticFeatures::recogniseSurfacesOfRevolution(graph, effective, model_tol, surfaces.size());
-        std::size_t lost = 0, demoted = 0;
-        for (std::size_t f = 0; f < exact_consumed.size() && f < features.consumed.size(); f++) {
-          if (exact_consumed[f] == 0) continue;  // the declared-only pass did not have it
-          if (features.consumed[f] == 0) {
-            lost++;
-            continue;
-          }
-          // It was claimed by a declaration - the first pass had nothing else -
-          // so it has to still be on one.
-          const std::size_t b = features.band_of_loop[f];
-          if (b == AnalyticFeatures::NO_BAND || b >= features.bands.size()) continue;
-          if (!features.bands[b].on_declared) demoted++;
-        }
-        if (lost > 0 || demoted > 0) {
-          // Measured unreachable: on lid10 and the bayonet part, 536 and 628
-          // facets go into the re-run claimed by a declared surface and every
-          // one of them comes out still claimed by one. Reaching this means the
-          // approximation has taken ground away from the model's own statement,
-          // which is the one thing the declaration channel exists to prevent.
-          LOG(message_group::Export_Error,
-              "STEP export: the approximation's re-run cost the declared surfaces %1$d facet%2$s "
-              "they had already recognised and moved %3$d onto a fitted surface - a measurement "
-              "may not displace a declaration",
-              int(lost), lost == 1 ? "" : "s", int(demoted));
-        }
-      }
-    }
-    for (const auto& line : features.report) LOG("STEP export: %1$s", line);
 
-    // Bezier patches are recognised here and written further down, with the
-    // B_SPLINE_SURFACE_WITH_KNOTS faces. The report is emitted either way, and
-    // before the writing: it says whether the fillet declarations reached the
-    // exporter and whether the regions and their boundary runs came out right,
-    // which a file with no B-spline face in it cannot distinguish from a model
-    // that declared none. A patch that is silently not recognised looks exactly
-    // like one that was never declared - the same trap the band report exists
-    // for.
-    // Every pass below walks `effective` in order and the first surface to accept
-    // a facet takes it, so the order *is* the precedence: the model's own
-    // surfaces are the first `surfaces.size()` entries and every fit is appended
-    // after them. Held rather than assumed, because nothing else in the file
-    // says it and a fit offered first would take facets the declaration states.
-    {
-      std::size_t out_of_order = 0;
-      for (std::size_t i = 0; i < surfaces.size(); i++) {
-        if (i >= effective.size() || effective[i] != surfaces[i]) out_of_order++;
+    decide_sections = [&](const std::vector<const AnalyticFeatures::Patch *>& standing) {
+      // Whose facets are not there to be written as a planar face: what an
+      // earlier pass consumed, plus what this one is standing to claim.
+      taken = features.consumed;
+      for (const auto *patch : standing) {
+        for (const std::size_t f : patch->facets) taken[f] = 1;
       }
-      if (out_of_order > 0) {
-        LOG(message_group::Export_Error,
-            "STEP export: %1$d of the model's own surfaces are no longer the first entries of the "
-            "list the passes walk, so a fitted surface can be offered a facet before the "
-            "declaration that states it",
-            int(out_of_order));
-      }
-    }
-
-    std::vector<std::string> patch_report;
-    std::vector<AnalyticFeatures::Patch> patches = AnalyticFeatures::recogniseBezierPatches(
-      graph, effective, features.consumed, patch_report, &features.ledger, surfaces.size());
-    for (const auto& line : patch_report) LOG("STEP export: %1$s", line);
-    std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
-    for (const auto& patch : patches) {
-      if (!patch.alive) continue;
-      live++;
-      covered += patch.facets.size();
-      for (const auto& run : patch.runs) {
-        (run.straight ? straight_runs : curved_runs)++;
-        if (!run.verts.empty()) mesh_edges += run.verts.size() - 1;
-      }
-    }
-    if (live > 0) {
-      LOG(
-        "STEP export: their boundaries are %1$d curved runs over %2$d mesh edges, and "
-        "%3$d straight edges",
-        int(curved_runs), int(mesh_edges), int(straight_runs));
-
-      // What each run borders decides whether it can be collapsed at all, and
-      // it is the last thing the emission needs that has never been seen on a
-      // real model. A run left unresolved is one the substitution cannot make.
-      int whole = 0, part = 0, shared = 0, stuck = 0;
-      for (const auto& patch : patches) {
-        if (!patch.alive) continue;
-        for (const auto& run : patch.runs) {
-          switch (run.kind) {
-          case AnalyticFeatures::Patch::Run::WHOLE_LOOP:  whole++; break;
-          case AnalyticFeatures::Patch::Run::LOOP_RUN:    part++; break;
-          case AnalyticFeatures::Patch::Run::OTHER_PATCH: shared++; break;
-          default:                                        stuck++; break;
+      // A loop a band will use as its rim is spoken for too. It is still
+      // written as a planar face, so it does not look consumed, but the band
+      // replaces a stretch of it with a circle and the writer takes the band's
+      // answer - so a second curve handed to the same loop is dropped in
+      // silence.
+      for (const auto& rim : features.rims) {
+        for (const AnalyticFeatures::RimRef *side : {&rim.first, &rim.second}) {
+          if (side->kind == AnalyticFeatures::RimRef::WHOLE_LOOP ||
+              side->kind == AnalyticFeatures::RimRef::LOOP_RUN) {
+            if (side->loop < taken.size()) taken[side->loop] = 1;
           }
         }
       }
-      LOG(
-        "STEP export: those runs border %1$d whole faces, %2$d stretches of a face, "
-        "%3$d other patches, %4$d unresolved",
-        whole, part, shared, stuck);
-      LOG("STEP export: written as %1$d faces instead of %2$d", int(face_cnt - covered + live),
-          int(face_cnt));
-    }
-    // Only patches whose every boundary can be substituted are written. One
-    // that cannot stays faceted, which is always a valid export.
-    //
-    // Every patch the pass found gets its fate in the ledger, written or not -
-    // see AnalyticFeatures::ClaimFate. A patch the pass itself could not make a
-    // sheet of is its own refusal; one this writer cannot bound is the writer's.
-    for (auto& patch : patches) {
-      const bool found_dead = !patch.alive;
-      if (patch.alive) {
-        for (const auto& run : patch.runs) {
-          if (run.kind == AnalyticFeatures::Patch::Run::UNRESOLVED) {
-            patch.alive = false;
-            patch.dropped = "one of its boundaries borders more than one face";
+      // And the planes those faces cut each surface with. Gathered per surface
+      // rather than per region, because a plane that cuts a cone cuts all of
+      // it: the region meeting the cut along a single edge could never have
+      // seen the plane from that edge alone, and refused the whole surface for
+      // it.
+      section_planes.clear();
+      section_misses.clear();
+      for (const auto *patch : standing) {
+        std::vector<CutPlane>& list = section_planes[patch->surface.get()];
+        for (const auto& run : patch->runs) {
+          if (run.loop >= loops.size() || loop_valid[run.loop] == 0) continue;
+          if (taken[run.loop] != 0 || loops[run.loop].size() < 3) continue;
+          CutPlane cp;
+          cp.normal = loop_normals[run.loop].normalized();
+          cp.on_plane = vertices[loops[run.loop][0]];
+          // A declared plane in preference to the mesh's own. The fit moves
+          // with the tessellation and with whatever the boolean left behind;
+          // the declaration cannot move at all, and the section derived from
+          // it is exact rather than merely close.
+          double best_tilt = 9, best_off = 9;
+          for (const auto& pl : declared_planes) {
+            // How near the nearest declaration comes, whether or not it is
+            // taken: a section written on the mesh's own plane is a section
+            // that moves when the corners do, and knowing it missed by 1e-5
+            // rather than by a right angle is the difference between a
+            // tolerance to widen and a plane nobody declared.
+            const double tilt = fabs(fabs(pl.second.dot(cp.normal)) - 1.0);
+            const double off = fabs((cp.on_plane - pl.first).dot(pl.second));
+            if (tilt < best_tilt) best_tilt = tilt;
+            if (tilt <= 1e-6 && off < best_off) best_off = off;
+            if (tilt > 1e-6) continue;
+            if (off > 1e-6) continue;
+            cp.normal = cp.normal.dot(pl.second) > 0 ? pl.second : Vector3d(-pl.second);
+            cp.on_plane = pl.first;
+            cp.declared = true;
             break;
           }
+          if (!cp.declared) {
+            section_misses.push_back({best_tilt, best_off});
+          }
+          bool have = false;
+          for (const auto& seen : list) {
+            have = fabs(fabs(seen.normal.dot(cp.normal)) - 1.0) < 1e-9 &&
+                   fabs((cp.on_plane - seen.on_plane).dot(seen.normal)) < 1e-9;
+            if (have) break;
+          }
+          if (!have) list.push_back(cp);
         }
       }
-      const std::size_t si = indexOf(patch.surface);
-      const bool declared = si < surfaces.size();
-      const AnalyticFeatures::ClaimFate fate =
-        patch.alive
-          ? AnalyticFeatures::ClaimFate::Honoured
-          : (found_dead ? AnalyticFeatures::ClaimFate::Declined : AnalyticFeatures::ClaimFate::Refused);
-      for (const std::size_t f : patch.facets)
-        features.ledger.add(
-          {f, patch.surface,
-           declared ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
-                    : AnalyticFeatures::ClaimPrecision::Fitted,
-           "a Bezier patch", patch.alive ? "the facet lies on the declared Bezier patch" : patch.dropped,
-           fate, si,
-           declared ? AnalyticFeatures::EvidenceClass::D1 : AnalyticFeatures::EvidenceClass::D3});
-      if (!patch.alive) continue;
-      for (const std::size_t f : patch.facets) features.consumed[f] = 1;
-      for (const std::size_t f : patch.facets) features.consumed_by[f] = "a Bezier patch";
-    }
-
-    // Which of the surviving patches are exactly quadrics.
-    //
-    // Since the fillet's Beziers went rational an edge strip is an exact
-    // cylinder quadrant and a corner an exact sphere octant, and writing them
-    // as such is the difference between a face a CAD kernel can offset, thread
-    // and pattern and one it merely tolerates. Everything else - a varying
-    // radius, faces that are not perpendicular - is a genuine spline and stays
-    // one.
-    patch_quadric.assign(patches.size(), nullptr);
-    std::map<std::string, int> quadric_refusals;
-    for (std::size_t p = 0; p < patches.size(); p++) {
-      if (!patches[p].alive) continue;
-      const auto *bez = dynamic_cast<const BezierPatchSurface *>(patches[p].surface.get());
-      if (bez == nullptr) continue;
-      const char *why = "no reason was given";
-      patch_quadric[p] = AnalyticFeatures::quadricOfPatch(*bez, model_tol, &why);
-      if (patch_quadric[p] == nullptr) quadric_refusals[why]++;
-    }
-
-    // A curved run shared with two patches becomes one EdgeCurve used by both,
-    // so the two have to agree on what kind of curve it is.
-    //
-    // This used to be settled by withdrawing the quadric: a quadric face was
-    // bounded by CIRCLEs and a spline face by curves read off its own net, so a
-    // patch whose partner was not a quadric gave up being one, to a fixed point
-    // because withdrawing one could withdraw its partner's partner in turn. It
-    // cost real faces - OCCT reported six of step-fillet-refusals' thirty
-    // splines as exact cylinders of radius sqrt(3), which is exactly the set
-    // this rule withdrew.
-    //
-    // The question it was answering is better asked of the *run*. runCircle
-    // reads the declared control net, weights and all, so it says whether that
-    // boundary is exactly a circular arc rather than whether the face beside it
-    // is a quadric. When both sides say so about the same circle, a CIRCLE lies
-    // on both surfaces exactly and bounding either with it is sound - and a
-    // kernel offsets and patterns along a circle where it merely tolerates a
-    // spline. When they disagree, or only one side is a patch at all, the run
-    // stays a spline and it is the *curve* that gives way rather than the face.
-    for (std::size_t p = 0; p < patches.size(); p++) {
-      if (!patches[p].alive) continue;
-      for (const auto& run : patches[p].runs) {
-        if (run.straight) continue;
-        Vector3d centre, normal;
-        double radius = 0;
-        if (!AnalyticFeatures::runCircle(patches[p], run, vertices, centre, normal, radius)) {
+      // Which faces meet along each boundary edge, so that an edge on two
+      // declared quadrics can be recognised from either side and written the
+      // same way from both.
+      std::map<std::pair<int, int>, std::vector<const Surface *>> along;
+      auto walk_into_along = [&](const AnalyticFeatures::Patch& patch) {
+        for (const auto& entry : rawBoundaryCycles(patch, loops, loop_valid, taken)) {
+          const std::vector<int>& verts = entry.second.verts;
+          const std::size_t n = verts.size();
+          for (std::size_t i = 0; i < n; i++) {
+            const int u = verts[i], v = verts[(i + 1) % n];
+            along[{std::min(u, v), std::max(u, v)}].push_back(patch.surface.get());
+          }
+        }
+      };
+      for (const auto *patch : standing) walk_into_along(*patch);
+      // The declared sweeps too. An edge where a sweep meets a cylinder is a
+      // crossing of two declarations exactly as much as one between two
+      // cylinders is, and leaving the sweeps out of this map is what made the
+      // question unaskable rather than answered - `along` would only ever see
+      // one owner for such an edge and drop it at the size test below.
+      //
+      // They are safe to add only because the grid emitter now reads
+      // `crossing_curves` as well: an edge admitted here and taken by the
+      // cylinder's face while the sweep's face still wrote a chord would give
+      // one edge two geometries, which is how this opened the shell on 420
+      // edges the first time it was tried.
+      for (const auto& patch : grid_faces) walk_into_along(patch);
+      crossing_edges.clear();
+      double worst_arc = 0;
+      for (const auto& entry : along) {
+        if (entry.second.size() != 2) continue;
+        const Surface *a = entry.second[0], *b = entry.second[1];
+        if (a == b) continue;
+        const Vector3d& p0 = vertices[entry.first.first];
+        const Vector3d& p1 = vertices[entry.first.second];
+        const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
+        // Both ends have to be on both surfaces already. Where a boolean made
+        // the vertex that is exactly what it is - the two makers crossing -
+        // and where it is not, no arc of theirs belongs here.
+        bool on = true;
+        for (const Surface *s : {a, b}) {
+          for (const Vector3d *p : {&p0, &p1}) {
+            double f = 0;
+            Vector3d g;
+            const double owed = std::max(1e-9 * scale, declaredBand(s));
+            double d = 0;
+            if (!surfaceImplicit(s, *p, f, g, &d) || g.norm() < 1e-12 || d > owed) {
+              on = false;
+            }
+          }
+        }
+        if (!on) continue;
+        std::vector<Vector3d> ctrl;
+        // The same 1e-7 the exact tier holds every other boundary to.
+        ArcOutcome why;
+        if (!intersectionArc(a, b, p0, p1, 1e-7, ctrl, &why)) {
+          arc_refused++;
+          if (why.degree == 0 || why.best_error == std::numeric_limits<double>::infinity()) {
+            arc_no_fit++;  // no degree ever got as far as a curve to measure
+          } else {
+            arc_errors.push_back(why.best_error);
+            arc_on_quadric.push_back(why.on_quadric);
+            arc_on_fitted.push_back(why.on_fitted);
+            if (why.straddles_crease == 1) arc_creased++;
+            else if (why.straddles_crease == 0) arc_uncreased++;
+          }
           continue;
         }
-        if (run.kind == AnalyticFeatures::Patch::Run::OTHER_PATCH) {
-          // Both nets have to describe the same circle, or the two faces would
-          // be bounded by a curve only one of them lies on.
-          if (run.patch >= patches.size() || !patches[run.patch].alive) continue;
-          const AnalyticFeatures::Patch& other = patches[run.patch];
-          if (run.partner >= other.runs.size()) continue;
-          Vector3d c2, n2;
-          double r2 = 0;
-          if (!AnalyticFeatures::runCircle(other, other.runs[run.partner], vertices, c2, n2, r2)) {
-            continue;
-          }
-          const double scale = std::max(1.0, radius);
-          if (fabs(r2 - radius) > 1e-9 * scale || (c2 - centre).norm() > 1e-9 * scale) continue;
-        }
-        circular_runs.insert(std::set<int>(run.verts.begin(), run.verts.end()));
-      }
-    }
-
-    // Why the rest are not, counted by reason. A patch refused for a reason
-    // nobody expected is the only way to tell a genuine spline from a quadric
-    // the recogniser is failing to see, and this suite had exactly that: OCCT
-    // named six exact cylinders among the splines while this pass reported a
-    // bare zero.
-    for (const auto& entry : quadric_refusals) {
-      LOG("STEP export: %1$d patches are not quadrics because %2$s", int(entry.second),
-          entry.first.c_str());
-    }
-
-    int quad_cyl = 0, quad_sph = 0;
-    for (std::size_t p = 0; p < patches.size(); p++) {
-      if (patch_quadric[p] == nullptr) continue;
-      if (dynamic_cast<const CylinderSurface *>(patch_quadric[p].get()) != nullptr) quad_cyl++;
-      else quad_sph++;
-    }
-    if (live > 0) {
-      LOG(
-        "STEP export: %1$d of %2$d patches are exactly quadrics - %3$d cylindrical, "
-        "%4$d spherical",
-        quad_cyl + quad_sph, int(live), quad_cyl, quad_sph);
-    }
-    bezier_patches = patches;
-
-    // What is left, and what it would take to do better.
-    //
-    // Everything above writes a surface only where the model declared one and
-    // the mesh fits it exactly. What remains is the geometry OpenSCAD never
-    // held the mathematics for - a polyhedron() over a computed point list, a
-    // helical thread - and it is written as planes, which is always correct and
-    // on the reference part is 99.8% of the uncovered area.
-    //
-    // `band` is what makes this measurable rather than a matter of taste. The
-    // mesh does not say where the true surface is; it says the true surface
-    // passes through these vertices and cannot stray further than the sagitta
-    // of the facets between them. A fitted surface inside that band asserts
-    // nothing the mesh does not already allow. One outside it is inventing
-    // geometry - which is exactly what a B-spline fitted through this project's
-    // own thread did at the run-out, overshooting 0.378mm where the band is
-    // 0.109mm, while scoring 1e-13 against the vertices it interpolated.
-    // What a declared sweep claims. This is the other half of the measurement
-    // below: uncoveredRegions() says the mesh has lost the ordering a fit would
-    // need, and a GridSurface is the generator handing that ordering back. The
-    // question it has to answer is whether the declaration still matches the
-    // mesh once the booleans have run - a record which matches nothing is
-    // harmless but useless, and looks identical to one that was never made.
-    for (const auto& surface : effective) {
-      const auto *grid = dynamic_cast<const GridSurface *>(surface.get());
-      if (grid == nullptr) continue;
-      std::size_t whole = 0, partly = 0;
-      std::vector<Vector3d> unused;  // pointMember's scratch argument, as elsewhere
-      for (std::size_t i = 0; i < loops.size(); i++) {
-        if (!loop_valid[i] || loop_is_hole[i]) continue;
-        std::size_t corners = 0;
-        for (const int v : loops[i]) {
-          corners += const_cast<GridSurface *>(grid)->pointMember(unused, vertices[v]);
-        }
-        if (corners == loops[i].size()) whole++;
-        else if (corners > 0) partly++;
-      }
-      LOG(
-        // The band is printed because it is the tolerance being trusted. A
-        // declared sweep is smooth and the mesh is its tessellation, so a
-        // vertex the boolean created lies on a facet rather than on the
-        // surface, up to the sagitta of a station away. That is the widest a
-        // claim here can be wrong by, and it is the model's own resolution
-        // rather than a constant somebody chose.
-        "STEP export: a declared %1$dx%2$d %3$s sweep claims %4$d facets whole, %5$d cut across "
-        "it, within its tessellation band of %6$.4f",
-        grid->rows, grid->cols, grid->interpolated() ? "cubic" : "linear", int(whole), int(partly),
-        grid->tessellationBand());
-    }
-
-    // What those claimed facets look like as a face: one sheet, and a boundary
-    // split into the runs that would each have to become one curve. That is the
-    // step between claiming facets and writing them, and it is reported before
-    // anything is written for the same reason the rest of this is - a sweep
-    // that cannot be made into a face has to say so, rather than looking like a
-    // sweep that was never declared.
-    std::vector<std::string> grid_report;
-    const std::vector<AnalyticFeatures::Patch> grid_patches = AnalyticFeatures::recogniseGridPatches(
-      graph, effective, features.consumed, grid_report, &features.ledger, surfaces.size());
-    for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
-
-    // Where the claimed region sits on the sweep, which is the question a face
-    // has to answer and a count of facets does not. A sweep whose profile is
-    // declared closed is a tube, and its surface is closed across v: the region
-    // covering every span of the profile wraps that seam, and a face on a
-    // surface written as an open rectangle cannot be bounded across it. One
-    // covering only some spans is a strip, whose boundary stays inside the
-    // rectangle and can be written as it stands.
-    std::size_t wrapping = 0, strips = 0;
-    // The fate of every sweep patch the pass found, written or not. Only a
-    // strip under the approximation flag is written; the rest are recorded here
-    // with the reason, so a facet of a declared sweep left planar can say why.
-    auto grid_fate = [&](const AnalyticFeatures::Patch& patch, AnalyticFeatures::ClaimFate fate,
-                         const char *why) {
-      const std::size_t si = indexOf(patch.surface);
-      const bool declared = si < surfaces.size();
-      for (const std::size_t f : patch.facets)
-        features.ledger.add(
-          {f, patch.surface,
-           declared ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
-                    : AnalyticFeatures::ClaimPrecision::Fitted,
-           "a declared sweep", why, fate, si,
-           declared ? AnalyticFeatures::EvidenceClass::D1 : AnalyticFeatures::EvidenceClass::D3});
-    };
-    for (const auto& patch : grid_patches) {
-      if (!patch.alive) {
-        grid_fate(patch, AnalyticFeatures::ClaimFate::Declined, patch.dropped);
-        continue;
-      }
-      const auto *g = dynamic_cast<const GridSurface *>(patch.surface.get());
-      if (g == nullptr) continue;
-      const int segs = g->closed_v ? g->cols : g->cols - 1;
-      if (segs < 1) {
-        grid_fate(patch, AnalyticFeatures::ClaimFate::Refused,
-                  "the sweep's profile has no span to write");
-        continue;
-      }
-      std::vector<char> span_used(segs, 0);
-      for (const std::size_t f : patch.facets) {
+        // Where the crossing curve is *planar* it is a conic, and a conic has
+        // an entity of its own: the plane-section pass writes it exactly,
+        // where this would write a fitted B-spline through it. Two equal
+        // cylinders crossing meet in a pair of true ellipses, and taking them
+        // here would be trading an exact curve for an approximation of the
+        // same curve. Planarity is the whole test, and it is a property of the
+        // two surfaces rather than of anything this pass chose.
         Vector3d centroid = Vector3d::Zero();
-        for (const int v : loops[f]) centroid += vertices[v];
-        centroid /= double(loops[f].size());
-        double pu = 0, pv = 0;
-        if (!g->project(centroid, pu, pv)) continue;
-        int span = int(pv * segs);
-        span = std::max(0, std::min(segs - 1, span));
-        span_used[span] = 1;
+        for (const auto& c : ctrl) centroid += c;
+        centroid /= double(ctrl.size());
+        Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+        for (const auto& c : ctrl) cov += (c - centroid) * (c - centroid).transpose();
+        const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
+        // The smallest eigenvalue is the sum of squared distances to the best
+        // plane, so its root over the count is the RMS off it.
+        const double flat = sqrt(std::max(0.0, es.eigenvalues()(0)) / double(ctrl.size()));
+        // ...but only between two of them. The sentence above is a statement
+        // about quadrics: two of those meeting in a planar curve meet in a
+        // conic, which ELLIPSE states exactly. A *sweep* cut by a plane is
+        // not a conic and no pass in this exporter writes one for it, so
+        // skipping it here does not hand the edge to something better - it
+        // hands it back to the chord it was. Measured on the band family at
+        // $fn 32: all 640 edges where the sweep meets the bore pass every
+        // other gate and every one of them is planar to 1e-9, because each
+        // spans a single facet and a short arc of anything is flat.
+        if (flat <= 1e-9 * scale && isQuadric(a) && isQuadric(b)) continue;
+        worst_arc = std::max(worst_arc, intersectionArcError(a, b, ctrl));
+        crossing_fit = std::max(crossing_fit, worst_arc);
+        crossing_edges.emplace(entry.first, std::make_pair(a, b));
       }
-      int used = 0;
-      for (const char c : span_used) used += c ? 1 : 0;
-      const bool wraps = used == segs && g->closed_v;
-      if (wraps) {
-        wrapping++;
-        grid_fate(patch, AnalyticFeatures::ClaimFate::Refused,
-                  "the region closes round the profile, and its face would cross the surface's seam");
-      } else {
-        strips++;
-        // Written only under the approximation flag. Every other analytic face
-        // this exporter writes carries a surface the mesh lies on exactly; a
-        // declared sweep is matched to within its tessellation band, which is
-        // the model's own resolution and not zero.
-        if (approximate) {
-          grid_faces.push_back(patch);
-          for (const std::size_t f : patch.facets) features.consumed[f] = 1;
-          for (const std::size_t f : patch.facets) features.consumed_by[f] = "a declared sweep";
-          grid_fate(patch, AnalyticFeatures::ClaimFate::Honoured,
-                    "the sweep's patch is written and takes it");
-        } else {
-          grid_fate(patch, AnalyticFeatures::ClaimFate::Refused,
-                    "a declared sweep is written only under the approximation flag");
-        }
-      }
-      LOG("STEP export: its facets lie over %1$d of the profile's %2$d spans - %3$s", used, segs,
-          wraps ? "the region closes around the profile, so its face crosses the surface's seam"
-                : "the region is a strip, whose boundary stays inside the surface's rectangle");
-    }
-
-    if (!grid_faces.empty()) {
-      std::size_t written_facets = 0;
-      for (const auto& patch : grid_faces) written_facets += patch.facets.size();
-      LOG("STEP export: %1$d declared sweep%2$s written as one face each, replacing %3$d facets",
-          int(grid_faces.size()), grid_faces.size() == 1 ? "" : "s", int(written_facets));
-    }
-    if (wrapping > 0 || strips > grid_faces.size()) {
-      // Which sweep is blocked on what is worth saying apart. A strip is
-      // bounded by the mesh's own edges and needs only the approximation flag;
-      // one that closes around its profile crosses a seam, which is a different
-      // piece of work.
-      LOG(message_group::Export_Warning,
-          "STEP export: %1$d declared sweep%2$s left faceted - %3$d wrap the surface's seam, "
-          "%4$d await the approximation flag",
-          int(wrapping + strips - grid_faces.size()),
-          wrapping + strips - grid_faces.size() == 1 ? "" : "s", int(wrapping),
-          int(strips - grid_faces.size()));
-    }
-
-    // A quadric the band pass could not write, because its trim is not a plane
-    // section: a bored cylinder, whose rim is a quartic and whose face is
-    // therefore lost for want of a bound. Runs last and over what nothing else
-    // claimed, so it can only ever add faces.
-    //
-    // Which tier it runs in is decided by proof rather than by the flag. A
-    // region cut from a declared surface is mostly exact - a boolean puts its
-    // new vertices on the facet planes, so it is the fringe where the cut
-    // landed that strays off the surface and not the interior - and a face
-    // whose every corner is on the surface to 1e-7 asserts nothing the mesh
-    // does not already state. Those are written by the exact pass. Spending
-    // the tessellation band, which is what makes a face this exporter cannot
-    // prove, still needs the approximation flag.
-    {
-      const double max_off = approximate ? std::numeric_limits<double>::infinity() : 1e-7;
-      std::vector<std::string> quadric_report;
-      const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::recogniseQuadricPatches(
-        graph, effective, features.consumed, provenance, smooth_angle, max_off, quadric_report,
-        &features.ledger, surfaces.size());
-      for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
-      // Corners on the surface are not enough to call a face exact. The
-      // boundary between two of them is a straight edge in the mesh, and a
-      // straight edge lies on a quadric only if it runs along the axis, or
-      // around it at a constant height where it can be written as an arc.
-      // Anything else is a chord under a surface that bulges away from it by
-      // the sagitta - truthful edge, truthful surface, inconsistent pair, and
-      // it is the pair a kernel has to widen its tolerance over.
-      //
-      // So the exact tier asks for both. Measured on the reference lid, asking
-      // only for the corners bought nine more analytic faces and cost 39 edges
-      // sagging up to 0.107 off the cylinder they bounded, on an export that
-      // had none at all.
-      auto boundary_lies_on_surface = [&](const AnalyticFeatures::Patch& patch,
-                                          const std::set<std::set<int>>& agreed) {
-        Vector3d axis, origin;
-        double radius = 0, slope = 0;
-        if (const auto *cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get())) {
-          axis = cyl->normdir.normalized();
-          origin = cyl->refpt;
-          radius = cyl->r;
-        } else if (const auto *con = dynamic_cast<const ConeSurface *>(patch.surface.get())) {
-          axis = con->normdir.normalized();
-          origin = con->refpt;
-          radius = con->r;
-          slope = con->slope;
-        } else {
-          return false;
-        }
-        for (const auto& entry : boundaryCycles(patch, vertices, loops, loop_valid, taken,
-                                                section_planes[patch.surface.get()], crossing_keys)) {
+      crossing_keys.clear();
+      for (const auto& e : crossing_edges) crossing_keys.insert(e.first);
+      // A section is written where both its faces will write it. A planar face
+      // across it is not a claimant - it never asks for a curve - so it counts
+      // as the second, and is handed the same edge when the faces are written.
+      std::map<std::set<int>, int> claims;
+      for (const auto *patch : standing) {
+        for (const auto& entry : boundaryCycles(*patch, vertices, loops, loop_valid, taken,
+                                                section_planes[patch->surface.get()], crossing_keys)) {
           const BoundaryCycle& cycle = entry.second;
           const std::size_t n = cycle.verts.size();
-          if (n < 3) continue;
-          // Edges a plane section covers are exact as the conic written for
-          // them, so they are not asked to lie on the surface as chords - but
-          // only where the face on the other side writes the same conic, which
-          // is what `agreed` records, decided over all the faces at once.
-          std::vector<char> covered(n, 0);
           for (const auto& bs : cycle.sections) {
             std::set<int> key;
             for (std::size_t k = 0; k < bs.count; k++) key.insert(cycle.verts[(bs.start + k) % n]);
-            if (agreed.find(key) == agreed.end()) continue;
-            for (std::size_t k = 0; k + 1 < bs.count; k++) covered[(bs.start + k) % n] = 1;
-          }
-          // How far a point is off the surface, radially. A cone's radius is a
-          // function of height, which is the whole of the difference.
-          auto off_surface = [&](const Vector3d& p) {
-            const Vector3d rel = p - origin;
-            const double along = rel.dot(axis);
-            const double want = radius + slope * along;
-            return fabs((rel - axis * along).norm() - want);
-          };
-          for (std::size_t i = 0; i < n; i++) {
-            if (covered[i]) continue;
-            // An edge on the curve where this surface crosses another declared
-            // one is written as that curve, so it is not asked to be a chord.
-            const int u = cycle.verts[i], v = cycle.verts[(i + 1) % n];
-            if (crossing_edges.count({std::min(u, v), std::max(u, v)}) != 0) continue;
-            const Vector3d a = vertices[cycle.verts[i]] - origin;
-            const Vector3d b = vertices[cycle.verts[(i + 1) % n]] - origin;
-            const Vector3d along = b - a;
-            const double rise = fabs(along.dot(axis));
-            // Round the axis at constant height is exact as the arc the
-            // post-pass will write. A straight edge is exact when the surface
-            // contains the whole line, and the midpoint settles that on its own:
-            // a line meets a quadric twice unless it lies in it, so a third
-            // point on the surface means every point of it is. That is the test
-            // rather than "parallel to the axis", which is only a cylinder's
-            // answer - a cone's rulings run to its apex, and calling those
-            // chords refused four regions of step-cut-cone for edges that were
-            // exactly on the cone all along.
-            const Vector3d mid = origin + (a + b) * 0.5;
-            if (rise > 1e-7 && off_surface(mid) > 1e-7) return false;
+            claims[key] += bs.loop >= 0 ? 2 : 1;
           }
         }
-        return true;
-      };
+      }
+      section_curves.clear();
+      for (const auto& claim : claims) {
+        if (claim.second == 2) section_curves.insert(claim.first);
+      }
+    };
 
-      for (std::size_t si = 0; si < effective.size(); si++) {
-        const auto *pl = dynamic_cast<const PlaneSurface *>(effective[si].get());
+    recognition::Writability writability;
+    writability.begin = [&](const std::vector<std::shared_ptr<Surface>>& passes) {
+      for (std::size_t si = 0; si < passes.size(); si++) {
+        const auto *pl = dynamic_cast<const PlaneSurface *>(passes[si].get());
         if (pl == nullptr) continue;
         declared_planes.emplace_back(pl->refpt, pl->normdir.normalized());
         declared_plane_index.push_back(si < surfaces.size() ? si : surfaces.size());
       }
-      decide_sections = [&](const std::vector<const AnalyticFeatures::Patch *>& standing) {
-        // Whose facets are not there to be written as a planar face: what an
-        // earlier pass consumed, plus what this one is standing to claim.
-        taken = features.consumed;
-        for (const auto *patch : standing) {
-          for (const std::size_t f : patch->facets) taken[f] = 1;
-        }
-        // A loop a band will use as its rim is spoken for too. It is still
-        // written as a planar face, so it does not look consumed, but the band
-        // replaces a stretch of it with a circle and the writer takes the band's
-        // answer - so a second curve handed to the same loop is dropped in
-        // silence.
-        for (const auto& rim : features.rims) {
-          for (const AnalyticFeatures::RimRef *side : {&rim.first, &rim.second}) {
-            if (side->kind == AnalyticFeatures::RimRef::WHOLE_LOOP ||
-                side->kind == AnalyticFeatures::RimRef::LOOP_RUN) {
-              if (side->loop < taken.size()) taken[side->loop] = 1;
-            }
-          }
-        }
-        // And the planes those faces cut each surface with. Gathered per surface
-        // rather than per region, because a plane that cuts a cone cuts all of
-        // it: the region meeting the cut along a single edge could never have
-        // seen the plane from that edge alone, and refused the whole surface for
-        // it.
-        section_planes.clear();
-        section_misses.clear();
-        for (const auto *patch : standing) {
-          std::vector<CutPlane>& list = section_planes[patch->surface.get()];
-          for (const auto& run : patch->runs) {
-            if (run.loop >= loops.size() || loop_valid[run.loop] == 0) continue;
-            if (taken[run.loop] != 0 || loops[run.loop].size() < 3) continue;
-            CutPlane cp;
-            cp.normal = loop_normals[run.loop].normalized();
-            cp.on_plane = vertices[loops[run.loop][0]];
-            // A declared plane in preference to the mesh's own. The fit moves
-            // with the tessellation and with whatever the boolean left behind;
-            // the declaration cannot move at all, and the section derived from
-            // it is exact rather than merely close.
-            double best_tilt = 9, best_off = 9;
-            for (const auto& pl : declared_planes) {
-              // How near the nearest declaration comes, whether or not it is
-              // taken: a section written on the mesh's own plane is a section
-              // that moves when the corners do, and knowing it missed by 1e-5
-              // rather than by a right angle is the difference between a
-              // tolerance to widen and a plane nobody declared.
-              const double tilt = fabs(fabs(pl.second.dot(cp.normal)) - 1.0);
-              const double off = fabs((cp.on_plane - pl.first).dot(pl.second));
-              if (tilt < best_tilt) best_tilt = tilt;
-              if (tilt <= 1e-6 && off < best_off) best_off = off;
-              if (tilt > 1e-6) continue;
-              if (off > 1e-6) continue;
-              cp.normal = cp.normal.dot(pl.second) > 0 ? pl.second : Vector3d(-pl.second);
-              cp.on_plane = pl.first;
-              cp.declared = true;
-              break;
-            }
-            if (!cp.declared) {
-              section_misses.push_back({best_tilt, best_off});
-            }
-            bool have = false;
-            for (const auto& seen : list) {
-              have = fabs(fabs(seen.normal.dot(cp.normal)) - 1.0) < 1e-9 &&
-                     fabs((cp.on_plane - seen.on_plane).dot(seen.normal)) < 1e-9;
-              if (have) break;
-            }
-            if (!have) list.push_back(cp);
-          }
-        }
-        // Which faces meet along each boundary edge, so that an edge on two
-        // declared quadrics can be recognised from either side and written the
-        // same way from both.
-        std::map<std::pair<int, int>, std::vector<const Surface *>> along;
-        auto walk_into_along = [&](const AnalyticFeatures::Patch& patch) {
-          for (const auto& entry : rawBoundaryCycles(patch, loops, loop_valid, taken)) {
-            const std::vector<int>& verts = entry.second.verts;
-            const std::size_t n = verts.size();
-            for (std::size_t i = 0; i < n; i++) {
-              const int u = verts[i], v = verts[(i + 1) % n];
-              along[{std::min(u, v), std::max(u, v)}].push_back(patch.surface.get());
-            }
-          }
-        };
-        for (const auto *patch : standing) walk_into_along(*patch);
-        // The declared sweeps too. An edge where a sweep meets a cylinder is a
-        // crossing of two declarations exactly as much as one between two
-        // cylinders is, and leaving the sweeps out of this map is what made the
-        // question unaskable rather than answered - `along` would only ever see
-        // one owner for such an edge and drop it at the size test below.
-        //
-        // They are safe to add only because the grid emitter now reads
-        // `crossing_curves` as well: an edge admitted here and taken by the
-        // cylinder's face while the sweep's face still wrote a chord would give
-        // one edge two geometries, which is how this opened the shell on 420
-        // edges the first time it was tried.
-        for (const auto& patch : grid_faces) walk_into_along(patch);
-        crossing_edges.clear();
-        double worst_arc = 0;
-        for (const auto& entry : along) {
-          if (entry.second.size() != 2) continue;
-          const Surface *a = entry.second[0], *b = entry.second[1];
-          if (a == b) continue;
-          const Vector3d& p0 = vertices[entry.first.first];
-          const Vector3d& p1 = vertices[entry.first.second];
-          const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
-          // Both ends have to be on both surfaces already. Where a boolean made
-          // the vertex that is exactly what it is - the two makers crossing -
-          // and where it is not, no arc of theirs belongs here.
-          bool on = true;
-          for (const Surface *s : {a, b}) {
-            for (const Vector3d *p : {&p0, &p1}) {
-              double f = 0;
-              Vector3d g;
-              const double owed = std::max(1e-9 * scale, declaredBand(s));
-              double d = 0;
-              if (!surfaceImplicit(s, *p, f, g, &d) || g.norm() < 1e-12 || d > owed) {
-                on = false;
-              }
-            }
-          }
-          if (!on) continue;
-          std::vector<Vector3d> ctrl;
-          // The same 1e-7 the exact tier holds every other boundary to.
-          ArcOutcome why;
-          if (!intersectionArc(a, b, p0, p1, 1e-7, ctrl, &why)) {
-            arc_refused++;
-            if (why.degree == 0 || why.best_error == std::numeric_limits<double>::infinity()) {
-              arc_no_fit++;  // no degree ever got as far as a curve to measure
-            } else {
-              arc_errors.push_back(why.best_error);
-              arc_on_quadric.push_back(why.on_quadric);
-              arc_on_fitted.push_back(why.on_fitted);
-              if (why.straddles_crease == 1) arc_creased++;
-              else if (why.straddles_crease == 0) arc_uncreased++;
-            }
-            continue;
-          }
-          // Where the crossing curve is *planar* it is a conic, and a conic has
-          // an entity of its own: the plane-section pass writes it exactly,
-          // where this would write a fitted B-spline through it. Two equal
-          // cylinders crossing meet in a pair of true ellipses, and taking them
-          // here would be trading an exact curve for an approximation of the
-          // same curve. Planarity is the whole test, and it is a property of the
-          // two surfaces rather than of anything this pass chose.
-          Vector3d centroid = Vector3d::Zero();
-          for (const auto& c : ctrl) centroid += c;
-          centroid /= double(ctrl.size());
-          Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
-          for (const auto& c : ctrl) cov += (c - centroid) * (c - centroid).transpose();
-          const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
-          // The smallest eigenvalue is the sum of squared distances to the best
-          // plane, so its root over the count is the RMS off it.
-          const double flat = sqrt(std::max(0.0, es.eigenvalues()(0)) / double(ctrl.size()));
-          // ...but only between two of them. The sentence above is a statement
-          // about quadrics: two of those meeting in a planar curve meet in a
-          // conic, which ELLIPSE states exactly. A *sweep* cut by a plane is
-          // not a conic and no pass in this exporter writes one for it, so
-          // skipping it here does not hand the edge to something better - it
-          // hands it back to the chord it was. Measured on the band family at
-          // $fn 32: all 640 edges where the sweep meets the bore pass every
-          // other gate and every one of them is planar to 1e-9, because each
-          // spans a single facet and a short arc of anything is flat.
-          if (flat <= 1e-9 * scale && isQuadric(a) && isQuadric(b)) continue;
-          worst_arc = std::max(worst_arc, intersectionArcError(a, b, ctrl));
-          crossing_fit = std::max(crossing_fit, worst_arc);
-          crossing_edges.emplace(entry.first, std::make_pair(a, b));
-        }
-        crossing_keys.clear();
-        for (const auto& e : crossing_edges) crossing_keys.insert(e.first);
-        // A section is written where both its faces will write it. A planar face
-        // across it is not a claimant - it never asks for a curve - so it counts
-        // as the second, and is handed the same edge when the faces are written.
-        std::map<std::set<int>, int> claims;
-        for (const auto *patch : standing) {
-          for (const auto& entry : boundaryCycles(*patch, vertices, loops, loop_valid, taken,
-                                                  section_planes[patch->surface.get()], crossing_keys)) {
-            const BoundaryCycle& cycle = entry.second;
-            const std::size_t n = cycle.verts.size();
-            for (const auto& bs : cycle.sections) {
-              std::set<int> key;
-              for (std::size_t k = 0; k < bs.count; k++) key.insert(cycle.verts[(bs.start + k) % n]);
-              claims[key] += bs.loop >= 0 ? 2 : 1;
-            }
-          }
-        }
-        section_curves.clear();
-        for (const auto& claim : claims) {
-          if (claim.second == 2) section_curves.insert(claim.first);
-        }
-      };
-
-      // All of a surface or none of it, and that decision and the sections are
-      // circular - a face may be writable only because a section covers its
-      // chords, and the section is only there while that face stands - so they
-      // are settled together, by dropping whatever the last round refused and
-      // asking again. Refusals only ever grow, so it stops.
-      std::map<const Surface *, bool> surface_ok;
-      {
-        std::vector<char> standing(found.size(), 0);
-        for (std::size_t i = 0; i < found.size(); i++) standing[i] = found[i].alive ? 1 : 0;
-        for (;;) {
-          std::vector<const AnalyticFeatures::Patch *> live;
-          for (std::size_t i = 0; i < found.size(); i++) {
-            if (standing[i]) live.push_back(&found[i]);
-          }
-          decide_sections(live);
-          surface_ok.clear();
-          for (std::size_t i = 0; i < found.size(); i++) {
-            if (!standing[i]) continue;
-            const Surface *key = found[i].surface.get();
-            const bool ok = boundary_lies_on_surface(found[i], section_curves);
-            auto it = surface_ok.find(key);
-            if (it == surface_ok.end()) surface_ok.emplace(key, ok);
-            else it->second = it->second && ok;
-          }
-          // Under the approximation flag a face is written whatever its boundary
-          // does, so nothing is dropped and one round settles it.
-          if (approximate) break;
-          bool changed = false;
-          for (std::size_t i = 0; i < found.size(); i++) {
-            if (standing[i] && !surface_ok[found[i].surface.get()]) {
-              standing[i] = 0;
-              changed = true;
-            }
-          }
-          if (!changed) break;
-        }
-      }
-
-      std::size_t claimed_facets = 0, refused = 0, unbounded = 0;
-      // The fate of every region the pass handed on. The facets it dropped
-      // before a region existed are recorded in the pass; these are the rest.
-      // D4 evidence throughout - see recogniseQuadricPatches.
-      auto quadric_fate = [&](const AnalyticFeatures::Patch& patch, AnalyticFeatures::ClaimFate fate,
-                              const char *why) {
-        const std::size_t si = indexOf(patch.surface);
-        for (const std::size_t f : patch.facets)
-          // The precision a claim carries has to be the one its *index*
-          // implies. Hardcoding DeclaredExact here once labelled a winning
-          // **fit** as a declaration, and `ClaimLedger::misheld` - whose whole
-          // job is to find a facet held by a claimant less precise than one
-          // that also covered it - reads that label.
-          features.ledger.add({f, patch.surface,
-                               si < surfaces.size() ? AnalyticFeatures::ClaimPrecision::DeclaredExact
-                                                    : AnalyticFeatures::ClaimPrecision::Fitted,
-                               "a quadric face", why, fate, si, AnalyticFeatures::EvidenceClass::D4});
-      };
-      for (const auto& patch : found) {
-        if (!patch.alive) {
-          refused++;
-          quadric_fate(patch, AnalyticFeatures::ClaimFate::Declined, patch.dropped);
-          continue;
-        }
-        if (!approximate && !surface_ok[patch.surface.get()]) {
-          unbounded++;
-          quadric_fate(
-            patch, AnalyticFeatures::ClaimFate::Refused,
-            "some of the surface's boundary is off it, and half a surface is worse than none");
-          continue;
-        }
-        quadric_faces.push_back(patch);
-        claimed_facets += patch.facets.size();
-        for (const std::size_t f : patch.facets) features.consumed[f] = 1;
-        for (const std::size_t f : patch.facets) features.consumed_by[f] = "a quadric face";
-        quadric_fate(patch, AnalyticFeatures::ClaimFate::Honoured,
-                     "the quadric's patch is written and takes it");
-      }
-      if (!quadric_faces.empty()) {
-        LOG(
-          "STEP export: %1$d trimmed quadric%2$s written as one face each, replacing %3$d facets "
-          "(%4$s)",
-          int(quadric_faces.size()), quadric_faces.size() == 1 ? "" : "s", int(claimed_facets),
-          approximate ? "within their tessellation band" : "exactly on their surface");
-      }
-      if (refused > 0) {
-        LOG("STEP export: %1$d trimmed quadric region%2$s could not be bounded", int(refused),
-            refused == 1 ? "" : "s");
-      }
-      if (unbounded > 0) {
-        LOG(
-          "STEP export: %1$d trimmed quadric region%2$s left faceted - the surface is exact but "
-          "some of it is bounded off itself, and half a surface is worse than none",
-          int(unbounded), unbounded == 1 ? "" : "s");
-      }
-    }
-
-    if (approximate) {
-      // What is left after everything, including the fits above. A region of
-      // one or two facets is not among them: a single flat facet is already
-      // written exactly as a PLANE, and reporting it as something left faceted
-      // says a surface was lost where none was.
-      std::vector<AnalyticFeatures::SmoothRegion> regions;
-      for (auto& region : AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle)) {
-        if (region.facets.size() >= 3) regions.push_back(std::move(region));
-      }
-      std::size_t left = 0;
-      double worst_band = 0.0;
-      for (const auto& region : regions) {
-        left += region.facets.size();
-        worst_band = std::max(worst_band, region.band);
-      }
-      if (regions.empty()) {
-        LOG("STEP export: approximation found nothing left to fit");
-      } else {
-        LOG(
-          "STEP export: %1$d smooth region%2$s left faceted, %3$d facets in all; the "
-          "tessellation leaves at most %4$.4f to fit inside",
-          int(regions.size()), regions.size() == 1 ? "" : "s", int(left), worst_band);
-        const std::size_t show = std::min<std::size_t>(regions.size(), 3);
-        for (std::size_t i = 0; i < show; i++) {
-          LOG(
-            "STEP export:   region of %1$d facets, area %2$.1f, band %3$.4f (typical %4$.4f), "
-            "worst dihedral %5$.1f degrees",
-            int(regions[i].facets.size()), regions[i].area, regions[i].band, regions[i].median_band,
-            regions[i].worst_dihedral * 180.0 / M_PI);
-          // Whether a fit is even available here, which is a different question
-          // from whether it would be accurate.
-          LOG(
-            "STEP export:     grid %1$.0f% regular over %2$d interior vertices at valence "
-            "%3$d - %4$s",
-            regions[i].regularity * 100.0, int(regions[i].interior_vertices),
-            int(regions[i].modal_valence),
-            regions[i].interior_vertices == 0
-              ? "too thin to tell - every vertex is on the boundary"
-              : (regions[i].regularity > 0.95
-                   ? "the generator's ordering survives, a fit could be made"
-                   : "the ordering is gone, only a declaration could describe this"));
-        }
-        // These are the ones the fit could not take, and saying so is the point -
-        // a pass which quietly wrote nothing here would look exactly like one
-        // which found nothing to write.
-        LOG(message_group::Export_Warning,
-            "STEP export: %1$d region%2$s faceted, no fit having been found - which is always "
-            "a valid export",
-            int(regions.size()), regions.size() == 1 ? " stays" : "s stay");
-      }
-    }
+    };
+    writability.boundaryOnSurface = [&](const std::vector<const AnalyticFeatures::Patch *>& standing) {
+      decide_sections(standing);
+      std::vector<char> ok;
+      ok.reserve(standing.size());
+      for (const auto *patch : standing)
+        ok.push_back(boundary_lies_on_surface(*patch, section_curves) ? 1 : 0);
+      return ok;
+    };
+    recognition::Inputs inputs;
+    inputs.mesh.vertices = &vertices;
+    inputs.mesh.loops = &loops;
+    inputs.mesh.valid = &loop_valid;
+    inputs.mesh.is_hole = &loop_is_hole;
+    inputs.mesh.normals = &loop_normals;
+    inputs.surfaces = &surfaces;
+    inputs.face_origin = &faceOrigin;
+    inputs.owned = &owned;
+    inputs.model_tol = model_tol;
+    inputs.approximate = approximate;
+    recognition::runPipeline(inputs, writability, rec);
   }
   const std::vector<AnalyticFeatures::Band>& bands = features.bands;
   const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;
