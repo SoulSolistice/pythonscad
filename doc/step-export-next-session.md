@@ -545,7 +545,7 @@ Paste this into a new session, adjusting only the worktree path.
 
 ```text
 You are continuing work on the PythonSCAD STEP exporter, in a worktree of
-E:\29_Git_Soulsolistice\pythonscad. Branch: claude/step-claim-two-pass, suite
+E:\29_Git_Soulsolistice\pythonscad. Branch: claude/step-claim-ledger, suite
 58 of 58, nothing pushed, tree clean.
 
 Read first, in this order: CLAUDE.md (build, test, the dev loop), then
@@ -600,15 +600,14 @@ the thing being optimised. A finding on it counts only once it is a synthetic
 fixture that isolates it. If the ladder is right, lid10 falls out of it. It
 needs its customizer: -p examples/step_test/lid10.json -P "New set 1".
 
-Where to start: finish step 1 of the design's migration plan - every pass
-records its claims into the ledger while `consumed` still decides everything,
-extended from "what a pass lost" to every claim a pass would make, honoured or
-not. Measured gap: recogniseQuadricPatches records a claim only when someone
-else holds the facet, and the band pass records only what it honours. That is
-additive and behaviour-neutral, and it is what turns the declaration census
-from a reconstruction of `consumed` into a read of the catalogue. Then step 3
-(flip the source of truth), then R0 properly (open item 29), then C0's refusals
-(open item 27), starting with the two 4x-median statistics.
+Where to start: read "The session of 2026-09-23" at the top of
+doc/step-export-next-session.md. Step 1 is finished; provenance is carried and
+has face/evidence roles; the switch to identity is parked because junctions
+need a D0 presence test as well. Build that, retry the switch against
+flagship-strict, then the recognition refactor (FacetGraph, Provenance, pure
+Proposers, Assembler, Arbiter) with the per-facet ledger dump on 104 exports as
+its oracle. The foundation is doc/step-recognition-design.md, *Determinacy*: a
+D0 with correct provenance first, independent closed forms, judged globally.
 
 Derive expectations from the model, never from a kernel, and never calculate
 anything from a faceted input. Mutation-check every zero an instrument reports.
