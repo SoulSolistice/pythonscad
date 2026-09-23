@@ -32,6 +32,12 @@ other's output files, so neither result means anything.
 | --- | --- |
 | `fault-census.py <file>…` | every property known to become a SOLIDWORKS fault, keyed by the code it becomes: 7, 16, 13, 21, 17 (OCP), seam crossings. Validated by the 2026-09-08 control (2420 edges off their surface, against 38–62 for current files). **Run this first.** |
 
+## Why is this facet what it is — the claim ledger
+
+| tool | answers |
+| --- | --- |
+| `OPENSCAD_STEP_LEDGER=<file.tsv>` on any export | every claim every recogniser made, one tab-separated row each: facet, origin, holder, claimant, surface, kind, precision, evidence class (D0-D4), fate (honoured / withdrawn / held / declined / refused), whether provenance says the maker owns that surface, and the rule behind the fate. Facet indices are the merged mesh's and match between the two tiers, so "what does one tier write that the other does not, and why" is a join of two dumps. The export's own report prints the summary: *why N facets are fitted or left to the tessellation*, then the rules by count. Read this before instrumenting a pass. |
+
 ## One relation at a time — our own file
 
 | tool | fault | answers |

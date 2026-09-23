@@ -1148,7 +1148,8 @@ const char *boundaryCycles(const std::vector<std::vector<int>>& loops,
 std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
                                           const std::vector<char>& consumed,
-                                          std::vector<std::string>& report)
+                                          std::vector<std::string>& report, ClaimLedger *ledger,
+                                          std::size_t declared_count)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -1158,7 +1159,8 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
   std::vector<Patch> patches;
   std::vector<char> taken(loops.size(), 0);
 
-  for (const auto& surface : surfaces) {
+  for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
+    const auto& surface = surfaces[surface_index];
     const auto *bez = dynamic_cast<const BezierPatchSurface *>(surface.get());
     if (bez == nullptr || bez->net.empty()) continue;
 
@@ -1179,7 +1181,13 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
     Patch patch;
     patch.surface = surface;
     for (std::size_t f = 0; f < loops.size(); f++) {
-      if (!loop_valid[f] || is_hole[f] || consumed[f] || taken[f]) continue;
+      if (!loop_valid[f] || is_hole[f]) continue;
+      // A held facet is still examined. Held is not held by the right claimant -
+      // not the most precise one, and not necessarily the right declaration even
+      // when that is exact - so a patch that would have covered it says so in the
+      // ledger instead of never having looked. It does not take it: `consumed`
+      // still decides, and this only records.
+      const bool held = consumed[f] != 0 || taken[f] != 0;
       bool on = true;
       for (const int v : loops[f]) {
         const Vector3d& p = vertices[v];
@@ -1196,7 +1204,19 @@ std::vector<Patch> recogniseBezierPatches(const Mesh& mesh,
           break;
         }
       }
-      if (on) patch.facets.push_back(f);
+      if (!on) continue;
+      if (held) {
+        if (ledger != nullptr) {
+          ledger->add({f, surface,
+                       surface_index < declared_count ? ClaimPrecision::DeclaredInterpolant
+                                                      : ClaimPrecision::Fitted,
+                       "a Bezier patch", "covered, but already held when this pass looked",
+                       ClaimFate::Held, surface_index,
+                       surface_index < declared_count ? EvidenceClass::D1 : EvidenceClass::D3});
+        }
+        continue;
+      }
+      patch.facets.push_back(f);
     }
     if (patch.facets.empty()) continue;
 
@@ -1761,7 +1781,8 @@ Patch patchFromFacets(const std::vector<std::vector<int>>& loops,
 std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
                                         const std::vector<std::shared_ptr<Surface>>& surfaces,
                                         const std::vector<char>& consumed,
-                                        std::vector<std::string>& report, ClaimLedger *ledger)
+                                        std::vector<std::string>& report, ClaimLedger *ledger,
+                                        std::size_t declared_count)
 {
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -1812,6 +1833,16 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
     // span of a closed profile closes around it, and no face on a surface
     // written as an open rectangle can be bounded across its own seam.
     const int segs = grid->closed_v ? grid->cols : grid->cols - 1;
+    // A declared sweep is an interpolant through the model's stations and
+    // publishes its band, which is D1; a sweep the approximation recovered from
+    // the mesh is past `declared_count` and is D3 whatever it interpolates.
+    const bool declared = surface_index < declared_count;
+    auto record = [&](std::size_t f, ClaimFate fate, const char *why) {
+      if (ledger == nullptr) return;
+      ledger->add({f, surface, declared ? ClaimPrecision::DeclaredInterpolant : ClaimPrecision::Fitted,
+                   "a declared sweep", why, fate, surface_index,
+                   declared ? EvidenceClass::D1 : EvidenceClass::D3});
+    };
     std::vector<std::size_t> claimed;
     std::vector<std::size_t> contested;  // on this sweep, but already held elsewhere
     std::vector<int> span_of;
@@ -1886,10 +1917,7 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         // Covered and not held: recorded, never honoured. A claim that leaves
         // no trace is the whole defect this ledger exists for.
         contested.push_back(f);
-        if (ledger != nullptr) {
-          ledger->add({f, surface, ClaimPrecision::DeclaredInterpolant, "a declared sweep",
-                       "covered, but already held when this pass looked", false, surface_index});
-        }
+        record(f, ClaimFate::Held, "covered, but already held when this pass looked");
         continue;
       }
       claimed.push_back(f);
@@ -1957,6 +1985,10 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
         for (std::size_t k = 0; k < claimed.size(); k++) {
           if (stray_of[k] > allow) {
             refused++;
+            // A refusal by a statistic over the claim's own strays - the shape
+            // open item 27 wants gone. Recorded so the census can say so.
+            record(claimed[k], ClaimFate::Declined,
+                   "a corner is further off the fit than four times this claim's median stray");
             continue;
           }
           kept.push_back(claimed[k]);
@@ -2474,6 +2506,25 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     const Vector3d ref = perpendicular(axis);
     const Vector3d ref2 = axis.cross(ref);
 
+    // Every facet this pass covers gets exactly one claim, recorded where its
+    // fate is decided: here for the rules below, at the writer for a region it
+    // hands on. Before 2026-09-23 only the held ones were recorded, so a facet
+    // this pass covered and then dropped to its own span rule or its region
+    // test left no trace - and those are exactly the facets that come out
+    // planar on a declared surface.
+    //
+    // The evidence is D4 in both tiers. Membership is OnQuadric::covers, whose
+    // corners are held to min(bandOf(f), max_off) and whose interior to
+    // 1.25 x the facet's own sagitta - the tessellation deciding, even where
+    // max_off is 1e-7. A declared surface in the claim does not make it D0; see
+    // doc/step-rungs.md, *a rung is as exact as its evidence*.
+    const ClaimPrecision precision =
+      surface_index < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted;
+    auto record = [&](std::size_t f, ClaimFate fate, const char *why) {
+      if (ledger == nullptr) return;
+      ledger->add(
+        {f, surface, precision, "a quadric face", why, fate, surface_index, EvidenceClass::D4});
+    };
     std::vector<std::size_t> claimed;
     std::vector<std::size_t> contested;  // on this quadric, but already held elsewhere
     std::vector<double> span_of_claim;
@@ -2511,19 +2562,19 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
         // never honoured - such a facet is held by someone else, so it can
         // never be mistaken for a claim nothing acted on.
         contested.push_back(f);
-        if (ledger != nullptr) {
-          ledger->add(
-            {f, surface,
-             surface_index < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted,
-             "a quadric face", "covered, but already held when this pass looked", false, surface_index});
-        }
+        record(f, ClaimFate::Held, "covered, but already held when this pass looked");
         continue;
       }
       claimed.push_back(f);
       span_of_claim.push_back(on_quadric.spanOf(f));
       worst = std::max(worst, off);
     }
-    if (claimed.size() < 3) continue;
+    if (claimed.size() < 3) {
+      for (const std::size_t f : claimed) {
+        record(f, ClaimFate::Declined, "fewer than three facets of the surface were free to claim");
+      }
+      continue;
+    }
 
     // And refuse a facet that reaches further round the axis than a facet of
     // this surface's tessellation does.
@@ -2562,6 +2613,8 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
         for (std::size_t k = 0; k < claimed.size(); k++) {
           if (span_of_claim[k] > 4 * typical) {
             reached++;
+            record(claimed[k], ClaimFate::Declined,
+                   "reaches further round the axis than four times this claim's median span");
             continue;
           }
           kept.push_back(claimed[k]);
@@ -2576,10 +2629,19 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
         claimed = std::move(kept);
       }
     }
-    if (claimed.size() < 3) continue;
+    if (claimed.size() < 3) {
+      for (const std::size_t f : claimed) {
+        record(f, ClaimFate::Declined, "fewer than three facets were left after the span rule");
+      }
+      continue;
+    }
 
     const double band = bandOf(claimed);
     if (worst > band) {
+      for (const std::size_t f : claimed) {
+        record(f, ClaimFate::Declined,
+               "the region's worst corner strays further than the region's tessellation band");
+      }
       report.push_back(
         format("a region of %d facets on the declared %s r=%g is not written: its boundary strays %.4f "
                "from the surface where the tessellation allows %.4f",
@@ -2617,7 +2679,12 @@ std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
     }
 
     for (const auto& group : groups) {
-      if (group.size() < 3) continue;
+      if (group.size() < 3) {
+        for (const std::size_t f : group) {
+          record(f, ClaimFate::Declined, "a piece of the seam split has fewer than three facets");
+        }
+        continue;
+      }
       // The seam split above cuts a wrapping claim in two; this one cuts a
       // claim the booleans left in pieces. Both have to happen, and neither
       // implies the other.
@@ -2847,6 +2914,26 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     return std::size_t(-1);
   };
 
+  // What this pass would have claimed and refused, keyed by (facet, surface).
+  //
+  // A band decides which facets it takes by what a band can *express*, and until
+  // 2026-09-23 a walk that found facets on a declared surface and then refused
+  // them for want of a ring shape left no trace: the pass named a surface only
+  // once every shape test had passed. That is the defect *the representation
+  // fits the region, never the region the representation* describes, and it
+  // was invisible. So the surface is named as soon as the walk is confined to
+  // it, and every refusal after that point is recorded here as a declined
+  // claim. Flushed at the end of the pass, once, and only where no band claim
+  // on that facet and surface was made - a strip is walked from every seed on
+  // it, and one seed's refusal is not a claim when another seed's band took it.
+  //
+  // Walls the pass already holds are not re-walked: every earlier band here is
+  // a band on a surface its walls lie on at 1e-7, and a quad lies on one
+  // declared quadric at that precision, so the only other claim such a walk
+  // could name is the same surface. Examining held facets is the later passes'
+  // job, and they do.
+  std::map<std::pair<std::size_t, std::size_t>, const char *> declined;
+
   for (std::size_t seed = 0; seed < face_cnt; seed++) {
     if (!loop_valid[seed] || consumed[seed] || loop_is_hole[seed]) continue;
     if (loops[seed].size() != 4) continue;
@@ -2893,6 +2980,17 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       Vector3d axis = axis_from_rulings(rulings_of(near, entry));
       if (axis.norm() < 0.5) axis = axis_from(chords_of(near, entry));
       if (axis.norm() < 0.5) continue;
+
+      // Which declared surface the confined walk is on, once there is one to
+      // name - see `declined` above. Asked with the same 1e-7 equality against
+      // a declaration the match further down uses, of the probe's rims; the
+      // walk admits a facet only if every corner is on the probe surface to
+      // 1e-7, so this is a statement about declared points, not a fit.
+      std::size_t named = std::size_t(-1);
+      auto decline = [&](const char *why) {
+        if (named == std::size_t(-1)) return;
+        for (const std::size_t f : walls) declined.emplace(std::make_pair(f, named), why);
+      };
 
       // Fit the surface from the seed and its first two neighbours - four
       // vertices on each rim, which is enough - and walk again, this time
@@ -2953,8 +3051,22 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
           }
           return true;
         };
+        {
+          std::size_t which = 0, which_top = 0;
+          if (cylindrical) {
+            if (declared_cylinder(probe_r0, axis, probe_base, &which)) named = which;
+          } else if (declared_cylinder(probe_r0, axis, probe_base, &which) &&
+                     declared_cylinder(probe_r1, axis, probe_base, &which_top)) {
+            named = std::max(which, which_top);  // as the match below names it
+          } else if (declared_cone(probe_r0, probe_r1, axis, probe_base, probe_hi - probe_lo, &which)) {
+            named = which;
+          }
+        }
         walk_strip(seed, side, walls, entry, &on_surface);
-        if (walls.size() < 3) continue;
+        if (walls.size() < 3) {
+          decline("fewer than three facets walk out on the surface - too short to be a band");
+          continue;
+        }
       }
 
       // every wall vertex has to sit on one of the two rims
@@ -2971,7 +3083,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         lo = std::min(lo, kv.second);
         hi = std::max(hi, kv.second);
       }
-      if (hi - lo < model_tol) continue;
+      if (hi - lo < model_tol) {
+        decline("the walk has no height along the axis");
+        continue;
+      }
 
       auto count_at = [&](double level) {
         std::size_t n = 0;
@@ -3013,9 +3128,15 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         for (const auto& kv : along) {
           if (fabs(kv.second - lo) >= model_tol) top_set.push_back(kv.first);
         }
-        if (!fitPlane(vertices, top_set, model_tol, top_normal)) continue;
+        if (!fitPlane(vertices, top_set, model_tol, top_normal)) {
+          decline("the far rim is neither at one height nor on one plane - no ring to write");
+          continue;
+        }
         if (top_normal.dot(axis) < 0) top_normal = -top_normal;
-        if (top_normal.dot(axis) < 1e-3) continue;
+        if (top_normal.dot(axis) < 1e-3) {
+          decline("the far rim's plane runs along the axis - no ring to write");
+          continue;
+        }
       }
 
       // Now that the walk is confined to one surface, the whole band has to
@@ -3029,13 +3150,19 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       // what this has left to catch there is a chord running between the two
       // rims - a ruling the walk mistook for a chord, which is neither.
       if (!tilted) {
-        if (!perpendicular_to(chords_of(walls, entry), axis)) continue;
+        if (!perpendicular_to(chords_of(walls, entry), axis)) {
+          decline("a chord runs between the rims - the walls are not one ring");
+          continue;
+        }
       } else {
         bool chords_ok = true;
         for (const Vector3d& c : chords_of(walls, entry)) {
           if (fabs(c.dot(axis)) >= 1e-9 && fabs(c.dot(top_normal)) >= 1e-9) chords_ok = false;
         }
-        if (!chords_ok) continue;
+        if (!chords_ok) {
+          decline("a chord runs between the rims - the walls are not one ring");
+          continue;
+        }
       }
 
       // A band which closes on itself has one rim vertex per facet; one which
@@ -3043,19 +3170,29 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       // facet. Anything else is not a band around a common axis.
       const bool full_turn = bottom_set.size() == walls.size() && top_set.size() == walls.size();
       const bool part_turn = bottom_set.size() == walls.size() + 1 && top_set.size() == walls.size() + 1;
-      if (!full_turn && !part_turn) continue;
+      if (!full_turn && !part_turn) {
+        decline("the rims do not have one vertex per wall, or one more - not a ring a band can write");
+        continue;
+      }
 
       // A tilted rim which stops short of a full turn would need an elliptical
       // *arc*, and the arc machinery - which run of which loop the rim
       // replaces, which end is which - is written for circles. A full turn
       // needs none of that: it is one closed curve.
-      if (tilted && !full_turn) continue;
+      if (tilted && !full_turn) {
+        decline(
+          "a tilted rim short of a full turn needs an elliptical arc, which a band has no form for");
+        continue;
+      }
 
       // Fit each rim on its own: the centroid of a full rim lies on the axis
       // but the centroid of an arc sits inside its chord, and the two rims of
       // a frustum have different radii anyway.
       Vector3d base, top_centre;
-      if (!fitCircleCentre(vertices, bottom_set, axis, lo, base)) continue;
+      if (!fitCircleCentre(vertices, bottom_set, axis, lo, base)) {
+        decline("the near rim does not fit a circle");
+        continue;
+      }
       if (tilted) {
         // Where the axis pierces the cut plane. That is the ellipse's centre,
         // and it is not the centroid of the rim's vertices unless the
@@ -3065,8 +3202,14 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         centroid /= double(top_set.size());
         top_centre = base + axis * (top_normal.dot(centroid - base) / top_normal.dot(axis));
       } else {
-        if (!fitCircleCentre(vertices, top_set, axis, hi, top_centre)) continue;
-        if (distanceToAxis(top_centre, base, axis) > 1e-6) continue;  // coaxial
+        if (!fitCircleCentre(vertices, top_set, axis, hi, top_centre)) {
+          decline("the far rim does not fit a circle");
+          continue;
+        }
+        if (distanceToAxis(top_centre, base, axis) > 1e-6) {  // coaxial
+          decline("the two rims are not coaxial");
+          continue;
+        }
       }
 
       double r_bottom = 0, r_top = 0;
@@ -3083,7 +3226,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       for (const int v : top_set) {
         dev = std::max(dev, fabs(distanceToAxis(vertices[v], base, axis) - r_top));
       }
-      if (dev > 1e-7 * scale) continue;
+      if (dev > 1e-7 * scale) {
+        decline("a rim vertex is off its rim's circle");
+        continue;
+      }
 
       // Intent. A cylinder needs its own record; a frustum has none, because
       // the shape that produces one - hull() of two coaxial cylinders, the
@@ -3095,7 +3241,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       // A cone cut off-axis gives a conic whose rim has no single radius, and
       // the ellipse written below would be the wrong curve rather than an
       // imprecise one. Only a cylinder may be tilted.
-      if (tilted && is_cone) continue;
+      if (tilted && is_cone) {
+        decline("a cone cut off-axis has no single-radius rim, and a band writes only those");
+        continue;
+      }
       if (is_cone) {
         // Either both rims match a declared cylinder - a hull() of two coaxial
         // cylinders declares those and never the cone between them, which is
@@ -3106,7 +3255,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
         std::size_t which_bottom = 0, which_top = 0, which_cone = 0;
         const bool by_rims = declared_cylinder(r_bottom, axis, base, &which_bottom) &&
                              declared_cylinder(r_top, axis, base, &which_top);
-        if (!by_rims && !declared_cone(r_bottom, r_top, axis, base, hi - lo, &which_cone)) continue;
+        if (!by_rims && !declared_cone(r_bottom, r_top, axis, base, hi - lo, &which_cone)) {
+          decline("the rims fitted over the whole walk match no declaration");
+          continue;
+        }
         matched = by_rims ? std::max(which_bottom, which_top) : which_cone;
         // Both rims were read to identify this cone and only one of them can be
         // `matched`. Record the pair, or a census cannot tell a declaration
@@ -3118,6 +3270,7 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
           note_evidence(which_cone);
         }
       } else if (!declared_cylinder(r_bottom, axis, base, &matched)) {
+        decline("the rims fitted over the whole walk match no declaration");
         continue;
       } else {
         note_evidence(matched);
@@ -3133,7 +3286,10 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       // the variable is set. See doc/step-recognition-design.md, *region before
       // representation*.
       if (const char *yield_to_general = getenv("OPENSCAD_STEP_YIELD_SURFACE")) {
-        if (matched == std::size_t(atoi(yield_to_general))) continue;
+        if (matched == std::size_t(atoi(yield_to_general))) {
+          decline("yielded to the general pass by OPENSCAD_STEP_YIELD_SURFACE");
+          continue;
+        }
       }
 
       Band info;
@@ -3161,10 +3317,15 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
       for (const std::size_t f : walls) {
         consumed[f] = 1;
         result.consumed_by[f] = "a band's wall";
+        // D0 on a declaration: every corner is on the surface to 1e-7, the rims
+        // match the declaration to 1e-7, and no band or statistic takes part.
+        // That is membership only; *which* facets is still what a band can
+        // express, which is R2 and D4, and the declines above are its record.
         result.ledger.add(
           {f, surfaces[matched],
            matched < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted,
-           "a band's wall", "the facet walks out from the band's seed", true, matched});
+           "a band's wall", "the facet walks out from the band's seed", ClaimFate::Honoured, matched,
+           matched < declared_count ? EvidenceClass::D0 : EvidenceClass::D3});
         band_of_loop[f] = bands.size();
       }
       bands.push_back(info);
@@ -3802,10 +3963,15 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
           const std::size_t zone_index = index_of(surface);
           const ClaimPrecision zone_precision =
             zone_index < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted;
+          // D4: a cap is absorbed because the gap it spans is under one ring
+          // step of this tessellation - the tessellation deciding, however
+          // exact the sphere it closes.
           result.ledger.add({cap_low, surface, zone_precision, "a band's cap",
-                             "the loop closing the band", true, zone_index});
+                             "the loop closing the band", ClaimFate::Honoured, zone_index,
+                             EvidenceClass::D4});
           result.ledger.add({cap_high, surface, zone_precision, "a band's cap",
-                             "the loop closing the band", true, zone_index});
+                             "the loop closing the band", ClaimFate::Honoured, zone_index,
+                             EvidenceClass::D4});
         }
         rims[seed] = ends;
         for (const std::size_t bi : run) {
@@ -3955,6 +4121,16 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
     if (band.alive || band.dropped == nullptr) continue;
     result.report.push_back(format("r=%g band of %d facets left faceted: %s", band.r_bottom,
                                    int(band.walls.size()), band.dropped));
+  }
+
+  // The refusals, once each. See `declined` above.
+  for (const auto& entry : declined) {
+    const std::size_t f = entry.first.first, si = entry.first.second;
+    if (result.ledger.has(f, "a band's wall", si)) continue;
+    result.ledger.add({f, surfaces[si],
+                       si < declared_count ? ClaimPrecision::DeclaredExact : ClaimPrecision::Fitted,
+                       "a band's wall", entry.second, ClaimFate::Declined, si,
+                       si < declared_count ? EvidenceClass::D0 : EvidenceClass::D3});
   }
 
   return result;

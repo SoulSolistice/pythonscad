@@ -543,6 +543,146 @@ reconstruction of `consumed` into a read of the catalogue.
 The census stays meanwhile: it is measurement, it found nine declarations to
 explain, and its limits are now written down beside it.
 
+## Determinacy: the ground this design stands on
+
+**Recorded 2026-09-23**, because weeks were lost viewing determinism locally, at
+the problem in hand, rather than globally. Everything above - the covering
+order, provenance before measurement, a pure Propose - is a consequence of what
+follows, and a change that cannot be justified against it is not justified.
+
+**1. Provenance first: a D0 with *correct* provenance is the anchor.** A region
+belongs to the surface its *creating function* declared, and ends where that
+function's surfaces end. A region so defined strands nothing, because every
+facet traces to a maker whose declarations cover it. A D0 held by the wrong
+claimant is still D0 by class, and it is exactly what splits a surface into
+pieces that do not track back to a maker. Three facts, each paid for:
+
+- `consumed` does not mean consumed by the most precise claimant;
+- consumed even by a D0 does not mean the *right* D0;
+- consumed by a wrong claimant can leave facets behind that nothing is able to
+  allocate afterwards.
+
+**2. An entity is as precise as the independent closed forms that fix it.** For
+every entity (point, curve, surface region, facet claim, and every combination)
+rank lexicographically by:
+
+1. the class of the **weakest** constraint the determining set needs - one D4
+   in it makes it D4, however many D0s stand round it (*a rung is as exact as
+   its evidence*);
+2. the **freedom left**: a point needs three independent surfaces, or a curve
+   and a surface; a curve two surfaces; a region its surface and a closed
+   boundary of determined curves. Freedom left over is filled from the mesh,
+   which is how a lower rung gets in;
+3. **independent corroboration** beyond what is needed - each further closed
+   form that agrees is evidence against a wrong classification.
+
+Independence is algebraic - the rank of the constraints' gradients at the
+entity - not a count of names: a surface declared twice, two coaxial cylinders,
+a plane containing an axis, fix no more than one. `kCornerRungs`' "three
+surfaces meeting in a point beats two meeting in a curve" is one instance of
+this, not the rule.
+
+**3. Globally, never locally.** What is maximised is the determinacy of the
+*whole cover*, every facet included. A decision is judged by what it leaves on
+every facet, and a stranded facet is a cost the arbiter must see **before** it
+chooses: a region solved well by a nine-knot Bezier that leaves two facets out of
+reach is worse than it looks, and no census or later pass recovers those two.
+Which is why Propose must be pure and cover the whole mesh regardless of what is
+held - a claim that is never proposed can never be weighed.
+
+**4. Wherever a less precise rung holds ground, the question is *why*.** A wrong
+classification? A missing declaration? Ground consumed by a misfitting claimant?
+Underdetermined? A more precise rung may not build on a less precise one unless
+that has been thoroughly validated. Since step 1 the ledger answers the first
+three per facet; see below.
+
+## Step 1, finished - 2026-09-23
+
+**Every pass now records every claim it would make, once, at the point its fate
+is decided**, and `consumed` still decides everything. Two fields carry it:
+
+- `ClaimFate` replaces the `honoured` bool: *honoured*, *withdrawn* (a band given
+  back), *held* (something already had it), *declined* (the claimant's own rule
+  refused it, and `why` names the rule), *refused* (proposed as a region, and the
+  writer would not write it).
+- `EvidenceClass` - the class of what decided membership, the weakest in the
+  determining set; `Unstated` first, so a forgotten site reads as unstated and
+  is an `EXPORT-ERROR` on a held facet rather than a silent D0.
+
+What each pass records that it did not before:
+
+| pass | newly recorded |
+| --- | --- |
+| band | a walk confined to a declared surface and then refused **for want of a ring shape** - named from the probe at the same 1e-7 its own match uses, recorded once per (facet, surface) and only where no band claim exists |
+| Bezier | held facets are now examined, not skipped; patches it could not sheet; patches the writer could not bound |
+| grid | its 4x-median refusal; every patch the writer does not write, with why (seam, awaiting the approximation flag) |
+| quadric | its three-facet floors, its span rule, `worst > band`, a seam-split piece too small, dead patches, and the exact tier's "half a surface" refusal |
+
+**Evidence classes, stated honestly.** A band's wall is D0 (every corner on the
+declared surface to 1e-7, rims matched to 1e-7). A band's cap is D4 (absorbed
+because its gap is under one ring step). A declared sweep or Bezier is D1. **A
+quadric face is D4 in both tiers**: `OnQuadric::covers` holds corners to
+`min(bandOf(f), max_off)` and the interior to 1.25x the facet's sagitta, so the
+tessellation decides even at `max_off = 1e-7`. lid10 writes 377 facets on a
+declared exact surface by D4 evidence, the bayonet 265 - the mismatch step 5
+will refuse, counted now.
+
+**Verified behaviour-neutral by content**: on 104 exports (lid10, bayonet, f02,
+f04 and all 48 fixtures, both tiers) every report line other than the ledger's
+own and the wall-clock time is identical, and the entity census is identical on
+all 104 files. Suite 58 of 58. No `EXPORT-ERROR` on any of them, before or
+after - and note that `tests/stepexportsanitytest.py` does not check for one,
+so on the fixtures the shadow check is loud to nobody.
+
+**The census reads the catalogue now.** The number it was missing - fitted or
+tessellated facets that had a declaration available - is a read of the ledger:
+
+```text
+lid10 approx   759 below: 306 declined, 0 refused, 0 held, 0 withdrawn, 453 no declared claim
+               124 band: far rim neither at one height nor on one plane
+                76 quadric: not a simple sheet   64 band: a chord runs between the rims
+                20 quadric: span rule   18 sweep: 4x-median   4 quadric: worst > band
+lid10 exact   1521 below: 23 declined, 761 refused (758 sweep awaiting the flag,
+               3 half a surface), 737 no declared claim
+bayonet approx  18 below, all 18 the sweep's 4x-median rule
+```
+
+The "no declared claim" branch is split by provenance, and fires where it
+should: `step-approximate-report` 2048 of 2048 from a maker declaring nothing,
+`step-extrude-refusals` 2112, `step-revolve-axis-point` 32; lid10 zero.
+
+**What the catalogue showed on its first read, and each is lid10 until a
+fixture isolates it:**
+
+- **The band declines *are* purity's defect, counted.** 188 facets on lid10 are
+  a walk the band pass confined to a declared surface and then refused for its
+  shape - *"a claim truncated to fit a form"*, which until today was in nobody's
+  claim.
+- **The approximation tier surrenders a closed form the exact tier writes.**
+  Joined facet by facet across the two tiers' ledgers: those same 188 facets of
+  declared cylinder 12 are a quadric face at the exact tier and planes at the
+  approximation tier, where `max_off = inf` widens the claim to fringe facets,
+  the region's worst corner then exceeds `bandOf(region)`, and the whole region
+  is declined. A D4 widening and a D4 all-or-nothing test, costing D0 ground.
+  This is the handover's *"the approximation loses cylinder 12"*, now with its
+  rule named. Open item 30.
+- **Order is policy, seen for the first time.** "provenance separates the
+  claimants on 6" (was 0): facets the sweep's maker owns, refused by the sweep's
+  own 4x-median statistic, then taken by a quadric face.
+- **Provenance's ownership half is a measurement.** 240 honoured band walls on
+  lid10 sit on a surface `owned` says their maker does not own, or has nothing
+  to say about. `owned` is not carried from the generator - `mergeSurfaces`
+  keeps one flat list that forgets who declared what - it is re-derived in
+  `export_step.cc` from corner positions (`runsThrough`, 1e-7 absolute), a 60
+  degree facing test and `least = 3`, while the band matches at 1e-7 *relative*
+  to the radius. Neither is identity. Open item 31, and it sits under R0: a
+  region "whose maker owns this surface" is only D0 if *owns* is.
+
+**The ledger is data now**: `OPENSCAD_STEP_LEDGER=<file>` writes every claim as
+a tab-separated row - facet, origin, holder, claimant, surface, kind, precision,
+evidence, fate, whether provenance says the maker owns it, why. Facet indices
+are the same in both tiers, so the 188 above is one join of two files.
+
 ## Migrating without a big bang
 
 The suite is 58 tests and it has a known history of blind spots - the flagship
@@ -551,8 +691,7 @@ against it is how a subtle regression ships. So:
 
 1. **The ledger exists alongside.** Every pass records its claims into it while
    `consumed` still decides everything. Additive, behaviour unchanged, suite
-   bit-identical. *(Started: `Result::consumed_by` records who took each facet,
-   and the grid and quadric passes record what they covered and lost.)*
+   bit-identical. *(Done 2026-09-23 - see "Step 1, finished", below.)*
 2. **The shadow check.** *(Done 2026-09-21.)* Derive the assignment from the
    ledger and assert it equals the one `consumed` produced, with an
    `EXPORT-ERROR` when it does not. This is the safety net that makes step 3

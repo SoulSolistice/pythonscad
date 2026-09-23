@@ -2237,8 +2237,8 @@ void StepKernel::build_tri_body(
     }
 
     std::vector<std::string> patch_report;
-    std::vector<AnalyticFeatures::Patch> patches =
-      AnalyticFeatures::recogniseBezierPatches(mesh, effective, features.consumed, patch_report);
+    std::vector<AnalyticFeatures::Patch> patches = AnalyticFeatures::recogniseBezierPatches(
+      mesh, effective, features.consumed, patch_report, &features.ledger, surfaces.size());
     for (const auto& line : patch_report) LOG("STEP export: %1$s", line);
     std::size_t curved_runs = 0, straight_runs = 0, mesh_edges = 0, covered = 0, live = 0;
     for (const auto& patch : patches) {
@@ -2280,25 +2280,38 @@ void StepKernel::build_tri_body(
     }
     // Only patches whose every boundary can be substituted are written. One
     // that cannot stays faceted, which is always a valid export.
+    //
+    // Every patch the pass found gets its fate in the ledger, written or not -
+    // see AnalyticFeatures::ClaimFate. A patch the pass itself could not make a
+    // sheet of is its own refusal; one this writer cannot bound is the writer's.
     for (auto& patch : patches) {
-      if (!patch.alive) continue;
-      for (const auto& run : patch.runs) {
-        if (run.kind == AnalyticFeatures::Patch::Run::UNRESOLVED) {
-          patch.alive = false;
-          patch.dropped = "one of its boundaries borders more than one face";
-          break;
+      const bool found_dead = !patch.alive;
+      if (patch.alive) {
+        for (const auto& run : patch.runs) {
+          if (run.kind == AnalyticFeatures::Patch::Run::UNRESOLVED) {
+            patch.alive = false;
+            patch.dropped = "one of its boundaries borders more than one face";
+            break;
+          }
         }
       }
+      const std::size_t si = indexOf(patch.surface);
+      const bool declared = si < surfaces.size();
+      const AnalyticFeatures::ClaimFate fate =
+        patch.alive
+          ? AnalyticFeatures::ClaimFate::Honoured
+          : (found_dead ? AnalyticFeatures::ClaimFate::Declined : AnalyticFeatures::ClaimFate::Refused);
+      for (const std::size_t f : patch.facets)
+        features.ledger.add(
+          {f, patch.surface,
+           declared ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
+                    : AnalyticFeatures::ClaimPrecision::Fitted,
+           "a Bezier patch", patch.alive ? "the facet lies on the declared Bezier patch" : patch.dropped,
+           fate, si,
+           declared ? AnalyticFeatures::EvidenceClass::D1 : AnalyticFeatures::EvidenceClass::D3});
       if (!patch.alive) continue;
       for (const std::size_t f : patch.facets) features.consumed[f] = 1;
       for (const std::size_t f : patch.facets) features.consumed_by[f] = "a Bezier patch";
-      for (const std::size_t f : patch.facets)
-        features.ledger.add({f, patch.surface,
-                             indexOf(patch.surface) < surfaces.size()
-                               ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
-                               : AnalyticFeatures::ClaimPrecision::Fitted,
-                             "a Bezier patch", "the facet lies on the declared Bezier patch", true,
-                             indexOf(patch.surface)});
     }
 
     // Which of the surviving patches are exactly quadrics.
@@ -2447,7 +2460,7 @@ void StepKernel::build_tri_body(
     // sweep that was never declared.
     std::vector<std::string> grid_report;
     const std::vector<AnalyticFeatures::Patch> grid_patches = AnalyticFeatures::recogniseGridPatches(
-      mesh, effective, features.consumed, grid_report, &features.ledger);
+      mesh, effective, features.consumed, grid_report, &features.ledger, surfaces.size());
     for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
 
     // Where the claimed region sits on the sweep, which is the question a face
@@ -2458,12 +2471,34 @@ void StepKernel::build_tri_body(
     // covering only some spans is a strip, whose boundary stays inside the
     // rectangle and can be written as it stands.
     std::size_t wrapping = 0, strips = 0;
+    // The fate of every sweep patch the pass found, written or not. Only a
+    // strip under the approximation flag is written; the rest are recorded here
+    // with the reason, so a facet of a declared sweep left planar can say why.
+    auto grid_fate = [&](const AnalyticFeatures::Patch& patch, AnalyticFeatures::ClaimFate fate,
+                         const char *why) {
+      const std::size_t si = indexOf(patch.surface);
+      const bool declared = si < surfaces.size();
+      for (const std::size_t f : patch.facets)
+        features.ledger.add(
+          {f, patch.surface,
+           declared ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
+                    : AnalyticFeatures::ClaimPrecision::Fitted,
+           "a declared sweep", why, fate, si,
+           declared ? AnalyticFeatures::EvidenceClass::D1 : AnalyticFeatures::EvidenceClass::D3});
+    };
     for (const auto& patch : grid_patches) {
-      if (!patch.alive) continue;
+      if (!patch.alive) {
+        grid_fate(patch, AnalyticFeatures::ClaimFate::Declined, patch.dropped);
+        continue;
+      }
       const auto *g = dynamic_cast<const GridSurface *>(patch.surface.get());
       if (g == nullptr) continue;
       const int segs = g->closed_v ? g->cols : g->cols - 1;
-      if (segs < 1) continue;
+      if (segs < 1) {
+        grid_fate(patch, AnalyticFeatures::ClaimFate::Refused,
+                  "the sweep's profile has no span to write");
+        continue;
+      }
       std::vector<char> span_used(segs, 0);
       for (const std::size_t f : patch.facets) {
         Vector3d centroid = Vector3d::Zero();
@@ -2478,8 +2513,11 @@ void StepKernel::build_tri_body(
       int used = 0;
       for (const char c : span_used) used += c ? 1 : 0;
       const bool wraps = used == segs && g->closed_v;
-      if (wraps) wrapping++;
-      else {
+      if (wraps) {
+        wrapping++;
+        grid_fate(patch, AnalyticFeatures::ClaimFate::Refused,
+                  "the region closes round the profile, and its face would cross the surface's seam");
+      } else {
         strips++;
         // Written only under the approximation flag. Every other analytic face
         // this exporter writes carries a surface the mesh lies on exactly; a
@@ -2489,13 +2527,11 @@ void StepKernel::build_tri_body(
           grid_faces.push_back(patch);
           for (const std::size_t f : patch.facets) features.consumed[f] = 1;
           for (const std::size_t f : patch.facets) features.consumed_by[f] = "a declared sweep";
-          for (const std::size_t f : patch.facets)
-            features.ledger.add({f, patch.surface,
-                                 indexOf(patch.surface) < surfaces.size()
-                                   ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
-                                   : AnalyticFeatures::ClaimPrecision::Fitted,
-                                 "a declared sweep", "the sweep's patch is written and takes it", true,
-                                 indexOf(patch.surface)});
+          grid_fate(patch, AnalyticFeatures::ClaimFate::Honoured,
+                    "the sweep's patch is written and takes it");
+        } else {
+          grid_fate(patch, AnalyticFeatures::ClaimFate::Refused,
+                    "a declared sweep is written only under the approximation flag");
         }
       }
       LOG("STEP export: its facets lie over %1$d of the profile's %2$d spans - %3$s", used, segs,
@@ -2856,33 +2892,42 @@ void StepKernel::build_tri_body(
       }
 
       std::size_t claimed_facets = 0, refused = 0, unbounded = 0;
+      // The fate of every region the pass handed on. The facets it dropped
+      // before a region existed are recorded in the pass; these are the rest.
+      // D4 evidence throughout - see recogniseQuadricPatches.
+      auto quadric_fate = [&](const AnalyticFeatures::Patch& patch, AnalyticFeatures::ClaimFate fate,
+                              const char *why) {
+        const std::size_t si = indexOf(patch.surface);
+        for (const std::size_t f : patch.facets)
+          // The precision a claim carries has to be the one its *index*
+          // implies. Hardcoding DeclaredExact here once labelled a winning
+          // **fit** as a declaration, and `ClaimLedger::misheld` - whose whole
+          // job is to find a facet held by a claimant less precise than one
+          // that also covered it - reads that label.
+          features.ledger.add({f, patch.surface,
+                               si < surfaces.size() ? AnalyticFeatures::ClaimPrecision::DeclaredExact
+                                                    : AnalyticFeatures::ClaimPrecision::Fitted,
+                               "a quadric face", why, fate, si, AnalyticFeatures::EvidenceClass::D4});
+      };
       for (const auto& patch : found) {
         if (!patch.alive) {
           refused++;
+          quadric_fate(patch, AnalyticFeatures::ClaimFate::Declined, patch.dropped);
           continue;
         }
         if (!approximate && !surface_ok[patch.surface.get()]) {
           unbounded++;
+          quadric_fate(
+            patch, AnalyticFeatures::ClaimFate::Refused,
+            "some of the surface's boundary is off it, and half a surface is worse than none");
           continue;
         }
         quadric_faces.push_back(patch);
         claimed_facets += patch.facets.size();
         for (const std::size_t f : patch.facets) features.consumed[f] = 1;
         for (const std::size_t f : patch.facets) features.consumed_by[f] = "a quadric face";
-        for (const std::size_t f : patch.facets)
-          // The precision a claim carries has to be the one its *index* implies,
-          // as the contested claim in the same pass already does. Hardcoding
-          // DeclaredExact here labelled a winning **fit** as a declaration, and
-          // `ClaimLedger::misheld` - whose whole job is to find a facet held by
-          // a claimant less precise than one that also covered it - reads that
-          // label. A fit that wins could therefore never be counted as misheld,
-          // which is why that number has been 0 on every part ever measured.
-          features.ledger.add({f, patch.surface,
-                               indexOf(patch.surface) < surfaces.size()
-                                 ? AnalyticFeatures::ClaimPrecision::DeclaredExact
-                                 : AnalyticFeatures::ClaimPrecision::Fitted,
-                               "a quadric face", "the quadric's patch is written and takes it", true,
-                               indexOf(patch.surface)});
+        quadric_fate(patch, AnalyticFeatures::ClaimFate::Honoured,
+                     "the quadric's patch is written and takes it");
       }
       if (!quadric_faces.empty()) {
         LOG(
@@ -3319,6 +3364,70 @@ void StepKernel::build_tri_body(
   // corner may travel no further than its nearest neighbouring vertex - which is
   // section 4's bound, and not the longest edge at it, which is the trap that
   // licensed a 1.9976 move on step-partial-cylinder.
+  // The ledger as data, for any tool to read.
+  //
+  // Every report line above and below is a summary of the ledger, and a summary
+  // can only answer the question it was written for. With OPENSCAD_STEP_LEDGER
+  // set to a path, every claim is written there as one tab-separated row, so a
+  // question nobody wrote a line for - "which facets does the exact tier write
+  // on a quadric that the approximation tier leaves planar?" - is a join of two
+  // files rather than an instrumented build. Facet indices are the merged mesh's
+  // and are the same in both tiers: nothing moves a facet before recognition
+  // has finished. Changes nothing unless the variable is set.
+  if (const char *ledger_path = getenv("OPENSCAD_STEP_LEDGER")) {
+    std::ofstream out(ledger_path);
+    AnalyticFeatures::Provenance prov;
+    prov.face_origin = &faceOrigin;
+    prov.owned = &owned;
+    prov.declared = surfaces.size();
+    auto fate_name = [](AnalyticFeatures::ClaimFate fate) {
+      switch (fate) {
+      case AnalyticFeatures::ClaimFate::Honoured:  return "honoured";
+      case AnalyticFeatures::ClaimFate::Withdrawn: return "withdrawn";
+      case AnalyticFeatures::ClaimFate::Held:      return "held";
+      case AnalyticFeatures::ClaimFate::Declined:  return "declined";
+      default:                                     return "refused";
+      }
+    };
+    auto kind_of = [](const Surface *sf) {
+      return sf == nullptr                                             ? "none"
+             : dynamic_cast<const CylinderSurface *>(sf) != nullptr    ? "cylinder"
+             : dynamic_cast<const ConeSurface *>(sf) != nullptr        ? "cone"
+             : dynamic_cast<const SphereSurface *>(sf) != nullptr      ? "sphere"
+             : dynamic_cast<const TorusSurface *>(sf) != nullptr       ? "torus"
+             : dynamic_cast<const GridSurface *>(sf) != nullptr        ? "sweep"
+             : dynamic_cast<const BezierPatchSurface *>(sf) != nullptr ? "bezier"
+             : dynamic_cast<const PlaneSurface *>(sf) != nullptr       ? "plane"
+                                                                       : "surface";
+    };
+    out << "facet\torigin\tconsumed_by\tby\tsurface\tkind\tdeclared\tprecision\tevidence\tfate\t"
+           "maker_owns\twhy\n";
+    for (const auto& c : features.ledger.all()) {
+      const bool declared = c.surface_index < surfaces.size();
+      // yes / no / silent: provenance is a gate that says nothing on a fitted
+      // surface or where the maker's ownership is too thin to state.
+      const char *owns = !declared ? "silent" : prov.excludes(c.facet, c.surface_index) ? "no" : "yes";
+      if (declared && c.facet < faceOrigin.size() &&
+          (faceOrigin[c.facet] < 0 || owned.find(faceOrigin[c.facet]) == owned.end())) {
+        owns = "silent";
+      }
+      const char *holder =
+        c.facet < features.consumed_by.size() && features.consumed_by[c.facet] != nullptr
+          ? features.consumed_by[c.facet]
+          : "-";
+      out << c.facet << '\t' << (c.facet < faceOrigin.size() ? faceOrigin[c.facet] : -1) << '\t'
+          << holder << '\t' << (c.by != nullptr ? c.by : "-") << '\t'
+          << (c.surface_index == std::size_t(-1) ? -1 : long(c.surface_index)) << '\t'
+          << kind_of(c.surface.get()) << '\t' << (declared ? 1 : 0) << '\t' << int(c.precision) << "\tD"
+          << (c.evidence == AnalyticFeatures::EvidenceClass::Unstated
+                ? std::string("?")
+                : std::to_string(int(c.evidence) - 1))
+          << '\t' << fate_name(c.fate) << '\t' << owns << '\t' << (c.why != nullptr ? c.why : "-")
+          << '\n';
+    }
+    LOG("STEP export: the claim ledger - %1$d claims - written to %2$s",
+        int(features.ledger.all().size()), ledger_path);
+  }
   // The shadow check (doc/step-recognition-design.md, step 2).
   //
   // The ledger records every claim and decides nothing; `consumed` still
@@ -3400,7 +3509,7 @@ void StepKernel::build_tri_body(
         if (claims.size() < 2) continue;
         const AnalyticFeatures::Claim *holder = nullptr;
         for (const auto *c : claims) {
-          if (c->honoured) {
+          if (c->honoured()) {
             holder = c;
             break;
           }
@@ -3409,7 +3518,7 @@ void StepKernel::build_tri_body(
         bool named = holder->surface_index != std::size_t(-1);
         bool split = false;
         for (const auto *c : claims) {
-          if (c == holder || c->honoured) continue;
+          if (c == holder || c->honoured()) continue;
           if (c->surface_index == std::size_t(-1)) {
             named = false;
             continue;
@@ -3424,7 +3533,7 @@ void StepKernel::build_tri_body(
         // and the contention is an artefact of recognising it twice.
         bool same_surface = false;
         for (const auto *c : claims) {
-          if (c == holder || c->honoured) continue;
+          if (c == holder || c->honoured()) continue;
           if (c->surface_index != std::size_t(-1) && c->surface_index == holder->surface_index) {
             same_surface = true;
           }
@@ -3552,14 +3661,14 @@ void StepKernel::build_tri_body(
         if (claims.size() < 2) continue;
         const AnalyticFeatures::Claim *holder = nullptr;
         for (const auto *c : claims) {
-          if (c->honoured) {
+          if (c->honoured()) {
             holder = c;
             break;
           }
         }
         if (holder == nullptr || holder->by == nullptr) continue;
         for (const auto *c : claims) {
-          if (c == holder || c->honoured || c->by == nullptr) continue;
+          if (c == holder || c->honoured() || c->by == nullptr) continue;
           const bool same =
             c->surface_index != std::size_t(-1) && c->surface_index == holder->surface_index;
           pairs[std::string(holder->by) + " holds, " + c->by + " also covered" +
@@ -6346,7 +6455,7 @@ void StepKernel::build_tri_body(
     for (std::size_t f = 0; f < features.consumed.size(); f++) {
       if (features.consumed[f] == 0) continue;
       for (const auto *claim : features.ledger.claimants(f)) {
-        if (!claim->honoured) continue;
+        if (!claim->honoured()) continue;
         if (claim->surface_index < decl_written.size()) {
           decl_written[claim->surface_index] = 1;
           if (f < facet_class.size()) facet_class[f] = 2;
@@ -6386,7 +6495,7 @@ void StepKernel::build_tri_body(
       std::size_t holder = std::size_t(-1);
       if (f < features.consumed.size() && features.consumed[f] != 0) {
         for (const auto *claim : features.ledger.claimants(f)) {
-          if (!claim->honoured) continue;
+          if (!claim->honoured()) continue;
           holder = claim->surface_index;
           break;
         }
@@ -6516,22 +6625,123 @@ void StepKernel::build_tri_body(
             "claim is malformed; see AnalyticFeatures::Claim::surface_index",
             int(unnamed));
       }
-      // **What this cannot yet say, and it is the number that matters most.**
-      // How many of the fitted and tessellated facets had a *declaration
-      // available* - exact ground that did not come out exact - needs a
-      // per-facet, per-surface membership test. `owned` cannot answer it: it
-      // names an original's surfaces, not a facet's, so on any model that
-      // declares anything at all it reports every facet of that original as
-      // owned by every surface it owns, and the answer comes back "all of
-      // them". That was measured on 2026-09-22 and the refinement was taken
-      // back out rather than shipped, because a number that says every
-      // tessellated facet is lost exact ground is the trap this file is full
-      // of: a nearly-right quantity answering a question it was not asked.
+      // **Why is a facet below what a declaration could give it?** The question
+      // that always has to be answered wherever a less precise rung holds
+      // ground: a wrong classification, a missing declaration, or ground
+      // already consumed by a misfitting claimant. Until 2026-09-23 this could
+      // not be asked - `owned` names an original's surfaces rather than a
+      // facet's, and answers "all of them" - and the ledger held only what
+      // passes lost to an earlier holder. Now every pass records every claim it
+      // would make with its fate (AnalyticFeatures::ClaimFate), so a declared
+      // claim on a fitted or tessellated facet *is* the evidence that a
+      // declaration was available there, and its fate is the reason it is not
+      // written on it. This reads the catalogue; it measures nothing.
       //
-      // The test that would answer it already exists in `export_step.cc` as
-      // `covered` / `covered_cut`, per original and per surface. Exposing it as
-      // a positive `Provenance` query is what this line is waiting on, and it
-      // is the same query R0 needs. See doc/step-rungs.md.
+      // Branches, taking a facet's most telling declared claim in this order:
+      //   declined   the claimant covered it and its own rule refused it -
+      //              a classification or a representation that could not hold
+      //              the region, and the rule is named
+      //   refused    proposed as a region, and the writer would not write it
+      //   held       a declared claimant covered it and something less precise
+      //              already had it - ground consumed by a misfitting claimant
+      //   withdrawn  a declared claimant took it and gave it back
+      //   none       no recogniser named a declaration for it at all: a missing
+      //              declaration, or ground nothing could declare. Split by
+      //              whether its maker declared anything, which is identity.
+      {
+        using AnalyticFeatures::ClaimFate;
+        std::size_t below = 0, declined = 0, refused = 0, held = 0, withdrawn = 0, none = 0,
+                    none_undeclaring = 0;
+        std::map<std::string, std::size_t> reasons;
+        for (std::size_t f = 0; f < facet_class.size() && f < loops.size(); f++) {
+          if (!loop_valid[f] || loop_is_hole[f]) continue;
+          if (facet_class[f] != 0 && facet_class[f] != 3) continue;
+          below++;
+          const AnalyticFeatures::Claim *best = nullptr;
+          auto rank = [](ClaimFate fate) {
+            switch (fate) {
+            case ClaimFate::Declined:  return 0;
+            case ClaimFate::Refused:   return 1;
+            case ClaimFate::Held:      return 2;
+            case ClaimFate::Withdrawn: return 3;
+            default:                   return 4;
+            }
+          };
+          for (const auto *claim : features.ledger.claimants(f)) {
+            if (claim->honoured() || claim->surface_index >= surfaces.size()) continue;
+            if (best == nullptr || rank(claim->fate) < rank(best->fate)) best = claim;
+          }
+          if (best == nullptr) {
+            none++;
+            const bool declares = f < faceOrigin.size() && owned.count(faceOrigin[f]) != 0 &&
+                                  !owned.at(faceOrigin[f]).empty();
+            if (!declares) none_undeclaring++;
+            continue;
+          }
+          switch (best->fate) {
+          case ClaimFate::Declined: declined++; break;
+          case ClaimFate::Refused:  refused++; break;
+          case ClaimFate::Held:     held++; break;
+          default:                  withdrawn++; break;
+          }
+          const char *fate_name = best->fate == ClaimFate::Declined  ? "declined"
+                                  : best->fate == ClaimFate::Refused ? "refused"
+                                  : best->fate == ClaimFate::Held    ? "held elsewhere"
+                                                                     : "withdrawn";
+          reasons[std::string(fate_name) + " by " + (best->by != nullptr ? best->by : "something") +
+                  ": " + (best->why != nullptr ? best->why : "no reason recorded")]++;
+        }
+        if (below > 0) {
+          LOG(
+            "STEP export:   why %1$d facets are fitted or left to the tessellation: %2$d were claimed "
+            "for a declaration and declined by the claimant's own rule, %3$d refused by the writer, "
+            "%4$d held first by something less precise, %5$d withdrawn, and %6$d were claimed for no "
+            "declaration at all (%7$d of those from a maker that declares nothing)",
+            int(below), int(declined), int(refused), int(held), int(withdrawn), int(none),
+            int(none_undeclaring));
+          std::vector<std::pair<std::size_t, std::string>> ranked;
+          for (const auto& kv : reasons) ranked.emplace_back(kv.second, kv.first);
+          std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+            return a.first != b.first ? a.first > b.first : a.second < b.second;
+          });
+          for (std::size_t i = 0; i < ranked.size() && i < 10; i++) {
+            LOG("STEP export:     %1$d %2$s", int(ranked[i].first), ranked[i].second);
+          }
+        }
+      }
+      // **And what decided each written facet.** A claim's precision is the
+      // surface it names; its evidence class is what put the facet on it, and a
+      // rung is as exact as its evidence (doc/step-rungs.md). Counted, not yet
+      // refused - refusing the mismatch is the handover's step 5 - but a claim
+      // that states no class at all is malformed and is an error now, as a
+      // claim that cannot name its surface is.
+      {
+        using AnalyticFeatures::EvidenceClass;
+        std::size_t by_class[6] = {0, 0, 0, 0, 0, 0};
+        std::size_t declared_on_mesh = 0;
+        for (std::size_t f = 0; f < features.consumed.size(); f++) {
+          if (features.consumed[f] == 0) continue;
+          const AnalyticFeatures::Claim *holder = features.ledger.firstClaimant(f);
+          if (holder == nullptr) continue;
+          by_class[std::size_t(holder->evidence)]++;
+          if (holder->precision == AnalyticFeatures::ClaimPrecision::DeclaredExact &&
+              (holder->evidence == EvidenceClass::D3 || holder->evidence == EvidenceClass::D4)) {
+            declared_on_mesh++;
+          }
+        }
+        LOG(
+          "STEP export:   what decided each written facet: %1$d D0, %2$d D1, %3$d D2, %4$d D3, %5$d D4 "
+          "- "
+          "%6$d of them on a declared exact surface by evidence from the tessellation",
+          int(by_class[1]), int(by_class[2]), int(by_class[3]), int(by_class[4]), int(by_class[5]),
+          int(declared_on_mesh));
+        if (by_class[0] > 0) {
+          LOG(message_group::Export_Error,
+              "STEP export:   %1$d facets are held by a claim that states no evidence class - the claim "
+              "is malformed; see AnalyticFeatures::EvidenceClass",
+              int(by_class[0]));
+        }
+      }
     }
   }
 

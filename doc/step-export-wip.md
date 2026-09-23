@@ -3752,6 +3752,71 @@ the next attempt, a fixture that does - a declared cone whose region exceeds a
 band's ring, asserting `ROUNDTRIP: Cone=1` at the exact tier - would have caught
 it in one run.
 
+### 30. The approximation tier surrenders a quadric face the exact tier writes
+
+**Found 2026-09-23**, on the first read of the completed ledger, and proven by
+joining the two tiers' `OPENSCAD_STEP_LEDGER` dumps facet by facet (indices are
+the same in both tiers). On lid10, **188 facets of declared cylinder 12**:
+
+| | band pass | quadric pass | written as |
+| --- | --- | --- | --- |
+| exact tier | declined, no ring shape | claimed at `max_off = 1e-7`, one sheet | a quadric face on cylinder 12 |
+| approximation tier | the same | `max_off = inf` admits fringe facets; the region's worst corner then exceeds `bandOf(region)` and **the whole region** is declined | planes |
+
+A D4 widening, then a D4 all-or-nothing region test, costing ground the exact
+tier writes in closed form: the tier that is supposed to add surfaces loses one.
+It is the declaration census's *"the approximation loses cylinder 12"*, now with
+its rule named. Nothing may fall down the ladder, so the fix is not a tolerance:
+the region test must not be able to take back facets a D0-admitted claim already
+covers. **A fixture first** - a declared cylinder whose exact-tier region is a
+clean sheet and whose band-widened region has a fringe corner past the region
+band, asserting the quadric face at both tiers.
+
+### 31. Provenance's ownership is measured, not carried
+
+**Found 2026-09-23.** `Provenance` is presented throughout as identity, and half
+of it is. *Which original made a facet* is carried from the generator
+(`PolySet::original_ids`, Manifold's per-triangle id). *Which surfaces an
+original owns* is not: `ManifoldGeometry::mergeSurfaces` keeps one flat list of
+surfaces across a boolean and forgets who declared each, and `export_step.cc`
+re-derives ownership from positions - an original owns a surface when at least
+`least = 3` of its **whole** triangles have every corner on it by `runsThrough`
+(1e-7 absolute) and face it within 60 degrees.
+
+What that costs, measured on lid10 with the ledger dump, both tiers:
+
+```text
+60 facets from original 1  held as a band's wall on cylinder 39   owned: original 1 owns cylinder 0
+60 facets from original 67 held as a band's wall on cylinder 42   owned: original 67 owns 39 and 43
+120 facets from original 2 held as band walls on cylinders 7, 8   owned: original 2 owns nothing
+```
+
+The band pass names a surface at 1e-7 *relative* to the radius (8e-6 at
+r = 80); `runsThrough` holds 1e-7 absolute. So either the band's D0 is not the
+declaration it names, or `owned` is wrong about these originals, and neither
+check is identity. Not chased further yet - which one is right is the next
+measurement, by `at-vertex.py` on a wall of each set against the named
+cylinder's own parameters.
+
+**Why it comes before R0.** R0's region is *"the facets whose maker owns this
+surface"*. If *owns* is a measurement with a magic 3 and a 60 degree band, a
+provenance region is a measured region wearing a D0 label - the class error
+that reverted the first R0. The root fix is at the origin: tag each declared
+surface with the original id of the primitive that declared it when the
+primitive becomes a Manifold, and keep the tag through `mergeSurfaces`, so
+ownership is carried rather than inferred.
+
+### 32. The fixture sanity test does not look for `EXPORT-ERROR`
+
+`tests/stepexportsanitytest.py` never checks the exporter's own error lines;
+only `step-flagship-check.py` and `step-representation-check.py` do. So on the
+48 fixtures the shadow check, the unnamed-claim check and the new
+unstated-evidence check are loud to nobody. Measured 2026-09-23: zero
+`EXPORT-ERROR`s on every fixture in both tiers, before and after step 1, so
+making the sanity test fail on one would cost nothing today - but the test runs
+further configurations (the CGAL backend, a comma locale) whose output was not
+measured, so it wants one suite run of its own before it lands.
+
 ### 27. C0 is a refusal problem, not a claim one - the 78 seam edges R0 did not touch
 
 **Opened 2026-09-22**, by R0 landing and the count not moving.
