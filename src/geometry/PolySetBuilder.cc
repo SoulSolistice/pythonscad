@@ -262,16 +262,24 @@ void PolySetBuilder::addCurve(std::shared_ptr<Curve> new_curve)
 void PolySetBuilder::addSurface(std::shared_ptr<Surface> new_surface)
 {
   auto cyl_new_surface = std::dynamic_pointer_cast<CylinderSurface>(new_surface);
+  // A duplicate keeps the owners of both records - see Surface::owners.
   if (cyl_new_surface != nullptr) {
     for (auto& surface : surfaces) {
       auto cyl_surface = std::dynamic_pointer_cast<CylinderSurface>(surface);
       if (cyl_surface != nullptr) {
-        if (cyl_surface->operator==(*cyl_new_surface)) return;  // duplicate
+        if (cyl_surface->operator==(*cyl_new_surface)) {
+          surface = withOwners(surface, new_surface->owners);
+          return;
+        }
       }
     }
   }
-  for (auto& surface : surfaces)
-    if (surface->operator==(*new_surface)) return;  // duplicate
+  for (auto& surface : surfaces) {
+    if (surface->operator==(*new_surface)) {
+      surface = withOwners(surface, new_surface->owners);
+      return;
+    }
+  }
   surfaces.push_back(new_surface);
 }
 

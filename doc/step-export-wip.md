@@ -3798,6 +3798,33 @@ check is identity. Not chased further yet - which one is right is the next
 measurement, by `at-vertex.py` on a wall of each set against the named
 cylinder's own parameters.
 
+**Carried alongside, 2026-09-23.** `Surface::owners` is now stamped with the
+original ids minted where a geometry becomes a Manifold
+(`createManifoldFromTriangularPolySet`, `setColor` / `toOriginal`, `hull()`),
+copied by `clone()` and so by every transform, and unioned wherever two records
+are deduplicated (`mergeSurfaces`, `PolySetBuilder::addSurface`). The export
+reports it against `owned` and the ledger dump carries it as `maker_declared`,
+both asked **per geometric surface** (`describesSameSurface`, now public),
+because two records of one wall declared from two heights are kept apart in the
+list. Nothing decides on it yet: `owned` still drives every gate, and 104
+exports are identical in report and entity census, suite 58 of 58.
+
+What identity says about lid10's disputed honoured claims:
+
+| facets | measured | carried | reading |
+| --- | --- | --- | --- |
+| 60 band walls, original 67 on cylinder 42 | no | **yes** | the measurement was wrong |
+| 120 band walls, original 2 on cylinders 7, 8 | silent | **yes** | identity answers where measurement could not |
+| 60 band walls, original 1 on cylinder 39 | no | no | only original 67 declared 39 - a missing declaration on 1, or the wrong declarer holding. Open |
+| 188 quadric facets, originals 26/28/30/32 on cylinder 12 | **yes** | no | ownership granted by position: their facets lie on 21's cylinder and `least = 3` called it theirs. Same cylinder as item 30 |
+
+Over all originals present: 14 pairs agree, 4 measured only, 18 carried only.
+*Carried only* is mostly benign - an original declared a surface a boolean
+buried or cut to under three whole facets. *Measured only* is the defect class,
+and two small fixtures show it besides lid10: `step-cylinder-cross` (original 3
+on surface 0) and `step-declare-cone` (original 7 on surface 6). Those are where
+to isolate the mechanism before provenance is switched to identity.
+
 **Why it comes before R0.** R0's region is *"the facets whose maker owns this
 surface"*. If *owns* is a measurement with a magic 3 and a 60 degree band, a
 provenance region is a measured region wearing a D0 label - the class error

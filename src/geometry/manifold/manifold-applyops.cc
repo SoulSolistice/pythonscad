@@ -74,9 +74,13 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       if (item.first) item.first->progress_report();
     }
     if (pts.empty()) return nullptr;
-    return std::make_shared<ManifoldGeometry>(manifold::Manifold::Hull(pts), std::set<uint32_t>{},
-                                              std::map<uint32_t, Color4f>{}, std::set<uint32_t>{},
-                                              surfaces);
+    // A hull is one new original: whatever its operands' triangles carried, its
+    // own carry the hull's id, so that id is who declared every record here.
+    const auto hull = manifold::Manifold::Hull(pts);
+    std::set<uint32_t> hull_ids;
+    if (hull.OriginalID() >= 0) hull_ids.insert(uint32_t(hull.OriginalID()));
+    return std::make_shared<ManifoldGeometry>(hull, std::set<uint32_t>{}, std::map<uint32_t, Color4f>{},
+                                              std::set<uint32_t>{}, stampOwners(surfaces, hull_ids));
   }
 
   std::shared_ptr<ManifoldGeometry> geom;

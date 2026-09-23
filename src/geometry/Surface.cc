@@ -123,7 +123,7 @@ bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
  * places it at the base of the sweep. Without this they are two records, and
  * every count a fixture asserts moves for a surface nothing gained.
  */
-static bool describesSameSurface(const Surface& a, const Surface& b)
+bool describesSameSurface(const Surface& a, const Surface& b)
 {
   if (a.sameAs(b)) return true;
   // The same axis *line*, which is what "infinite along the axis" means: the
@@ -169,8 +169,48 @@ void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
                    const std::vector<std::shared_ptr<Surface>>& from)
 {
   for (const auto& surface : from) {
-    if (!containsSurface(into, surface)) into.push_back(surface);
+    bool found = false;
+    for (auto& s : into) {
+      if (s == surface || (s && surface && s->sameAs(*surface))) {
+        // The same surface declared by two originals is owned by both.
+        if (surface) s = withOwners(s, surface->owners);
+        found = true;
+        break;
+      }
+    }
+    if (!found) into.push_back(surface);
   }
+}
+
+std::shared_ptr<Surface> withOwners(const std::shared_ptr<Surface>& surface,
+                                    const std::vector<int32_t>& more)
+{
+  if (surface == nullptr || more.empty()) return surface;
+  std::vector<int32_t> merged = surface->owners;
+  merged.insert(merged.end(), more.begin(), more.end());
+  std::sort(merged.begin(), merged.end());
+  merged.erase(std::unique(merged.begin(), merged.end()), merged.end());
+  if (merged == surface->owners) return surface;
+  auto copy = surface->clone();
+  copy->owners = std::move(merged);
+  return copy;
+}
+
+std::vector<std::shared_ptr<Surface>> stampOwners(const std::vector<std::shared_ptr<Surface>>& list,
+                                                  const std::set<uint32_t>& ids)
+{
+  if (ids.empty()) return list;
+  std::vector<int32_t> owners;
+  for (const uint32_t id : ids) owners.push_back(static_cast<int32_t>(id));
+  std::vector<std::shared_ptr<Surface>> out;
+  out.reserve(list.size());
+  for (const auto& surface : list) {
+    if (surface == nullptr) continue;
+    auto copy = surface->clone();
+    copy->owners = owners;
+    out.push_back(copy);
+  }
+  return out;
 }
 
 PlaneSurface::PlaneSurface(Vector3d refpt, Vector3d normdir)

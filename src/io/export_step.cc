@@ -809,6 +809,62 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     LOG("STEP export: original %1$d, %2$d facets, owns %3$s", int(entry.first), int(facets[entry.first]),
         names.c_str());
   }
+
+  // Ownership carried from the generator, held against the ownership measured
+  // above. `owned` is inferred from positions - whole facets on the surface by
+  // `runsThrough`, facing it within 60 degrees, at least `least` of them - and
+  // `Surface::owners` is stamped where the original's id was minted. The first
+  // is a measurement wearing the name provenance; the second is identity. This
+  // reports where they differ and decides nothing: `owned` still drives every
+  // gate. Over originals present in this mesh and surfaces that are not planes,
+  // because that is the population `owned` speaks for. See open item 31.
+  {
+    std::size_t agree = 0, measured_only = 0, carried_only = 0, unstamped = 0;
+    std::string first_measured, first_carried;
+    for (std::size_t j = 0; j < nsurf; j++) {
+      if (is_plane[j] != 0 || ps.surfaces[j] == nullptr) continue;
+      // Per geometric surface, not per record: two records of one wall - the
+      // same infinite cylinder declared from two heights - are kept apart, and
+      // whoever declared either of them declared the wall.
+      std::vector<int32_t> carried;
+      for (std::size_t k = 0; k < nsurf; k++) {
+        if (ps.surfaces[k] == nullptr || !describesSameSurface(*ps.surfaces[k], *ps.surfaces[j]))
+          continue;
+        carried.insert(carried.end(), ps.surfaces[k]->owners.begin(), ps.surfaces[k]->owners.end());
+      }
+      std::sort(carried.begin(), carried.end());
+      carried.erase(std::unique(carried.begin(), carried.end()), carried.end());
+      if (carried.empty()) unstamped++;
+      for (const auto& entry : facets) {
+        const int32_t id = entry.first;
+        const auto it = owned.find(id);
+        const bool measured =
+          it != owned.end() && std::find(it->second.begin(), it->second.end(), j) != it->second.end();
+        const bool stated = std::binary_search(carried.begin(), carried.end(), id);
+        if (measured && stated) agree++;
+        else if (measured) {
+          measured_only++;
+          if (first_measured.empty()) {
+            first_measured = "original " + std::to_string(int(id)) + " on surface " + std::to_string(j);
+          }
+        } else if (stated) {
+          carried_only++;
+          if (first_carried.empty()) {
+            first_carried = "original " + std::to_string(int(id)) + " on surface " + std::to_string(j);
+          }
+        }
+      }
+    }
+    if (!facets.empty()) {
+      LOG(
+        "STEP export: surface ownership carried from the generator against ownership measured from "
+        "positions: %1$d agree, %2$d measured only%3$s, %4$d carried only%5$s, %6$d surfaces carry no "
+        "owner",
+        int(agree), int(measured_only),
+        first_measured.empty() ? "" : (" (first " + first_measured + ")"), int(carried_only),
+        first_carried.empty() ? "" : (" (first " + first_carried + ")"), int(unstamped));
+    }
+  }
 }
 
 }  // namespace

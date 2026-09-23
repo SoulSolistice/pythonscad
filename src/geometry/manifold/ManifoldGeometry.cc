@@ -408,6 +408,8 @@ void ManifoldGeometry::setColor(const Color4f& c)
   originalIDToColor_.clear();
   originalIDToColor_[manifold_.OriginalID()] = c;
   subtractedIDs_.clear();
+  // Every triangle now carries this one id, so it is the owner of every record.
+  surfaces_ = stampOwners(surfaces_, originalIDs_);
 }
 
 void ManifoldGeometry::toOriginal()
@@ -419,6 +421,7 @@ void ManifoldGeometry::toOriginal()
   originalIDs_.insert(manifold_.OriginalID());
   originalIDToColor_.clear();
   subtractedIDs_.clear();
+  surfaces_ = stampOwners(surfaces_, originalIDs_);
 }
 
 BoundingBox ManifoldGeometry::getBoundingBox() const

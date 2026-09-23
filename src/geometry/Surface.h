@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -12,6 +14,19 @@ class Surface
 public:
   virtual ~Surface() = default;
   Vector3d refpt, normdir;
+  /*! The originals that declared this surface: the Manifold original ids
+   * minted for the geometry that carried this record when it became a
+   * Manifold, sorted and unique. Empty until then.
+   *
+   * This is provenance as identity. Which original made a facet has always
+   * been carried (PolySet::original_ids); which surfaces an original declared
+   * was not - booleans merge the operands' records into one list and forget
+   * who stated what, and the exporter re-derived it from positions. Stamped
+   * where an id is minted (stampOwners), copied by clone() and so by every
+   * transform, and unioned wherever two records are deduplicated into one, so
+   * it answers "did this facet's maker declare this surface?" without a
+   * tolerance. See doc/step-export-wip.md, open item 31. */
+  std::vector<int32_t> owners;
   virtual void reverse(void);
   virtual int operator==(const Surface& other);
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
@@ -42,6 +57,13 @@ public:
   [[nodiscard]] virtual bool sameAs(const Surface& other) const;
 };
 
+/*! Whether two records describe one geometric surface - `sameAs`, plus a
+ * cylinder or cone declared from two points along its own axis. Two records of
+ * one wall are kept apart in a list (see mergeSurfaces), so any question about
+ * the *surface* rather than the record - who declared it, above all - has to be
+ * asked through this. */
+[[nodiscard]] bool describesSameSurface(const Surface& a, const Surface& b);
+
 /*! Whether `list` already holds a record for the same surface. */
 [[nodiscard]] bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
                                    const std::shared_ptr<Surface>& surface);
@@ -67,6 +89,19 @@ bool addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
  * stop the list growing without bound through a deep boolean tree. */
 void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
                    const std::vector<std::shared_ptr<Surface>>& from);
+
+/*! The records of `list`, each owned by exactly `ids` - the ids just minted for
+ * the geometry that carries them. Copies rather than mutates: a record may be
+ * shared with a cached geometry. Returns `list` unchanged when `ids` is empty,
+ * because no id means nothing to say, not "owned by nobody". */
+[[nodiscard]] std::vector<std::shared_ptr<Surface>> stampOwners(
+  const std::vector<std::shared_ptr<Surface>>& list, const std::set<uint32_t>& ids);
+
+/*! `surface` with `more` added to its owners - itself when nothing is new, a
+ * copy otherwise. What deduplication has to do with the record it keeps, or the
+ * dropped twin's owner is lost. */
+[[nodiscard]] std::shared_ptr<Surface> withOwners(const std::shared_ptr<Surface>& surface,
+                                                  const std::vector<int32_t>& more);
 
 /*! A sphere, declared by the primitive that drew it.
  *

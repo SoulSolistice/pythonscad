@@ -3401,7 +3401,7 @@ void StepKernel::build_tri_body(
                                                                        : "surface";
     };
     out << "facet\torigin\tconsumed_by\tby\tsurface\tkind\tdeclared\tprecision\tevidence\tfate\t"
-           "maker_owns\twhy\n";
+           "maker_owns\tmaker_declared\twhy\n";
     for (const auto& c : features.ledger.all()) {
       const bool declared = c.surface_index < surfaces.size();
       // yes / no / silent: provenance is a gate that says nothing on a fitted
@@ -3410,6 +3410,21 @@ void StepKernel::build_tri_body(
       if (declared && c.facet < faceOrigin.size() &&
           (faceOrigin[c.facet] < 0 || owned.find(faceOrigin[c.facet]) == owned.end())) {
         owns = "silent";
+      }
+      // The same question asked of identity: was this surface stamped with the
+      // facet's own original when that original was minted? See Surface::owners.
+      const char *stated = "silent";
+      // Per geometric surface: a wall declared as two records is one wall.
+      if (declared && c.facet < faceOrigin.size() && faceOrigin[c.facet] >= 0 &&
+          surfaces[c.surface_index] != nullptr) {
+        bool any = false, mine = false;
+        for (const auto& other : surfaces) {
+          if (other == nullptr || !describesSameSurface(*other, *surfaces[c.surface_index])) continue;
+          any = any || !other->owners.empty();
+          mine =
+            mine || std::binary_search(other->owners.begin(), other->owners.end(), faceOrigin[c.facet]);
+        }
+        if (any) stated = mine ? "yes" : "no";
       }
       const char *holder =
         c.facet < features.consumed_by.size() && features.consumed_by[c.facet] != nullptr
@@ -3422,8 +3437,8 @@ void StepKernel::build_tri_body(
           << (c.evidence == AnalyticFeatures::EvidenceClass::Unstated
                 ? std::string("?")
                 : std::to_string(int(c.evidence) - 1))
-          << '\t' << fate_name(c.fate) << '\t' << owns << '\t' << (c.why != nullptr ? c.why : "-")
-          << '\n';
+          << '\t' << fate_name(c.fate) << '\t' << owns << '\t' << stated << '\t'
+          << (c.why != nullptr ? c.why : "-") << '\n';
     }
     LOG("STEP export: the claim ledger - %1$d claims - written to %2$s",
         int(features.ledger.all().size()), ledger_path);
