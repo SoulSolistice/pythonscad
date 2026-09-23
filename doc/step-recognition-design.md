@@ -594,6 +594,30 @@ against it is how a subtle regression ships. So:
 Steps 1-3 change no behaviour and are individually verifiable. Step 4 is where
 the wins are, and by then every one of them is measurable in isolation.
 
+### The structural work is sanctioned - do not tiptoe around it
+
+**Recorded 2026-09-23, because a session hesitated over it.** Turning the
+recognisers into classes, building a graph-shaped pipeline whose dependencies
+are declared rather than discovered by breakage, making Propose pure, replacing
+the 4000-line function - **all of that is wanted, not merely tolerated.** It is
+step 5 above, and the five consequences at the top of this document are what the
+current shape costs. A change is not too big if it is what the design asks for.
+
+What is refused is a **wholesale rewrite validated only against the suite**, for
+the reason this section already gives: that is how a subtle regression ships.
+The reverted R0 is the proof - it passed 56 of 56 while turning a declared cone
+on lid10 into planes, because no fixture asserted the exact tier's analytic
+coverage. So refactor in the plan's steps, land each one on its own numbers, and
+keep the shadow check honest while `consumed` still decides.
+
+Two further rules the same episode earned:
+
+- **A step that claims to change no behaviour must be shown to change none**, by
+  content - the export's report, the entity census, the derived volumes - and
+  never by diffing files, because the exporter is not byte-deterministic.
+- **Measure both tiers.** `--enable=step-analytic-surfaces` alone is a separate
+  export and the suite is weakest there.
+
 ## What this does not change
 
 The corner arbiter stays as it is - it is already the shape this document is
