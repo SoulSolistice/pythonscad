@@ -456,6 +456,18 @@ std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double to
 bool runCircle(const Patch& patch, const Patch::Run& run, const std::vector<Vector3d>& vertices,
                Vector3d& centre, Vector3d& normal, double& radius);
 
+/*! What one declared Bezier patch proposes: every facet on it, whoever holds
+ * it. Pure data - see proposeBezierPatches. */
+struct BezierProposal {
+  std::size_t surface_index = 0;
+  std::vector<std::size_t> facets;  // on the patch, in facet order
+  double extent = 0;                // diagonal of the net's box, for curve tolerances
+};
+
+/*! Propose, purely: see BezierProposal. Reads no claim of any pass. */
+std::vector<BezierProposal> proposeBezierPatches(const recognition::FacetGraph& graph,
+                                                 const std::vector<std::shared_ptr<Surface>>& surfaces);
+
 /*! Find the facets which lie on each declared Bezier patch.
  *
  * `consumed` marks loops already taken by a band, which a patch may not also
@@ -473,6 +485,22 @@ std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
                                           const std::vector<char>& consumed,
                                           std::vector<std::string>& report, ClaimLedger *ledger,
                                           std::size_t declared_count);
+
+/*! What one declared sweep proposes: every facet it covers, whoever holds it,
+ * with what its region rules read. Pure data - see proposeGrids. */
+struct GridProposal {
+  std::size_t surface_index = 0;
+  std::vector<std::size_t> facets;  // covered, in facet order
+  std::vector<double> miss;         // centroid off the sweep, parallel
+  std::vector<double> u, v;         // centroid's parameters, parallel
+  std::vector<double> stray;        // worst corner off the fit, parallel
+  std::size_t corners_only = 0;     // every corner on the sweep, the middle not
+  double worst_miss = 0, missed_against = 0;
+};
+
+/*! Propose, purely: see GridProposal. Reads no claim of any pass. */
+std::vector<GridProposal> proposeGrids(const recognition::FacetGraph& graph,
+                                       const std::vector<std::shared_ptr<Surface>>& surfaces);
 
 /*! Find the facets which lie on each declared grid, and split their boundaries.
  *
@@ -498,6 +526,22 @@ std::vector<Patch> recogniseGridPatches(const recognition::FacetGraph& graph,
                                         const std::vector<char>& consumed,
                                         std::vector<std::string>& report, ClaimLedger *ledger,
                                         std::size_t declared_count);
+
+/*! What one quadric proposes: every facet it covers, whoever holds it, with
+ * the measurements its region rules read. Pure data - see proposeQuadrics. */
+struct QuadricProposal {
+  std::size_t surface_index = 0;
+  std::vector<std::size_t> facets;  // covered, in facet order
+  std::vector<double> off;          // worst corner offset, parallel to `facets`
+  std::vector<double> span;         // angular reach round the axis, parallel
+  std::size_t gated = 0;            // facet-surface tests provenance spared
+};
+
+/*! Propose, purely: see QuadricProposal. Reads no claim of any pass. */
+std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& graph,
+                                             const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                             const Provenance& provenance, double smooth_angle,
+                                             double max_off);
 
 /*! Regions lying on a declared or fitted quadric, as patches.
  *

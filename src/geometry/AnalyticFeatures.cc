@@ -1145,26 +1145,24 @@ const char *boundaryCycles(const std::vector<std::vector<int>>& loops,
 
 }  // namespace
 
-std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
-                                          const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                          const std::vector<char>& consumed,
-                                          std::vector<std::string>& report, ClaimLedger *ledger,
-                                          std::size_t declared_count)
+/*! Propose: every facet on each declared Bezier patch, whoever holds it. Pure -
+ * it reads the graph and the surfaces and no claim of any pass. Membership is
+ * every corner on the patch; evidence D1. */
+std::vector<BezierProposal> proposeBezierPatches(const recognition::FacetGraph& graph,
+                                                 const std::vector<std::shared_ptr<Surface>>& surfaces)
 {
   const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
   const std::vector<char>& loop_valid = *mesh.valid;
   const std::vector<char>& is_hole = *mesh.is_hole;
-
-  std::vector<Patch> patches;
-  std::vector<char> taken(loops.size(), 0);
-
+  std::vector<BezierProposal> out;
   for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
     const auto& surface = surfaces[surface_index];
     const auto *bez = dynamic_cast<const BezierPatchSurface *>(surface.get());
     if (bez == nullptr || bez->net.empty()) continue;
-
+    BezierProposal proposal;
+    proposal.surface_index = surface_index;
     // A Bezier lies inside the convex hull of its control net, so a box round
     // the net rejects almost every facet in the model without projecting
     // anything. That matters: projection is a Newton solve from a grid of
@@ -1179,16 +1177,9 @@ std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
     lo.array() -= slack;
     hi.array() += slack;
 
-    Patch patch;
-    patch.surface = surface;
+    proposal.extent = (hi - lo).norm();
     for (std::size_t f = 0; f < loops.size(); f++) {
       if (!loop_valid[f] || is_hole[f]) continue;
-      // A held facet is still examined. Held is not held by the right claimant -
-      // not the most precise one, and not necessarily the right declaration even
-      // when that is exact - so a patch that would have covered it says so in the
-      // ledger instead of never having looked. It does not take it: `consumed`
-      // still decides, and this only records.
-      const bool held = consumed[f] != 0 || taken[f] != 0;
       bool on = true;
       for (const int v : loops[f]) {
         const Vector3d& p = vertices[v];
@@ -1206,6 +1197,53 @@ std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
         }
       }
       if (!on) continue;
+      proposal.facets.push_back(f);
+    }
+    out.push_back(std::move(proposal));
+  }
+  return out;
+}
+
+std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
+                                          const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                          const std::vector<char>& consumed,
+                                          std::vector<std::string>& report, ClaimLedger *ledger,
+                                          std::size_t declared_count)
+{
+  const Mesh& mesh = graph.mesh();
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  const std::vector<char>& loop_valid = *mesh.valid;
+  const std::vector<char>& is_hole = *mesh.is_hole;
+
+  std::vector<Patch> patches;
+  std::vector<char> taken(loops.size(), 0);
+
+  // Propose first, and purely - see proposeBezierPatches.
+  const std::vector<BezierProposal> proposals = proposeBezierPatches(graph, surfaces);
+
+  for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
+    const auto& surface = surfaces[surface_index];
+    const auto *bez = dynamic_cast<const BezierPatchSurface *>(surface.get());
+    if (bez == nullptr || bez->net.empty()) continue;
+
+    // What this patch proposed - every facet on it, whoever holds it -
+    // granted by the policy in force today. See proposeBezierPatches.
+    const BezierProposal *proposal = nullptr;
+    for (const auto& p : proposals) {
+      if (p.surface_index == surface_index) proposal = &p;
+    }
+    if (proposal == nullptr) continue;
+
+    Patch patch;
+    patch.surface = surface;
+    for (const std::size_t f : proposal->facets) {
+      // A held facet is still examined. Held is not held by the right claimant -
+      // not the most precise one, and not necessarily the right declaration even
+      // when that is exact - so a patch that would have covered it says so in the
+      // ledger instead of never having looked. It does not take it: `consumed`
+      // still decides, and this only records.
+      const bool held = consumed[f] != 0 || taken[f] != 0;
       if (held) {
         if (ledger != nullptr) {
           ledger->add({f, surface,
@@ -1236,7 +1274,7 @@ std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
     const std::vector<int>& cycle = cycles.front();
     // Each *segment* of the boundary is assigned a curve, not each vertex: a
     // segment lies on exactly one, while its endpoints may lie on two.
-    const double curve_tol = 1e-7 * std::max(1.0, (hi - lo).norm());
+    const double curve_tol = 1e-7 * std::max(1.0, proposal->extent);
     std::vector<unsigned> on(cycle.size());
     for (std::size_t i = 0; i < cycle.size(); i++) {
       on[i] = boundarySet(*bez, vertices[cycle[i]], curve_tol);
@@ -1637,6 +1675,103 @@ std::vector<std::shared_ptr<Surface>> fitRevolved(const Mesh& mesh, const Smooth
  * needs to be - a maximal stretch of consecutive boundary segments with the
  * same face on the far side, because every segment of it has to be replaced
  * in that one neighbour by one curve or the shell opens. */
+/*! Propose: every facet each declared sweep covers, whoever holds it. Pure -
+ * it reads the graph and the surfaces and no claim of any pass. Membership is
+ * every corner on the sweep and the centroid on it too; evidence D1 for a
+ * declared sweep, D3 for one the approximation recovered. */
+std::vector<GridProposal> proposeGrids(const recognition::FacetGraph& graph,
+                                       const std::vector<std::shared_ptr<Surface>>& surfaces)
+{
+  const Mesh& mesh = graph.mesh();
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  const std::vector<char>& loop_valid = *mesh.valid;
+  const std::vector<char>& is_hole = *mesh.is_hole;
+  std::vector<GridProposal> out;
+  for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
+    const auto& surface = surfaces[surface_index];
+    const auto *grid = dynamic_cast<const GridSurface *>(surface.get());
+    if (grid == nullptr || grid->net.empty()) continue;
+    GridProposal proposal;
+    proposal.surface_index = surface_index;
+    // The declared points bound the sweep, so a box round them rejects most of
+    // the model without projecting anything - the same reason the Bezier path
+    // takes a box round its control net first. The band is added because
+    // membership itself is only accurate to the band.
+    Vector3d lo = grid->net.front(), hi = grid->net.front();
+    for (const auto& p : grid->net) {
+      lo = lo.cwiseMin(p);
+      hi = hi.cwiseMax(p);
+    }
+    const double slack = grid->tessellationBand() + 1e-6 * std::max(1.0, (hi - lo).norm());
+    lo.array() -= slack;
+    hi.array() += slack;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      if (!loop_valid[f] || is_hole[f]) continue;
+      bool on = true;
+      for (const int v : loops[f]) {
+        const Vector3d& p = vertices[v];
+        if ((p.array() < lo.array()).any() || (p.array() > hi.array()).any()) {
+          on = false;
+          break;
+        }
+      }
+      if (!on) continue;
+      for (const int v : loops[f]) {
+        std::vector<Vector3d> unused;  // pointMember's scratch argument, as elsewhere
+        if (!const_cast<GridSurface *>(grid)->pointMember(unused, vertices[v])) {
+          on = false;
+          break;
+        }
+      }
+      if (!on) continue;
+      // Corners are not enough. Every corner of the facet closing a declared
+      // profile is a point the generator emitted, so position alone claims it
+      // even when the declaration does not cover that strip - which is exactly
+      // what a grid declared open does. The centroid is the cheapest point that
+      // is not a declared point, and asking whether it lies on the surface asks
+      // about the facet rather than about its corners.
+      Vector3d centroid = Vector3d::Zero();
+      for (const int v : loops[f]) centroid += vertices[v];
+      centroid /= double(loops[f].size());
+      double pu = 0, pv = 0;
+      if (!grid->project(centroid, pu, pv)) {
+        proposal.corners_only++;
+        continue;
+      }
+      const double miss = (grid->evaluate(pu, pv) - centroid).norm();
+      if (miss > grid->membershipTolerance()) {
+        proposal.corners_only++;
+        proposal.worst_miss = std::max(proposal.worst_miss, miss);
+        // The widest, not the last seen: claim_band two lines down already
+        // takes a max, and the two describing the same kind of quantity
+        // differently is what made this one wrong.
+        proposal.missed_against = std::max(proposal.missed_against, grid->membershipTolerance());
+        continue;
+      }
+      // How far the facet's own corners are off the fit. These become the
+      // corners of the written face wherever the facet is on its boundary, so
+      // unlike the centroid above they are asserted in the file.
+      double stray = 0;
+      for (const int v : loops[f]) {
+        double vu = 0, vv = 0;
+        if (!grid->project(vertices[v], vu, vv)) {
+          stray = std::numeric_limits<double>::max();
+          break;
+        }
+        stray = std::max(stray, (grid->evaluate(vu, vv) - vertices[v]).norm());
+      }
+      proposal.facets.push_back(f);
+      proposal.miss.push_back(miss);
+      proposal.u.push_back(pu);
+      proposal.v.push_back(pv);
+      proposal.stray.push_back(stray);
+    }
+    out.push_back(std::move(proposal));
+  }
+  return out;
+}
+
 /*! The facets of a claim, split into the pieces that actually touch.
  *
  * A claim is a set of facets agreeing with one surface, and the booleans have
@@ -1800,23 +1935,13 @@ std::vector<Patch> recogniseGridPatches(const recognition::FacetGraph& graph,
   // The adjacency every recogniser walks, built once - see recognition::FacetGraph.
   const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops = graph.edgeLoops();
 
+  // Propose first, and purely - see proposeGrids.
+  const std::vector<GridProposal> proposals = proposeGrids(graph, surfaces);
+
   for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
     const auto& surface = surfaces[surface_index];
     const auto *grid = dynamic_cast<const GridSurface *>(surface.get());
     if (grid == nullptr || grid->net.empty()) continue;
-
-    // The declared points bound the sweep, so a box round them rejects most of
-    // the model without projecting anything - the same reason the Bezier path
-    // takes a box round its control net first. The band is added because
-    // membership itself is only accurate to the band.
-    Vector3d lo = grid->net.front(), hi = grid->net.front();
-    for (const auto& p : grid->net) {
-      lo = lo.cwiseMin(p);
-      hi = hi.cwiseMax(p);
-    }
-    const double slack = grid->tessellationBand() + 1e-6 * std::max(1.0, (hi - lo).norm());
-    lo.array() -= slack;
-    hi.array() += slack;
 
     // Which facets lie on the sweep, and where along the profile each one sits.
     // The second answer is needed as early as the first: a region covering every
@@ -1837,8 +1962,20 @@ std::vector<Patch> recogniseGridPatches(const recognition::FacetGraph& graph,
     std::vector<std::size_t> contested;  // on this sweep, but already held elsewhere
     std::vector<int> span_of;
     std::vector<double> stray_of;  // worst any corner of the facet is off the fit
-    for (std::size_t f = 0; f < loops.size(); f++) {
-      if (!loop_valid[f] || is_hole[f]) continue;
+    // What this sweep proposed - every facet it covers, whoever holds it -
+    // granted by the policy in force today. See proposeGrids.
+    const GridProposal *proposal = nullptr;
+    for (const auto& p : proposals) {
+      if (p.surface_index == surface_index) proposal = &p;
+    }
+    if (proposal == nullptr) continue;
+    corners_only += proposal->corners_only;
+    worst_miss = std::max(worst_miss, proposal->worst_miss);
+    missed_against = std::max(missed_against, proposal->missed_against);
+    for (std::size_t k = 0; k < proposal->facets.size(); k++) {
+      const std::size_t f = proposal->facets[k];
+      const double miss = proposal->miss[k], pu = proposal->u[k], pv = proposal->v[k];
+      const double stray = proposal->stray[k];
       // A facet something else already holds is still *examined*, and if this
       // sweep would have covered it that is recorded rather than lost.
       //
@@ -1850,59 +1987,6 @@ std::vector<Patch> recogniseGridPatches(const recognition::FacetGraph& graph,
       // second*: this is the record, not yet the arbitration - who holds the
       // facet is still decided by who ran first.
       const bool held = consumed[f] != 0 || taken[f] != 0;
-      bool on = true;
-      for (const int v : loops[f]) {
-        const Vector3d& p = vertices[v];
-        if ((p.array() < lo.array()).any() || (p.array() > hi.array()).any()) {
-          on = false;
-          break;
-        }
-      }
-      if (!on) continue;
-      for (const int v : loops[f]) {
-        std::vector<Vector3d> unused;  // pointMember's scratch argument, as elsewhere
-        if (!const_cast<GridSurface *>(grid)->pointMember(unused, vertices[v])) {
-          on = false;
-          break;
-        }
-      }
-      if (!on) continue;
-      // Corners are not enough. Every corner of the facet closing a declared
-      // profile is a point the generator emitted, so position alone claims it
-      // even when the declaration does not cover that strip - which is exactly
-      // what a grid declared open does. The centroid is the cheapest point that
-      // is not a declared point, and asking whether it lies on the surface asks
-      // about the facet rather than about its corners.
-      Vector3d centroid = Vector3d::Zero();
-      for (const int v : loops[f]) centroid += vertices[v];
-      centroid /= double(loops[f].size());
-      double pu = 0, pv = 0;
-      if (!grid->project(centroid, pu, pv)) {
-        corners_only++;
-        continue;
-      }
-      const double miss = (grid->evaluate(pu, pv) - centroid).norm();
-      if (miss > grid->membershipTolerance()) {
-        corners_only++;
-        worst_miss = std::max(worst_miss, miss);
-        // The widest, not the last seen: claim_band two lines down already
-        // takes a max, and the two describing the same kind of quantity
-        // differently is what made this one wrong.
-        missed_against = std::max(missed_against, grid->membershipTolerance());
-        continue;
-      }
-      // How far the facet's own corners are off the fit. These become the
-      // corners of the written face wherever the facet is on its boundary, so
-      // unlike the centroid above they are asserted in the file.
-      double stray = 0;
-      for (const int v : loops[f]) {
-        double vu = 0, vv = 0;
-        if (!grid->project(vertices[v], vu, vv)) {
-          stray = std::numeric_limits<double>::max();
-          break;
-        }
-        stray = std::max(stray, (grid->evaluate(vu, vv) - vertices[v]).norm());
-      }
       if (held) {
         // Covered and not held: recorded, never honoured. A claim that leaves
         // no trace is the whole defect this ledger exists for.
@@ -2393,6 +2477,76 @@ private:
 
 }  // namespace
 
+/*! Propose: every facet each declared or fitted quadric covers, whoever holds
+ * it. Pure - it reads the graph, the surfaces and provenance, and nothing any
+ * pass has claimed, so the order recognisers run in cannot change it.
+ *
+ * Membership is OnQuadric::covers, after provenance's gate. Evidence class D4:
+ * see recogniseQuadricPatches. */
+std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& graph,
+                                             const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                             const Provenance& provenance, double smooth_angle,
+                                             double max_off)
+{
+  const Mesh& mesh = graph.mesh();
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  const std::vector<char>& loop_valid = *mesh.valid;
+  const std::vector<char>& is_hole = *mesh.is_hole;
+  std::vector<QuadricProposal> out;
+  for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
+    const auto& surface = surfaces[surface_index];
+    const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
+    const auto *cone = dynamic_cast<const ConeSurface *>(surface.get());
+    if (cyl == nullptr && cone == nullptr) continue;
+    if (cyl != nullptr && !(cyl->r > 0)) continue;
+    // How far a facet may sit off the surface and still be on it is the
+    // facet's *own* tessellation band, not a fraction of the radius. A
+    // fraction cannot be right for both: on a bore of r=4 it has to admit the
+    // 0.0188 a trim vertex strays, and on a wall of r=82 the same fraction is
+    // four millimetres, which reaches clean across to the next declared
+    // cylinder - the reference lid has four of them inside 1.7 of each other,
+    // and claiming across them is how this first went wrong.
+    //
+    // The band is local and self calibrating: it is what the mesh already
+    // concedes about where its own surface lies, so a facet inside it is one
+    // this cylinder could be the surface of, and a facet outside it belongs to
+    // something else. That, the lean and the interior test are OnQuadric, which
+    // the band pass asks the same question of.
+    const OnQuadric on_quadric(mesh, graph.edgeLoops(), surface.get(), smooth_angle);
+    QuadricProposal proposal;
+    proposal.surface_index = surface_index;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      if (!loop_valid[f] || is_hole[f]) continue;
+      if (loops[f].size() < 3) continue;
+      // Ask the model before measuring. See Provenance: where the generator
+      // says this facet's maker does not own this surface, no distance test can
+      // make it true, and every threshold below is spared the question.
+      if (provenance.excludes(f, surface_index)) {
+        proposal.gated++;
+        continue;
+      }
+      // The allowance comes from the surface, not from the neighbours.
+      //
+      // It used to be twice `bandOf`, which is the dihedral to whatever lies
+      // across each edge - a statement about the mesh's local flatness. That
+      // holds only while the mesh stays as the generator emitted it. Move a
+      // corner onto the curve where its two declared owners cross, which is
+      // what a corner belongs on, and the dihedrals change: measured on
+      // step-bored-cone, a facet still sitting a correct 0.048 off a cone of
+      // radius 10 was allowed 0.0033 because its neighbours happened to come
+      // out nearly coplanar. The claim shattered into fourteen pieces of one
+      // and three facets.
+      double off = 0;
+      if (!on_quadric.covers(f, max_off, &off)) continue;
+      proposal.facets.push_back(f);
+      proposal.off.push_back(off);
+      proposal.span.push_back(on_quadric.spanOf(f));
+    }
+    out.push_back(std::move(proposal));
+  }
+  return out;
+}
+
 /*! Regions lying on a declared or fitted quadric, as patches.
  *
  * The band recogniser already writes quadrics, and writes them better - a
@@ -2439,6 +2593,12 @@ std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
   // The adjacency every recogniser walks, built once - see recognition::FacetGraph.
   const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops = graph.edgeLoops();
 
+  // Propose first, and purely: nothing above this line reads what any pass
+  // holds. See doc/step-recognition-design.md, *Three phases, and the first
+  // one is pure*.
+  const std::vector<QuadricProposal> proposals =
+    proposeQuadrics(graph, surfaces, provenance, smooth_angle, max_off);
+
   // The band a region of facets leaves open, by the same sagitta the
   // approximation pass measures: over every interior edge,
   // (reach/2)*tan(dihedral/4). The one-facet case belongs to OnQuadric, which
@@ -2474,20 +2634,6 @@ std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
     if (cyl != nullptr && !(cyl->r > 0)) continue;
     const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
 
-    // How far a facet may sit off the surface and still be on it is the
-    // facet's *own* tessellation band, not a fraction of the radius. A
-    // fraction cannot be right for both: on a bore of r=4 it has to admit the
-    // 0.0188 a trim vertex strays, and on a wall of r=82 the same fraction is
-    // four millimetres, which reaches clean across to the next declared
-    // cylinder - the reference lid has four of them inside 1.7 of each other,
-    // and claiming across them is how this first went wrong.
-    //
-    // The band is local and self calibrating: it is what the mesh already
-    // concedes about where its own surface lies, so a facet inside it is one
-    // this cylinder could be the surface of, and a facet outside it belongs to
-    // something else. That, the lean and the interior test are OnQuadric, which
-    // the band pass asks the same question of.
-    const OnQuadric on_quadric(mesh, edge_loops, surface.get(), smooth_angle);
     const Vector3d ref = perpendicular(axis);
     const Vector3d ref2 = axis.cross(ref);
 
@@ -2514,34 +2660,23 @@ std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
     std::vector<std::size_t> contested;  // on this quadric, but already held elsewhere
     std::vector<double> span_of_claim;
     double worst = 0;
-    for (std::size_t f = 0; f < loops.size(); f++) {
-      if (!loop_valid[f] || is_hole[f]) continue;
-      if (loops[f].size() < 3) continue;
+    // What this surface proposed - every facet it covers, whoever holds it -
+    // granted by the policy in force today: whatever an earlier pass kept, or an
+    // earlier surface of this pass took, is held. See proposeQuadrics.
+    const QuadricProposal *proposal = nullptr;
+    for (const auto& p : proposals) {
+      if (p.surface_index == surface_index) proposal = &p;
+    }
+    if (proposal == nullptr) continue;
+    gated += proposal->gated;
+    for (std::size_t k = 0; k < proposal->facets.size(); k++) {
+      const std::size_t f = proposal->facets[k];
+      const double off = proposal->off[k];
       // Examined even when something already holds it - see the same record in
       // recogniseGridPatches. This pass runs *after* the sweeps, so it is the
       // one that loses facets, and the first pass reporting no contention is a
       // statement about the order the passes run in and not about the geometry.
       const bool held = consumed[f] != 0 || taken[f] != 0;
-      // Ask the model before measuring. See Provenance: where the generator
-      // says this facet's maker does not own this surface, no distance test can
-      // make it true, and every threshold below is spared the question.
-      if (provenance.excludes(f, surface_index)) {
-        gated++;
-        continue;
-      }
-      // The allowance comes from the surface, not from the neighbours.
-      //
-      // It used to be twice `bandOf`, which is the dihedral to whatever lies
-      // across each edge - a statement about the mesh's local flatness. That
-      // holds only while the mesh stays as the generator emitted it. Move a
-      // corner onto the curve where its two declared owners cross, which is
-      // what a corner belongs on, and the dihedrals change: measured on
-      // step-bored-cone, a facet still sitting a correct 0.048 off a cone of
-      // radius 10 was allowed 0.0033 because its neighbours happened to come
-      // out nearly coplanar. The claim shattered into fourteen pieces of one
-      // and three facets.
-      double off = 0;
-      if (!on_quadric.covers(f, max_off, &off)) continue;
       if (held) {
         // What this pass covers and does not hold. Recorded as it is found, and
         // never honoured - such a facet is held by someone else, so it can
@@ -2551,7 +2686,7 @@ std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
         continue;
       }
       claimed.push_back(f);
-      span_of_claim.push_back(on_quadric.spanOf(f));
+      span_of_claim.push_back(proposal->span[k]);
       worst = std::max(worst, off);
     }
     if (claimed.size() < 3) {
