@@ -18,6 +18,7 @@ first few differing lines, so a failure says what moved, not only that
 something did. Needs nothing but the standard library.
 """
 import argparse
+import difflib
 import re
 import sys
 from collections import Counter
@@ -44,10 +45,17 @@ def ledger(path):
 
 
 def first_differences(a, b, n):
-    sa, sb = set(a), set(b)
-    only_a = [x for x in a if x not in sb][:n]
-    only_b = [x for x in b if x not in sa][:n]
-    return ["  - " + x[:200] for x in only_a] + ["  + " + x[:200] for x in only_b]
+    # An ordered diff, not a set difference: a line moved or printed twice is a
+    # difference too, and a set comparison shows it as nothing at all - which
+    # is how a duplicated report line first surfaced here as an empty REPORT.
+    out = []
+    for line in difflib.unified_diff(a, b, lineterm="", n=0):
+        if line.startswith(("---", "+++", "@@")):
+            continue
+        out.append("  " + line[:200])
+        if len(out) >= 2 * n:
+            break
+    return out
 
 
 def main():

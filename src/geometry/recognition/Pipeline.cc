@@ -30,84 +30,140 @@
 #include <vector>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Arbiter.h"
 #include "utils/printutils.h"
 
 namespace recognition {
 
-void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
+namespace {
+
+/*! What every stage shares: the inputs, the result being filled, and what is
+ * derived once from the inputs - the graph, the smoothing angle, the surface
+ * list the passes walk, provenance. Stages read it; only `effective` grows (the
+ * fit stage appends), and only the arbiter decides who holds a facet. */
+struct Context {
+  const Inputs& in;
+  Writability& writability;
+  Recognition& out;
+  AnalyticFeatures::Mesh mesh;
+  FacetGraph graph;
+  double smooth_angle;
+  std::vector<std::shared_ptr<Surface>> effective;
+  AnalyticFeatures::Provenance provenance;
+  Arbiter arbiter;
+
+  Context(const Inputs& inputs, Writability& w, Recognition& result)
+    : in(inputs),
+      writability(w),
+      out(result),
+      mesh(inputs.mesh),
+      graph(inputs.mesh),
+      smooth_angle(smoothAngle()),
+      effective(*inputs.surfaces),
+      arbiter(result.features, inputs.surfaces->size())
+  {
+    provenance.face_origin = inputs.face_origin;
+    provenance.owned = inputs.owned;
+    provenance.declared = inputs.surfaces->size();
+  }
+
+  /*! A patch names its surface by pointer; the ledger and Provenance both work
+   * in indices into `effective`, so a claim needs the translation. */
+  [[nodiscard]] std::size_t indexOf(const std::shared_ptr<const Surface>& s) const
+  {
+    if (s == nullptr) return std::size_t(-1);
+    for (std::size_t i = 0; i < effective.size(); i++) {
+      if (effective[i].get() == s.get() || (effective[i] && effective[i]->sameAs(*s))) return i;
+    }
+    return std::size_t(-1);
+  }
+
+private:
+  static double smoothAngle()
+  {
+    // How sharp an edge still counts as one surface. It is the whole of the
+    // intent judgement the approximation pass makes, so it is read once, here,
+    // and used by both the fitting and the measuring below.
+    double smooth_angle = 25.0;
+    if (const char *env = getenv("OPENSCAD_STEP_SMOOTH_ANGLE")) smooth_angle = atof(env);
+    smooth_angle *= M_PI / 180.0;
+    return smooth_angle;
+  }
+};
+
+/*! The band stage: rings of facets on a declared surface of revolution. Reads
+ * the graph and the declarations only. */
+void runBands(Context& ctx)
 {
-  const std::vector<Vector3d>& vertices = *in.mesh.vertices;
-  const std::vector<std::vector<int>>& loops = *in.mesh.loops;
-  const std::vector<char>& loop_valid = *in.mesh.valid;
-  const std::vector<char>& loop_is_hole = *in.mesh.is_hole;
-  const std::vector<Vector3d>& loop_normals = *in.mesh.normals;
-  const std::vector<std::shared_ptr<Surface>>& surfaces = *in.surfaces;
-  const std::vector<int32_t>& faceOrigin = *in.face_origin;
-  const std::map<int32_t, std::vector<std::size_t>>& owned = *in.owned;
-  const double model_tol = in.model_tol;
-  const bool approximate = in.approximate;
-  const std::size_t face_cnt = loops.size();
-  AnalyticFeatures::Result& features = out.features;
-  std::vector<AnalyticFeatures::Patch>& bezier_patches = out.bezier_patches;
-  std::vector<std::shared_ptr<Surface>>& patch_quadric = out.patch_quadric;
-  std::set<std::set<int>>& circular_runs = out.circular_runs;
-  std::vector<AnalyticFeatures::Patch>& grid_faces = out.grid_faces;
-  std::vector<AnalyticFeatures::Patch>& quadric_faces = out.quadric_faces;
-  static_cast<void>(vertices);
-  static_cast<void>(loop_valid);
-  static_cast<void>(loop_is_hole);
+  [[maybe_unused]] const std::vector<Vector3d>& vertices = *ctx.in.mesh.vertices;
+  [[maybe_unused]] const std::vector<std::vector<int>>& loops = *ctx.in.mesh.loops;
+  [[maybe_unused]] const std::vector<char>& loop_valid = *ctx.in.mesh.valid;
+  [[maybe_unused]] const std::vector<char>& loop_is_hole = *ctx.in.mesh.is_hole;
+  [[maybe_unused]] const std::vector<std::shared_ptr<Surface>>& surfaces = *ctx.in.surfaces;
+  [[maybe_unused]] const double model_tol = ctx.in.model_tol;
+  [[maybe_unused]] const bool approximate = ctx.in.approximate;
+  [[maybe_unused]] const std::size_t face_cnt = loops.size();
+  [[maybe_unused]] const AnalyticFeatures::Mesh& mesh = ctx.mesh;
+  [[maybe_unused]] const FacetGraph& graph = ctx.graph;
+  [[maybe_unused]] const double smooth_angle = ctx.smooth_angle;
+  [[maybe_unused]] std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
+  [[maybe_unused]] const AnalyticFeatures::Provenance& provenance = ctx.provenance;
+  [[maybe_unused]] AnalyticFeatures::Result& features = ctx.out.features;
+  [[maybe_unused]] Writability& writability = ctx.writability;
+  [[maybe_unused]] auto indexOf = [&ctx](const std::shared_ptr<const Surface>& s) {
+    return ctx.indexOf(s);
+  };
 
   // Say so even when there is nothing, so that a model whose declarations
   // never arrived cannot be mistaken for a build that predates them. The
   // availability line above prints only when the list is non-empty, which
   // makes those two cases look identical - silence.
   if (surfaces.empty()) LOG("STEP export: no analytic surfaces were declared");
-  // How sharp an edge still counts as one surface. It is the whole of the
-  // intent judgement the approximation pass makes, so it is read once, here,
-  // and used by both the fitting and the measuring below.
-  double smooth_angle = 25.0;
-  if (const char *env = getenv("OPENSCAD_STEP_SMOOTH_ANGLE")) smooth_angle = atof(env);
-  smooth_angle *= M_PI / 180.0;
-  AnalyticFeatures::Mesh mesh;
-  mesh.vertices = &vertices;
-  mesh.loops = &loops;
-  mesh.valid = &loop_valid;
-  mesh.is_hole = &loop_is_hole;
-  mesh.normals = &loop_normals;
-  // The adjacency every recogniser walks, built once for all of them.
-  const recognition::FacetGraph graph(mesh);
   features =
     AnalyticFeatures::recogniseSurfacesOfRevolution(graph, surfaces, model_tol, surfaces.size());
+}
 
-  // The approximation pass, and the only place in this exporter where a
-  // surface is written that the model never declared.
-  //
-  // It runs on what the declared pass left over, fits a cylinder to each
-  // smooth region there, and then simply *declares* it - after which the
-  // ordinary recogniser does everything else, including refusing the fit if
-  // the mesh does not lie on it after all. That is the whole design: the
-  // approximation contributes a declaration, not a face, so nothing
-  // downstream has to trust it.
-  //
-  // What makes declaring on the model's behalf defensible is the region
-  // rather than the fit. Regions are grown across edges meeting at less than
-  // the smoothing angle, so a hexagonal prism - which is the same mesh as a
-  // six sided tessellation of a cylinder, and the reason the exact path
-  // refuses to guess - never forms one.
-  std::vector<std::shared_ptr<Surface>> effective = surfaces;
-  // A patch names its surface by pointer; the ledger and Provenance both work
-  // in indices into this list, so the winning claim needs the translation.
-  auto indexOf = [&effective](const std::shared_ptr<const Surface>& s) {
-    if (s == nullptr) return std::size_t(-1);
-    for (std::size_t i = 0; i < effective.size(); i++) {
-      if (effective[i].get() == s.get() || (effective[i] && effective[i]->sameAs(*s))) return i;
-    }
-    return std::size_t(-1);
+/*! The fit stage, under the approximation flag: surfaces the model did not
+ * declare, fitted to what the band stage left, then the band stage again with
+ * them in hand. Its report ends with the band report, which is final only once
+ * the re-run is done.
+ *
+ * The approximation pass, and the only place in this exporter where a
+ * surface is written that the model never declared.
+ *
+ * It runs on what the declared pass left over, fits a cylinder to each
+ * smooth region there, and then simply *declares* it - after which the
+ * ordinary recogniser does everything else, including refusing the fit if
+ * the mesh does not lie on it after all. That is the whole design: the
+ * approximation contributes a declaration, not a face, so nothing
+ * downstream has to trust it.
+ *
+ * What makes declaring on the model's behalf defensible is the region
+ * rather than the fit. Regions are grown across edges meeting at less than
+ * the smoothing angle, so a hexagonal prism - which is the same mesh as a
+ * six sided tessellation of a cylinder, and the reason the exact path
+ * refuses to guess - never forms one. */
+void runFits(Context& ctx)
+{
+  [[maybe_unused]] const std::vector<Vector3d>& vertices = *ctx.in.mesh.vertices;
+  [[maybe_unused]] const std::vector<std::vector<int>>& loops = *ctx.in.mesh.loops;
+  [[maybe_unused]] const std::vector<char>& loop_valid = *ctx.in.mesh.valid;
+  [[maybe_unused]] const std::vector<char>& loop_is_hole = *ctx.in.mesh.is_hole;
+  [[maybe_unused]] const std::vector<std::shared_ptr<Surface>>& surfaces = *ctx.in.surfaces;
+  [[maybe_unused]] const double model_tol = ctx.in.model_tol;
+  [[maybe_unused]] const bool approximate = ctx.in.approximate;
+  [[maybe_unused]] const std::size_t face_cnt = loops.size();
+  [[maybe_unused]] const AnalyticFeatures::Mesh& mesh = ctx.mesh;
+  [[maybe_unused]] const FacetGraph& graph = ctx.graph;
+  [[maybe_unused]] const double smooth_angle = ctx.smooth_angle;
+  [[maybe_unused]] std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
+  [[maybe_unused]] const AnalyticFeatures::Provenance& provenance = ctx.provenance;
+  [[maybe_unused]] AnalyticFeatures::Result& features = ctx.out.features;
+  [[maybe_unused]] Writability& writability = ctx.writability;
+  [[maybe_unused]] auto indexOf = [&ctx](const std::shared_ptr<const Surface>& s) {
+    return ctx.indexOf(s);
   };
-  AnalyticFeatures::Provenance provenance;
-  provenance.face_origin = &faceOrigin;
-  provenance.owned = &owned;
-  provenance.declared = surfaces.size();
+
   if (approximate) {
     const std::vector<AnalyticFeatures::SmoothRegion> candidates =
       AnalyticFeatures::uncoveredRegions(mesh, features.consumed, smooth_angle);
@@ -265,6 +321,32 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
           int(out_of_order));
     }
   }
+}
+
+/*! The Bezier stage: declared fillet patches, and which of them are exactly quadrics. */
+void runBezier(Context& ctx)
+{
+  [[maybe_unused]] const std::vector<Vector3d>& vertices = *ctx.in.mesh.vertices;
+  [[maybe_unused]] const std::vector<std::vector<int>>& loops = *ctx.in.mesh.loops;
+  [[maybe_unused]] const std::vector<char>& loop_valid = *ctx.in.mesh.valid;
+  [[maybe_unused]] const std::vector<char>& loop_is_hole = *ctx.in.mesh.is_hole;
+  [[maybe_unused]] const std::vector<std::shared_ptr<Surface>>& surfaces = *ctx.in.surfaces;
+  [[maybe_unused]] const double model_tol = ctx.in.model_tol;
+  [[maybe_unused]] const bool approximate = ctx.in.approximate;
+  [[maybe_unused]] const std::size_t face_cnt = loops.size();
+  [[maybe_unused]] const AnalyticFeatures::Mesh& mesh = ctx.mesh;
+  [[maybe_unused]] const FacetGraph& graph = ctx.graph;
+  [[maybe_unused]] const double smooth_angle = ctx.smooth_angle;
+  [[maybe_unused]] std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
+  [[maybe_unused]] const AnalyticFeatures::Provenance& provenance = ctx.provenance;
+  [[maybe_unused]] AnalyticFeatures::Result& features = ctx.out.features;
+  [[maybe_unused]] Writability& writability = ctx.writability;
+  [[maybe_unused]] auto indexOf = [&ctx](const std::shared_ptr<const Surface>& s) {
+    return ctx.indexOf(s);
+  };
+  [[maybe_unused]] std::vector<AnalyticFeatures::Patch>& bezier_patches = ctx.out.bezier_patches;
+  [[maybe_unused]] std::vector<std::shared_ptr<Surface>>& patch_quadric = ctx.out.patch_quadric;
+  [[maybe_unused]] std::set<std::set<int>>& circular_runs = ctx.out.circular_runs;
 
   std::vector<std::string> patch_report;
   std::vector<AnalyticFeatures::Patch> patches = AnalyticFeatures::recogniseBezierPatches(
@@ -325,23 +407,12 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
         }
       }
     }
-    const std::size_t si = indexOf(patch.surface);
-    const bool declared = si < surfaces.size();
     const AnalyticFeatures::ClaimFate fate =
       patch.alive
         ? AnalyticFeatures::ClaimFate::Honoured
         : (found_dead ? AnalyticFeatures::ClaimFate::Declined : AnalyticFeatures::ClaimFate::Refused);
-    for (const std::size_t f : patch.facets)
-      features.ledger.add(
-        {f, patch.surface,
-         declared ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
-                  : AnalyticFeatures::ClaimPrecision::Fitted,
-         "a Bezier patch", patch.alive ? "the facet lies on the declared Bezier patch" : patch.dropped,
-         fate, si,
-         declared ? AnalyticFeatures::EvidenceClass::D1 : AnalyticFeatures::EvidenceClass::D3});
-    if (!patch.alive) continue;
-    for (const std::size_t f : patch.facets) features.consumed[f] = 1;
-    for (const std::size_t f : patch.facets) features.consumed_by[f] = "a Bezier patch";
+    ctx.arbiter.settle(kBezierPatch, patch, indexOf(patch.surface), fate,
+                       patch.alive ? "the facet lies on the declared Bezier patch" : patch.dropped);
   }
 
   // Which of the surviving patches are exactly quadrics.
@@ -432,6 +503,30 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
       quad_cyl + quad_sph, int(live), quad_cyl, quad_sph);
   }
   bezier_patches = patches;
+}
+
+/*! The grid stage: declared sweeps, written as faces where the tier allows. */
+void runGrids(Context& ctx)
+{
+  [[maybe_unused]] const std::vector<Vector3d>& vertices = *ctx.in.mesh.vertices;
+  [[maybe_unused]] const std::vector<std::vector<int>>& loops = *ctx.in.mesh.loops;
+  [[maybe_unused]] const std::vector<char>& loop_valid = *ctx.in.mesh.valid;
+  [[maybe_unused]] const std::vector<char>& loop_is_hole = *ctx.in.mesh.is_hole;
+  [[maybe_unused]] const std::vector<std::shared_ptr<Surface>>& surfaces = *ctx.in.surfaces;
+  [[maybe_unused]] const double model_tol = ctx.in.model_tol;
+  [[maybe_unused]] const bool approximate = ctx.in.approximate;
+  [[maybe_unused]] const std::size_t face_cnt = loops.size();
+  [[maybe_unused]] const AnalyticFeatures::Mesh& mesh = ctx.mesh;
+  [[maybe_unused]] const FacetGraph& graph = ctx.graph;
+  [[maybe_unused]] const double smooth_angle = ctx.smooth_angle;
+  [[maybe_unused]] std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
+  [[maybe_unused]] const AnalyticFeatures::Provenance& provenance = ctx.provenance;
+  [[maybe_unused]] AnalyticFeatures::Result& features = ctx.out.features;
+  [[maybe_unused]] Writability& writability = ctx.writability;
+  [[maybe_unused]] auto indexOf = [&ctx](const std::shared_ptr<const Surface>& s) {
+    return ctx.indexOf(s);
+  };
+  [[maybe_unused]] std::vector<AnalyticFeatures::Patch>& grid_faces = ctx.out.grid_faces;
 
   // What is left, and what it would take to do better.
   //
@@ -506,15 +601,7 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
   // with the reason, so a facet of a declared sweep left planar can say why.
   auto grid_fate = [&](const AnalyticFeatures::Patch& patch, AnalyticFeatures::ClaimFate fate,
                        const char *why) {
-    const std::size_t si = indexOf(patch.surface);
-    const bool declared = si < surfaces.size();
-    for (const std::size_t f : patch.facets)
-      features.ledger.add(
-        {f, patch.surface,
-         declared ? AnalyticFeatures::ClaimPrecision::DeclaredInterpolant
-                  : AnalyticFeatures::ClaimPrecision::Fitted,
-         "a declared sweep", why, fate, si,
-         declared ? AnalyticFeatures::EvidenceClass::D1 : AnalyticFeatures::EvidenceClass::D3});
+    ctx.arbiter.settle(kDeclaredSweep, patch, indexOf(patch.surface), fate, why);
   };
   for (const auto& patch : grid_patches) {
     if (!patch.alive) {
@@ -554,8 +641,6 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
       // the model's own resolution and not zero.
       if (approximate) {
         grid_faces.push_back(patch);
-        for (const std::size_t f : patch.facets) features.consumed[f] = 1;
-        for (const std::size_t f : patch.facets) features.consumed_by[f] = "a declared sweep";
         grid_fate(patch, AnalyticFeatures::ClaimFate::Honoured,
                   "the sweep's patch is written and takes it");
       } else {
@@ -586,6 +671,31 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
         wrapping + strips - grid_faces.size() == 1 ? "" : "s", int(wrapping),
         int(strips - grid_faces.size()));
   }
+}
+
+/*! The quadric stage: trimmed regions of declared or fitted quadrics, all of a
+ * surface or none of it, asked of the writer through Writability. */
+void runQuadrics(Context& ctx)
+{
+  [[maybe_unused]] const std::vector<Vector3d>& vertices = *ctx.in.mesh.vertices;
+  [[maybe_unused]] const std::vector<std::vector<int>>& loops = *ctx.in.mesh.loops;
+  [[maybe_unused]] const std::vector<char>& loop_valid = *ctx.in.mesh.valid;
+  [[maybe_unused]] const std::vector<char>& loop_is_hole = *ctx.in.mesh.is_hole;
+  [[maybe_unused]] const std::vector<std::shared_ptr<Surface>>& surfaces = *ctx.in.surfaces;
+  [[maybe_unused]] const double model_tol = ctx.in.model_tol;
+  [[maybe_unused]] const bool approximate = ctx.in.approximate;
+  [[maybe_unused]] const std::size_t face_cnt = loops.size();
+  [[maybe_unused]] const AnalyticFeatures::Mesh& mesh = ctx.mesh;
+  [[maybe_unused]] const FacetGraph& graph = ctx.graph;
+  [[maybe_unused]] const double smooth_angle = ctx.smooth_angle;
+  [[maybe_unused]] std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
+  [[maybe_unused]] const AnalyticFeatures::Provenance& provenance = ctx.provenance;
+  [[maybe_unused]] AnalyticFeatures::Result& features = ctx.out.features;
+  [[maybe_unused]] Writability& writability = ctx.writability;
+  [[maybe_unused]] auto indexOf = [&ctx](const std::shared_ptr<const Surface>& s) {
+    return ctx.indexOf(s);
+  };
+  [[maybe_unused]] std::vector<AnalyticFeatures::Patch>& quadric_faces = ctx.out.quadric_faces;
 
   // A quadric the band pass could not write, because its trim is not a plane
   // section: a bored cylinder, whose rim is a quartic and whose face is
@@ -661,19 +771,14 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
     // The fate of every region the pass handed on. The facets it dropped
     // before a region existed are recorded in the pass; these are the rest.
     // D4 evidence throughout - see recogniseQuadricPatches.
+    // The precision a claim carries is the one its *index* implies - the
+    // Arbiter derives it. Hardcoding DeclaredExact here once labelled a
+    // winning **fit** as a declaration, and `ClaimLedger::misheld` - whose
+    // whole job is to find a facet held by a claimant less precise than one
+    // that also covered it - reads that label.
     auto quadric_fate = [&](const AnalyticFeatures::Patch& patch, AnalyticFeatures::ClaimFate fate,
                             const char *why) {
-      const std::size_t si = indexOf(patch.surface);
-      for (const std::size_t f : patch.facets)
-        // The precision a claim carries has to be the one its *index*
-        // implies. Hardcoding DeclaredExact here once labelled a winning
-        // **fit** as a declaration, and `ClaimLedger::misheld` - whose whole
-        // job is to find a facet held by a claimant less precise than one
-        // that also covered it - reads that label.
-        features.ledger.add({f, patch.surface,
-                             si < surfaces.size() ? AnalyticFeatures::ClaimPrecision::DeclaredExact
-                                                  : AnalyticFeatures::ClaimPrecision::Fitted,
-                             "a quadric face", why, fate, si, AnalyticFeatures::EvidenceClass::D4});
+      ctx.arbiter.settle(kQuadricFace, patch, indexOf(patch.surface), fate, why);
     };
     for (const auto& patch : found) {
       if (!patch.alive) {
@@ -689,8 +794,6 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
       }
       quadric_faces.push_back(patch);
       claimed_facets += patch.facets.size();
-      for (const std::size_t f : patch.facets) features.consumed[f] = 1;
-      for (const std::size_t f : patch.facets) features.consumed_by[f] = "a quadric face";
       quadric_fate(patch, AnalyticFeatures::ClaimFate::Honoured,
                    "the quadric's patch is written and takes it");
     }
@@ -712,6 +815,30 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
         int(unbounded), unbounded == 1 ? "" : "s");
     }
   }
+}
+
+/*! What no stage took, reported under the approximation flag - the regions left
+ * to the tessellation, and whether a fit or only a declaration could reach them. */
+void runLeftover(Context& ctx)
+{
+  [[maybe_unused]] const std::vector<Vector3d>& vertices = *ctx.in.mesh.vertices;
+  [[maybe_unused]] const std::vector<std::vector<int>>& loops = *ctx.in.mesh.loops;
+  [[maybe_unused]] const std::vector<char>& loop_valid = *ctx.in.mesh.valid;
+  [[maybe_unused]] const std::vector<char>& loop_is_hole = *ctx.in.mesh.is_hole;
+  [[maybe_unused]] const std::vector<std::shared_ptr<Surface>>& surfaces = *ctx.in.surfaces;
+  [[maybe_unused]] const double model_tol = ctx.in.model_tol;
+  [[maybe_unused]] const bool approximate = ctx.in.approximate;
+  [[maybe_unused]] const std::size_t face_cnt = loops.size();
+  [[maybe_unused]] const AnalyticFeatures::Mesh& mesh = ctx.mesh;
+  [[maybe_unused]] const FacetGraph& graph = ctx.graph;
+  [[maybe_unused]] const double smooth_angle = ctx.smooth_angle;
+  [[maybe_unused]] std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
+  [[maybe_unused]] const AnalyticFeatures::Provenance& provenance = ctx.provenance;
+  [[maybe_unused]] AnalyticFeatures::Result& features = ctx.out.features;
+  [[maybe_unused]] Writability& writability = ctx.writability;
+  [[maybe_unused]] auto indexOf = [&ctx](const std::shared_ptr<const Surface>& s) {
+    return ctx.indexOf(s);
+  };
 
   if (approximate) {
     // What is left after everything, including the fits above. A region of
@@ -763,6 +890,63 @@ void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
           "a valid export",
           int(regions.size()), regions.size() == 1 ? " stays" : "s stay");
     }
+  }
+}
+
+/*! What each stage needs to exist before it runs, and what it makes. */
+enum Product : unsigned {
+  kGraph = 1u << 0,         // the mesh and its adjacency
+  kDeclarations = 1u << 1,  // the model's surface records
+  kProvenance = 1u << 2,    // who made each facet, who declared each surface
+  kBands = 1u << 3,         // rings on declared surfaces of revolution, and what they hold
+  kFits = 1u << 4,          // the surface list the passes walk, fits appended
+  kBezierFaces = 1u << 5,
+  kSweepFaces = 1u << 6,
+  kQuadricFaces = 1u << 7,
+  kLeftover = 1u << 8,
+};
+
+/*! The stages, in the order the policy in force runs them, each with what it
+ * reads and what it writes.
+ *
+ * The order is checked against the declarations every run rather than trusted:
+ * doc/step-recognition-design.md, consequence 3 - "dependencies are discovered
+ * by breakage" - is what this ends. The quadric stage reads the sweep faces
+ * because the writer's sections, asked through Writability, walk them; that
+ * dependency once opened a shell on 420 edges when it was discovered the other
+ * way. A stage whose inputs another produces is placed after it, and a table
+ * that says otherwise is an EXPORT-ERROR. */
+struct Stage {
+  const char *name;
+  unsigned reads;
+  unsigned writes;
+  void (*run)(Context&);
+};
+constexpr Stage kStages[] = {
+  {"band", kGraph | kDeclarations, kBands, runBands},
+  {"fit", kGraph | kDeclarations | kBands, kFits | kBands, runFits},
+  {"Bezier", kGraph | kFits | kBands, kBezierFaces, runBezier},
+  {"grid", kGraph | kFits | kBands | kBezierFaces, kSweepFaces, runGrids},
+  {"quadric", kGraph | kFits | kProvenance | kBands | kBezierFaces | kSweepFaces, kQuadricFaces,
+   runQuadrics},
+  {"leftover", kGraph | kBands | kBezierFaces | kSweepFaces | kQuadricFaces, kLeftover, runLeftover},
+};
+
+}  // namespace
+
+void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
+{
+  Context ctx(in, writability, out);
+  unsigned produced = kGraph | kDeclarations | kProvenance;
+  for (const Stage& stage : kStages) {
+    if ((stage.reads & ~produced) != 0) {
+      LOG(message_group::Export_Error,
+          "STEP export: the recognition stage '%1$s' runs before something it reads exists - "
+          "the stage table's order contradicts its declarations",
+          stage.name);
+    }
+    stage.run(ctx);
+    produced |= stage.writes;
   }
 }
 
