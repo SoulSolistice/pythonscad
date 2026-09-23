@@ -3401,7 +3401,33 @@ void StepKernel::build_tri_body(
                                                                        : "surface";
     };
     out << "facet\torigin\tconsumed_by\tby\tsurface\tkind\tdeclared\tprecision\tevidence\tfate\t"
-           "maker_owns\tmaker_declared\twhy\n";
+           "maker_owns\tmaker_declared\tx\ty\tz\twhy\n";
+    // And the surfaces the rows name, with their parameters and who declared
+    // them - so "which part of the model is this" is a lookup, not a hunt.
+    {
+      std::ofstream sout(std::string(ledger_path) + ".surfaces.tsv");
+      sout << "surface\tkind\trefx\trefy\trefz\tdirx\tdiry\tdirz\tr\tslope\towners\twitnesses\n";
+      for (std::size_t i = 0; i < surfaces.size(); i++) {
+        const Surface *sf = surfaces[i].get();
+        if (sf == nullptr) continue;
+        double r = 0, slope = 0;
+        if (const auto *cyl = dynamic_cast<const CylinderSurface *>(sf)) r = cyl->r;
+        if (const auto *cone = dynamic_cast<const ConeSurface *>(sf)) {
+          r = cone->r;
+          slope = cone->slope;
+        }
+        if (const auto *sph = dynamic_cast<const SphereSurface *>(sf)) r = sph->r;
+        auto ids = [](const std::vector<int32_t>& v) {
+          std::string s;
+          for (const int32_t id : v) s += (s.empty() ? "" : ",") + std::to_string(int(id));
+          return s.empty() ? std::string("-") : s;
+        };
+        sout << i << '\t' << kind_of(sf) << '\t' << sf->refpt[0] << '\t' << sf->refpt[1] << '\t'
+             << sf->refpt[2] << '\t' << sf->normdir[0] << '\t' << sf->normdir[1] << '\t'
+             << sf->normdir[2] << '\t' << r << '\t' << slope << '\t' << ids(sf->owners) << '\t'
+             << ids(sf->witnesses) << '\n';
+      }
+    }
     for (const auto& c : features.ledger.all()) {
       const bool declared = c.surface_index < surfaces.size();
       // yes / no / silent: provenance is a gate that says nothing on a fitted
@@ -3437,7 +3463,13 @@ void StepKernel::build_tri_body(
           << (c.evidence == AnalyticFeatures::EvidenceClass::Unstated
                 ? std::string("?")
                 : std::to_string(int(c.evidence) - 1))
-          << '\t' << fate_name(c.fate) << '\t' << owns << '\t' << stated << '\t'
+          << '\t' << fate_name(c.fate) << '\t' << owns << '\t' << stated << '\t';
+      Vector3d centre(0, 0, 0);
+      if (c.facet < loops.size() && !loops[c.facet].empty()) {
+        for (const int v : loops[c.facet]) centre += vertices[v];
+        centre /= double(loops[c.facet].size());
+      }
+      out << centre[0] << '\t' << centre[1] << '\t' << centre[2] << '\t'
           << (c.why != nullptr ? c.why : "-") << '\n';
     }
     LOG("STEP export: the claim ledger - %1$d claims - written to %2$s",
