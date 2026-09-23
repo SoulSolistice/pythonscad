@@ -65,11 +65,9 @@ one geometric surface is one record.
 2. **The D0 presence test**, then the provenance switch again, judged by
    `flagship-strict`, `step-cylinder-cross`, `step-declare-cone` and
    `step-shared-arc`.
-3. **The rest of the structure** - the three pieces
-   `doc/step-recognition-design.md`, *The recognition module, as built*, names as
-   not done: loser claims through the arbiter, the band pass split into propose
-   and form, and each recogniser moved out of `AnalyticFeatures.cc` into its own
-   file. Pure moves; the oracle proves each.
+3. **The band pass into propose and form** - with step 4, because it matters
+   only once the arbiter has a policy for bands (R0). Loser claims through one
+   rule and one file per recogniser are done.
 4. Then the remaining policy, one landing each with a fixture first: provenance-first regions
    (R0), exchange-never-surrender (item 30), D4 tests out of D0 membership, the
    4x-median statistics (item 27), the global objective.

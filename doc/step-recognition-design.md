@@ -781,13 +781,16 @@ a fixture that asserts the change first.
   for, and the design's shuffled-order test becomes meaningful with it.
 - **The band pass grants inside itself.** Its walls and caps are claimed
   honoured in `recogniseSurfacesOfRevolution`'s own `Result`, which the arbiter
-  then adopts; it has no separate propose. It reads no other pass, so it is
-  pure *between* recognisers, not within.
-- **Loser claims** (held, declined) are written by the `form*` functions straight
-  into the ledger rather than through the arbiter.
-- **`AnalyticFeatures.cc`** still holds every recogniser and its geometry
-  helpers in one file of ~4700 lines. The seams are cut now; moving each
-  recogniser to its own file is a pure move the oracle can prove.
+  then adopts. It reads no other pass, so it is pure *between* recognisers, and
+  splitting it into propose and form changes nothing until the arbiter has a
+  policy to apply to bands - which is exactly R0 (a whole-region claim beating a
+  ring, exchanged never surrendered). So it lands with step 4, fixture first,
+  not as a neutral move.
+- *Done since:* every claim - honoured or lost - is recorded through one
+  `recordClaim` and a `Claimant` (`fefe50911`); each recogniser is its own file
+  (`5c87fdfe9`: `Bands.cc`, `Bezier.cc`, `Grids.cc`, `Quadrics.cc`, `Fits.cc`,
+  `Regions.cc`, shared helpers in `Internal.h`; `AnalyticFeatures.cc` is the
+  696 lines the writer calls).
 - Report strings still say `STEP export:`.
 
 ### The structural work is sanctioned - do not tiptoe around it
