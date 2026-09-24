@@ -3776,6 +3776,52 @@ covers. **A fixture first** - a declared cylinder whose exact-tier region is a
 clean sheet and whose band-widened region has a fringe corner past the region
 band, asserting the quadric face at both tiers.
 
+**Closed 2026-09-24.** Three defects, one shape - a statistic over the
+tessellation deciding ground it has no standing over:
+
+1. **The region rules decided D0 members.** The floor of three facets, the
+   4x-median span rule and the worst-corner-against-band test are D4, and they
+   declined whole claims. Each quadric proposal now carries, per facet, the
+   class of what decided its membership (`QuadricProposal::decided`): **D0**
+   where its maker owns the surface (identity plus presence, open item 31) and
+   every corner is on it at **machine precision** (`recognition/Exact.h`, the
+   forward-error bound of the residual - no threshold), **D4** otherwise. The
+   rules decide only D4 members. The arbiter is told each class before any
+   grant (`Arbiter::stateMembership`) and every claim records it.
+2. **The worst corner was stale.** It was taken over the claim before the span
+   rule and never again, so a facet that rule had already declined set the
+   worst corner of the region it had left. On the fixture that alone declined
+   the 39 facets.
+3. **A band-admitted fringe could make D0 ground unformable.** On lid10, 27
+   facets of cylinder 9 written whole at the exact tier formed "not a simple
+   sheet" at the approximation tier once the fringe joined them. Where a piece
+   mixing the two classes cannot be bounded, the D4 members are declined and the
+   D0 members are formed alone.
+
+Fixture `step-exchange-never-surrender.scad` (lid10's channel meeting its
+entry slot, in thirty lines, every count derived), and a general check in
+`tests/stepexportsanitytest.py`: every fixture's approximation tier is held
+against its exact tier facet by facet, through both tiers' ledger dumps, and a
+facet the exact tier writes on a declared surface that the approximation tier
+writes on nothing fails the test (`surrendered`). Over the 106 measured exports
+it fired on lid10 alone before the fix (215 facets, cylinders 12 and 9) and on
+none after. Mutation-checked: labelling every member D4 fails the fixture's D0
+line and step-region-pocket's volume; adding the stale worst corner back fails
+the surrender check alone.
+
+What it bought, entity census against the base: lid10's approximation tier
+**6 to 41 cylindrical faces, 300 to 542 circles, 837 to 705 faces**, its exact
+tier identical in geometry and now **909 D0, 0 D4** (was 536 D0, 373 D4);
+**`step-region-pocket` exports the derived 4185 pi = 13147.565255 in both tiers**
+and its `WILL_FAIL` is gone - the short facets beside its band are D0 and no
+statistic may take them; `step-split-surface`'s exact tier 15636.82 to
+15641.35. What it leaves: the pocket's wall is a band's ring plus two quadric
+patches of one surface (R0's representation question - the band proposing its
+ring beside the whole region), and 12 small D0 regions on `step-cap-meets-wall`
+are now formed and refused by the writer's "half a surface" rule where the
+floor used to decline them - planes either way, and the ledger now names the
+real reason.
+
 ### 31. Provenance's ownership is measured, not carried
 
 **Found 2026-09-23.** `Provenance` is presented throughout as identity, and half

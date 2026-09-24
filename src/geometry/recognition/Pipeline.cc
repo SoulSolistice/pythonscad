@@ -55,7 +55,6 @@ struct Context {
   std::vector<AnalyticFeatures::BezierProposal> bezier_proposals;
   std::vector<AnalyticFeatures::GridProposal> grid_proposals;
   std::vector<AnalyticFeatures::QuadricProposal> quadric_proposals;
-  double quadric_max_off = 0;
 
   Context(const Inputs& inputs, Writability& w, Recognition& result)
     : in(inputs),
@@ -340,18 +339,27 @@ void runFits(Context& ctx)
  * the flag. A region cut from a declared surface is mostly exact - a boolean
  * puts its new vertices on the facet planes, so it is the fringe where the cut
  * landed that strays off the surface and not the interior - and a face whose
- * every corner is on the surface to 1e-7 asserts nothing the mesh does not
- * already state. Spending the tessellation band still needs the approximation
- * flag. */
+ * every corner is on the surface at machine precision asserts nothing the mesh
+ * does not already state. Spending the tessellation band still needs the
+ * approximation flag.
+ *
+ * What decided each quadric member - D0 by identity and exact position, or D4
+ * - is stated to the arbiter here, before any grant, so every claim recorded
+ * for that facet carries it. */
 void runPropose(Context& ctx)
 {
   const FacetGraph& graph = ctx.graph;
   const std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
-  ctx.quadric_max_off = ctx.in.approximate ? std::numeric_limits<double>::infinity() : 1e-7;
   ctx.bezier_proposals = AnalyticFeatures::proposeBezierPatches(graph, effective);
   ctx.grid_proposals = AnalyticFeatures::proposeGrids(graph, effective);
   ctx.quadric_proposals = AnalyticFeatures::proposeQuadrics(graph, effective, ctx.provenance,
-                                                            ctx.smooth_angle, ctx.quadric_max_off);
+                                                            ctx.smooth_angle, ctx.in.approximate);
+  for (const auto& proposal : ctx.quadric_proposals) {
+    for (std::size_t k = 0; k < proposal.facets.size(); k++) {
+      ctx.arbiter.stateMembership(kQuadricFace, proposal.surface_index, proposal.facets[k],
+                                  proposal.decided[k]);
+    }
+  }
 }
 
 /*! The Bezier stage: declared fillet patches, and which of them are exactly quadrics. */
@@ -744,11 +752,10 @@ void runQuadrics(Context& ctx)
   // the tessellation band, which is what makes a face this exporter cannot
   // prove, still needs the approximation flag.
   {
-    const double max_off = ctx.quadric_max_off;
     std::vector<std::string> quadric_report;
     const std::vector<AnalyticFeatures::Patch> found = AnalyticFeatures::formQuadricPatches(
-      graph, effective, ctx.arbiter.held(), provenance, smooth_angle, max_off, quadric_report,
-      &features.ledger, surfaces.size(), ctx.quadric_proposals);
+      graph, effective, ctx.arbiter.held(), smooth_angle, quadric_report, &features.ledger,
+      surfaces.size(), ctx.quadric_proposals);
     for (const auto& line : quadric_report) LOG("STEP export: %1$s", line);
     // Corners on the surface are not enough to call a face exact. The
     // boundary between two of them is a straight edge in the mesh, and a
@@ -803,7 +810,7 @@ void runQuadrics(Context& ctx)
     std::size_t claimed_facets = 0, refused = 0, unbounded = 0;
     // The fate of every region the pass handed on. The facets it dropped
     // before a region existed are recorded in the pass; these are the rest.
-    // D4 evidence throughout - see recogniseQuadricPatches.
+    // The class of each facet's membership is the proposal's - see runPropose.
     // The precision a claim carries is the one its *index* implies - the
     // Arbiter derives it. Hardcoding DeclaredExact here once labelled a
     // winning **fit** as a declaration, and `ClaimLedger::misheld` - whose

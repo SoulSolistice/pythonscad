@@ -675,17 +675,6 @@ std::vector<Patch> recogniseGridPatches(const Mesh& mesh,
                               declared_count);
 }
 
-std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
-                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                           const std::vector<char>& consumed,
-                                           const Provenance& provenance, double smooth_angle,
-                                           double max_off, std::vector<std::string>& report,
-                                           ClaimLedger *ledger, std::size_t declared_count)
-{
-  return recogniseQuadricPatches(recognition::FacetGraph(mesh), surfaces, consumed, provenance,
-                                 smooth_angle, max_off, report, ledger, declared_count);
-}
-
 Result recogniseSurfacesOfRevolution(const Mesh& mesh,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
                                      std::size_t declared_count)

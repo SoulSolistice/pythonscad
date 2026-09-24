@@ -281,10 +281,11 @@ powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 compare <a> <b>
   fate, measured and carried ownership, centroid, why) and `<file>.surfaces.tsv`
   (every declared surface's parameters, owners and witnesses). Facet indices match
   between tiers, so tier differences are a join of two files.
-- **The suite**: `ctest --test-dir build -R 'export-step-|mutations'`, 58 tests
-  (via `step-dev.ps1 test`). Three are **`WILL_FAIL` on purpose** and report
+- **The suite**: `ctest --test-dir build -R 'export-step-|mutations'`, 59 tests
+  (via `step-dev.ps1 test`). Two are **`WILL_FAIL` on purpose** and report
   green while failing: `export-step-flagship-corners`,
-  `export-step-sanitytest_step-region-pocket`, `export-step-representation`.
+  `export-step-representation`. (`step-region-pocket` was the third until
+  2026-09-24, when it started passing - open item 30.)
   Unit tests: `build/OpenSCADUnitTests.exe` with `build/staging` on PATH, from
   the MSYS2 shell.
 - **The OCP instruments and the round trip need `cadquery-ocp==7.8.1.1.post1`**
@@ -453,7 +454,7 @@ exports (report, entity census, sorted ledger) is the bar for a refactor.
 OPENSCAD_STEP_LEDGER=<file.tsv> dumps every claim with fate, evidence class,
 ownership and centroid, plus the declared surfaces. export writes both tiers;
 measure both. Measure only after a build that succeeded. Never run two builds
-or two suites at once. Three suite tests are WILL_FAIL on purpose. Every
+or two suites at once. Two suite tests are WILL_FAIL on purpose. Every
 diagnostic is catalogued in scripts/step-diagnostics/README.md; the OCP tools
 need cadquery-ocp==7.8.1.1.post1 and skip in silence without it.
 

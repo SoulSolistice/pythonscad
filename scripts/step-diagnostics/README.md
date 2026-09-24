@@ -14,7 +14,7 @@ point and sometimes a trap — see *Kernel agreement is not proof* in
 | command | does |
 | --- | --- |
 | `scripts/step-dev.sh build` | incremental build and stage — never configures |
-| `scripts/step-dev.sh test` | the STEP suite, `export-step-\|mutations`, 58 tests, staging DLLs on PATH |
+| `scripts/step-dev.sh test` | the STEP suite, `export-step-\|mutations`, 59 tests, staging DLLs on PATH |
 | `scripts/step-dev.sh flagship` | the three flagship tests alone |
 | `scripts/step-dev.sh export lid10\|bayonet\|f02\|f04\|<file.scad>` | export with both feature flags and the right customizer set, into `build/step-dev/` |
 | `scripts/step-dev.sh census <file.stp>…` | the fault census, with the OCP-capable interpreter |
@@ -97,3 +97,10 @@ read the fault list last.
 (OCP; a kernel reads it back as a solid), and `tests/step-flagship-check.py`
 (both, plus vertex-on-curve and seam-straddle, over the six flagship coupons)
 are what the suite runs. They are the floor, not the method.
+
+`tests/stepexportsanitytest.py` also holds every fixture's approximation tier
+against its exact tier through both tiers' ledger dumps (`surrendered`): a
+facet the exact tier writes on a declared surface that the approximation tier
+writes on nothing fails the test - a closed form surrendered, not exchanged.
+The same function answers it for any two ledger dumps of one model, which is
+how it was first run over a whole `measure` directory.

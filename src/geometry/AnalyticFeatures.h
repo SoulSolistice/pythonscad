@@ -542,22 +542,38 @@ std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
                                    const std::vector<GridProposal>& proposals);
 
 /*! What one quadric proposes: every facet it covers, whoever holds it, with
- * the measurements its region rules read. Pure data - see proposeQuadrics. */
+ * the measurements its region rules read and the class of what decided each
+ * facet's membership. Pure data - see proposeQuadrics. */
 struct QuadricProposal {
   std::size_t surface_index = 0;
   std::vector<std::size_t> facets;  // covered, in facet order
   std::vector<double> off;          // worst corner offset, parallel to `facets`
   std::vector<double> span;         // angular reach round the axis, parallel
-  std::size_t gated = 0;            // facet-surface tests provenance spared
+  /*! What decided that the facet is on this surface, parallel. D0 where its
+   * maker owns the surface (Provenance::owns - identity) and every corner is
+   * on it at machine precision (recognition::onExactly); D4 otherwise - the
+   * tessellation band admitted it, or nothing declared who made it. A D4 rule
+   * of the region may decide only D4 members: doc/step-rungs.md, *a D4 may
+   * never be an input to a D0-D2*. */
+  std::vector<recognition::EvidenceClass> decided;
+  std::size_t gated = 0;  // facet-surface tests provenance spared
 };
 
-/*! Propose, purely: see QuadricProposal. Reads no claim of any pass. */
+/*! Propose, purely: every facet each declared or fitted cylinder or cone
+ * covers. Reads no claim of any pass.
+ *
+ * `spend_band` is the tier. Without it a facet is covered only when every
+ * corner is on the surface at machine precision - a face asserting nothing the
+ * mesh does not already state, which is the exact pass. With it, a corner may
+ * also stand off the surface by as much as the facet's own tessellation band
+ * concedes, which is the approximation, and such a facet's membership is D4. */
 std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& graph,
                                              const std::vector<std::shared_ptr<Surface>>& surfaces,
                                              const Provenance& provenance, double smooth_angle,
-                                             double max_off);
+                                             bool spend_band);
 
-/*! Regions lying on a declared or fitted quadric, as patches.
+/*! Form: regions lying on a declared or fitted quadric, as patches, from what
+ * `proposals` offer and the policy in force grants.
  *
  * The band recogniser writes quadrics already, and writes them better: between
  * two circular rims a cylinder goes out bounded by CIRCLEs, which a kernel can
@@ -565,46 +581,21 @@ std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& grap
  * is not a plane section - it *is* two rims at a constant height - so a bored
  * cylinder loses its whole face for want of a curve to bound it with.
  *
- * This claims such a region by distance to the axis instead of by walking
- * rings, and lets its boundary be whatever the booleans left. It runs after the
- * band pass and over what that pass did not consume, so it can never cost a
- * circle that would otherwise have been written.
+ * This claims such a region by what the declaration covers instead of by
+ * walking rings, and lets its boundary be whatever the booleans left. It runs
+ * after the band pass and over what that pass did not consume, so it can never
+ * cost a circle that would otherwise have been written.
  *
- * `max_off` is how far a facet's corners may sit off the surface and still be
- * claimed, on top of that facet's own tessellation band. It is what separates
- * the two tiers this recogniser serves, and the separation is by proof rather
- * than by flag.
- *
- * A region cut from a *declared* surface is mostly exact: a boolean puts new
- * vertices on the facet planes rather than on the ideal surface, so it is the
- * fringe where the cut landed that strays, and the interior does not. On the
- * reference lid 32 of the 36 curved faces this pass finds are on their own
- * surface to 1e-7. Those assert nothing the mesh does not already state and
- * belong in the exact pass; pass a tolerance of that order to get only them.
- *
- * The rest is an approximation and gated as one - pass infinity, and a claim
- * which strays further than its own tessellation band is still dropped, with a
- * line in `report` rather than written. */
-std::vector<Patch> recogniseQuadricPatches(const Mesh& mesh,
-                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                           const std::vector<char>& consumed,
-                                           const Provenance& provenance, double smooth_angle,
-                                           double max_off, std::vector<std::string>& report,
-                                           ClaimLedger *ledger = nullptr,
-                                           std::size_t declared_count = std::size_t(-1));
-/*! The same, over the adjacency built once per export. */
-std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
-                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                           const std::vector<char>& consumed,
-                                           const Provenance& provenance, double smooth_angle,
-                                           double max_off, std::vector<std::string>& report,
-                                           ClaimLedger *ledger, std::size_t declared_count);
-/*! Form: the region rules over what `proposals` offer, granted by the policy
- * in force. `recogniseQuadricPatches` is propose-then-form. */
+ * Its region rules - a floor of three facets, a facet reaching four times the
+ * claim's median span, a worst corner beyond the region's tessellation band -
+ * are statistics over the tessellation, D4, and decide only the proposal's D4
+ * members: a D0 member is on its maker's declared surface by identity and
+ * exact position, and no statistic over facets may take it back. A claim that
+ * fails them keeps its D0 members and loses the rest, with a line in `report`
+ * saying what it lost. */
 std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
                                       const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                      const std::vector<char>& consumed, const Provenance& provenance,
-                                      double smooth_angle, double max_off,
+                                      const std::vector<char>& consumed, double smooth_angle,
                                       std::vector<std::string>& report, ClaimLedger *ledger,
                                       std::size_t declared_count,
                                       const std::vector<QuadricProposal>& proposals);

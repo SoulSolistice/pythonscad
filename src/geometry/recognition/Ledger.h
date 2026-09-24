@@ -284,22 +284,33 @@ inline constexpr Claimant kBezierPatch{"a Bezier patch", ClaimPrecision::Declare
 /*! A declared sweep: the model's stations, interpolated, band published - D1. */
 inline constexpr Claimant kDeclaredSweep{"a declared sweep", ClaimPrecision::DeclaredInterpolant,
                                          EvidenceClass::D1, EvidenceClass::D3};
-/*! A trimmed quadric: OnQuadric::covers, which the tessellation band and the
- * facet's sagitta decide even at max_off = 1e-7 - D4, declared or not. */
+/*! A trimmed quadric. D4 by default - the tessellation band admits a facet, or
+ * nothing declared who made it - and D0 facet by facet where its maker owns the
+ * surface (identity) and every corner is on it at machine precision; the
+ * proposal says which (QuadricProposal::decided). */
 inline constexpr Claimant kQuadricFace{"a quadric face", ClaimPrecision::DeclaredExact,
                                        EvidenceClass::D4, EvidenceClass::D4};
 
 /*! Record one claim by `who` on `facet` for the surface at `surface_index`,
  * whose first `declared_count` entries are the model's own. The one rule for
  * what precision and evidence class a claim carries - every site that records a
- * claim, honoured or lost, goes through it. */
+ * claim, honoured or lost, goes through it.
+ *
+ * `decided` is the class of what decided this facet's membership, where the
+ * claimant knows it facet by facet; left `Unstated`, the claimant's own stated
+ * class applies. A fitted surface's claim takes the claimant's fitted class
+ * whatever is passed - nothing declared it, so nothing about it is D0. */
 inline void recordClaim(ClaimLedger& ledger, const Claimant& who, std::size_t facet,
                         const std::shared_ptr<const Surface>& surface, std::size_t surface_index,
-                        std::size_t declared_count, ClaimFate fate, const char *why)
+                        std::size_t declared_count, ClaimFate fate, const char *why,
+                        EvidenceClass decided = EvidenceClass::Unstated)
 {
   const bool declared = surface_index < declared_count;
+  const EvidenceClass evidence = !declared                            ? who.evidence_if_fitted
+                                 : decided != EvidenceClass::Unstated ? decided
+                                                                      : who.evidence_if_declared;
   ledger.add({facet, surface, declared ? who.if_declared : ClaimPrecision::Fitted, who.by, why, fate,
-              surface_index, declared ? who.evidence_if_declared : who.evidence_if_fitted});
+              surface_index, evidence});
 }
 
 }  // namespace recognition

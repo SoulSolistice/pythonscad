@@ -21,6 +21,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Internal.h"
 #include "geometry/recognition/Ledger.h"
 
@@ -42,8 +43,9 @@ namespace {
  *
  *   lean      a facet across the axis is not on the surface however close its
  *             corners fall - a cap over a bore has every vertex on the rim
- *   corners   every vertex within `max_off`, and within what the mesh itself
- *             concedes about where its surface lies
+ *   corners   every vertex on the surface at machine precision - or, where
+ *             the tier spends the tessellation band, within what the mesh
+ *             itself concedes about where its surface lies
  *   interior  the centroid and the edge midpoints within the sagitta the
  *             facet's own angular span implies - what separates a facet *of*
  *             the surface from one spanning a hole in it
@@ -55,6 +57,7 @@ public:
             const Surface *surface, double smooth_angle)
     : mesh_(mesh),
       edge_loops_(edge_loops),
+      surface_(surface),
       smooth_angle_(smooth_angle),
       cyl_(dynamic_cast<const CylinderSurface *>(surface)),
       cone_(dynamic_cast<const ConeSurface *>(surface))
@@ -169,10 +172,12 @@ public:
     return band;
   }
 
-  /*! Is this facet on the surface, spending no more than `max_off` of what the
-   * mesh concedes? `off_out` takes the worst corner offset, which a caller
-   * judging a whole region needs. */
-  [[nodiscard]] bool covers(std::size_t f, double max_off, double *off_out = nullptr) const
+  /*! Is this facet on the surface - with every corner on it exactly, or,
+   * where `spend_band`, within what the mesh concedes? `off_out` takes the
+   * worst corner offset, which a caller judging a whole region needs, and
+   * `exact_out` whether every corner is on the surface at machine precision. */
+  [[nodiscard]] bool covers(std::size_t f, bool spend_band, double *off_out = nullptr,
+                            bool *exact_out = nullptr) const
   {
     const std::vector<Vector3d>& vertices = *mesh_.vertices;
     const std::vector<std::vector<int>>& loops = *mesh_.loops;
@@ -192,12 +197,16 @@ public:
       return false;
     }
     double off = 0;
-    for (const int v : loops[f]) off = std::max(off, offsetAt(vertices[v]));
-    // The band is what the mesh concedes about where its surface lies;
-    // `max_off` is how much of that concession this tier is willing to spend.
-    // At 1e-7 it spends none, and claims only facets the surface already runs
-    // through.
-    if (off > std::min(bandOf(f), max_off)) return false;
+    bool exact = true;
+    for (const int v : loops[f]) {
+      off = std::max(off, offsetAt(vertices[v]));
+      exact = exact && recognition::onExactly(surface_, vertices[v]);
+    }
+    // Every corner on the surface at machine precision is what the exact tier
+    // claims: a face that asserts nothing the mesh does not already state.
+    // Otherwise the band is what the mesh concedes about where its surface
+    // lies, and only the approximation tier may spend it.
+    if (!exact && (!spend_band || off > bandOf(f))) return false;
 
     // Corners on the surface are not enough, and the lean test above is not the
     // whole of the guard. A facet that spans a *hole* in the surface has every
@@ -222,12 +231,14 @@ public:
     }
     if (interior > interior_allow) return false;
     if (off_out != nullptr) *off_out = off;
+    if (exact_out != nullptr) *exact_out = exact;
     return true;
   }
 
 private:
   const Mesh& mesh_;
   const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops_;
+  const Surface *surface_ = nullptr;
   double smooth_angle_ = 0;
   const CylinderSurface *cyl_ = nullptr;
   const ConeSurface *cone_ = nullptr;
@@ -241,12 +252,12 @@ private:
  * it. Pure - it reads the graph, the surfaces and provenance, and nothing any
  * pass has claimed, so the order recognisers run in cannot change it.
  *
- * Membership is OnQuadric::covers, after provenance's gate. Evidence class D4:
- * see recogniseQuadricPatches. */
+ * Membership is OnQuadric::covers, after provenance's gate, and each member is
+ * labelled with what decided it - see QuadricProposal::decided. */
 std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& graph,
                                              const std::vector<std::shared_ptr<Surface>>& surfaces,
                                              const Provenance& provenance, double smooth_angle,
-                                             double max_off)
+                                             bool spend_band)
 {
   const Mesh& mesh = graph.mesh();
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -297,57 +308,29 @@ std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& grap
       // out nearly coplanar. The claim shattered into fourteen pieces of one
       // and three facets.
       double off = 0;
-      if (!on_quadric.covers(f, max_off, &off)) continue;
+      bool exact = false;
+      if (!on_quadric.covers(f, spend_band, &off, &exact)) continue;
       proposal.facets.push_back(f);
       proposal.off.push_back(off);
       proposal.span.push_back(on_quadric.spanOf(f));
+      // D0 only where both halves are declarations: its maker declared this
+      // surface as a face and is on it (identity), and every corner is on it
+      // exactly (position, at machine precision). Corners alone are the
+      // weakest rung - a cap over a bore has every corner on the rim - and
+      // identity alone says nothing about this facet.
+      proposal.decided.push_back(exact && provenance.owns(f, surface_index)
+                                   ? recognition::EvidenceClass::D0
+                                   : recognition::EvidenceClass::D4);
     }
     out.push_back(std::move(proposal));
   }
   return out;
 }
 
-/*! Regions lying on a declared or fitted quadric, as patches.
- *
- * The band recogniser already writes quadrics, and writes them better - a
- * cylinder between two circular rims goes out with CIRCLEs a kernel can offset
- * and pattern along. What it cannot do is write one whose rim is not a circle,
- * because a band *is* two rims at a constant height and every rule in it says
- * so. A cylinder bored across, or trimmed by anything that is not a plane
- * section, has no such rim: the trim is a quartic, and the whole face is lost
- * for want of a curve to bound it with.
- *
- * This is the other route to the same face. It claims facets by distance to the
- * axis rather than by walking rings, hands them to patchFromFacets, and lets
- * the boundary be whatever the booleans left - each stretch of it becoming one
- * curve against one neighbour, exactly as a trimmed sweep's does. It runs after
- * the band pass and over what that pass did not consume, so nothing it does can
- * cost a circle that would otherwise have been written.
- *
- * It is an approximation and is gated as one. The trim's vertices are not all
- * on the surface: where a ruling of the bore met a facet of the wall the vertex
- * is exactly on it, but where a facet met an *edge* it is not, and on the
- * reference bore 16 of 80 rim vertices are off by up to 0.0188 against that
- * region's tessellation band of 0.0193. Inside the band is the same licence the
- * rest of the approximation pass runs on, and a claim which cannot show that is
- * dropped rather than written.
- */
-std::vector<Patch> recogniseQuadricPatches(const recognition::FacetGraph& graph,
-                                           const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                           const std::vector<char>& consumed,
-                                           const Provenance& provenance, double smooth_angle,
-                                           double max_off, std::vector<std::string>& report,
-                                           ClaimLedger *ledger, std::size_t declared_count)
-{
-  return formQuadricPatches(graph, surfaces, consumed, provenance, smooth_angle, max_off, report, ledger,
-                            declared_count,
-                            proposeQuadrics(graph, surfaces, provenance, smooth_angle, max_off));
-}
-
+/*! See AnalyticFeatures.h. */
 std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
                                       const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                      const std::vector<char>& consumed, const Provenance& provenance,
-                                      double smooth_angle, double max_off,
+                                      const std::vector<char>& consumed, double smooth_angle,
                                       std::vector<std::string>& report, ClaimLedger *ledger,
                                       std::size_t declared_count,
                                       const std::vector<QuadricProposal>& proposals)
@@ -414,20 +397,24 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
     // test left no trace - and those are exactly the facets that come out
     // planar on a declared surface.
     //
-    // The evidence is D4 in both tiers. Membership is OnQuadric::covers, whose
-    // corners are held to min(bandOf(f), max_off) and whose interior to
-    // 1.25 x the facet's own sagitta - the tessellation deciding, even where
-    // max_off is 1e-7. A declared surface in the claim does not make it D0; see
-    // doc/step-rungs.md, *a rung is as exact as its evidence*.
-    auto record = [&](std::size_t f, ClaimFate fate, const char *why) {
+    // Each carries the class of what decided its membership (see
+    // QuadricProposal::decided): D0 where identity and exact position did, D4
+    // where the tessellation band did. A declared surface in the claim does not
+    // make it D0; see doc/step-rungs.md, *a rung is as exact as its evidence*.
+    using recognition::EvidenceClass;
+    auto record = [&](std::size_t f, ClaimFate fate, const char *why, EvidenceClass decided) {
       if (ledger == nullptr) return;
       recognition::recordClaim(*ledger, recognition::kQuadricFace, f, surface, surface_index,
-                               declared_count, fate, why);
+                               declared_count, fate, why, decided);
     };
-    std::vector<std::size_t> claimed;
+    struct Member {
+      std::size_t facet;
+      double off;
+      double span;
+      EvidenceClass decided;
+    };
+    std::vector<Member> claimed;
     std::vector<std::size_t> contested;  // on this quadric, but already held elsewhere
-    std::vector<double> span_of_claim;
-    double worst = 0;
     // What this surface proposed - every facet it covers, whoever holds it -
     // granted by the policy in force today: whatever an earlier pass kept, or an
     // earlier surface of this pass took, is held. See proposeQuadrics.
@@ -439,7 +426,6 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
     gated += proposal->gated;
     for (std::size_t k = 0; k < proposal->facets.size(); k++) {
       const std::size_t f = proposal->facets[k];
-      const double off = proposal->off[k];
       // Examined even when something already holds it - see the same record in
       // recogniseGridPatches. This pass runs *after* the sweeps, so it is the
       // one that loses facets, and the first pass reporting no contention is a
@@ -450,19 +436,36 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
         // never honoured - such a facet is held by someone else, so it can
         // never be mistaken for a claim nothing acted on.
         contested.push_back(f);
-        record(f, ClaimFate::Held, "covered, but already held when this pass looked");
+        record(f, ClaimFate::Held, "covered, but already held when this pass looked",
+               proposal->decided[k]);
         continue;
       }
-      claimed.push_back(f);
-      span_of_claim.push_back(proposal->span[k]);
-      worst = std::max(worst, off);
+      claimed.push_back({f, proposal->off[k], proposal->span[k], proposal->decided[k]});
     }
-    if (claimed.size() < 3) {
-      for (const std::size_t f : claimed) {
-        record(f, ClaimFate::Declined, "fewer than three facets of the surface were free to claim");
+
+    // The region rules below are statistics over the tessellation - a count of
+    // facets, a median of spans, a worst corner against the region's band - so
+    // each is D4, and decides only the claim's D4 members. A D0 member is on the
+    // surface its maker declared, at every corner, and nothing measured from
+    // facets may take it back: doc/step-rungs.md, *a D4 may never be an input to
+    // a D0-D2*. Before 2026-09-24 they decided the whole claim, and on lid10 the
+    // region test's worst corner - the fringe the band admitted - cost 188 facets
+    // the exact tier writes in closed form. Open item 30.
+    auto has_d0 = [&]() {
+      for (const Member& m : claimed) {
+        if (m.decided == EvidenceClass::D0) return true;
       }
-      continue;
-    }
+      return false;
+    };
+    // Whether a D4 rule leaves the claim with nothing worth making: under three
+    // facets, none of them D0. A region of two D0 facets is as real as one of
+    // two hundred.
+    auto below_floor = [&](const char *why) {
+      if (claimed.size() >= 3 || has_d0()) return false;
+      for (const Member& m : claimed) record(m.facet, ClaimFate::Declined, why, m.decided);
+      return true;
+    };
+    if (below_floor("fewer than three facets of the surface were free to claim")) continue;
 
     // And refuse a facet that reaches further round the axis than a facet of
     // this surface's tessellation does.
@@ -492,20 +495,21 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
                int(contested.size()), who.c_str()));
     }
     {
-      std::vector<double> ranked = span_of_claim;
+      std::vector<double> ranked;
+      for (const Member& m : claimed) ranked.push_back(m.span);
       std::sort(ranked.begin(), ranked.end());
       const double typical = ranked[ranked.size() / 2];
       if (typical > 0) {
-        std::vector<std::size_t> kept;
+        std::vector<Member> kept;
         std::size_t reached = 0;
-        for (std::size_t k = 0; k < claimed.size(); k++) {
-          if (span_of_claim[k] > 4 * typical) {
+        for (const Member& m : claimed) {
+          if (m.decided != EvidenceClass::D0 && m.span > 4 * typical) {
             reached++;
-            record(claimed[k], ClaimFate::Declined,
-                   "reaches further round the axis than four times this claim's median span");
+            record(m.facet, ClaimFate::Declined,
+                   "reaches further round the axis than four times this claim's median span", m.decided);
             continue;
           }
-          kept.push_back(claimed[k]);
+          kept.push_back(m);
         }
         if (reached > 0) {
           report.push_back(
@@ -517,25 +521,50 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
         claimed = std::move(kept);
       }
     }
-    if (claimed.size() < 3) {
-      for (const std::size_t f : claimed) {
-        record(f, ClaimFate::Declined, "fewer than three facets were left after the span rule");
-      }
-      continue;
-    }
+    if (below_floor("fewer than three facets were left after the span rule")) continue;
 
-    const double band = bandOf(claimed);
-    if (worst > band) {
-      for (const std::size_t f : claimed) {
-        record(f, ClaimFate::Declined,
-               "the region's worst corner strays further than the region's tessellation band");
+    // The region's worst corner, against the region's own band - asked of the
+    // members the band admitted, and of the region as it now stands. It was
+    // once taken before the span rule and never again, so a facet that rule had
+    // already declined still set the worst corner of the region it had left.
+    {
+      std::vector<std::size_t> region;
+      double worst = 0;
+      std::size_t banded = 0;
+      for (const Member& m : claimed) {
+        region.push_back(m.facet);
+        if (m.decided == EvidenceClass::D0) continue;
+        banded++;
+        worst = std::max(worst, m.off);
       }
-      report.push_back(
-        format("a region of %d facets on the declared %s r=%g is not written: its boundary strays %.4f "
-               "from the surface where the tessellation allows %.4f",
-               int(claimed.size()), cyl != nullptr ? "cylinder" : "cone",
-               cyl != nullptr ? cyl->r : cone->r, worst, band));
-      continue;
+      const double band = bandOf(region);
+      if (banded > 0 && worst > band) {
+        std::vector<Member> kept;
+        for (const Member& m : claimed) {
+          if (m.decided == EvidenceClass::D0) {
+            kept.push_back(m);
+            continue;
+          }
+          record(m.facet, ClaimFate::Declined,
+                 "the region's worst corner strays further than the region's tessellation band",
+                 m.decided);
+        }
+        if (kept.empty()) {
+          report.push_back(format(
+            "a region of %d facets on the declared %s r=%g is not written: its boundary strays %.4f "
+            "from the surface where the tessellation allows %.4f",
+            int(claimed.size()), cyl != nullptr ? "cylinder" : "cone", cyl != nullptr ? cyl->r : cone->r,
+            worst, band));
+          continue;
+        }
+        report.push_back(format(
+          "a region of %d facets on the declared %s r=%g is written without the %d the tessellation "
+          "band admitted: their worst corner strays %.4f from the surface where the region's band "
+          "allows %.4f, and the rest are on it by declaration",
+          int(kept.size()), cyl != nullptr ? "cylinder" : "cone", cyl != nullptr ? cyl->r : cone->r,
+          int(claimed.size() - kept.size()), worst, band));
+        claimed = std::move(kept);
+      }
     }
 
     // Does the claim close around the axis? A face that wraps needs a seam, and
@@ -546,8 +575,8 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
     std::vector<double> theta(claimed.size());
     for (std::size_t i = 0; i < claimed.size(); i++) {
       Vector3d c(0, 0, 0);
-      for (const int v : loops[claimed[i]]) c += vertices[v];
-      c /= double(loops[claimed[i]].size());
+      for (const int v : loops[claimed[i].facet]) c += vertices[v];
+      c /= double(loops[claimed[i].facet].size());
       const Vector3d rel = c - base;
       double t = atan2(rel.dot(ref2), rel.dot(ref));
       if (t < 0) t += 2 * M_PI;
@@ -556,22 +585,33 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
     }
     const bool wraps = quadrant[0] && quadrant[1] && quadrant[2] && quadrant[3];
 
-    std::vector<std::vector<std::size_t>> groups;
+    std::vector<std::vector<Member>> split;
     if (!wraps) {
-      groups.push_back(claimed);
+      split.push_back(claimed);
     } else {
-      groups.resize(2);
+      split.resize(2);
       for (std::size_t i = 0; i < claimed.size(); i++) {
-        groups[theta[i] < M_PI ? 0 : 1].push_back(claimed[i]);
+        split[theta[i] < M_PI ? 0 : 1].push_back(claimed[i]);
       }
     }
 
-    for (const auto& group : groups) {
-      if (group.size() < 3) {
-        for (const std::size_t f : group) {
-          record(f, ClaimFate::Declined, "a piece of the seam split has fewer than three facets");
+    for (const auto& members : split) {
+      // The same floor, and the same class: a count decides only a piece with
+      // no D0 member in it.
+      bool any_d0 = false;
+      for (const Member& m : members) any_d0 = any_d0 || m.decided == EvidenceClass::D0;
+      if (members.size() < 3 && !any_d0) {
+        for (const Member& m : members) {
+          record(m.facet, ClaimFate::Declined, "a piece of the seam split has fewer than three facets",
+                 m.decided);
         }
         continue;
+      }
+      std::vector<std::size_t> group;
+      std::map<std::size_t, EvidenceClass> decided_of;
+      for (const Member& m : members) {
+        group.push_back(m.facet);
+        decided_of[m.facet] = m.decided;
       }
       // The seam split above cuts a wrapping claim in two; this one cuts a
       // claim the booleans left in pieces. Both have to happen, and neither
@@ -584,6 +624,34 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
       for (const auto& piece : connectedComponents(loops, edge_loops, group)) {
         if (piece.empty()) continue;
         Patch patch = patchFromFacets(loops, edge_loops, surface, piece);
+        if (!patch.alive) {
+          // The same covering order, one step later: facets the tessellation
+          // band admitted may not make a region of D0 ground unformable. Where
+          // a piece mixing the two classes cannot be bounded, the band's
+          // members are declined and the D0 members are formed on their own -
+          // measured on lid10, 27 facets of a declared cylinder the exact tier
+          // writes whole came out planar at the approximation tier because the
+          // band's fringe made their region "not a simple sheet".
+          std::vector<std::size_t> exact_part, banded_part;
+          for (const std::size_t f : piece) {
+            (decided_of[f] == EvidenceClass::D0 ? exact_part : banded_part).push_back(f);
+          }
+          if (!exact_part.empty() && !banded_part.empty()) {
+            for (const std::size_t f : banded_part) {
+              record(f, ClaimFate::Declined,
+                     "admitted by the tessellation band, and with it the region could not be bounded",
+                     decided_of[f]);
+            }
+            for (const auto& core : connectedComponents(loops, edge_loops, exact_part)) {
+              Patch exact = patchFromFacets(loops, edge_loops, surface, core);
+              if (exact.alive) {
+                for (const std::size_t f : exact.facets) taken[f] = 1;
+              }
+              patches.push_back(std::move(exact));
+            }
+            continue;
+          }
+        }
         if (patch.alive) {
           for (const std::size_t f : patch.facets) taken[f] = 1;
         }

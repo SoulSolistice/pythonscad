@@ -1019,7 +1019,7 @@ TEST_CASE("proposals do not depend on what is held or on the order proposers run
   const Provenance provenance;  // silent: no ids, so it gates nothing
   const double smooth = 25.0 * M_PI / 180.0;
 
-  const std::vector<QuadricProposal> first = proposeQuadrics(graph, surfaces, provenance, smooth, 1e-7);
+  const std::vector<QuadricProposal> first = proposeQuadrics(graph, surfaces, provenance, smooth, false);
   REQUIRE(first.size() == 1);
   REQUIRE(first[0].facets.size() == (std::size_t)fn);  // every wall facet is on the declared cylinder
 
@@ -1028,10 +1028,10 @@ TEST_CASE("proposals do not depend on what is held or on the order proposers run
   // the equalities below are not an accident of a case where it does nothing.
   std::vector<char> nothing_held(mesh.loops->size(), 0), all_held(mesh.loops->size(), 1);
   std::vector<std::string> report;
-  const auto granted = formQuadricPatches(graph, surfaces, nothing_held, provenance, smooth, 1e-7,
-                                          report, nullptr, surfaces.size(), first);
-  const auto refused = formQuadricPatches(graph, surfaces, all_held, provenance, smooth, 1e-7, report,
-                                          nullptr, surfaces.size(), first);
+  const auto granted =
+    formQuadricPatches(graph, surfaces, nothing_held, smooth, report, nullptr, surfaces.size(), first);
+  const auto refused =
+    formQuadricPatches(graph, surfaces, all_held, smooth, report, nullptr, surfaces.size(), first);
   CHECK_FALSE(granted.empty());
   CHECK(refused.empty());
 
@@ -1041,7 +1041,7 @@ TEST_CASE("proposals do not depend on what is held or on the order proposers run
   CHECK(!bands.bands.empty());
   const std::vector<GridProposal> grids = proposeGrids(graph, surfaces);
   const std::vector<BezierProposal> beziers = proposeBezierPatches(graph, surfaces);
-  const std::vector<QuadricProposal> again = proposeQuadrics(graph, surfaces, provenance, smooth, 1e-7);
+  const std::vector<QuadricProposal> again = proposeQuadrics(graph, surfaces, provenance, smooth, false);
   CHECK(grids.empty());
   CHECK(beziers.empty());
   REQUIRE(again.size() == first.size());
@@ -1049,5 +1049,6 @@ TEST_CASE("proposals do not depend on what is held or on the order proposers run
   CHECK(again[0].facets == first[0].facets);
   CHECK(again[0].off == first[0].off);
   CHECK(again[0].span == first[0].span);
+  CHECK(again[0].decided == first[0].decided);
   CHECK(again[0].gated == first[0].gated);
 }

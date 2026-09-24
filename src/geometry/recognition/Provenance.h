@@ -57,6 +57,22 @@ struct Provenance {
     if (it == owned->end()) return false;  // its maker owns nothing we can use
     return std::find(it->second.begin(), it->second.end(), surface) == it->second.end();
   }
+
+  /*! Whether the maker of `facet` owns `surface`: declared it as a face, and a
+   * whole facet of its own is still on it. The positive answer - identity, not
+   * a measurement - which `excludes` could only give by its absence, and which
+   * is silent (false) wherever `excludes` is. */
+  [[nodiscard]] bool owns(std::size_t facet, std::size_t surface) const
+  {
+    if (face_origin == nullptr || owned == nullptr) return false;
+    if (surface >= declared) return false;  // fitted: nothing declared it
+    if (facet >= face_origin->size()) return false;
+    const int32_t id = (*face_origin)[facet];
+    if (id < 0) return false;
+    const auto it = owned->find(id);
+    if (it == owned->end()) return false;
+    return std::find(it->second.begin(), it->second.end(), surface) != it->second.end();
+  }
 };
 
 }  // namespace recognition

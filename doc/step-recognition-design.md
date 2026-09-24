@@ -783,6 +783,18 @@ saying what it reads and writes; the order check does the rest. (5) The oracle:
 `measure` before and after, `compare` - and if it is meant to change behaviour,
 a fixture that asserts the change first.
 
+**Step 4's first landing, 2026-09-24: the covering order inside a claim.** A
+quadric proposal states per facet what decided its membership - D0 by identity
+(`Provenance::owns`) and exact position (`recognition/Exact.h`, machine
+precision), D4 by the tessellation band - and the arbiter is told before any
+grant (`Arbiter::stateMembership`). The claimant's region rules are statistics
+over facets, so they decide only D4 members; a D4 addition that makes a region
+unformable is declined and the D0 members are formed alone. D0 ground is never
+the stake of a D4 rule. Open item 30 closed with it, and `step-region-pocket`'s
+derived volume was reached without the band yielding anything. The next landing
+is the same order *between* claimants: the band's ring and a whole-region claim,
+both D0, where the arbiter must choose the one that will be written (R0).
+
 **What is not done, named so it is not mistaken for done:**
 
 - **Step 4, the policy.** The arbiter's grant is still today's call order - pass

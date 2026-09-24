@@ -496,7 +496,54 @@ def surfaces_available(output):
     return int(m.group(1)) if m else 0
 
 
-def check_approximation(openscad, inputfile, stepfile, args):
+def ledger_env(ledger):
+    """The environment an export needs to dump its claim ledger to `ledger`."""
+    env = dict(os.environ)
+    env["OPENSCAD_STEP_LEDGER"] = ledger
+    return env
+
+
+def remove_ledger(ledger):
+    for path in (ledger, ledger + ".surfaces.tsv"):
+        if os.path.exists(path):
+            os.unlink(path)
+
+
+def honoured_on_declared(ledger):
+    """facet -> (claimant, surface) for every facet a claim on a *declared*
+    surface holds, read from an OPENSCAD_STEP_LEDGER dump."""
+    held = {}
+    with open(ledger, encoding="utf-8") as f:
+        header = f.readline().rstrip("\n").split("\t")
+        col = {name: i for i, name in enumerate(header)}
+        for line in f:
+            row = line.rstrip("\n").split("\t")
+            if row[col["fate"]] == "honoured" and row[col["declared"]] == "1":
+                held[row[col["facet"]]] = (row[col["by"]], row[col["surface"]])
+    return held
+
+
+def surrendered(exact_ledger, approx_ledger):
+    """Facets the exact tier writes on a declared surface and the approximation
+    tier writes on nothing: a closed form surrendered to a facet plane.
+
+    doc/step-rungs.md: *a closed form may be exchanged, never surrendered*, and
+    the approximation tier is the exact tier plus what spending the tessellation
+    band adds - never less. Asked facet by facet, because the two tiers mesh
+    identically and the ledger's facet indices agree between them. Found on
+    lid10 as open item 30: 188 facets of a declared cylinder written as one face
+    at the exact tier and as planes at the approximation tier, on a green suite.
+    """
+    exact = honoured_on_declared(exact_ledger)
+    approx = honoured_on_declared(approx_ledger)
+    lost = {}
+    for facet, (by, surface) in exact.items():
+        if facet not in approx:
+            lost[(by, surface)] = lost.get((by, surface), 0) + 1
+    return lost
+
+
+def check_approximation(openscad, inputfile, stepfile, args, exact_ledger=None):
     """Run the approximation measurement pass, for fixtures which ask for it.
 
     Only fixtures carrying APPROX: lines pay for this extra export. The pass
@@ -505,14 +552,28 @@ def check_approximation(openscad, inputfile, stepfile, args):
     nothing, so the file it produces still has to be valid and identical in
     substance to the analytic one."""
     approxfile = stepfile.replace(".stp", "-approx.stp")
+    approx_ledger = approxfile + ".ledger.tsv"
     print("Re-exporting with --enable=step-approximate-surfaces", file=sys.stderr)
     output = export(
         openscad, inputfile, approxfile,
         args + ["--enable=step-analytic-surfaces", "--enable=step-approximate-surfaces"],
+        env=ledger_env(approx_ledger),
     )
     for line in report_contradictions(output):
         print("the approximation run's own report contradicts itself: " + line, file=sys.stderr)
         return False
+    if exact_ledger is not None and os.path.exists(exact_ledger) and os.path.exists(approx_ledger):
+        lost = surrendered(exact_ledger, approx_ledger)
+        if lost:
+            print("the approximation tier writes on no closed form %d facets the exact tier writes "
+                  "on a declared surface - a closed form surrendered, not exchanged: %s"
+                  % (sum(lost.values()),
+                     ", ".join("%d held by %s on surface %s" % (n, by, s)
+                               for (by, s), n in sorted(lost.items()))),
+                  file=sys.stderr)
+            return False
+        remove_ledger(exact_ledger)
+    remove_ledger(approx_ledger)
     if not validateSTEP(approxfile):
         print("the approximation export is not valid", file=sys.stderr)
         return False
@@ -569,11 +630,14 @@ def check_approximation(openscad, inputfile, stepfile, args):
 # CYLINDRICAL_SURFACE still has to leave the shell watertight, its rims still
 # have to be used once in each direction - and the surface checks only have
 # anything to look at here.
+exact_ledger = None
 if ok:
     analyticfile = stepfile.replace(".stp", "-analytic.stp")
     analytic_flag = "--enable=step-analytic-surfaces"
+    exact_ledger = analyticfile + ".ledger.tsv"
     print("Re-exporting with " + analytic_flag, file=sys.stderr)
-    output = export(args.openscad, inputfile, analyticfile, remaining_args + [analytic_flag])
+    output = export(args.openscad, inputfile, analyticfile, remaining_args + [analytic_flag],
+                    env=ledger_env(exact_ledger))
     contradictions = report_contradictions(output)
     if contradictions:
         for line in contradictions:
@@ -656,8 +720,13 @@ if ok:
 # A fixture that says nothing about the tier still gets what needs no
 # expectation: the file has to be valid, it has to read back as one solid, and
 # every corner of an analytic face has to lie on the surface it is written on.
+#
+# And it is held against the exact tier facet by facet: whatever the exact tier
+# writes on a declared surface, the approximation tier has to write on a closed
+# form too - see surrendered().
 if ok:
-    ok = check_approximation(args.openscad, inputfile, stepfile, remaining_args)
+    ok = check_approximation(args.openscad, inputfile, stepfile, remaining_args,
+                             exact_ledger=exact_ledger)
 
 if ok:
     os.unlink(stepfile)

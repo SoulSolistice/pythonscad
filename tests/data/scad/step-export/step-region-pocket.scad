@@ -1,10 +1,11 @@
 // A declared cylinder with a pocket cut along its own facet boundaries, whose
-// volume the model fixes in closed form - and which the exporter misses.
+// volume the model fixes in closed form.
 //
-// **Registered WILL_FAIL.** It fails today by 5.4398 mm3, and that is the
-// defect rather than the test being wrong. Read it beside
-// `step-region-beyond-the-band.scad`, which guards the same surface's face
-// count; this one states what the solid *is*.
+// **Registered WILL_FAIL from 2026-09-22 to 2026-09-24**, failing by 5.4398
+// mm3, and that was the defect rather than the test being wrong; it passes on
+// its own merits since, and the marking is gone - see the end of this comment.
+// Read it beside `step-region-beyond-the-band.scad`, which guards the same
+// surface's face count; this one states what the solid *is*.
 //
 // Why this shape, and every choice in it is load bearing. The pocket is cut
 // with `rotate_extrude(angle = 45)`, so at $fn = 32 it takes 45/11.25 = 4
@@ -58,6 +59,17 @@
 // doc/step-recognition-design.md, *R0, attempted and reverted* - so the number
 // here stays wrong until R0 is done properly. The day it is, ctest reports this
 // as a failure, which is how the fix announces itself.
+//
+// **It announced itself on 2026-09-24**, and not through the band at all. The 8
+// short facets are D0 ground: their maker declared the cylinder and every one
+// of their corners is on it at machine precision. What left them planar were the
+// trimmed-quadric pass's region rules - a floor of three facets, a median span -
+// which are statistics over the tessellation, and a D4 rule may not decide D0
+// ground (doc/step-rungs.md). Once those rules decide only the facets the band
+// admitted, both tiers export 13147.565255, the derived figure, and the round
+// trip reads Cylinder 6, Plane 6, with 12 exact circles. The wall is still two
+// kinds of face - the band's ring and the remainder as quadric patches - which is
+// R0's representation question and no longer a question of what the solid is.
 $fn = 32;
 difference() {
   cylinder(h = 30, r = 12);
