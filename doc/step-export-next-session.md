@@ -19,6 +19,7 @@ was built, how to work, and what to do next. The priming prompt is at the end.
 | --- | --- |
 | **`doc/step-recognition-design.md`** | **MANDATORY.** The claim ledger, Propose / Arbitrate / Assemble, region before representation, the migration plan (steps 1-3 now done), *Determinacy: the ground this design stands on*, *Step 1, finished*, and **The recognition module, as built** - the architecture you are working in, how to add a recogniser, and what is not done |
 | **`doc/step-rungs.md`** | **MANDATORY.** What determines each entity and therefore which rung it is: the D0-D4 classes, the covering order, the ladders for curves (C0-C6), surfaces (S0-S3), regions (R0-R2) and corners, and how to read a result |
+| **`doc/step-design-checklist.md`** | **MANDATORY, and binding.** The two documents above as one numbered list of questions, each with what enforces it - an `EXPORT-ERROR`, a test, or *none yet*. Every change, PoC, design concept and hypothesis is walked against every row before it lands, and the commit states the result |
 | `doc/step-export-development.md` | what is settled: the declaration channel (now with *who declared a surface, and in which role*), boundary machinery, corner arbiter, kernels, testing doctrine (now with *behaviour-neutral is proven by the oracle*), traps (now with this session's process traps) |
 | `doc/step-export-wip.md` | open items - read **30, 31, 32** (new), 27, 29, and 17 (superseded) |
 | `scripts/step-diagnostics/README.md` | every instrument, by the question it answers |
@@ -43,6 +44,21 @@ commit message).
 | `f1fbcc41c` | **Ownership is identity plus D0 presence** (open item 31). The parked switch, plus the fix it needed: a facet wholly on a *declared plane* is a facet of that plane, never presence on a curved surface - a cap has every corner on the rim. Against the base: entity census and ledger identical on all 104 exports; only step-cylinder-cross and step-declare-cone's ownership reports move, as identity predicts |
 | `45e8b3d3c` | **A D4 rule may not decide D0 ground** (open item 30, closed). Each quadric proposal states per facet what decided membership - D0 by identity (`Provenance::owns`) and exact position, D4 by the band - and the arbiter is told before any grant (`Arbiter::stateMembership`). The claim's region rules (floor, span median, worst corner) decide only D4 members; a stale worst corner and a fringe that made D0 ground unformable are fixed too. **The sanity test now holds every fixture's approximation tier against its exact tier facet by facet** (`surrendered`). lid10's approximation tier 6 to 41 cylindrical faces; **step-region-pocket exports its derived 4185 pi and lost its WILL_FAIL**. New fixture step-exchange-never-surrender |
 | `9bcea3694` | **D0 at machine precision** - `recognition/Exact.h`: the forward-error bound of the residual, no threshold - in the quadric pass, `runsThrough` and the band pass's sphere and torus zones. It exposed a feedstock defect: `offset()` emits round-join points on Clipper's 2^-27 grid, half a cell off the arcs it declares, and step-rounded-profile's tori fell to cones. Fixed at the origin, `Polygon2d::placeOnArcs`, after the offset and after every 2D boolean. New fixture step-rounded-profile-notched |
+
+**Later the same session**: the D0 regions (`recognition/Membership`, a pure
+stage, `bfd9c77df`); systemic defects as `EXPORT-ERROR`s and the suite reading
+them, with `KNOWN-EXPORT-ERROR` for named known defects (`7d85bd57e`; open items
+32 closed, 33 and 34 new, 28 measured); and **`doc/step-design-checklist.md`**,
+binding on every change from now on.
+
+**Today's landings walked against the checklist, honestly:**
+
+| commit | holds | breaks, or left broken |
+| --- | --- | --- |
+| `f1fbcc41c` identity plus presence | A1-A5, B5 (improved), E4, F2 | C2 - the presence test still held 1e-7 (fixed in `9bcea3694`) |
+| `45e8b3d3c` D4 rules off D0 ground | C3, C5, C6, B6 (improved), F2 | **B3 / D1** - on lid10's cone 48, the bayonet's cylinder 6 and cone 71, step-region-pocket and step-declare-grid-two-bands the D0 remainder beside a band became a quadric patch: the boundary between them was already there (band against planes), but the landing was not checked against B3, and it should have been. Now `KNOWN-EXPORT-ERROR`s; R0 removes them |
+| `9bcea3694` machine precision | C2, E3 (feedstock fixed at the origin), F2 | C2 in the band pass's measured-parameter matching, named in `Exact.h` |
+| `bfd9c77df`, `7d85bd57e` regions and errors | B1-B6 enforced, B5 fixed at the root (witness named as face) | B7 - cut facets are outside the D0 region; F9 - CGAL non-determinism, measured |
 
 **The standing rules the author added this session, all now in memory**
 (`closed-form-or-proof`): every entity aims at a pure closed algebraic form;
@@ -504,8 +520,17 @@ sessions, and every change to recognition or to a rung is justified against
 them. Before building anything, find the paragraph that already covers it - two
 sessions running lost most of a day rediscovering what they already said. Then
 doc/step-export-development.md (what is settled, testing doctrine, traps) and
-doc/step-export-wip.md (open items 29, 31, 27, 32; 30 is closed). Section 2b of
-the handover is the latest session in one page - read it before section 1.
+doc/step-export-wip.md (open items 29, 31, 27, 33, 34, 28; 30 and 32 are
+closed). Section 2b of the handover is the latest session in one page - read it
+before section 1.
+
+THE CHECKLIST IS BINDING: doc/step-design-checklist.md holds every rule of the
+two mandatory documents as a question with what enforces it. Every change, PoC,
+design concept and hypothesis is walked against every row before it lands, and
+the commit says which rows it touches and how it holds. What can be an
+EXPORT-ERROR is one, and every fixture run fails on an EXPORT-ERROR; a fixture
+carrying a known systemic defect names it with KNOWN-EXPORT-ERROR, never
+WILL_FAIL.
 
 PURITY IS NOT NEGOTIABLE. Recognition now runs as a pipeline in
 src/geometry/recognition/: band -> fit -> propose (pure) -> Bezier -> grid ->

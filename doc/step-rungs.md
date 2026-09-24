@@ -6,6 +6,9 @@ computation, and one made a census three times worse. Each was reasoned, none
 was surveyed. This document is the survey: for every analytic entity the
 exporter writes, *what fixes it*, and therefore where it belongs in the order.
 
+**Every rule here is also a row of `doc/step-design-checklist.md`**, which every
+change is held against before it lands.
+
 **Read with it, since 2026-09-23:** `doc/step-recognition-design.md`,
 *Determinacy: the ground this design stands on* - a D0 with **correct
 provenance** is the anchor; an entity is as precise as the **independent** closed

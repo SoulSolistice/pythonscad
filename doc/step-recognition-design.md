@@ -7,6 +7,9 @@ it produced is worth having (lid10: **56 facets a quadric covers are held by a
 band's wall**, never visible before), and the cost of getting it is the problem
 this document exists to remove.
 
+**Every rule here is also a row of `doc/step-design-checklist.md`**, which every
+change is held against before it lands.
+
 This is a design, not a record of what is built. What is built is in
 `doc/step-export-development.md`; what is open is in `doc/step-export-wip.md`.
 

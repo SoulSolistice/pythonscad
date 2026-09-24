@@ -891,6 +891,7 @@ smoke testing, JavaScript API (`EmsInitPython` / `EmsEvaluatePython`), and known
 | `CLAUDE.md` | this file: environment, build, packaging, running and testing |
 | `doc/step-export-next-session.md` | STEP exporter: the handover — tooling, doctrine, what was measured, next steps, priming prompt. **Start here.** |
 | `doc/step-rungs.md` | STEP exporter: what determines each entity, and therefore which rung it is — the survey. **MANDATORY before touching a rung; not advisory** |
+| `doc/step-design-checklist.md` | STEP exporter: every rule of the two documents above as a question, with what enforces it. **Every change, PoC and design concept is held against it before it lands, and the commit states the result** |
 | `doc/step-recognition-design.md` | STEP exporter: the claim ledger, Propose/Arbitrate/Assemble, region before representation, and the migration plan. **MANDATORY before touching recognition; work inside its numbered steps** |
 | `doc/step-export-development.md` | STEP exporter: settled design, kernel behaviour, testing doctrine, traps, refuted claims |
 | `doc/step-export-wip.md` | STEP exporter: open items, unexplained results, roadmap, handover |
