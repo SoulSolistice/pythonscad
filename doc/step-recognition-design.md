@@ -795,6 +795,38 @@ derived volume was reached without the band yielding anything. The next landing
 is the same order *between* claimants: the band's ring and a whole-region claim,
 both D0, where the arbiter must choose the one that will be written (R0).
 
+**R0 is region first, and the region is sequence-agnostic - recorded
+2026-09-24, from the author.** *"We need to make sure to not split on a
+misattributed boundary, because this inevitably leaves facets behind that can
+no longer be attributed. This is the core of the ledger being sequence
+agnostic."* A boundary between two faces of one declared surface that the model
+never drew - a band's ring here, a patch there - is whoever-ran-first written
+into the file, and the facets on the wrong side of it are exactly the ones no
+later pass can attribute. So R0 is not "the arbiter chooses between a ring and a
+whole region" after the band pass has carved the ring; the band pass must not
+carve at all:
+
+1. **The region is a pure function of provenance and exact membership**: per
+   declared surface, the connected components of facets whose maker owns it
+   (identity plus presence) and whose every corner is on it at machine
+   precision. The quadric proposal already computes exactly this, per facet
+   (`QuadricProposal::decided == D0`), reading no claim - so it is the same
+   whatever order anything runs in.
+2. **The representation is chosen per region, second**: a band where the region
+   *is* a ring between two rims, a trimmed patch otherwise. The ring walk
+   becomes a test of a given region's shape, never the thing that decides which
+   facets belong. Its seed loop, which skips facets an earlier seed's ring took,
+   is sequence dependence of exactly the kind this rules out.
+3. **The ledger's "declared surface is split between different kinds of
+   recogniser" becomes an assertion** once this lands: a split of one connected
+   D0 region is a misattributed boundary, and should be an `EXPORT-ERROR`.
+
+Measured state before it lands, 2026-09-24: since the D0 membership landing,
+the D0 remainders beside a band are written as quadric patches rather than
+planes - step-region-pocket's wall (34 band + 2 patch, exact volume), lid10's
+cone 48, the bayonet's cylinder 6 and cone 71. None of their facets is stranded
+any more, and every one of those boundaries is misattributed.
+
 **What is not done, named so it is not mistaken for done:**
 
 - **Step 4, the policy.** The arbiter's grant is still today's call order - pass

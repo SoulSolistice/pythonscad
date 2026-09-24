@@ -71,7 +71,8 @@ order (`held() || taken`); `ClaimPrecision` is reported, never ranked on.
   bayonet's cylinder 6 (52 + 8) and cone 71 (56 + 6), and step-region-pocket's
   wall (34 + 2, now with the exact volume). That is **R0**, and the next landing.
 
-**Why R0 needs the band split first, found this session.** Rim resolution runs
+**Why R0 cannot be done after the band pass, found this session** (and see the
+author's correction below it: region first). Rim resolution runs
 *inside* the band pass as a fixed point, a band whose neighbour dies is dropped
 with it (*"the band sharing this rim was dropped"*), and `RimRef` has no kind
 for a quadric patch. So exchanging a band after the band pass orphans its
@@ -407,17 +408,21 @@ of 58, unit tests unchanged.
 **Revised 2026-09-24 (second session)** - items 1 and 2's first candidate are
 done (section 2b). In order now:
 
-1. **Split the band pass into propose and form**, behaviour-neutral, proven by
-   `measure` / `compare` (0 differences over 108 exports is the bar). The shared
-   closures of `recogniseSurfacesOfRevolution` become a small context both halves
-   use; the pipeline gets a band-propose and a band-form stage, and the table
-   says what each reads.
-2. **R0 between the halves**, fixture first: the rings of a surface against its
-   whole connected D0 region (the quadric proposal's D0 members), the region
-   granted only where it forms and the writer can bound it; otherwise the rings.
-   Judged by step-region-pocket (one face per surface, still 4185 pi),
-   step-split-surface (the derived 15647.634695 - check that figure is derivable
-   before asserting it), and lid10's and the bayonet's split surfaces gone.
+1. **R0 as region first, sequence-agnostic** - read
+   `doc/step-recognition-design.md`, *R0 is region first, and the region is
+   sequence-agnostic*, before anything else; the author's correction of this
+   plan is recorded there. The region is a pure function of provenance and exact
+   membership (the quadric proposal's D0 members, per declared surface,
+   connected); the representation - a band where the region is a ring between two
+   rims, a trimmed patch otherwise - is chosen per region, second. The band
+   pass's ring walk becomes a shape test of a given region and stops carving
+   regions. Split the band pass into its ring-shape test and its form (rims,
+   seams, zones) on the way, each step neutral by the oracle where it claims to
+   be. Fixture first; judged by step-region-pocket (one face per surface, still
+   4185 pi), step-split-surface (the derived 15647.634695 - check that figure is
+   derivable before asserting it), lid10's and the bayonet's split surfaces gone.
+2. **The "declared surface is split" warning becomes an `EXPORT-ERROR`** once 1
+   lands: a split of one connected D0 region is a misattributed boundary.
 3. **Provenance in the grant**: a claimant whose facet's maker owns the surface
    beats one that does not - moves nothing measured today, so it lands with a
    fixture that makes it move. Then the design's shuffled-order test.
@@ -555,14 +560,16 @@ lid10 is a SPECIMEN, not a deliverable; a finding counts once a synthetic
 fixture isolates it. It needs its customizer: -p examples/step_test/lid10.json
 -P "New set 1".
 
-Where to start: handover section 6 as revised. (1) Split the band pass into
-propose (Bands.cc 34-646: walk rings, match declarations) and form (647-1443:
-rims, seams, releases, zone merges), behaviour-neutral by the oracle. (2) R0
-between the halves, fixture first: a surface's rings against its whole
-connected D0 region, the region granted only where it forms and the writer can
-bound it, else the rings. (3) Provenance in the grant, then the shuffled-order
-test. (4) The band pass at D0 proper - points against the declaration, not a
-measured axis against it.
+Where to start: handover section 6 as revised. (1) R0 as REGION FIRST AND
+SEQUENCE-AGNOSTIC: never split one declared surface on a boundary the model
+does not have - it strands facets no later pass can attribute. The region is a
+pure function of provenance and exact membership (the quadric proposal's D0
+members, connected, per surface); the representation - a band where the region
+is a ring, a trimmed patch otherwise - is chosen per region, second, and the
+band pass stops carving regions. (2) Then the split warning becomes an
+EXPORT-ERROR. (3) Provenance in the grant, then the shuffled-order test. (4) The
+band pass at D0 proper - points against the declaration, not a measured axis
+against it.
 
 Derive expectations from the model, never from a kernel, and never calculate
 anything from a faceted input. Mutation-check every new assertion and every
