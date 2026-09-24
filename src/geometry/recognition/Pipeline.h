@@ -13,6 +13,7 @@
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/FacetGraph.h"
 #include "geometry/recognition/Membership.h"
+#include "geometry/recognition/Representation.h"
 
 class Surface;
 
@@ -53,6 +54,7 @@ struct Recognition {
   std::vector<AnalyticFeatures::Patch> grid_faces;      // declared sweeps written as faces
   std::vector<AnalyticFeatures::Patch> quadric_faces;   // trimmed quadrics written as faces
   std::vector<Region> d0_regions;  // each declared surface's D0 region - see Membership.h
+  std::vector<RegionRepresentation> d0_representations;  // how each would be written - proposals
 };
 
 /*! Run every stage. `out` is filled as the stages run, so a Writability that

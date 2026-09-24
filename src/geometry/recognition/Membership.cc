@@ -35,6 +35,21 @@ std::vector<char> onDeclaredPlane(const FacetGraph& graph,
   return out;
 }
 
+std::vector<std::size_t> d0Conflicts(const std::vector<Region>& regions)
+{
+  std::map<std::size_t, std::size_t> first_surface;
+  std::vector<std::size_t> out;
+  for (const Region& region : regions) {
+    for (const std::size_t f : region.facets) {
+      const auto it = first_surface.emplace(f, region.surface_index).first;
+      if (it->second != region.surface_index) out.push_back(f);
+    }
+  }
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
 std::vector<Region> d0Regions(const FacetGraph& graph,
                               const std::vector<std::shared_ptr<Surface>>& surfaces,
                               std::size_t declared, const Provenance& provenance)

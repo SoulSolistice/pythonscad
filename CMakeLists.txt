@@ -1627,6 +1627,7 @@ set(CORE_SOURCES
   src/geometry/recognition/Fits.cc
   src/geometry/recognition/Grids.cc
   src/geometry/recognition/Membership.cc
+  src/geometry/recognition/Representation.cc
   src/geometry/recognition/Quadrics.cc
   src/geometry/recognition/Regions.cc
   src/geometry/recognition/Pipeline.cc

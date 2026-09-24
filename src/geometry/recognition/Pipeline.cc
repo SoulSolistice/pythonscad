@@ -109,6 +109,15 @@ void runRegions(Context& ctx)
   ctx.d0 = D0Membership(ctx.out.d0_regions);
 }
 
+/*! The representation stage: how each D0 region would be written - rings, one
+ * patch, or nothing this writer has - chosen for the region, from the
+ * declaration, at machine precision. See Representation.h. Pure, and granted
+ * nothing yet: reported against what holds each region today. */
+void runRepresent(Context& ctx)
+{
+  ctx.out.d0_representations = representRegions(ctx.graph, *ctx.in.surfaces, ctx.out.d0_regions);
+}
+
 /*! The band stage: rings of facets on a declared surface of revolution. Reads
  * the graph and the declarations only. */
 void runBands(Context& ctx)
@@ -958,8 +967,9 @@ enum Product : unsigned {
   kSweepFaces = 1u << 6,
   kQuadricFaces = 1u << 7,
   kLeftover = 1u << 8,
-  kProposals = 1u << 9,  // what every patch recogniser wants - pure
-  kRegions = 1u << 10,   // each declared surface's D0 region - pure
+  kProposals = 1u << 9,         // what every patch recogniser wants - pure
+  kRegions = 1u << 10,          // each declared surface's D0 region - pure
+  kRepresentations = 1u << 11,  // how each D0 region would be written - pure
 };
 
 /*! The stages, in the order the policy in force runs them, each with what it
@@ -980,6 +990,7 @@ struct Stage {
 };
 constexpr Stage kStages[] = {
   {"region", kGraph | kDeclarations | kProvenance, kRegions, runRegions},
+  {"represent", kGraph | kDeclarations | kRegions, kRepresentations, runRepresent},
   {"band", kGraph | kDeclarations | kRegions, kBands, runBands},
   {"fit", kGraph | kDeclarations | kBands | kRegions, kFits | kBands, runFits},
   {"propose", kGraph | kFits | kProvenance | kRegions, kProposals, runPropose},

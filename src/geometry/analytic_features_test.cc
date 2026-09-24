@@ -20,6 +20,8 @@
 #include <vector>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Membership.h"
+#include "geometry/recognition/Representation.h"
 
 using namespace AnalyticFeatures;
 
@@ -1054,4 +1056,78 @@ TEST_CASE("proposals do not depend on what is held or on the order proposers run
   CHECK(again[0].span == first[0].span);
   CHECK(again[0].decided == first[0].decided);
   CHECK(again[0].gated == first[0].gated);
+}
+
+// doc/step-design-checklist.md, A7 and B2: the region is sequence-agnostic. The
+// D0 regions and the representation each is given must not depend on the order
+// the declarations arrive in - checked here by declaring the same two surfaces
+// both ways round and comparing the answers surface by surface.
+TEST_CASE("D0 regions and their representations do not depend on the order of the declarations",
+          "[analytic][purity]")
+{
+  const FacetedCylinder cyl(16, 10.0, 5.0);
+  const Mesh mesh = cyl.mesh();
+  const recognition::FacetGraph graph(mesh);
+  const auto wall = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10.0);
+  const auto other = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 20.0);
+  const std::vector<int32_t> origin(mesh.loops->size(), 1);
+
+  auto answer = [&](const std::vector<std::shared_ptr<Surface>>& surfaces) {
+    const std::map<int32_t, std::vector<std::size_t>> owned{{1, {0, 1}}};
+    Provenance provenance;
+    provenance.face_origin = &origin;
+    provenance.owned = &owned;
+    provenance.declared = surfaces.size();
+    const std::vector<recognition::Region> regions =
+      recognition::d0Regions(graph, surfaces, 2, provenance);
+    const std::vector<recognition::RegionRepresentation> reps =
+      recognition::representRegions(graph, surfaces, regions);
+    // keyed by the surface itself, not its index
+    std::map<const Surface *, std::vector<std::pair<std::vector<std::size_t>, int>>> out;
+    for (const auto& rep : reps) {
+      const recognition::Region& region = regions[rep.region];
+      out[surfaces[region.surface_index].get()].push_back({region.facets, int(rep.kind)});
+    }
+    return out;
+  };
+  const auto forward = answer({wall, other});
+  const auto backward = answer({other, wall});
+  REQUIRE(forward.count(wall.get()) == 1);  // the wall is a region - the check is not vacuous
+  CHECK(forward == backward);
+}
+
+// C9: a facet whose maker owns two surfaces, with every corner on both, is a
+// conflict nothing but a declaration can settle. Two cylinders along z pass
+// through the two rulings of wall facet 0 - a quad on two parallel lines lies on
+// a whole family of them - and the guard names that facet and no other. Owned
+// by one original only, the second cylinder has no region and nothing conflicts.
+TEST_CASE("a facet that is D0 on two declared surfaces is a conflict", "[analytic][provenance]")
+{
+  const int fn = 16;
+  const double r = 10.0;
+  const FacetedCylinder cyl(fn, r, 5.0);
+  const Mesh mesh = cyl.mesh();
+  const recognition::FacetGraph graph(mesh);
+  const Vector3d p1(r, 0, 0), p2(r * cos(2 * M_PI / fn), r * sin(2 * M_PI / fn), 0);
+  const Vector3d mid = (p1 + p2) / 2;
+  const Vector3d inward = -mid.normalized();
+  const Vector3d centre = mid + inward * 3.0;  // on the chord's bisector, not the axis
+  const double r2 = (p1 - centre).norm();
+  const std::vector<std::shared_ptr<Surface>> surfaces{
+    std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), r),
+    std::make_shared<CylinderSurface>(centre, Vector3d(0, 0, 1), r2)};
+  const std::vector<int32_t> origin(mesh.loops->size(), 1);
+
+  const std::map<int32_t, std::vector<std::size_t>> owns_both{{1, {0, 1}}};
+  Provenance provenance;
+  provenance.face_origin = &origin;
+  provenance.owned = &owns_both;
+  provenance.declared = surfaces.size();
+  const std::vector<std::size_t> conflicts =
+    recognition::d0Conflicts(recognition::d0Regions(graph, surfaces, 2, provenance));
+  CHECK(conflicts == std::vector<std::size_t>{0});
+
+  const std::map<int32_t, std::vector<std::size_t>> owns_one{{1, {0}}};
+  provenance.owned = &owns_one;
+  CHECK(recognition::d0Conflicts(recognition::d0Regions(graph, surfaces, 2, provenance)).empty());
 }

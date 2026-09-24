@@ -2697,10 +2697,12 @@ void StepKernel::build_tri_body(
       recognition::Mesh{&vertices, &loops, &loop_valid, &loop_is_hole, &loop_normals},
       faceOrigin,
       owned,
-      &rec.d0_regions};
+      &rec.d0_regions,
+      &rec.d0_representations};
     recognition::dumpLedger(report_inputs);
     recognition::reportArbitration(report_inputs);
     recognition::reportRegions(report_inputs);
+    recognition::reportRepresentations(report_inputs);
   }
   if (approximate) {
     // The distinct surfaces of the analytic faces at each corner. Bands are

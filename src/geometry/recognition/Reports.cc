@@ -269,6 +269,88 @@ void reportRegions(const ReportInputs& in)
   }
 }
 
+void reportRepresentations(const ReportInputs& in)
+{
+  if (in.regions == nullptr || in.representations == nullptr || in.regions->empty()) return;
+  const ClaimLedger& ledger = in.features.ledger;
+  std::size_t rings = 0, patches = 0, none = 0, agree = 0, differ = 0, differ_facets = 0;
+  std::map<std::string, std::size_t> why_none;
+  std::vector<std::string> first_differ;
+  for (const RegionRepresentation& rep : *in.representations) {
+    const Region& region = (*in.regions)[rep.region];
+    // What today's passes hold this region with: one kind on its own surface,
+    // or not.
+    std::set<std::string> holders;
+    for (const std::size_t f : region.facets) {
+      const Claim *holder = ledger.firstClaimant(f);
+      if (holder == nullptr || holder->by == nullptr) holders.insert("the tessellation");
+      else if (holder->surface_index != region.surface_index) holders.insert("another surface");
+      else holders.insert(holder->by);
+    }
+    const bool by_band =
+      holders.size() == 1 && holders.count(kBandWall.by) + holders.count(kBandCap.by) == 1;
+    const bool band_and_cap =
+      holders.size() == 2 && holders.count(kBandWall.by) == 1 && holders.count(kBandCap.by) == 1;
+    const bool by_quadric = holders.size() == 1 && holders.count(kQuadricFace.by) == 1;
+    bool same = false;
+    const char *as = "nothing";
+    switch (rep.kind) {
+    case RegionRepresentation::Rings:
+      rings++;
+      as = "rings";
+      same = by_band || band_and_cap;
+      break;
+    case RegionRepresentation::Patch:
+      patches++;
+      as = "one patch";
+      same = by_quadric;
+      break;
+    case RegionRepresentation::None:
+      none++;
+      why_none[rep.not_patch != nullptr ? rep.not_patch : "no reason given"]++;
+      same = holders.size() == 1 && holders.count("the tessellation") == 1;
+      break;
+    }
+    if (same) {
+      agree++;
+      continue;
+    }
+    differ++;
+    differ_facets += region.facets.size();
+    if (first_differ.size() < 3) {
+      std::string held;
+      for (const std::string& h : holders) held += (held.empty() ? "" : " + ") + h;
+      first_differ.push_back(
+        "surface " + std::to_string(region.surface_index) + ", " + std::to_string(region.facets.size()) +
+        " facets: " + as + ", held today by " + held +
+        (rep.not_rings != nullptr ? std::string(" (not rings: ") + rep.not_rings + ")" : std::string()));
+    }
+  }
+  LOG(
+    "STEP export: region first, as it would write - %1$d regions: %2$d as rings, %3$d as one patch, "
+    "%4$d "
+    "with no closed-form writer; %5$d written that way today, %6$d not (%7$d facets)",
+    int(in.representations->size()), int(rings), int(patches), int(none), int(agree), int(differ),
+    int(differ_facets));
+  for (const std::string& line : first_differ) LOG("STEP export:   would change: %1$s", line.c_str());
+  for (const auto& kv : why_none) {
+    LOG("STEP export:   %1$d region%2$s with no closed-form writer: %3$s", int(kv.second),
+        kv.second == 1 ? "" : "s", kv.first.c_str());
+  }
+  // A facet in the D0 regions of two different surfaces: its maker owns both
+  // and every corner is on both. Neither provenance nor membership can say which
+  // it belongs to - doc/step-design-checklist.md, C9 - so it wants a declaration,
+  // not an order. Measured 2026-09-24: none on any export that has regions; so
+  // an error, not a figure, and a unit test builds one to show it fires.
+  const std::vector<std::size_t> twice = d0Conflicts(*in.regions);
+  if (!twice.empty()) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d facets are D0 on two declared surfaces at once (first facet %2$d) - "
+        "neither provenance nor membership decides between them, and only a declaration can",
+        int(twice.size()), int(twice.front()));
+  }
+}
+
 void reportArbitration(const ReportInputs& in)
 {
   [[maybe_unused]] const AnalyticFeatures::Result& features = in.features;

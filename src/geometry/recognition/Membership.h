@@ -72,6 +72,12 @@ private:
   std::map<std::size_t, std::vector<std::size_t>> by_surface_;
 };
 
+/*! Facets in the D0 regions of two different declared surfaces: the maker owns
+ * both and every corner is on both. Neither provenance nor membership can say
+ * which such a facet belongs to (doc/step-design-checklist.md, C9) - it wants a
+ * declaration, never an order. Ascending. */
+std::vector<std::size_t> d0Conflicts(const std::vector<Region>& regions);
+
 /*! Per facet: 1 where every corner lies on one declared plane at machine
  * precision. `surfaces[0, declared)` are the model's own. */
 std::vector<char> onDeclaredPlane(const FacetGraph& graph,
