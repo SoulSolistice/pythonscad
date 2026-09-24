@@ -56,6 +56,20 @@
 // analytic face on the surface that face is written on. The approximation figure
 // is 0.0054% under the smooth solid, which is the boundary that is still chords
 // rather than the curve the two surfaces cross along.
+//
+// Known systemic defect: twelve facets of a D0 region - maker owns the
+// surface, every corner on it exactly - are left as planes at the exact tier:
+// formed as small quadric regions and refused by the writer's all-or-nothing
+// boundary rule. D0 ground fallen to the tessellation with no proof that no
+// closed form exists. Tolerated by name; the test fails the day it is no
+// longer raised.
+// KNOWN-EXPORT-ERROR: of a D0 region are left to the tessellation
+// And on the CGAL backend, a planar face whose bound leaves its plane - open
+// item 33, as in step-band-family - but here only in some runs: this model's
+// CGAL export is not deterministic (open item 28; four different reports in six
+// identical runs, measured 2026-09-24, where the Manifold export gave one). So
+// tolerated, not required.
+// KNOWN-EXPORT-ERROR-INTERMITTENT: assert a plane one of their own bounds is not in
 
 $fn = 64;
 intersection() {

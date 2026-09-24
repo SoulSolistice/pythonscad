@@ -1763,6 +1763,15 @@ did once, and every approximation fixture failed at the same moment.
 | `RADII:` | every face of a kind has this radius | yes — the model says `r=10` |
 | `EDGES:` / `EDGES-APPROX:` | the kernel's edge census | mostly |
 | `CANONICAL:` | what the kernel thinks each B-spline really is | no — it is an audit |
+| `KNOWN-EXPORT-ERROR:` | a systemic defect the fixture is known to carry, by a substring of the `EXPORT-ERROR` line; any other error fails the test, and so does this one once no run raises it | no - it names a defect, it asserts none |
+
+**Every run fails on an `EXPORT-ERROR`, since 2026-09-24.** The exporter raises
+one where it can tell its own output is wrong - a shadow check that disagrees, a
+D0 region split on a boundary the model does not have, D0 ground left to the
+tessellation. Until then the sanity test never read them and they were loud to
+nobody. A fixture that carries a known one names it with `KNOWN-EXPORT-ERROR:`,
+never with `WILL_FAIL`, which passes a test whatever it fails on and so blinds it
+to every other regression.
 
 **`ROUNDTRIP:` is exhaustive.** It accounts for every surface kind the kernel
 reads, not only the ones a fixture names. Checking a subset let an unlisted kind

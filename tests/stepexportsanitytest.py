@@ -79,7 +79,53 @@ def export(openscad, inputfile, outfile, extra_args, env=None):
         failquit("PythonSCAD exited with status %d without exporting %s" % (proc.returncode, outfile))
     if not os.path.exists(outfile):
         failquit("PythonSCAD reported success but wrote no file to " + outfile)
+    # The exporter's own verdict on its output. Every EXPORT-ERROR is a systemic
+    # defect it detected in what it wrote - a shadow check that failed, a claim
+    # that names no surface, a D0 region split on a boundary the model does not
+    # have - and until 2026-09-24 this test never read them, so on every fixture
+    # they were loud to nobody (open item 32). Any run, any tier.
+    #
+    # A fixture known to carry one says so with a KNOWN-EXPORT-ERROR: line
+    # naming it - see known_export_errors(). Only that error is tolerated, and
+    # only while it keeps appearing.
+    known = known_export_errors(inputfile) + known_export_errors(inputfile, intermittent=True)
+    errors = [line for line in output.splitlines() if "EXPORT-ERROR" in line]
+    for line in errors:
+        hit = [k for k in known if k in line]
+        if not hit:
+            failquit("the exporter says its own output is wrong (%s):\n  %s"
+                     % (" ".join(extra_args) or "default", line))
+        KNOWN_SEEN.update(hit)
     return output
+
+
+KNOWN_SEEN = set()
+
+
+def known_export_errors(path, intermittent=False):
+    """Systemic defects a fixture is known to carry: `KNOWN-EXPORT-ERROR: <text>`,
+    each a substring of an EXPORT-ERROR line the exporter raises about its own
+    output. Narrower than WILL_FAIL on purpose - that passes a test whatever it
+    fails on, and so hides every other regression in the fixture. This tolerates
+    one named error, fails on any other, and fails when the named one is no
+    longer raised by any run, so the fix announces itself (see the end of this
+    script).
+
+    `KNOWN-EXPORT-ERROR-INTERMITTENT:` is the weaker form, for an error that
+    comes and goes between identical runs: tolerated, and not required. It
+    exists only because the exporter is not deterministic on the CGAL backend
+    (doc/step-export-wip.md, open item 28) - measured on step-cap-meets-wall,
+    four different reports in six identical runs - and a fixture using it has
+    to say so. It is a defect of its own, and the directive goes when item 28
+    does."""
+    found = []
+    tag = "KNOWN-EXPORT-ERROR-INTERMITTENT" if intermittent else "KNOWN-EXPORT-ERROR"
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.search(r"(?<![-\w])" + tag + r":\s*(.+?)\s*$", line)
+            if m:
+                found.append(" ".join(m.group(1).split()))
+    return found
 
 
 def normalized(path):
@@ -727,6 +773,15 @@ if ok:
 if ok:
     ok = check_approximation(args.openscad, inputfile, stepfile, remaining_args,
                              exact_ledger=exact_ledger)
+
+# A known defect that no run raised any more is fixed - or no longer reached,
+# which needs looking at just as much. Either way the directive has to go.
+if ok:
+    for known in known_export_errors(inputfile):
+        if known not in KNOWN_SEEN:
+            print("the fixture lists a KNOWN-EXPORT-ERROR no run raised: %r - it is fixed, "
+                  "take the directive out" % known, file=sys.stderr)
+            ok = False
 
 if ok:
     os.unlink(stepfile)

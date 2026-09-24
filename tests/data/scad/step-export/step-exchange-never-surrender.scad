@@ -51,6 +51,13 @@
 // No VOLUME: the slot's and the channel's walls are cut against each other's
 // tessellation, so the solid is a mixture of an exact cylinder and 24-gon and
 // 240-gon chords, and no figure for it is derivable from the model.
+//
+// Known systemic defect: on the CGAL backend only, a planar face is written
+// with a bound that leaves its plane by more than the mesh's own coplanarity
+// allows - raised by the exporter about its own output and never read by this
+// test until 2026-09-24. Not yet chased: doc/step-export-wip.md, open item
+// 33. Tolerated by name; the test fails the day it is no longer raised.
+// KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
 $fn = 24;
 R = 30; Ri = 24; H = 30;
 z0 = 8; h = 8; ramp = 3;

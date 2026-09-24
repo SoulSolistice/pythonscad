@@ -205,9 +205,12 @@ void reportRegions(const ReportInputs& in)
         edges++;
       }
     }
-    if (by_holder.size() == 1 && by_holder.begin()->first != "the tessellation" &&
-        by_holder.begin()->first.find(" on another surface") == std::string::npos) {
-      whole++;
+    // One holder for the whole region is not a split, whatever that holder is:
+    // held under another surface's name, or left to the tessellation, is counted
+    // above as what it is. A split is two holders inside one region.
+    if (by_holder.size() == 1) {
+      const std::string& only = by_holder.begin()->first;
+      if (only != "the tessellation" && only.find(" on another surface") == std::string::npos) whole++;
       continue;
     }
     split++;
@@ -230,6 +233,33 @@ void reportRegions(const ReportInputs& in)
     int(in.regions->size()), int(surfaces_seen.size()), int(facets), int(whole), int(split),
     int(inner_edges), int(faceted), int(elsewhere));
   for (const std::string& line : first_split) LOG("STEP export:   split: %1$s", line.c_str());
+  // Each of these is a systemic defect, not a quality figure, and none of them
+  // may pass silently: doc/step-recognition-design.md, *the representation fits
+  // the region, never the region the representation*, and doc/step-rungs.md, *a
+  // rung may never manufacture a boundary*. A split region is a boundary the
+  // model does not have, whoever-ran-first written into the file; a D0 facet
+  // held for another surface is ground attributed against the model's own
+  // statement of who made it; a D0 facet left to the tessellation is closed-form
+  // ground fallen to planes with nothing proving no closed form exists.
+  if (split > 0) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d D0 region%2$s split on a boundary the model does not have, %3$d mesh edges "
+        "inside them between differently-held facets - a region is decided by its declaration and "
+        "written whole, never carved by a representation",
+        int(split), split == 1 ? " is" : "s are", int(inner_edges));
+  }
+  if (elsewhere > 0) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d facets of a D0 region are held for a different surface than the one their "
+        "maker declared them on",
+        int(elsewhere));
+  }
+  if (faceted > 0) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d facets of a D0 region are left to the tessellation - closed-form ground "
+        "written as planes",
+        int(faceted));
+  }
   if (filtered > 0) {
     LOG(
       "STEP export: %1$d facets of a declared cylinder or cone are D0 and the trimmed-quadric pass did "

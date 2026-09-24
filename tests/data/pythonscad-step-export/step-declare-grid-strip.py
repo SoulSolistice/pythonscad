@@ -105,6 +105,13 @@ standing off the chords by about that band, in the direction it should.
 # sweep alone - the several cylinder faces are one wall each side of the seam
 # it is cut at, since a face written on an open rectangle cannot wrap.
 # ROUNDTRIP-APPROX: BSplineSurface=2 Cylinder=9 Plane=4
+#
+# Known systemic defect: on the CGAL backend only, a planar face is written
+# with a bound that leaves its plane by more than the mesh's own coplanarity
+# allows - raised by the exporter about its own output and never read by this
+# test until 2026-09-24. Not yet chased: doc/step-export-wip.md, open item 33.
+# Tolerated by name; the test fails the day it is no longer raised.
+# KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
 from pythonscad import *
 import math
 

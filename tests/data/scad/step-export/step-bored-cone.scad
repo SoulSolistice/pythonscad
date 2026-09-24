@@ -79,6 +79,13 @@
 // default 1e-6 the harness applies when no window is given, so the +/- 12.0 goes
 // and the assertion becomes four times stricter than the thing it is measuring.
 // VOLUME-APPROX: 5382.203842
+//
+// Known systemic defect: on the CGAL backend only, a planar face is written
+// with a bound that leaves its plane by more than the mesh's own coplanarity
+// allows - raised by the exporter about its own output and never read by this
+// test until 2026-09-24. Not yet chased: doc/step-export-wip.md, open item
+// 33. Tolerated by name; the test fails the day it is no longer raised.
+// KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
 $fn = 32;
 difference() {
 	cylinder(r1 = 12, r2 = 8, h = 20);

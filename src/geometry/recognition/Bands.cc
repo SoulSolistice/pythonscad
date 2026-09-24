@@ -366,13 +366,15 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         };
         {
           std::size_t which = 0, which_top = 0;
+          // The same order as the match below: a declared cone is the face, and
+          // is named before two rims that only witness it.
           if (cylindrical) {
             if (declared_cylinder(probe_r0, axis, probe_base, &which)) named = which;
+          } else if (declared_cone(probe_r0, probe_r1, axis, probe_base, probe_hi - probe_lo, &which)) {
+            named = which;
           } else if (declared_cylinder(probe_r0, axis, probe_base, &which) &&
                      declared_cylinder(probe_r1, axis, probe_base, &which_top)) {
             named = std::max(which, which_top);  // as the match below names it
-          } else if (declared_cone(probe_r0, probe_r1, axis, probe_base, probe_hi - probe_lo, &which)) {
-            named = which;
           }
         }
         walk_strip(seed, side, walls, entry, &on_surface);
@@ -565,23 +567,33 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         // itself. The second way exists because the first cannot state a cone
         // whose far rim is only where a boolean cut it, and asking that trim to
         // declare itself is asking the wrong thing of it.
+        //
+        // Where the model declared the cone, that is the face and the claim
+        // names it, whatever the rims also match: a rim cylinder a frustum
+        // declares is a *witness* - evidence offered to identify the cone - and
+        // a claim naming it attributes the cone's facets to a surface they are
+        // not on. It did, on step-split-surface, step-bored-cone and
+        // step-cap-meets-wall, until the D0 regions report caught it
+        // (2026-09-24). The rims name the claim only where no cone is declared -
+        // hull() of two cylinders, which declares no blend; that is a missing
+        // declaration, and still misattributed.
         std::size_t which_bottom = 0, which_top = 0, which_cone = 0;
         const bool by_rims = declared_cylinder(r_bottom, axis, base, &which_bottom) &&
                              declared_cylinder(r_top, axis, base, &which_top);
-        if (!by_rims && !declared_cone(r_bottom, r_top, axis, base, hi - lo, &which_cone)) {
+        const bool by_cone = declared_cone(r_bottom, r_top, axis, base, hi - lo, &which_cone);
+        if (!by_rims && !by_cone) {
           decline("the rims fitted over the whole walk match no declaration");
           continue;
         }
-        matched = by_rims ? std::max(which_bottom, which_top) : which_cone;
-        // Both rims were read to identify this cone and only one of them can be
-        // `matched`. Record the pair, or a census cannot tell a declaration
-        // doing its job from one nothing used - see Result::evidence.
+        matched = by_cone ? which_cone : std::max(which_bottom, which_top);
+        // Everything read to identify this cone is evidence, and only one record
+        // can be `matched`. Record them all, or a census cannot tell a
+        // declaration doing its job from one nothing used - see Result::evidence.
         if (by_rims) {
           note_evidence(which_bottom);
           note_evidence(which_top);
-        } else {
-          note_evidence(which_cone);
         }
+        if (by_cone) note_evidence(which_cone);
       } else if (!declared_cylinder(r_bottom, axis, base, &matched)) {
         decline("the rims fitted over the whole walk match no declaration");
         continue;

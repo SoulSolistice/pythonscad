@@ -17,6 +17,13 @@
  * connected component of those facets across mesh edges. Planes are not
  * covered: a plane's region is a different question, answered by the writer's
  * own planar faces.
+ *
+ * Not yet covered, and named so it is not mistaken for complete: a facet a
+ * boolean *cut*, whose cut corner lies on no surface exactly. It belongs to its
+ * maker's surface all the same, and where the cut corner belongs is the corner
+ * ladder's question - so until that is answered at D0 a region stops at the
+ * cut, and a band on the whole facets beside a patch on the cut ones does not
+ * read as split here. doc/step-export-wip.md, open item 34.
  */
 
 #include <cstddef>

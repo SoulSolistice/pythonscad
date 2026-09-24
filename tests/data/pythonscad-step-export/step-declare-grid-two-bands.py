@@ -37,6 +37,22 @@ makes it fire.
 # EXPECT: a declared 48x4 cubic sweep claims 237 facets whole, 146 cut across it, within its tessellation band of 0.0657
 # And the bound that has to be the wider of the two, not whichever was seen last.
 # EXPECT: their sweep's own tessellation band, the widest of which is 0.6519
+#
+# Known systemic defect: the D0 regions report (recognition::reportRegions)
+# finds this model's declared surface written as a band's ring plus a quadric
+# patch - a boundary the model does not have. R0, region first:
+# doc/step-recognition-design.md, *R0 is region first, and the region is
+# sequence-agnostic*. Tolerated by name until it lands; the test fails the day
+# it is no longer raised.
+# KNOWN-EXPORT-ERROR: split on a boundary the model does not have
+# And on the CGAL backend, a planar face whose bound leaves its plane - open
+# item 33, as in step-band-family.
+# KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
+# And at the approximation tier a declared sweep holds 3 facets of a cylinder's
+# D0 region - their maker declared the cylinder, and the sweep's pass ran first:
+# the grant between claimants is still pass order, not provenance. Handover
+# section 6, "provenance in the grant".
+# KNOWN-EXPORT-ERROR: held for a different surface than the one their maker declared them on
 from pythonscad import *
 import math
 

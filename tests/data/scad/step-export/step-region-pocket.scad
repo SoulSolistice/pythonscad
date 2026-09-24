@@ -70,6 +70,14 @@
 // trip reads Cylinder 6, Plane 6, with 12 exact circles. The wall is still two
 // kinds of face - the band's ring and the remainder as quadric patches - which is
 // R0's representation question and no longer a question of what the solid is.
+//
+// Known systemic defect: the D0 regions report (recognition::reportRegions)
+// finds this model's declared surface written as a band's ring plus a quadric
+// patch - a boundary the model does not have. R0, region first:
+// doc/step-recognition-design.md, *R0 is region first, and the region is
+// sequence-agnostic*. Tolerated by name until it lands; the test fails the
+// day it is no longer raised.
+// KNOWN-EXPORT-ERROR: split on a boundary the model does not have
 $fn = 32;
 difference() {
   cylinder(h = 30, r = 12);

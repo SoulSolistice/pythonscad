@@ -23,6 +23,13 @@
 //
 // FN is the knob, overridden per coupon with -D. Everything else is fixed so
 // that the band is the only thing that moves.
+//
+// Known systemic defect: on the CGAL backend only, a planar face is written
+// with a bound that leaves its plane by more than the mesh's own coplanarity
+// allows - raised by the exporter about its own output and never read by this
+// test until 2026-09-24. Not yet chased: doc/step-export-wip.md, open item
+// 33. Tolerated by name; the test fails the day it is no longer raised.
+// KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
 FN = 32;
 
 ridgeDepth = 2;

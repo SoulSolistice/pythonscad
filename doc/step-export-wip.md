@@ -4055,6 +4055,60 @@ making the sanity test fail on one would cost nothing today - but the test runs
 further configurations (the CGAL backend, a comma locale) whose output was not
 measured, so it wants one suite run of its own before it lands.
 
+**Closed 2026-09-24.** `export()` in the sanity test fails on any
+`EXPORT-ERROR` from any run - faceted, comma locale, analytic, approximation,
+CGAL. A fixture known to carry a systemic defect names it with a
+`KNOWN-EXPORT-ERROR: <text>` directive, which tolerates that one error, fails on
+any other, and fails once no run raises it any more; `step-flagship-check.py`
+keeps the same list per coupon (`KNOWN_EXPORT_ERRORS`). Narrower than
+`WILL_FAIL` on purpose: that passes a test whatever it fails on. Mutation-checked
+both ways (an unlisted error fails; a listed one never raised fails). The one
+suite run it wanted found what it predicted - errors nobody read: item 33, and
+the D0 region errors below it.
+
+### 33. On the CGAL backend, planar faces are written with a bound off their plane
+
+**Found 2026-09-24**, the first time the sanity test read `EXPORT-ERROR`s: on the
+CGAL-backend run only, six fixtures (step-band-family, step-bored-cone,
+step-cap-meets-wall, step-exchange-never-surrender, and the Python
+step-declare-grid, -strip, -topcap and -two-bands) raise *"N planar faces assert
+a plane one of their own bounds is not in, by up to 0.0000 against the ~1e-6 the
+mesh's own coplanarity allows"*. The exporter had been saying so on every suite
+run and nothing read it. Not chased: a Nef boolean's exact coordinates converted
+to doubles is the first branch to name, and is not measured. Each fixture carries
+it as a `KNOWN-EXPORT-ERROR`.
+
+### 34. What the D0 regions report found on its first read, 2026-09-24
+
+`recognition::reportRegions` - each declared surface's D0 region (provenance
+plus exact membership, pure) against what holds it - raises three
+`EXPORT-ERROR`s, and found three defects:
+
+- **A band named a witness where the model declared the face** - fixed. A
+  frustum's band matched "both rims are declared cylinders" before "the cone is
+  declared", and named the r = 17 rim cylinder, an evidence record, for the
+  cone's facets (step-split-surface, step-bored-cone, step-cap-meets-wall). The
+  written face was right; the claim was on the wrong surface. The matcher now
+  names a declared cone first and keeps the rims as evidence. Geometry identical
+  on all 108 exports.
+- **Split on a boundary the model does not have** - lid10's cone 48, the
+  bayonet's cylinder 6 and cone 71, step-region-pocket, step-declare-grid-two-bands:
+  R0, region first. Known errors until it lands.
+- **D0 ground left to the tessellation** - step-cap-meets-wall's exact tier, 12
+  facets refused by the writer's all-or-nothing boundary rule; lid10's exact
+  tier, 3.
+- **A sweep holding a cylinder's D0 facets** - step-declare-grid-two-bands'
+  approximation tier, 3: the grant between claimants is pass order, not
+  provenance.
+
+**The region's own gap, named so it is not mistaken for complete**: a D0 region
+holds *whole* facets only - every corner on the surface. A boolean-*cut* facet of
+the same maker, whose cut corner is on no surface exactly, is not in it, so a
+band on the whole facets and a quadric on the cut ones do not read as split
+(step-bored-cone's and step-cap-meets-wall's cones, still flagged by the older
+per-kind warning). Where a cut corner belongs is the corner ladder's question;
+membership of a cut facet waits on it.
+
 ### 27. C0 is a refusal problem, not a claim one - the 78 seam edges R0 did not touch
 
 **Opened 2026-09-22**, by R0 landing and the count not moving.
@@ -4110,6 +4164,15 @@ report and both kernel volumes are identical to the last digit - but entity
 The likely cause is a `std::map` keyed on a pointer; `section_planes` in
 `StepKernel.cc` is one (`section_planes[patch.surface.get()]`), and with ASLR
 its iteration order changes per run. Not chased further.
+
+**Measured 2026-09-24, and it is the CGAL backend.** Exporting
+step-cap-meets-wall six times each: the Manifold path gave one report at each tier
+(less timings), the CGAL path four different ones - 193 or 197 facets left to the
+tessellation, so the merged mesh itself differs - and an `EXPORT-ERROR` (item 33)
+in 7 of 12 runs. So the non-determinism is upstream of recognition, in the Nef
+path, and it is not harmless: which errors an export raises depends on the run.
+The fixture carries it as `KNOWN-EXPORT-ERROR-INTERMITTENT:`, which exists only
+for this and goes when this item does.
 
 **Two consequences, and the second is the one that matters.**
 
