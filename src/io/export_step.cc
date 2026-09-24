@@ -337,6 +337,14 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   // cut faces are exactly the ones the question is about.
   std::map<int32_t, std::size_t> facets;
   std::map<int32_t, std::vector<std::size_t>> covered, covered_cut;
+  // Whether a whole facet of this original lies on this surface by the
+  // generator's own points - every corner `runsThrough` it, or is a declared
+  // grid point adjacent in the net - asked *before* the facing band below and
+  // with no count. D0: float equality for points the generator emitted on the
+  // surface. What ownership asks of it is only whether the surface is still
+  // *here* for this original; whether the original meant it is identity's
+  // question, not this one's. See the ownership block below.
+  std::map<int32_t, std::vector<char>> present;
   for (std::size_t t = 0; t < ps.indices.size(); t++) {
     const int32_t id = ps.original_ids[t];
     facets[id]++;
@@ -344,11 +352,37 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     if (row.empty()) row.assign(nsurf, 0);
     auto& row_cut = covered_cut[id];
     if (row_cut.empty()) row_cut.assign(nsurf, 0);
+    auto& row_present = present[id];
+    if (row_present.empty()) row_present.assign(nsurf, 0);
     const IndexedFace& f = ps.indices[t];
     if (f.size() < 3) continue;
     const Vector3d fn =
       (ps.vertices[f[1]] - ps.vertices[f[0]]).cross(ps.vertices[f[2]] - ps.vertices[f[0]]);
     if (fn.norm() < 1e-18) continue;
+
+    // A facet wholly on a declared plane is a facet *of that plane*, whatever
+    // curved surface its corners also lie on: a cylinder's cap has every corner
+    // on the rim, and its interior is the disc, not the wall. The plane is the
+    // closed form it lies on, stated by a declaration, by the same float
+    // equality `runsThrough` holds - so this is D0, where the facing band below
+    // is a measurement. Measured without it on step-chamfered-cylinder:
+    // hull() swallows the r = 8 disc's wall entirely, and the hull's bottom cap
+    // alone made the disc's original "present" on that cylinder.
+    bool on_declared_plane = false;
+    for (std::size_t j = 0; j < nsurf && !on_declared_plane; j++) {
+      if (is_plane[j] == 0) continue;
+      const Surface *plane = ps.surfaces[j].get();
+      const Vector3d n = plane->normdir.normalized();
+      bool all = true;
+      for (const int v : f) {
+        if (v < 0 || std::size_t(v) >= ps.vertices.size() ||
+            fabs((ps.vertices[v] - plane->refpt).dot(n)) > tol) {
+          all = false;
+          break;
+        }
+      }
+      on_declared_plane = all;
+    }
 
     for (std::size_t j = 0; j < nsurf; j++) {
       if (is_plane[j] != 0) continue;
@@ -380,7 +414,9 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
           }
         }
         if (!adjacent) continue;
+        if (on.size() == f.size() && !on_declared_plane) row_present[j] = 1;
       } else {
+        if (on.size() == f.size() && !on_declared_plane) row_present[j] = 1;
         // ...and faces the way the surface does there. See surfaceNormal.
         Vector3d centroid = Vector3d::Zero();
         for (const int v : on) centroid += ps.vertices[v];
@@ -407,11 +443,49 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   // unambiguous junctions of step-declare-cone into 64 contested ones. A
   // boundary artefact cannot produce a whole facet, because a facet wholly on
   // a surface is on it.
+  //
+  // **Superseded 2026-09-23, and kept only to be compared against.** The rule
+  // above is a measurement, and it fails exactly where two declarations meet:
+  // on step-cylinder-cross, 76 of the vertical cylinder's facets are slivers
+  // along the crease whose every corner is on the crossing curve - on *both*
+  // cylinders by position - and near the crease the two normals agree within
+  // 60 degrees, so the vertical solid "owned" the horizontal cylinder too. On
+  // lid10 it granted cylinder 12 to four originals that never declared it.
   const std::size_t least = 3;
-  std::map<int32_t, std::vector<std::size_t>> owned;
+  std::map<int32_t, std::vector<std::size_t>> owned_measured;
   for (const auto& entry : covered) {
     for (std::size_t j = 0; j < nsurf; j++) {
-      if (is_plane[j] == 0 && entry.second[j] >= least) owned[entry.first].push_back(j);
+      if (is_plane[j] == 0 && entry.second[j] >= least) owned_measured[entry.first].push_back(j);
+    }
+  }
+  // What an id owns is what it *declared*: Surface::owners, stamped where the
+  // id was minted and carried through every boolean. Identity, no tolerance,
+  // no count. Asked per geometric surface - two records of one wall from two
+  // heights are one wall - and over the same population as before, curved
+  // surfaces of originals present in this mesh, so every consumer reads the
+  // map it always did. See doc/step-export-wip.md, open item 31.
+  std::map<int32_t, std::vector<std::size_t>> owned;
+  for (std::size_t j = 0; j < nsurf; j++) {
+    if (is_plane[j] != 0 || ps.surfaces[j] == nullptr) continue;
+    std::set<int32_t> declared_by;
+    for (std::size_t k = 0; k < nsurf; k++) {
+      if (ps.surfaces[k] == nullptr || !describesSameSurface(*ps.surfaces[k], *ps.surfaces[j])) continue;
+      declared_by.insert(ps.surfaces[k]->owners.begin(), ps.surfaces[k]->owners.end());
+    }
+    // Declared as a face by this original, *and* present in its facets. Identity
+    // alone is not enough: step-declare-cone's r = 100 intersection tool did
+    // declare its wall, and the intersection removed all of it, so offering that
+    // wall at a junction sent a candidate 132.9 mm away. Presence alone is not
+    // enough either: identity is what keeps a crease sliver, on two cylinders by
+    // position, from giving its solid the other one. And presence is asked of
+    // facets not wholly on a declared plane, because a cap has every corner on
+    // the rim - measured, without that step-chamfered-cylinder's hull "kept" the
+    // disc wall it swallows, and lid10 and the bayonet gained 120 junctions
+    // with more owners than meet there.
+    for (const int32_t id : declared_by) {
+      const auto it = present.find(id);
+      if (it == present.end() || it->second[j] == 0) continue;
+      owned[id].push_back(j);
     }
   }
 
@@ -810,14 +884,14 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         names.c_str());
   }
 
-  // Ownership carried from the generator, held against the ownership measured
-  // above. `owned` is inferred from positions - whole facets on the surface by
-  // `runsThrough`, facing it within 60 degrees, at least `least` of them - and
-  // `Surface::owners` is stamped where the original's id was minted. The first
-  // is a measurement wearing the name provenance; the second is identity. This
-  // reports where they differ and decides nothing: `owned` still drives every
-  // gate. Over originals present in this mesh and surfaces that are not planes,
-  // because that is the population `owned` speaks for. See open item 31.
+  // Ownership carried from the generator, held against the ownership the old
+  // rule measured. `owned_measured` is inferred from positions - whole facets
+  // on the surface by `runsThrough`, facing it within 60 degrees, at least
+  // `least` of them - and `Surface::owners` is stamped where the original's id
+  // was minted. The first is a measurement wearing the name provenance; the
+  // second is identity, and since 2026-09-23 it is what `owned` is. Reported so
+  // every export says where the two would have differed. Over originals present
+  // in this mesh and surfaces that are not planes. See open item 31.
   {
     std::size_t agree = 0, measured_only = 0, carried_only = 0, unstamped = 0;
     std::string first_measured, first_carried;
@@ -837,9 +911,9 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       if (carried.empty()) unstamped++;
       for (const auto& entry : facets) {
         const int32_t id = entry.first;
-        const auto it = owned.find(id);
-        const bool measured =
-          it != owned.end() && std::find(it->second.begin(), it->second.end(), j) != it->second.end();
+        const auto it = owned_measured.find(id);
+        const bool measured = it != owned_measured.end() &&
+                              std::find(it->second.begin(), it->second.end(), j) != it->second.end();
         const bool stated = std::binary_search(carried.begin(), carried.end(), id);
         if (measured && stated) agree++;
         else if (measured) {

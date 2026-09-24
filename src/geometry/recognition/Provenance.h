@@ -29,10 +29,17 @@ namespace recognition {
  * which surfaces a facet *could* be on, and the geometry still says which one it
  * is - a much easier question than the one asked without it.
  *
- * Silent where it knows nothing. An original absent from `owned` owns no
- * surface by three whole facets, which is a threshold rather than a statement,
- * and surfaces past `declared` were fitted by the approximation pass and have no
- * provenance at all. Both are left to the measurement. */
+ * `owned` is identity plus presence (export_step.cc, reportOwnership): an
+ * original owns a surface it declared *as a face* (`Surface::owners`, carried
+ * from where its id was minted) of which a whole facet of its own is still in
+ * the mesh - every corner on the surface by the generator's own points, and not
+ * wholly on a declared plane. No band, no count. Until 2026-09-24 it was a
+ * measurement: three whole facets facing the surface within 60 degrees.
+ *
+ * Silent where it knows nothing. An original absent from `owned` declared no
+ * surface that survives in its facets - a polyhedron, an import - and surfaces
+ * past `declared` were fitted by the approximation pass and have no provenance
+ * at all. Both are left to the measurement. */
 struct Provenance {
   const std::vector<int32_t> *face_origin = nullptr;
   const std::map<int32_t, std::vector<std::size_t>> *owned = nullptr;

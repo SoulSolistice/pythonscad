@@ -24,6 +24,9 @@ from a declared r=10 to an r=6 that no primitive named.
 # EXPECT: 4 analytic surfaces available (3 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 # EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 64 facets replaced
 # EXPECT-NOT: left faceted
+# The intersection removes all of the r = 100 tool's wall, so two of the three
+# originals keep a declared wall - see the SCAD twin, and open item 31.
+# EXPECT: provenance maps 2 of 3 originals onto 2 of 4 declared surfaces
 # ROUNDTRIP: Cone=1 Cylinder=1 Plane=2
 # VOLUME: 3962.5955337
 from pythonscad import *

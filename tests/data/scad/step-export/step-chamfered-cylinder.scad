@@ -19,6 +19,16 @@
 // EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 64 facets replaced
 //
+// One original (the hull), two declared cylinders, and only one of them is
+// still here: the r = 8 disc's wall is 0.01 tall and inside the hull's
+// profile, so none of it survives. What does survive is the hull's bottom cap,
+// whose every corner is on r = 8 - and a presence test asking corners alone
+// counts that cap as the disc's wall. It did, once, while ownership was being
+// moved from measurement to identity. The cap lies wholly on a declared plane,
+// which is the surface it is a facet of. See doc/step-export-wip.md, open
+// item 31.
+// EXPECT: provenance maps 1 of 1 originals onto 1 of 2 declared surfaces
+//
 // The hull's profile is (r=8, z=0) to (r=10, z=2) to (r=10, z=20) - the small
 // cylinder's top rim at (8, 0.01) is inside that line, so it contributes no
 // vertex. Frustum (pi*2/3)(64 + 80 + 100) plus cylinder pi*100*18.

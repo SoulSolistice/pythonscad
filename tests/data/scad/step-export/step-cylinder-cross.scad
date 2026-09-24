@@ -16,6 +16,18 @@
 //
 // EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier), and 4 declared planes
 //
+// Who owns which surface is the model's to say, and it says each solid
+// declared one cylinder and nothing else. Measured from positions it came out
+// otherwise: 76 facets of each cylinder are slivers along the crease whose
+// every corner is on the crossing curve - on *both* cylinders - and near the
+// crease the two normals agree within the 60 degrees that rule allowed, so
+// each solid "owned" the other's cylinder too. Carried ownership plus a D0
+// presence test names one surface per solid, so no ownership line may name two.
+// See doc/step-export-wip.md, open item 31.
+// EXPECT: provenance maps 2 of 2 originals onto 2 of 2 declared surfaces
+// EXPECT-NOT: cut), cylinder
+// APPROX-NOT: cut), cylinder
+//
 // No plane survives: each cylinder's caps sit at |z| = 20 and the other reaches
 // only to 10, so both are cut away entirely. That is what makes this a closed
 // shell of nothing but quadrics, and a clean test of a boundary.

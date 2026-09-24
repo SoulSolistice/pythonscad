@@ -3957,6 +3957,39 @@ measurement, judged by `flagship-strict`, `step-cylinder-cross`,
 it moves. It is a behaviour change: it lands with its numbers, or parks again
 with them.
 
+**Landed 2026-09-24: identity plus presence, and presence corrected.** The
+parked switch, retried on `claude/step-claim-ledger`, passed `flagship-strict`
+(the channel declaration had removed its only failure) and was still wrong in
+a way nothing failed on: `compare` against the base showed lid10 and the
+bayonet going from 10 / 2 to 130 / 122 junctions with more owners than meet
+there, and `step-chamfered-cylinder`'s hull "keeping" the r = 8 disc wall it
+swallows. One cause for all of it: presence asked corners alone, and a **cap**
+has every corner on the rim - the design doc's own *corners only* rung, the
+weakest. The D0 fix is a declaration, not a band: a facet wholly on a
+**declared plane** (every corner on it, the same float equality `runsThrough`
+holds) is a facet of that plane, so it is not presence on anything curved.
+With it, against the base, over 104 exports: **entity census and ledger
+identical everywhere**, lid10 and the bayonet reports identical, and only two
+fixtures' ownership reports move, both the way identity predicts -
+`step-cylinder-cross` (each solid owns its own cylinder only; 128 facet-surface
+tests now spared) and `step-declare-cone` (the r = 100 tool, whose wall the
+intersection removes, owns nothing: 2 of 3 originals mapped, was 3 of 3).
+Suite 58 of 58, unit tests unchanged. Asserted in those two fixtures, the
+Python twin and `step-chamfered-cylinder`, each mutation-checked: planting
+corners-only presence fails chamfered-cylinder and both declare-cones;
+planting measured ownership fails cylinder-cross and both declare-cones.
+
+What it leaves open, and it is the next measurement for this item: lid10's
+original 67 holds 60 band walls on cylinder 42 (D0 by the band's 1e-7
+*relative* match) and owns it by neither rule, because no whole facet of 67 is
+on 42 by `runsThrough`'s 1e-7 *absolute* - a cap was the only thing that made
+it "present" under corners alone. So the band's D0 and presence's D0 disagree
+about the same walls at r = 80 (8e-6 against 1e-7), which is the first half of
+this item as it was opened and is not settled: either the walls are off the
+declared cylinder and the band's claim is looser than D0, or they are on it and
+the generator's points are further off than float equality. `at-vertex.py` on
+one wall against cylinder 42's own parameters decides it.
+
 **Why it comes before R0.** R0's region is *"the facets whose maker owns this
 surface"*. If *owns* is a measurement with a magic 3 and a 60 degree band, a
 provenance region is a measured region wearing a D0 label - the class error

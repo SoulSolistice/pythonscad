@@ -149,7 +149,7 @@ survey says to do*, below, and open item 27.
 | rung | rule | class | today |
 | --- | --- | --- | --- |
 | R0 | the whole connected region the surface covers | D0 | **not implemented.** Attempted 2026-09-22 and reverted; the attempt is `claude/step-region-r0-optimistic-parked` and what it measured is below |
-| R1 | provenance: the facets whose maker owns this surface | D0 | available (`Provenance`), used only as a *gate*, and its ownership half is **measured** (`owned`: corners on the surface, a 60 degree band, `least = 3`). Since 2026-09-23 ownership is also **carried** - `Surface::owners` (face declarers) and `witnesses` (evidence declarers), stamped where Manifold mints the ids - and reported against the measured one; the switch to carried ownership is parked because junctions need *declared as a face* **and** *present* (a facet of the maker on it by `runsThrough`). Open item 31 |
+| R1 | provenance: the facets whose maker owns this surface | D0 | available (`Provenance`), used only as a *gate*, and its ownership half is **measured** (`owned`: corners on the surface, a 60 degree band, `least = 3`). Since 2026-09-23 ownership is also **carried** - `Surface::owners` (face declarers) and `witnesses` (evidence declarers), stamped where Manifold mints the ids - and reported against the measured one; since 2026-09-24 `owned` *is* identity plus presence - *declared as a face* (carried) **and** *present* (a whole facet of the maker on it by `runsThrough`, not wholly on a declared plane) - with no band and no count. Still used as a gate only; the positive query R0 needs is next. Open item 31 |
 | R2 | whatever a recogniser's own form can express | D4 | what the band pass does today |
 
 #### What the attempt got wrong, and it is a class error

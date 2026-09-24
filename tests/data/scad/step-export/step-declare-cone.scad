@@ -32,6 +32,17 @@
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 64 facets replaced
 // EXPECT-NOT: left faceted
 //
+// Three originals - the r = 10 cylinder, the frustum, the r = 100 tool - and
+// two of them keep a declared wall: the intersection removes all of the tool's,
+// leaving only its cap facets, whose every corner lies on the cut circle. So
+// provenance names two owners and not three. Measured from positions, the tool
+// "owned" the cone through those caps - a cap over a bore has every vertex on
+// the rim - and identity alone offered its removed wall at a junction 132.9 mm
+// away. Identity (declared as a face) plus presence (a whole facet on the
+// surface by the generator's own points, not wholly on a declared plane) says
+// neither. See doc/step-export-wip.md, open item 31.
+// EXPECT: provenance maps 2 of 3 originals onto 2 of 4 declared surfaces
+//
 // What a kernel makes of it: four faces, where the faceted export has 66.
 // ROUNDTRIP: Cone=1 Cylinder=1 Plane=2
 // RADII: Cylinder=10
