@@ -6,6 +6,13 @@ computation, and one made a census three times worse. Each was reasoned, none
 was surveyed. This document is the survey: for every analytic entity the
 exporter writes, *what fixes it*, and therefore where it belongs in the order.
 
+**Read with it, since 2026-09-23:** `doc/step-recognition-design.md`,
+*Determinacy: the ground this design stands on* - a D0 with **correct
+provenance** is the anchor; an entity is as precise as the **independent** closed
+forms that fix it (weakest class the determining set needs, then freedom left,
+then corroboration); and determinacy is judged **globally**, over the whole
+cover, stranded facets included. Every table below is an instance of that.
+
 The rule the whole thing rests on, from
 `doc/step-export-development.md`:
 
@@ -142,7 +149,7 @@ survey says to do*, below, and open item 27.
 | rung | rule | class | today |
 | --- | --- | --- | --- |
 | R0 | the whole connected region the surface covers | D0 | **not implemented.** Attempted 2026-09-22 and reverted; the attempt is `claude/step-region-r0-optimistic-parked` and what it measured is below |
-| R1 | provenance: the facets whose maker owns this surface | D0 | available (`Provenance`), used only as a *gate*. Its **positive** form is what R0 needs and it does not exist |
+| R1 | provenance: the facets whose maker owns this surface | D0 | available (`Provenance`), used only as a *gate*, and its ownership half is **measured** (`owned`: corners on the surface, a 60 degree band, `least = 3`). Since 2026-09-23 ownership is also **carried** - `Surface::owners` (face declarers) and `witnesses` (evidence declarers), stamped where Manifold mints the ids - and reported against the measured one; the switch to carried ownership is parked because junctions need *declared as a face* **and** *present* (a facet of the maker on it by `runsThrough`). Open item 31 |
 | R2 | whatever a recogniser's own form can express | D4 | what the band pass does today |
 
 #### What the attempt got wrong, and it is a class error
@@ -254,8 +261,16 @@ and the cases were added one at a time. Worth surveying on the same terms as the
 rest - what *determines* a run, and therefore which rung it is.
 
 **Depth - every rung names its class and the class of its evidence.** A rung is
-as exact as what decides it. Nothing checks this today; see the honour-system
-note under the D4 rule above.
+as exact as what decides it. **Since 2026-09-23 every claim carries its
+`EvidenceClass`** (D0-D4, the weakest class in what decided it), stated once per
+recogniser in a `Claimant` and recorded through one rule, and every export
+reports what decided each written facet. Measured: a band's wall is D0, a band's
+polar cap D4, a declared sweep or Bezier patch D1, and **a trimmed quadric face
+D4 in both tiers** - `OnQuadric::covers` holds corners to `min(bandOf(f),
+max_off)` and the interior to 1.25x the facet's sagitta, so the tessellation
+decides even at `max_off = 1e-7`. lid10 writes 377 facets on a declared exact
+surface by D4 evidence, the bayonet 265. Counted, not yet refused: refusing the
+mismatch is enforcement, and it waits on the policy (migration step 4).
 
 **Feedstock - every primitive declares what it makes.** A ladder can only reach
 D0 where a declaration exists, and where none does it falls to D4 with nothing
@@ -316,6 +331,24 @@ bayonet exact tier  23 surfaces: 11 written, 0 evidence, 7 no mesh, 5 unexplaine
                     cylinder 24, cylinder 60, cylinder 67, cone 78, sweep 87
 ```
 
+**Measured again 2026-09-23, after two root-cause fixes** - the specimens declare
+their bayonet channel's walls, and one geometric surface is one record (two
+records of one infinite cylinder had been counted as two surfaces, one of them
+"unexplained"):
+
+```text
+lid10   exact tier  22 surfaces: 13 written, 1 evidence, 6 no mesh, 2 unexplained
+                    cone 52, sweep 62
+        both flags  1 unexplained - cylinder 12 (open item 30: the approximation
+                    tier surrenders its quadric face)
+bayonet exact tier  20 surfaces: 11 written, 0 evidence, 7 no mesh, 2 unexplained
+                    cone 75, sweep 84
+        both flags  0 unexplained
+```
+
+Indices moved with the record list; the cone and the sweep are the same
+declarations as before.
+
 Nine declarations across the two specimens, each a *reason to find*. Note the
 tier split on lid10: the approximation writes cone 54 and sweep 65 and loses
 cylinder 12, so the two tiers fail on different declarations.
@@ -359,7 +392,16 @@ foundation under all of it.** It is also why the rung order has to be *followed*
 rather than admired: D0 is covered first precisely so a D3 fit never gets the
 chance to take exact ground and strand the remainder.
 
-**One number is deliberately missing.** How many of the fitted and tessellated
+**Answered since 2026-09-23, by the ledger.** Once every recogniser records
+every claim it would make with its fate, a claim naming a declared surface on a
+fitted or tessellated facet *is* the evidence a declaration was available, and
+its fate is the reason. The export now prints *why N facets are fitted or left
+to the tessellation*: declined by the claimant's own rule (named), refused by
+the writer, held first by something less precise, withdrawn, or claimed for no
+declaration at all (split by whether the maker declares anything). The paragraph
+below is how it stood before, kept because its reasoning still holds.
+
+**One number was deliberately missing.** How many of the fitted and tessellated
 facets had a declaration *available*, which is exact ground that did not come
 out exact, needs a per-facet, per-surface membership test. `owned` cannot answer it: it
 names an *original's* surfaces, not a facet's, so on any model that declares
@@ -381,12 +423,17 @@ Three things, each of which was skipped by at least one rung this session:
   *evidence* is D3 or D4 then it is itself D3 or D4, whatever the entity it
   decides about. R0 was called D0 because a declared surface was in the
   sentence; what decided it was `bandOf`, and that is what fixed its class.
-  Nothing in the code checks this today: the ledger carries a claim's own
-  `ClaimPrecision` but not the class of the evidence behind it, so the next
-  structural step is to carry both and make the mismatch loud.
+  Since 2026-09-23 the ledger carries both - a claim's `ClaimPrecision` and its
+  `EvidenceClass` - through the recogniser's `Claimant`
+  (`src/geometry/recognition/Ledger.h`); state it honestly there. Making the
+  mismatch loud is the next step.
 - **Say what it is measured against**, and make it something the model states.
   A statistic over the tessellation's own spread is the yardstick made of the
   error it grades.
+- **Put it in the recognition module's shape.** A pure proposal, a form over
+  what the arbiter grants, a `Claimant`, a row in the stage table - see
+  `doc/step-recognition-design.md`, *How to add a recogniser, now*. Prove a
+  structural change neutral with `scripts/step-dev.sh measure` / `compare`.
 - **Prove it fires, and prove the suite fails without it.** One rung inserted
   this session fired zero times on every reference part; the rules already
   forbid landing a guard nothing exercises, and a survey would have predicted it

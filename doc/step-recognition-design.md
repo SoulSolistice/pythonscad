@@ -763,6 +763,17 @@ quadric stage's writability walks the sweep faces), and a `consumed` cache that
 parts from the ledger. A unit test (`[purity]`) guards that no proposal moves
 with what is held or with the order proposers run in.
 
+**Continuing in this shape is not negotiable.** Purity - proposals that read no
+claim, one arbiter that grants, a ledger that is the truth, stages that declare
+what they read - is what makes "why is this facet a plane?" a lookup, what lets
+policy change in one table instead of across four passes, and what makes the
+covering order (D0 first, nothing falls down the ladder) enforceable at all. A
+change to recognition that reaches round it - a pass reading `consumed`, a grant
+outside the arbiter, a stage the table does not declare, a report computed
+inside the writer - is refused, whatever it buys. Refactoring that serves this
+shape is endorsed and wanted; the constraint is only that each step is proven,
+by the oracle when it claims to be neutral and by a fixture when it does not.
+
 **How to add a recogniser, now.** (1) A `propose*` that reads only the graph,
 the surfaces and provenance - if it wants anything a pass holds, it is not a
 proposal. (2) A `form*` over its proposals and `Arbiter::held()`. (3) A

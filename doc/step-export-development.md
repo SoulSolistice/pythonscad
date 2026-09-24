@@ -345,6 +345,57 @@ exists for them:
 These are also the cases where corners can never be made exact. That is the
 boundary of the corner work, and it should be stated rather than discovered.
 
+**And a geometric argument cannot stand in for the missing declaration.** Asked
+2026-09-23 whether a Minkowski decomposition, the half-space (H-)representation
+or an Ehrhart polynomial could trace an undeclared polyhedron back to the
+cylinder it approximates: no. The H-representation of a polyhedron is its chord
+planes - the same inequalities as a prism whose corners sit on a circle; a circle
+is never a Minkowski summand of a polytope; an Ehrhart polynomial exists only for
+lattice (or rational) polytopes and counts points, never surfaces. What geometry
+*can* state, with no threshold, is that the points satisfy a declared closed form
+(x^2 + y^2 = r^2 at float equality) - corroboration, D0-grade evidence that the
+facets *lie on* a surface. It is not intent: treating it as ownership is inferring
+intent by measurement, the thing provenance exists to replace. Where intent is
+real but undeclared, the fix is at the origin - the model declares it.
+
+**Worked example, and fixed that way.** lid10's `bayonetChannel` is a
+`polyhedron()` whose inner and outer walls are point lists at `rInner` and
+`rOuter` - the same two cylinders its entry slots declare, because the callers
+pass the same parameters. The channel declared nothing, so the measured owner
+credited it with the slots' cylinder and the carried owner said, correctly, that
+it declared none. Both specimens now wrap the channel in
+`declare_cylinder(r = rOuter)` and `declare_cylinder(r = rInner)`.
+
+### Who declared a surface, and in which role - carried, not measured
+
+**Since 2026-09-23.** `PolySet::original_ids` has always carried *which original
+made a facet*. *Which surfaces an original declared* was not carried: every
+boolean merges its operands' records into one flat list, and `export_step.cc`
+re-derived ownership from positions. Now every `Surface` record carries it:
+
+| field | meaning |
+| --- | --- |
+| `owners` | originals that declared it as a **face** - their facets lie on it |
+| `witnesses` | originals that offered it as **evidence** - `cylinder(r1, r2)`'s two rim cylinders, a sloped `rotate_extrude` edge's endpoint radii, a tapered `linear_extrude`'s rims. No facet of those solids lies on them |
+| `evidence_only` | set by a generator before any id exists; routes the ids at stamping |
+
+Stamped where Manifold mints an original id - `createManifoldFromTriangularPolySet`,
+`ManifoldGeometry::setColor` / `toOriginal`, `hull()` - and by
+`ManifoldGeometry::addSurface` for a `declare_*` made over a subtree that is
+already a Manifold (stamped with the subtree's originals). Copied by `clone()`,
+so every transform carries it; every deduplication unites both lists with the
+face winning.
+
+**One geometric surface is one record.** `mergeSurfaces` and `containsSurface`
+match by `describesSameSurface` (same axis *line* and radius for a cylinder; cones
+likewise), not `sameAs`'s exact reference point. Item 17 had measured the rule
+geometry-neutral and not landed it; it landed once ownership, the ledger and the
+census - all per record - were seen counting one surface twice.
+
+`export_step.cc` still decides with the **measured** `owned`, and reports the
+carried ownership against it on every export. Why the switch is parked, and what
+it needs, is open item 31.
+
 ---
 
 ## 3. What an analytic face's boundary is
@@ -1756,6 +1807,24 @@ The mutation check can itself be green for the wrong reason: the first run of on
 reported every mutation as uncaught, and the fault was in the check, because
 `0% tests passed` contains the string `tests passed`.
 
+### Behaviour-neutral is proven by the oracle, never argued
+
+**Since 2026-09-23.** A change that claims to change no behaviour - a refactor, a
+new report, a record that is carried but not yet read - is proven by
+`scripts/step-dev.sh measure <name>` before and after and `compare <a> <b>`
+(`scripts/step-diagnostics/measure-compare.py`). It compares, per export, over
+the four reference parts and every fixture in both tiers (104 exports): the
+report less wall-clock lines, the STEP entity census, and the claim ledger and
+surface tables row by row after sorting. Zero differences is the bar; the suite
+is far weaker.
+
+It was checked on itself before it was trusted: two runs of one binary compare to
+0; a copy with one ledger field and one report word changed shows exactly those
+two. Its first version, a shell `diff`, compared nothing on MSYS2 (no `diff`
+installed) and said nothing - and its first Python version explained a
+difference by set membership, so a line printed twice showed as an empty REPORT.
+Both are fixed; both are the lesson of this file in miniature.
+
 ### Two shapes of circular validation
 
 **Never relax a validator rule because your own change broke it.** Every
@@ -2186,6 +2255,28 @@ Each of these cost real time and each will recur.
   mesh's plane outwards, never from the declaration in.
 
 ### Process
+
+- **Measure only after a build that succeeded.** A compound "build; measure;
+  compare" that does not stop on a failed build compares the *old* binary with
+  itself and reports 0 differences. Capture the build's exit status and gate on
+  it.
+- **`scripts/step-dev.ps1 build` shows only the last three lines.** A compile
+  error is off the end of that window; run `scripts/msys2-build.sh` with the log
+  kept and grep it for `error:` when a build fails.
+- **Git Bash has no `ctest`, MSYS2 has no `diff`.** Run the suite through
+  `step-dev.ps1 test`; compare through `step-dev.sh compare`, which is Python.
+- **Paths from PowerShell into `step-dev.sh` must use forward slashes** - a
+  backslash path is split by bash and the export writes nowhere. From PowerShell,
+  pass the `.ps1` itself with backslashes, and file arguments with slashes.
+- **A heredoc through the Bash tool can turn `\n` in C++ source into a real
+  newline.** Edit C++ string literals with the Edit tool, or write the edit
+  script to a file first.
+- **The clang-format hook reformats and fails the first commit.** Stage again
+  and commit again; never `--no-verify`.
+- **A mutation that is not in the source cannot be detected.** Every new
+  assertion this session - the stage order check, the `consumed`-cache check -
+  was proven by planting the fault, building, and seeing it fire, then
+  restoring.
 
 - **The mesh moves between recognition and writing.** Any decision taken on
   vertex *positions* has to be taken twice, or it describes a mesh that no longer

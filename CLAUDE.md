@@ -266,7 +266,11 @@ out-of-process automation; `scripts/fusion/step-interop-fusion.py` runs inside i
 via Utilities → ADD-INS → Scripts and Add-Ins.
 
 **Use the committed loop, not ad-hoc scripts:** `scripts/step-dev.ps1` (or
-`.sh`) `build | test | flagship | export <part> | census <file>`. **Every
+`.sh`) `build | test | flagship | export <part> | census <file> | measure <name>
+| compare <a> <b>`. `measure` exports the four reference parts and every fixture
+in both tiers with the claim ledger dumped; `compare` is the behaviour-neutral
+oracle (report, entity census, ledger - 0 differences is the bar for any
+refactor). **Every
 diagnostic is catalogued by the question it answers in
 `scripts/step-diagnostics/README.md`** — read it before writing a new one.
 

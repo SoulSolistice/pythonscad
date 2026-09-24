@@ -3944,6 +3944,19 @@ census); lid10 goes from 27 records to 22 and its unexplained declarations from
 sweep 62, exact tier). `step-declare-cone`'s fixtures asserted the duplicated
 count and now assert the derived one, 4 surfaces.
 
+**State at the handover of 2026-09-24, and the next measurement.** The parked
+identity-plus-presence switch (`73a42f3aa` on
+`claude/step-provenance-identity-parked`) failed `flagship-strict` on lid10
+**only** because of originals 26-32 - the undeclared bayonet channel. That cause
+is fixed at the origin (the specimens declare the channel walls) and one surface
+is one record now, and after both lid10 measures **0 measured-only owners** (16
+agree, 7 carried only, both tiers). The switch has **not** been retried since.
+Retrying it on top of `claude/step-claim-ledger` is the cheapest next
+measurement, judged by `flagship-strict`, `step-cylinder-cross`,
+`step-declare-cone` and `step-shared-arc`, and by `compare` for everything else
+it moves. It is a behaviour change: it lands with its numbers, or parks again
+with them.
+
 **Why it comes before R0.** R0's region is *"the facets whose maker owns this
 surface"*. If *owns* is a measurement with a magic 3 and a 60 degree band, a
 provenance region is a measured region wearing a D0 label - the class error
