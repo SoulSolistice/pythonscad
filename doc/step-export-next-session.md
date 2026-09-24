@@ -1,9 +1,11 @@
 # STEP export: handover, 2026-09-24
 
-Branch **`claude/step-claim-ledger`**, the commits in section 5 on top of
-`claude/step-claim-two-pass-cf4565` (`f5fb30c74`), nothing pushed, working tree
-clean. Suite **58 of 58**; unit tests 3974 passing plus 1 expected failure.
-Parked beside it: `claude/step-provenance-identity-parked`.
+Branch **`claude/step-exporter-continue-9aeeb8`**: three commits (section 2b)
+on top of `claude/step-claim-ledger` (`f97b44e55`), which is the commits in
+section 5 on top of `claude/step-claim-two-pass-cf4565`. Nothing pushed, working
+tree clean. STEP suite **60 of 60**; full suite 3003 of 3005 from the build
+tree, the two REPL smoke tests passing against staging; unit tests 3975 passing
+plus 1 expected failure.
 
 This document is the whole handover. It says what the rules are, what was
 understood in the session of 2026-09-23/24 so that it is not rediscovered, what
@@ -27,6 +29,58 @@ to a rung, or to what the exporter writes is justified against them, and work
 goes *inside* the design's numbered migration steps. Before building anything,
 find the paragraph that already covers it: two sessions running have lost most
 of a day rediscovering what those documents already said.
+
+---
+
+## 2b. The session of 2026-09-24 (second), in one page - read before section 1's detail
+
+Three landings, each in the recognition shape, each proven by the oracle and by
+fixtures that fail without it (mutation-checked, the mutations listed in each
+commit message).
+
+| commit | what |
+| --- | --- |
+| `f1fbcc41c` | **Ownership is identity plus D0 presence** (open item 31). The parked switch, plus the fix it needed: a facet wholly on a *declared plane* is a facet of that plane, never presence on a curved surface - a cap has every corner on the rim. Against the base: entity census and ledger identical on all 104 exports; only step-cylinder-cross and step-declare-cone's ownership reports move, as identity predicts |
+| `45e8b3d3c` | **A D4 rule may not decide D0 ground** (open item 30, closed). Each quadric proposal states per facet what decided membership - D0 by identity (`Provenance::owns`) and exact position, D4 by the band - and the arbiter is told before any grant (`Arbiter::stateMembership`). The claim's region rules (floor, span median, worst corner) decide only D4 members; a stale worst corner and a fringe that made D0 ground unformable are fixed too. **The sanity test now holds every fixture's approximation tier against its exact tier facet by facet** (`surrendered`). lid10's approximation tier 6 to 41 cylindrical faces; **step-region-pocket exports its derived 4185 pi and lost its WILL_FAIL**. New fixture step-exchange-never-surrender |
+| `9bcea3694` | **D0 at machine precision** - `recognition/Exact.h`: the forward-error bound of the residual, no threshold - in the quadric pass, `runsThrough` and the band pass's sphere and torus zones. It exposed a feedstock defect: `offset()` emits round-join points on Clipper's 2^-27 grid, half a cell off the arcs it declares, and step-rounded-profile's tori fell to cones. Fixed at the origin, `Polygon2d::placeOnArcs`, after the offset and after every 2D boolean. New fixture step-rounded-profile-notched |
+
+**The standing rules the author added this session, all now in memory**
+(`closed-form-or-proof`): every entity aims at a pure closed algebraic form;
+where one is not reached, the *why* is mandatory, and the tessellation is a
+fallback only once it is *proven* no pure form exists; nothing - work, fixture
+or derived number - grounds on tessellations; **in D0 only machine precision
+applies**, no threshold, no deviation; **declarations are the foundation of D0,
+and a missing one is added** (in the primitive that makes the geometry, or in
+the model) rather than inferred; refactoring and restructuring are endorsed, and
+the strict goal is structure that serves D0, never patches round it.
+
+**Arbitration, as the author put it and as the design says**: within a class a
+tie is decided by provenance and membership; below D2 precision may also rank;
+at D0, where two closed forms both satisfy the construct, *only* provenance and
+membership discriminate. **Built**: provenance as a gate, its positive answer,
+per-facet membership class, and D4 rules barred from D0 ground inside a claim.
+**Not built**: the grant *between* claimants - still pass order, then surface
+order (`held() || taken`); `ClaimPrecision` is reported, never ranked on.
+
+**What the ledger says is left, measured on lid10 and the bayonet:**
+
+- *Different surfaces on one facet*: 6 facets per part, every one already held
+  by the claimant provenance names (the sweep's own 4x-median refused them first).
+  An arbiter keyed on provenance gives the same answer by rule, and moves nothing.
+- *One surface, two representations*: lid10's cone 48 (56 band + 6 quadric), the
+  bayonet's cylinder 6 (52 + 8) and cone 71 (56 + 6), and step-region-pocket's
+  wall (34 + 2, now with the exact volume). That is **R0**, and the next landing.
+
+**Why R0 needs the band split first, found this session.** Rim resolution runs
+*inside* the band pass as a fixed point, a band whose neighbour dies is dropped
+with it (*"the band sharing this rim was dropped"*), and `RimRef` has no kind
+for a quadric patch. So exchanging a band after the band pass orphans its
+neighbours' rims. `Bands.cc` divides cleanly: lines 34-646 walk rings and match
+declarations (**propose**), 647-1016 resolve rims, seams and releases, 1017-1443
+merge sphere and torus zones (**form**, over the rings granted). Split them,
+behaviour-neutral by the oracle; then the arbiter decides between a surface's
+rings and its whole D0 region *between* the two halves, taking the region only
+where it is formed and (exact tier) writable, else keeping the rings.
 
 ---
 
@@ -350,6 +404,33 @@ of 58, unit tests unchanged.
 
 ## 6. Next steps, in order
 
+**Revised 2026-09-24 (second session)** - items 1 and 2's first candidate are
+done (section 2b). In order now:
+
+1. **Split the band pass into propose and form**, behaviour-neutral, proven by
+   `measure` / `compare` (0 differences over 108 exports is the bar). The shared
+   closures of `recogniseSurfacesOfRevolution` become a small context both halves
+   use; the pipeline gets a band-propose and a band-form stage, and the table
+   says what each reads.
+2. **R0 between the halves**, fixture first: the rings of a surface against its
+   whole connected D0 region (the quadric proposal's D0 members), the region
+   granted only where it forms and the writer can bound it; otherwise the rings.
+   Judged by step-region-pocket (one face per surface, still 4185 pi),
+   step-split-surface (the derived 15647.634695 - check that figure is derivable
+   before asserting it), and lid10's and the bayonet's split surfaces gone.
+3. **Provenance in the grant**: a claimant whose facet's maker owns the surface
+   beats one that does not - moves nothing measured today, so it lands with a
+   fixture that makes it move. Then the design's shuffled-order test.
+4. **The band pass at D0 proper**: it still compares an axis and radius
+   *measured* from the mesh against the declaration at a relative 1e-7; the D0
+   question is the generator's points against the declaration (`Exact.h`).
+5. **The 4x-median statistics** (open item 27): the sweep's is the one that
+   refused the six facets above; the same class rule as open item 30 applies to
+   the grid claim.
+6. Then the old list below from its item 3.
+
+The list as the previous session left it:
+
 1. **Retry the parked provenance switch** (`73a42f3aa`, identity plus D0
    presence) on top of this branch. Its only known failure - originals 26-32 -
    is fixed at the origin. Judge it by `flagship-strict`, `step-cylinder-cross`,
@@ -403,11 +484,12 @@ Paste this into a new session, adjusting only the worktree path.
 
 ```text
 You are continuing work on the PythonSCAD STEP exporter, in a worktree of
-E:\29_Git_Soulsolistice\pythonscad. Branch: claude/step-claim-ledger (built
-on claude/step-claim-two-pass-cf4565), nothing pushed, tree clean, suite 58 of
-58. If your worktree was cut from master, branch from claude/step-claim-ledger
-(do not reset); copy the submodules from the main checkout, writing each .git
-file as the main checkout's own gitdir for it.
+E:\29_Git_Soulsolistice\pythonscad. Branch: claude/step-exporter-continue-9aeeb8
+(built on claude/step-claim-ledger), nothing pushed, tree clean, STEP suite 60
+of 60. If your worktree was cut from master, branch from that branch (do not
+reset); copy the submodules from the main checkout, writing each .git file as
+the main checkout's own gitdir for it, and copy python_mingw/ from a built
+worktree.
 
 Read first, in this order, and in full: doc/step-export-next-session.md (the
 handover - rules, what was understood, what was built, tools, next steps), then
@@ -417,7 +499,8 @@ sessions, and every change to recognition or to a rung is justified against
 them. Before building anything, find the paragraph that already covers it - two
 sessions running lost most of a day rediscovering what they already said. Then
 doc/step-export-development.md (what is settled, testing doctrine, traps) and
-doc/step-export-wip.md (open items 30, 31, 32, 27, 29).
+doc/step-export-wip.md (open items 29, 31, 27, 32; 30 is closed). Section 2b of
+the handover is the latest session in one page - read it before section 1.
 
 PURITY IS NOT NEGOTIABLE. Recognition now runs as a pipeline in
 src/geometry/recognition/: band -> fit -> propose (pure) -> Bezier -> grid ->
@@ -439,6 +522,16 @@ closed forms that fix it (weakest needed class, freedom left, corroboration),
 judged GLOBALLY over the whole cover. Wherever a less precise rung holds ground,
 ask why. Root-cause fixes only. Intent cannot be recovered from geometry - it is
 declared.
+
+D0 IS THE GOAL AND EVERYTHING ELSE SUBMITS TO IT. Every entity aims at a pure
+closed algebraic form; where one is not reached the why is mandatory, and the
+tessellation is a fallback only once it is PROVEN no pure form exists. Nothing -
+work, fixture or derived number - grounds on tessellations. In D0 only machine
+precision applies: no threshold, no deviation (recognition/Exact.h, the forward
+error of the residual). Declarations are the foundation of D0: a missing one is
+added, in the primitive or the model, never inferred. Within a class a tie is
+decided by provenance and membership; at D0 only they discriminate. No patches
+round the structure - restructure it.
 
 Tooling - the dev loop is committed, do not write build or export scripts:
 
@@ -462,15 +555,14 @@ lid10 is a SPECIMEN, not a deliverable; a finding counts once a synthetic
 fixture isolates it. It needs its customizer: -p examples/step_test/lid10.json
 -P "New set 1".
 
-Where to start: (1) retry the parked provenance switch (identity plus D0
-presence, claude/step-provenance-identity-parked 73a42f3aa) on top of this
-branch - its only known failure, lid10's undeclared bayonet channel, is fixed in
-the model now. (2) Then migration step 4: move the grant from the form*
-functions into the arbiter's table, provenance first then determinacy, one
-landing at a time with a fixture first, starting with open item 30
-(exchange-never-surrender), then R0 with the band pass split into propose and
-form. Write the design's shuffled-order test when the policy stops being call
-order.
+Where to start: handover section 6 as revised. (1) Split the band pass into
+propose (Bands.cc 34-646: walk rings, match declarations) and form (647-1443:
+rims, seams, releases, zone merges), behaviour-neutral by the oracle. (2) R0
+between the halves, fixture first: a surface's rings against its whole
+connected D0 region, the region granted only where it forms and the writer can
+bound it, else the rings. (3) Provenance in the grant, then the shuffled-order
+test. (4) The band pass at D0 proper - points against the declaration, not a
+measured axis against it.
 
 Derive expectations from the model, never from a kernel, and never calculate
 anything from a faceted input. Mutation-check every new assertion and every
