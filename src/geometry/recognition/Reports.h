@@ -12,6 +12,7 @@
 
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/FacetGraph.h"
+#include "geometry/recognition/Membership.h"
 
 class Surface;
 
@@ -24,6 +25,7 @@ struct ReportInputs {
   Mesh mesh;
   const std::vector<int32_t>& face_origin;
   const std::map<int32_t, std::vector<std::size_t>>& owned;
+  const std::vector<Region> *regions = nullptr;  // the D0 regions, where computed
 };
 
 /*! OPENSCAD_STEP_LEDGER=<file>: every claim as a table row, and the surfaces
@@ -33,6 +35,11 @@ void dumpLedger(const ReportInputs& in);
 /*! The shadow check, contention, provenance's verdict on it, and split
  * surfaces - what the arbitration did and what it could not decide. */
 void reportArbitration(const ReportInputs& in);
+
+/*! The D0 regions against what holds them: is each region - decided by
+ * declarations alone, whatever order anything ran in - written whole, or split
+ * on a boundary the model does not have? See Membership.h. */
+void reportRegions(const ReportInputs& in);
 
 /*! The declaration census: is everything that could be exact written as exact,
  * per declaration and per facet, and why not where it is not. `decl_written`

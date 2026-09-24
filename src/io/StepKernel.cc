@@ -2692,11 +2692,15 @@ void StepKernel::build_tri_body(
   // licensed a 1.9976 move on step-partial-cylinder.
   {
     const recognition::ReportInputs report_inputs{
-      features, surfaces,
-      recognition::Mesh{&vertices, &loops, &loop_valid, &loop_is_hole, &loop_normals}, faceOrigin,
-      owned};
+      features,
+      surfaces,
+      recognition::Mesh{&vertices, &loops, &loop_valid, &loop_is_hole, &loop_normals},
+      faceOrigin,
+      owned,
+      &rec.d0_regions};
     recognition::dumpLedger(report_inputs);
     recognition::reportArbitration(report_inputs);
+    recognition::reportRegions(report_inputs);
   }
   if (approximate) {
     // The distinct surfaces of the analytic faces at each corner. Bands are

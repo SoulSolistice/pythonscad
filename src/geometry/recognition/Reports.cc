@@ -145,6 +145,100 @@ void dumpLedger(const ReportInputs& in)
   }
 }
 
+void reportRegions(const ReportInputs& in)
+{
+  if (in.regions == nullptr || in.regions->empty()) return;
+  const std::vector<std::vector<int>>& loops = *in.mesh.loops;
+  const ClaimLedger& ledger = in.features.ledger;
+  // What holds a facet, as the file will write it: the honoured claimant and
+  // the surface it names - or nothing, and the tessellation writes the facet.
+  auto holder_of = [&](std::size_t f, std::size_t surface) -> std::string {
+    const Claim *holder = ledger.firstClaimant(f);
+    if (holder == nullptr || holder->by == nullptr) return "the tessellation";
+    if (holder->surface_index != surface) return std::string(holder->by) + " on another surface";
+    return holder->by;
+  };
+  std::set<std::size_t> surfaces_seen;
+  std::size_t facets = 0, whole = 0, split = 0, inner_edges = 0, faceted = 0, elsewhere = 0;
+  std::size_t filtered = 0;
+  std::vector<std::string> first_split;
+  for (const Region& region : *in.regions) {
+    surfaces_seen.insert(region.surface_index);
+    facets += region.facets.size();
+    std::map<std::string, std::size_t> by_holder;
+    for (const std::size_t f : region.facets) {
+      const std::string h = holder_of(f, region.surface_index);
+      by_holder[h]++;
+      if (h == "the tessellation") faceted++;
+      else if (h.size() > 19 && h.compare(h.size() - 19, 19, " on another surface") == 0) elsewhere++;
+      // A trimmed quadric proposes every D0 facet of a cylinder or cone it can
+      // see; one it did not propose as D0 was refused by one of OnQuadric's own
+      // tests - the lean or the interior - which are the tessellation's.
+      const Surface *s =
+        region.surface_index < in.surfaces.size() ? in.surfaces[region.surface_index].get() : nullptr;
+      if (dynamic_cast<const CylinderSurface *>(s) != nullptr ||
+          dynamic_cast<const ConeSurface *>(s) != nullptr) {
+        bool proposed = false;
+        for (const Claim *c : ledger.claimants(f)) {
+          if (c->by != nullptr && std::string(c->by) == kQuadricFace.by &&
+              c->surface_index == region.surface_index && c->evidence == EvidenceClass::D0) {
+            proposed = true;
+          }
+        }
+        if (!proposed) filtered++;
+      }
+    }
+    // Mesh edges inside the region with a differently-held facet on each side:
+    // each is a boundary the file will have and the model does not.
+    std::size_t edges = 0;
+    std::map<EdgeKey, std::vector<std::size_t>> sides;
+    for (const std::size_t f : region.facets) {
+      const std::vector<int>& loop = loops[f];
+      for (std::size_t i = 0; i < loop.size(); i++) {
+        sides[edgeKey(loop[i], loop[(i + 1) % loop.size()])].push_back(f);
+      }
+    }
+    for (const auto& kv : sides) {
+      if (kv.second.size() != 2) continue;
+      if (holder_of(kv.second[0], region.surface_index) !=
+          holder_of(kv.second[1], region.surface_index)) {
+        edges++;
+      }
+    }
+    if (by_holder.size() == 1 && by_holder.begin()->first != "the tessellation" &&
+        by_holder.begin()->first.find(" on another surface") == std::string::npos) {
+      whole++;
+      continue;
+    }
+    split++;
+    inner_edges += edges;
+    if (first_split.size() < 3) {
+      std::string parts;
+      for (const auto& kv : by_holder) {
+        parts += (parts.empty() ? "" : ", ") + std::to_string(kv.second) + " to " + kv.first;
+      }
+      first_split.push_back("surface " + std::to_string(region.surface_index) + ", " +
+                            std::to_string(region.facets.size()) + " facets: " + parts + "; " +
+                            std::to_string(edges) + " edges inside it between differently-held facets");
+    }
+  }
+  LOG(
+    "STEP export: D0 regions, by declaration alone - %1$d regions of %2$d declared surfaces over %3$d "
+    "facets: %4$d written whole by one kind of face on their own surface, %5$d split on a boundary the "
+    "model does not have (%6$d mesh edges inside a region between differently-held facets); %7$d of "
+    "their facets left to the tessellation, %8$d held on a different surface",
+    int(in.regions->size()), int(surfaces_seen.size()), int(facets), int(whole), int(split),
+    int(inner_edges), int(faceted), int(elsewhere));
+  for (const std::string& line : first_split) LOG("STEP export:   split: %1$s", line.c_str());
+  if (filtered > 0) {
+    LOG(
+      "STEP export: %1$d facets of a declared cylinder or cone are D0 and the trimmed-quadric pass did "
+      "not "
+      "propose them as such - refused by its lean or interior test, which are the tessellation's",
+      int(filtered));
+  }
+}
+
 void reportArbitration(const ReportInputs& in)
 {
   [[maybe_unused]] const AnalyticFeatures::Result& features = in.features;

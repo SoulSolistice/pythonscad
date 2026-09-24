@@ -95,6 +95,16 @@ private:
   }
 };
 
+/*! The region stage: the D0 region of every declared curved surface, by
+ * provenance and exact membership alone - see Membership.h. Pure, first, and
+ * read by nothing that decides yet: it is the sequence-agnostic region R0 will
+ * grant from, reported against what the passes below hold
+ * (recognition::reportRegions). */
+void runRegions(Context& ctx)
+{
+  ctx.out.d0_regions = d0Regions(ctx.graph, *ctx.in.surfaces, ctx.in.surfaces->size(), ctx.provenance);
+}
+
 /*! The band stage: rings of facets on a declared surface of revolution. Reads
  * the graph and the declarations only. */
 void runBands(Context& ctx)
@@ -945,6 +955,7 @@ enum Product : unsigned {
   kQuadricFaces = 1u << 7,
   kLeftover = 1u << 8,
   kProposals = 1u << 9,  // what every patch recogniser wants - pure
+  kRegions = 1u << 10,   // each declared surface's D0 region - pure
 };
 
 /*! The stages, in the order the policy in force runs them, each with what it
@@ -964,6 +975,7 @@ struct Stage {
   void (*run)(Context&);
 };
 constexpr Stage kStages[] = {
+  {"region", kGraph | kDeclarations | kProvenance, kRegions, runRegions},
   {"band", kGraph | kDeclarations, kBands, runBands},
   {"fit", kGraph | kDeclarations | kBands, kFits | kBands, runFits},
   {"propose", kGraph | kFits | kProvenance, kProposals, runPropose},
