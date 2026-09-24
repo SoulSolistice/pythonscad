@@ -1,7 +1,12 @@
-/*! How each D0 region would be written - see Representation.h. */
+/*! How each D0 region would be written - see Representation.h.
+ *
+ * One decision per function, data between them: the rims (Rims.h), then whether
+ * the region is rings (ringsOf), then whether it is one ring cut by a declared
+ * plane (tiltedRing), then whether one patch forms over it (patchOf).
+ * representRegions only composes them.
+ */
 #include "geometry/recognition/Representation.h"
 
-#include <algorithm>
 #include <map>
 #include <set>
 #include <utility>
@@ -10,55 +15,126 @@
 #include "geometry/Surface.h"
 #include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Internal.h"
+#include "geometry/recognition/Rims.h"
 
 namespace recognition {
 
 namespace {
 
-/*! A vertex's place on a surface of revolution: its level along the declared
- * axis and its radius about it, each with the forward error of computing it. */
-struct AxialPlace {
-  double t = 0, rho = 0;
-  double t_err = 0, rho_err = 0;
+/*! Whether a region is rings: every facet a wall between exactly two rims, or -
+ * where `pole` allows it - a cap on one. */
+struct RingSplit {
+  std::vector<std::vector<std::size_t>> rings;
+  std::vector<char> closed;
+  std::vector<std::size_t> caps;
+  const char *not_rings = nullptr;  // the rule that says it is not, if one does
 };
 
-AxialPlace placeOf(const Surface *s, const Vector3d& p)
+RingSplit ringsOf(const std::vector<std::vector<int>>& loops, const std::vector<std::size_t>& facets,
+                  const Rims& rims, bool pole)
 {
-  AxialPlace out;
-  // axis: 9 roundings; p - refpt: 3; the dot: 5 - 17 for the level. The radius
-  // adds axis * t (3), the difference (3) and a norm (6) - 29.
-  const Vector3d axis = s->normdir.normalized();
-  const Vector3d rel = p - s->refpt;
-  out.t = rel.dot(axis);
-  out.rho = (rel - axis * out.t).norm();
-  const double scale = p.norm() + s->refpt.norm();
-  out.t_err = forwardError(17, scale);
-  out.rho_err = forwardError(29, scale);
+  RingSplit out;
+  std::map<std::pair<std::size_t, std::size_t>, std::vector<std::size_t>> by_rims;
+  for (const std::size_t f : facets) {
+    std::set<std::size_t> on;
+    for (const int v : loops[f]) on.insert(rims.rimOf(v));
+    if (on.size() == 2) {
+      by_rims[{*on.begin(), *on.rbegin()}].push_back(f);
+    } else if (on.size() == 1) {
+      out.caps.push_back(f);
+    } else if (out.not_rings == nullptr) {
+      out.not_rings = "a facet spans more than two rims of the surface";
+    }
+  }
+  if (out.not_rings == nullptr && !out.caps.empty() && !pole) {
+    out.not_rings = "a facet lies on one rim only, and only a sphere closes at a pole";
+  }
+  if (out.not_rings != nullptr) return out;
+  for (const auto& kv : by_rims) {
+    // Closed: as many facets as vertices on either rim; a part turn has one
+    // vertex more on each rim than it has facets.
+    std::set<int> low, high;
+    for (const std::size_t f : kv.second) {
+      for (const int v : loops[f]) (rims.rimOf(v) == kv.first.first ? low : high).insert(v);
+    }
+    const bool closed = low.size() == kv.second.size() && high.size() == kv.second.size();
+    const bool part = low.size() == kv.second.size() + 1 && high.size() == kv.second.size() + 1;
+    if (!closed && !part) {
+      out.not_rings = "a ring's rims do not have one vertex per wall, or one more";
+      return out;
+    }
+    out.rings.push_back(kv.second);
+    out.closed.push_back(closed ? 1 : 0);
+  }
   return out;
 }
 
-/*! Group values that are equal at machine precision: sorted, a value within the
- * two values' combined error bounds of the group's first joins it. Returns, per
- * input, its group's index. */
-std::vector<std::size_t> groupEqual(const std::vector<double>& value, const std::vector<double>& err)
+/*! Whether a cylinder region is one full ring whose far rim is cut by a plane
+ * at an angle: one flat rim, and every other vertex on one *declared* plane
+ * that crosses the axis - which is what an oblique cut is, and what the model
+ * states. The band pass takes this case by fitting a plane to the mesh at a
+ * tolerance; here it is a declaration asked at machine precision. A full turn of
+ * a cylinder only, as the band writes it: a cone cut off-axis has no
+ * single-radius rim, and a part turn would need an elliptical arc. */
+bool tiltedRing(const Mesh& mesh, const std::vector<std::shared_ptr<Surface>>& surfaces,
+                const CylinderSurface& cyl, const std::vector<std::size_t>& facets, const Rims& rims)
 {
-  std::vector<std::size_t> order(value.size());
-  for (std::size_t i = 0; i < order.size(); i++) order[i] = i;
-  std::sort(order.begin(), order.end(),
-            [&](std::size_t a, std::size_t b) { return value[a] < value[b]; });
-  std::vector<std::size_t> group(value.size(), 0);
-  std::size_t g = 0, first = 0;
-  for (std::size_t k = 0; k < order.size(); k++) {
-    const std::size_t i = order[k];
-    if (k == 0) {
-      first = i;
-    } else if (value[i] - value[first] > err[i] + err[first]) {
-      g++;
-      first = i;
+  const std::vector<Vector3d>& vertices = *mesh.vertices;
+  const std::vector<std::vector<int>>& loops = *mesh.loops;
+  if (rims.levels == 0) return false;
+  const Vector3d axis = cyl.normdir.normalized();
+  // the flat rim: the lowest level, or the highest
+  for (const std::size_t flat : {std::size_t(0), rims.levels - 1}) {
+    std::vector<int> on_flat, rest;
+    for (std::size_t i = 0; i < rims.vertices.size(); i++) {
+      (rims.level[i] == flat ? on_flat : rest).push_back(rims.vertices[i]);
     }
-    group[i] = g;
+    if (on_flat.size() != facets.size() || rest.size() != facets.size()) continue;
+    const Surface *cut = nullptr;
+    for (const auto& candidate : surfaces) {
+      const auto *plane = dynamic_cast<const PlaneSurface *>(candidate.get());
+      if (plane == nullptr) continue;
+      // crosses the axis: a plane containing the axis direction cuts a
+      // cylinder in straight lines, and there is no rim there to write. At
+      // machine precision: two normalisations (9 each) and a dot (5).
+      if (fabs(plane->normdir.normalized().dot(axis)) <= forwardError(23, 2.0)) continue;
+      bool all = true;
+      for (const int v : rest) all = all && onExactly(plane, vertices[v]);
+      if (all) {
+        cut = plane;
+        break;
+      }
+    }
+    if (cut == nullptr) continue;
+    const std::set<int> flat_set(on_flat.begin(), on_flat.end());
+    bool walls = true;
+    for (const std::size_t f : facets) {
+      std::size_t n_flat = 0;
+      for (const int v : loops[f]) n_flat += flat_set.count(v);
+      walls = walls && n_flat == 2 && loops[f].size() == 4;
+    }
+    if (walls) return true;
   }
-  return group;
+  return false;
+}
+
+/*! Whether one patch forms over the whole region - and why not where it does
+ * not. Only a cylinder or a cone has a trimmed face in this writer. */
+void patchOf(const FacetGraph& graph, const std::shared_ptr<Surface>& surface,
+             const std::vector<std::size_t>& facets, RegionRepresentation& rep)
+{
+  const Surface *s = surface.get();
+  if (dynamic_cast<const CylinderSurface *>(s) == nullptr &&
+      dynamic_cast<const ConeSurface *>(s) == nullptr) {
+    rep.not_patch = "no trimmed face of this kind of surface is written";
+    rep.kind = RegionRepresentation::None;
+    return;
+  }
+  const AnalyticFeatures::Patch patch =
+    AnalyticFeatures::patchFromFacets(*graph.mesh().loops, graph.edgeLoops(), surface, facets);
+  rep.patch_formable = patch.alive;
+  rep.not_patch = patch.alive ? nullptr : patch.dropped;
+  rep.kind = patch.alive ? RegionRepresentation::Patch : RegionRepresentation::None;
 }
 
 }  // namespace
@@ -68,162 +144,30 @@ std::vector<RegionRepresentation> representRegions(const FacetGraph& graph,
                                                    const std::vector<Region>& regions)
 {
   const Mesh& mesh = graph.mesh();
-  const std::vector<Vector3d>& vertices = *mesh.vertices;
-  const std::vector<std::vector<int>>& loops = *mesh.loops;
   std::vector<RegionRepresentation> out;
   for (std::size_t r = 0; r < regions.size(); r++) {
     const Region& region = regions[r];
+    const std::shared_ptr<Surface>& surface = surfaces[region.surface_index];
     RegionRepresentation rep;
     rep.region = r;
-    const Surface *s =
-      region.surface_index < surfaces.size() ? surfaces[region.surface_index].get() : nullptr;
-    const bool revolved_patchable = dynamic_cast<const CylinderSurface *>(s) != nullptr ||
-                                    dynamic_cast<const ConeSurface *>(s) != nullptr;
-    const bool sphere = dynamic_cast<const SphereSurface *>(s) != nullptr;
 
-    // The rims: every vertex of the region, keyed by level then radius, each
-    // grouped at machine precision.
-    std::vector<int> verts;
-    for (const std::size_t f : region.facets)
-      verts.insert(verts.end(), loops[f].begin(), loops[f].end());
-    std::sort(verts.begin(), verts.end());
-    verts.erase(std::unique(verts.begin(), verts.end()), verts.end());
-    std::vector<double> t, t_err, rho, rho_err;
-    for (const int v : verts) {
-      const AxialPlace place = placeOf(s, vertices[v]);
-      t.push_back(place.t);
-      t_err.push_back(place.t_err);
-      rho.push_back(place.rho);
-      rho_err.push_back(place.rho_err);
-    }
-    const std::vector<std::size_t> level = groupEqual(t, t_err);
-    // Within each level, by radius.
-    std::map<int, std::size_t> rim_of;
-    {
-      std::map<std::size_t, std::vector<std::size_t>> at_level;
-      for (std::size_t i = 0; i < verts.size(); i++) at_level[level[i]].push_back(i);
-      std::size_t next = 0;
-      for (const auto& kv : at_level) {
-        std::vector<double> rr, re;
-        for (const std::size_t i : kv.second) {
-          rr.push_back(rho[i]);
-          re.push_back(rho_err[i]);
-        }
-        const std::vector<std::size_t> g = groupEqual(rr, re);
-        std::size_t most = 0;
-        for (std::size_t k = 0; k < kv.second.size(); k++) {
-          rim_of[verts[kv.second[k]]] = next + g[k];
-          most = std::max(most, g[k]);
-        }
-        next += most + 1;
+    const Rims rims = rimsOf(mesh, surface.get(), region.facets);
+    const bool pole = dynamic_cast<const SphereSurface *>(surface.get()) != nullptr;
+    RingSplit split = ringsOf(*mesh.loops, region.facets, rims, pole);
+    if (split.not_rings != nullptr) {
+      const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
+      if (cyl != nullptr && tiltedRing(mesh, surfaces, *cyl, region.facets, rims)) {
+        split = RingSplit{{region.facets}, {1}, {}, nullptr};
       }
     }
-
-    // Each facet: a wall between exactly two rims, or a cap on one.
-    std::map<std::pair<std::size_t, std::size_t>, std::vector<std::size_t>> by_rims;
-    std::set<std::size_t> cap_rims;
-    for (const std::size_t f : region.facets) {
-      std::set<std::size_t> on;
-      for (const int v : loops[f]) on.insert(rim_of[v]);
-      if (on.size() == 2) {
-        by_rims[{*on.begin(), *on.rbegin()}].push_back(f);
-      } else if (on.size() == 1) {
-        rep.caps.push_back(f);
-        cap_rims.insert(*on.begin());
-      } else if (rep.not_rings == nullptr) {
-        rep.not_rings = "a facet spans more than two rims of the surface";
-      }
-    }
-    if (rep.not_rings == nullptr && !rep.caps.empty() && !sphere) {
-      rep.not_rings = "a facet lies on one rim only, and only a sphere closes at a pole";
-    }
-    if (rep.not_rings == nullptr) {
-      for (auto& kv : by_rims) {
-        // Closed: as many facets as vertices on either rim; a part turn has one
-        // vertex more on each rim than it has facets.
-        std::set<int> low, high;
-        for (const std::size_t f : kv.second) {
-          for (const int v : loops[f]) (rim_of[v] == kv.first.first ? low : high).insert(v);
-        }
-        const bool closed = low.size() == kv.second.size() && high.size() == kv.second.size();
-        const bool part = low.size() == kv.second.size() + 1 && high.size() == kv.second.size() + 1;
-        if (!closed && !part) {
-          rep.not_rings = "a ring's rims do not have one vertex per wall, or one more";
-          break;
-        }
-        rep.rings.push_back(kv.second);
-        rep.ring_closed.push_back(closed ? 1 : 0);
-      }
-    }
-    // A ring whose far rim is cut by a plane at an angle: one flat rim, and
-    // every other vertex on one *declared* plane that crosses the axis - which
-    // is what an oblique cut is, and what the model states. The band pass takes
-    // this case by fitting a plane to the mesh at a tolerance; here it is a
-    // declaration asked at machine precision. A full turn of a cylinder only,
-    // as the band writes it: a cone cut off-axis has no single-radius rim, and a
-    // part turn would need an elliptical arc.
-    if (rep.not_rings != nullptr && dynamic_cast<const CylinderSurface *>(s) != nullptr &&
-        region.surface_index < surfaces.size()) {
-      const Vector3d axis = s->normdir.normalized();
-      // the flat rim: the lowest level, or the highest - whichever the region's
-      // vertices on it close a full turn
-      std::size_t low_level = level[0], high_level = level[0];
-      for (const std::size_t l : level) {
-        low_level = std::min(low_level, l);
-        high_level = std::max(high_level, l);
-      }
-      for (const std::size_t flat : {low_level, high_level}) {
-        std::vector<int> on_flat, rest;
-        for (std::size_t i = 0; i < verts.size(); i++)
-          (level[i] == flat ? on_flat : rest).push_back(verts[i]);
-        if (on_flat.size() != region.facets.size() || rest.size() != region.facets.size()) continue;
-        const Surface *cut = nullptr;
-        for (const auto& candidate : surfaces) {
-          const auto *plane = dynamic_cast<const PlaneSurface *>(candidate.get());
-          if (plane == nullptr) continue;
-          // crosses the axis: a plane containing the axis direction cuts a
-          // cylinder in straight lines, and there is no rim there to write.
-          // At machine precision: two normalisations (9 each) and a dot (5).
-          if (fabs(plane->normdir.normalized().dot(axis)) <= forwardError(23, 2.0)) continue;
-          bool all = true;
-          for (const int v : rest) all = all && onExactly(plane, vertices[v]);
-          if (all) {
-            cut = plane;
-            break;
-          }
-        }
-        if (cut == nullptr) continue;
-        const std::set<int> flat_set(on_flat.begin(), on_flat.end());
-        bool walls = true;
-        for (const std::size_t f : region.facets) {
-          std::size_t n_flat = 0;
-          for (const int v : loops[f]) n_flat += flat_set.count(v);
-          walls = walls && n_flat == 2 && loops[f].size() == 4;
-        }
-        if (!walls) continue;
-        rep.not_rings = nullptr;
-        rep.caps.clear();
-        rep.rings.assign(1, region.facets);
-        rep.ring_closed.assign(1, 1);
-        break;
-      }
-    }
-    if (rep.not_rings == nullptr) {
+    if (split.not_rings == nullptr) {
       rep.kind = RegionRepresentation::Rings;
+      rep.rings = std::move(split.rings);
+      rep.ring_closed = std::move(split.closed);
+      rep.caps = std::move(split.caps);
     } else {
-      rep.rings.clear();
-      rep.ring_closed.clear();
-      rep.caps.clear();
-      if (revolved_patchable) {
-        const AnalyticFeatures::Patch patch = AnalyticFeatures::patchFromFacets(
-          loops, graph.edgeLoops(), surfaces[region.surface_index], region.facets);
-        rep.patch_formable = patch.alive;
-        rep.not_patch = patch.alive ? nullptr : patch.dropped;
-        rep.kind = patch.alive ? RegionRepresentation::Patch : RegionRepresentation::None;
-      } else {
-        rep.not_patch = "no trimmed face of this kind of surface is written";
-        rep.kind = RegionRepresentation::None;
-      }
+      rep.not_rings = split.not_rings;
+      patchOf(graph, surface, region.facets, rep);
     }
     out.push_back(std::move(rep));
   }

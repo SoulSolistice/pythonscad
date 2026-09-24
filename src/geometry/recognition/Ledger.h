@@ -256,6 +256,23 @@ private:
   std::map<std::size_t, std::vector<std::size_t>> by_facet_;
 };
 
+/*! What holds a facet, as the file will write it, seen from one surface: the
+ * tessellation (nothing honoured it), a claimant on that surface, or a claimant
+ * on another. A query over the ledger - the one every report asks when it wants
+ * to know how a region is written today. */
+struct Holding {
+  enum Kind { Tessellation, Own, Other };
+  Kind kind = Tessellation;
+  const char *by = nullptr;  // the holder, where there is one
+};
+
+inline Holding holdingOf(const ClaimLedger& ledger, std::size_t facet, std::size_t surface_index)
+{
+  const Claim *holder = ledger.firstClaimant(facet);
+  if (holder == nullptr || holder->by == nullptr) return {Holding::Tessellation, nullptr};
+  return {holder->surface_index == surface_index ? Holding::Own : Holding::Other, holder->by};
+}
+
 /*! Who claims, as the ledger names it, and what decides its membership.
  *
  * Precision is the surface's (a declaration or a fit); evidence is what put

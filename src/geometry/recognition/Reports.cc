@@ -153,10 +153,10 @@ void reportRegions(const ReportInputs& in)
   // What holds a facet, as the file will write it: the honoured claimant and
   // the surface it names - or nothing, and the tessellation writes the facet.
   auto holder_of = [&](std::size_t f, std::size_t surface) -> std::string {
-    const Claim *holder = ledger.firstClaimant(f);
-    if (holder == nullptr || holder->by == nullptr) return "the tessellation";
-    if (holder->surface_index != surface) return std::string(holder->by) + " on another surface";
-    return holder->by;
+    const Holding h = holdingOf(ledger, f, surface);
+    if (h.kind == Holding::Tessellation) return "the tessellation";
+    if (h.kind == Holding::Other) return std::string(h.by) + " on another surface";
+    return h.by;
   };
   std::set<std::size_t> surfaces_seen;
   std::size_t facets = 0, whole = 0, split = 0, inner_edges = 0, faceted = 0, elsewhere = 0;
@@ -282,10 +282,10 @@ void reportRepresentations(const ReportInputs& in)
     // or not.
     std::set<std::string> holders;
     for (const std::size_t f : region.facets) {
-      const Claim *holder = ledger.firstClaimant(f);
-      if (holder == nullptr || holder->by == nullptr) holders.insert("the tessellation");
-      else if (holder->surface_index != region.surface_index) holders.insert("another surface");
-      else holders.insert(holder->by);
+      const Holding h = holdingOf(ledger, f, region.surface_index);
+      holders.insert(h.kind == Holding::Tessellation ? "the tessellation"
+                     : h.kind == Holding::Other      ? "another surface"
+                                                     : h.by);
     }
     const bool by_band =
       holders.size() == 1 && holders.count(kBandWall.by) + holders.count(kBandCap.by) == 1;
