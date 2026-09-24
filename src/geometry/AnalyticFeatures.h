@@ -35,6 +35,7 @@
 #include "geometry/linalg.h"
 #include "geometry/recognition/FacetGraph.h"
 #include "geometry/recognition/Ledger.h"
+#include "geometry/recognition/Membership.h"
 #include "geometry/recognition/Provenance.h"
 
 class Surface;
@@ -569,7 +570,8 @@ struct QuadricProposal {
  * concedes, which is the approximation, and such a facet's membership is D4. */
 std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& graph,
                                              const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                             const Provenance& provenance, double smooth_angle,
+                                             const Provenance& provenance,
+                                             const recognition::D0Membership& d0, double smooth_angle,
                                              bool spend_band);
 
 /*! Form: regions lying on a declared or fitted quadric, as patches, from what
@@ -603,14 +605,20 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
 /*! Find the bands of facets which were modelled as a surface of revolution.
  *
  * `surfaces` are the analytic surfaces the model declared; with none of them
- * nothing is recognised, by design. `tol` is the modelling tolerance. */
+ * nothing is recognised, by design. `tol` is the modelling tolerance.
+ *
+ * `d0`, where given, is what the claims are labelled by: a wall or a cap in its
+ * surface's D0 region was decided by identity and exact position, D0; any
+ * other was decided by the band itself - rims fitted to the mesh and matched to
+ * a declaration - and is labelled D3 (a cap D4). Without it nothing is D0. */
 Result recogniseSurfacesOfRevolution(const Mesh& mesh,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
                                      std::size_t declared_count = std::size_t(-1));
 /*! The same, over the adjacency built once per export. */
 Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
-                                     std::size_t declared_count);
+                                     std::size_t declared_count,
+                                     const recognition::D0Membership *d0 = nullptr);
 
 /*! An arbitrary unit vector perpendicular to `norm`. */
 Vector3d perpendicular(const Vector3d& norm);

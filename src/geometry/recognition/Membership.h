@@ -26,7 +26,9 @@
  * read as split here. doc/step-export-wip.md, open item 34.
  */
 
+#include <algorithm>
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -41,6 +43,33 @@ namespace recognition {
 struct Region {
   std::size_t surface_index = 0;
   std::vector<std::size_t> facets;  // ascending
+};
+
+/*! Whether a facet belongs to a declared surface at D0: the one definition,
+ * read by every claimant that labels what decided its claim - the band's walls
+ * and caps, the trimmed quadric's members. Built from the regions, so it is the
+ * same pure answer whoever asks. A claim on a facet this does not contain was
+ * decided by something weaker - a fit, a band - and says so. */
+class D0Membership
+{
+public:
+  D0Membership() = default;
+  explicit D0Membership(const std::vector<Region>& regions)
+  {
+    for (const Region& region : regions) {
+      std::vector<std::size_t>& facets = by_surface_[region.surface_index];
+      facets.insert(facets.end(), region.facets.begin(), region.facets.end());
+    }
+    for (auto& kv : by_surface_) std::sort(kv.second.begin(), kv.second.end());
+  }
+  [[nodiscard]] bool contains(std::size_t surface_index, std::size_t facet) const
+  {
+    const auto it = by_surface_.find(surface_index);
+    return it != by_surface_.end() && std::binary_search(it->second.begin(), it->second.end(), facet);
+  }
+
+private:
+  std::map<std::size_t, std::vector<std::size_t>> by_surface_;
 };
 
 /*! Per facet: 1 where every corner lies on one declared plane at machine

@@ -1019,7 +1019,9 @@ TEST_CASE("proposals do not depend on what is held or on the order proposers run
   const Provenance provenance;  // silent: no ids, so it gates nothing
   const double smooth = 25.0 * M_PI / 180.0;
 
-  const std::vector<QuadricProposal> first = proposeQuadrics(graph, surfaces, provenance, smooth, false);
+  const recognition::D0Membership no_d0;  // silent provenance: nothing is D0
+  const std::vector<QuadricProposal> first =
+    proposeQuadrics(graph, surfaces, provenance, no_d0, smooth, false);
   REQUIRE(first.size() == 1);
   REQUIRE(first[0].facets.size() == (std::size_t)fn);  // every wall facet is on the declared cylinder
 
@@ -1041,7 +1043,8 @@ TEST_CASE("proposals do not depend on what is held or on the order proposers run
   CHECK(!bands.bands.empty());
   const std::vector<GridProposal> grids = proposeGrids(graph, surfaces);
   const std::vector<BezierProposal> beziers = proposeBezierPatches(graph, surfaces);
-  const std::vector<QuadricProposal> again = proposeQuadrics(graph, surfaces, provenance, smooth, false);
+  const std::vector<QuadricProposal> again =
+    proposeQuadrics(graph, surfaces, provenance, no_d0, smooth, false);
   CHECK(grids.empty());
   CHECK(beziers.empty());
   REQUIRE(again.size() == first.size());

@@ -33,8 +33,15 @@ bool Band::isCone() const
 
 Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
-                                     std::size_t declared_count)
+                                     std::size_t declared_count, const recognition::D0Membership *d0)
 {
+  // What decided a claim of this pass on `f` for the surface at `index`: the
+  // facet's D0 membership where it has one, otherwise the pass's own evidence -
+  // `weaker`, the class of what the band itself measured. See
+  // doc/step-design-checklist.md, C4: a rung is as exact as its evidence.
+  auto decided = [d0](std::size_t index, std::size_t f, recognition::EvidenceClass weaker) {
+    return d0 != nullptr && d0->contains(index, f) ? recognition::EvidenceClass::D0 : weaker;
+  };
   const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
@@ -642,13 +649,15 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       for (const std::size_t f : walls) {
         consumed[f] = 1;
         result.consumed_by[f] = "a band's wall";
-        // D0 on a declaration: every corner is on the surface to 1e-7, the rims
-        // match the declaration to 1e-7, and no band or statistic takes part.
-        // That is membership only; *which* facets is still what a band can
-        // express, which is R2 and D4, and the declines above are its record.
+        // D0 where the facet is in its surface's D0 region - identity and exact
+        // position decided it. Otherwise D3: the band fitted its rims to the
+        // mesh and matched them to the declaration at a relative 1e-7, which is
+        // a fit and a threshold, not identity. *Which* facets is still what a
+        // band can express (R2), and the declines above are its record.
         recognition::recordClaim(result.ledger, recognition::kBandWall, f, surfaces[matched], matched,
                                  declared_count, ClaimFate::Honoured,
-                                 "the facet walks out from the band's seed");
+                                 "the facet walks out from the band's seed",
+                                 decided(matched, f, recognition::EvidenceClass::D3));
         band_of_loop[f] = bands.size();
       }
       bands.push_back(info);
@@ -1282,7 +1291,8 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
           // exact the sphere it closes.
           for (const std::size_t cap : {cap_low, cap_high}) {
             recognition::recordClaim(result.ledger, recognition::kBandCap, cap, surface, zone_index,
-                                     declared_count, ClaimFate::Honoured, "the loop closing the band");
+                                     declared_count, ClaimFate::Honoured, "the loop closing the band",
+                                     decided(zone_index, cap, recognition::EvidenceClass::D4));
           }
         }
         rims[seed] = ends;
@@ -1436,7 +1446,8 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
     const std::size_t f = entry.first.first, si = entry.first.second;
     if (result.ledger.has(f, recognition::kBandWall.by, si)) continue;
     recognition::recordClaim(result.ledger, recognition::kBandWall, f, surfaces[si], si, declared_count,
-                             ClaimFate::Declined, entry.second);
+                             ClaimFate::Declined, entry.second,
+                             decided(si, f, recognition::EvidenceClass::D3));
   }
 
   return result;

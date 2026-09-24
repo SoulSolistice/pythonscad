@@ -4044,6 +4044,31 @@ surface with the original id of the primitive that declared it when the
 primitive becomes a Manifold, and keep the tag through `mergeSurfaces`, so
 ownership is carried rather than inferred.
 
+### 35. Provenance exists only where a Manifold boolean ran
+
+**Found 2026-09-24**, by relabelling a band's walls honestly (D0 only inside a
+D0 region, D3 otherwise). On step-rounded-box, step-extrude-circle,
+step-rotate-extrude, step-sphere, step-torus, step-rounded-profile and others,
+every facet's original id is -1: ids are minted where a geometry becomes a
+Manifold for a boolean, so a model with no boolean carries no identity at all,
+nothing on it can be D0 by identity, and its bands now read D3. That is the
+label being honest, not a regression - and it points at the origin: an original
+id belongs on every primitive where it is generated, not only where a boolean
+happens to run. Its own landing; R0 reaches only facets that carry provenance,
+so it widens what R0 can fix.
+
+### 36. lid10's 240 band walls are not on their declaration at machine precision
+
+**Found 2026-09-24**, the same relabel. The 240 walls item 31 left open (originals
+1, 2 and 67 on cylinders 39, 42, 7 and 8) are outside every D0 region: the band
+matched them to a declaration at a relative 1e-7, and no whole facet of their
+makers lies on it at machine precision. So the band's "D0" there was never D0,
+and item 31's question - is the band's claim looser than D0, or are the
+generator's points off their own declaration? - is answered for the first half.
+The second is the origin question (checklist E1, E3): which primitive emits those
+points, and why are they not on the surface it declares? Chase with the ledger
+dump's centroids and `.surfaces.tsv`, as items 31's originals 26-32 were.
+
 ### 32. The fixture sanity test does not look for `EXPORT-ERROR`
 
 `tests/stepexportsanitytest.py` never checks the exporter's own error lines;

@@ -174,10 +174,8 @@ public:
 
   /*! Is this facet on the surface - with every corner on it exactly, or,
    * where `spend_band`, within what the mesh concedes? `off_out` takes the
-   * worst corner offset, which a caller judging a whole region needs, and
-   * `exact_out` whether every corner is on the surface at machine precision. */
-  [[nodiscard]] bool covers(std::size_t f, bool spend_band, double *off_out = nullptr,
-                            bool *exact_out = nullptr) const
+   * worst corner offset, which a caller judging a whole region needs. */
+  [[nodiscard]] bool covers(std::size_t f, bool spend_band, double *off_out = nullptr) const
   {
     const std::vector<Vector3d>& vertices = *mesh_.vertices;
     const std::vector<std::vector<int>>& loops = *mesh_.loops;
@@ -231,7 +229,6 @@ public:
     }
     if (interior > interior_allow) return false;
     if (off_out != nullptr) *off_out = off;
-    if (exact_out != nullptr) *exact_out = exact;
     return true;
   }
 
@@ -256,7 +253,8 @@ private:
  * labelled with what decided it - see QuadricProposal::decided. */
 std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& graph,
                                              const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                             const Provenance& provenance, double smooth_angle,
+                                             const Provenance& provenance,
+                                             const recognition::D0Membership& d0, double smooth_angle,
                                              bool spend_band)
 {
   const Mesh& mesh = graph.mesh();
@@ -308,8 +306,7 @@ std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& grap
       // out nearly coplanar. The claim shattered into fourteen pieces of one
       // and three facets.
       double off = 0;
-      bool exact = false;
-      if (!on_quadric.covers(f, spend_band, &off, &exact)) continue;
+      if (!on_quadric.covers(f, spend_band, &off)) continue;
       proposal.facets.push_back(f);
       proposal.off.push_back(off);
       proposal.span.push_back(on_quadric.spanOf(f));
@@ -317,10 +314,10 @@ std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& grap
       // surface as a face and is on it (identity), and every corner is on it
       // exactly (position, at machine precision). Corners alone are the
       // weakest rung - a cap over a bore has every corner on the rim - and
-      // identity alone says nothing about this facet.
-      proposal.decided.push_back(exact && provenance.owns(f, surface_index)
-                                   ? recognition::EvidenceClass::D0
-                                   : recognition::EvidenceClass::D4);
+      // identity alone says nothing about this facet. Asked of the one
+      // definition every claimant reads, recognition::D0Membership.
+      proposal.decided.push_back(d0.contains(surface_index, f) ? recognition::EvidenceClass::D0
+                                                               : recognition::EvidenceClass::D4);
     }
     out.push_back(std::move(proposal));
   }

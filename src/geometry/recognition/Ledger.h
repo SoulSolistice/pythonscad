@@ -268,11 +268,13 @@ struct Claimant {
   EvidenceClass evidence_if_fitted;    // ... and on a surface the approximation fitted
 };
 
-/*! A band's wall: every corner on the declared surface to 1e-7 and the rims
- * matched to it at 1e-7, no band or statistic - D0 on a declaration. Which
- * facets a band takes is still what a ring can express (R2, D4); its declines
- * are the record of that. */
-inline constexpr Claimant kBandWall{"a band's wall", ClaimPrecision::DeclaredExact, EvidenceClass::D0,
+/*! A band's wall. What the band itself measures is a fit: rims fitted to the
+ * mesh and matched to a declaration at a relative 1e-7 - D3. A wall in its
+ * surface's D0 region (recognition::D0Membership) is D0 facet by facet, and the
+ * band pass says so where it records it. Which facets a band takes is still
+ * what a ring can express (R2, D4); its declines are the record of that. Until
+ * 2026-09-24 every wall was labelled D0, including walls no identity decided. */
+inline constexpr Claimant kBandWall{"a band's wall", ClaimPrecision::DeclaredExact, EvidenceClass::D3,
                                     EvidenceClass::D3};
 /*! A band's polar cap, absorbed because the gap it spans is under one ring step
  * of the tessellation - the tessellation deciding, however exact the sphere. */

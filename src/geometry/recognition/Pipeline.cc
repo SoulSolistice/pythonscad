@@ -55,6 +55,9 @@ struct Context {
   std::vector<AnalyticFeatures::BezierProposal> bezier_proposals;
   std::vector<AnalyticFeatures::GridProposal> grid_proposals;
   std::vector<AnalyticFeatures::QuadricProposal> quadric_proposals;
+  // Which facets belong to which declared surface at D0 - the regions, as a
+  // lookup every claimant labels its claims by. Filled by the region stage.
+  D0Membership d0;
 
   Context(const Inputs& inputs, Writability& w, Recognition& result)
     : in(inputs),
@@ -103,6 +106,7 @@ private:
 void runRegions(Context& ctx)
 {
   ctx.out.d0_regions = d0Regions(ctx.graph, *ctx.in.surfaces, ctx.in.surfaces->size(), ctx.provenance);
+  ctx.d0 = D0Membership(ctx.out.d0_regions);
 }
 
 /*! The band stage: rings of facets on a declared surface of revolution. Reads
@@ -133,8 +137,8 @@ void runBands(Context& ctx)
   // availability line above prints only when the list is non-empty, which
   // makes those two cases look identical - silence.
   if (surfaces.empty()) LOG("STEP export: no analytic surfaces were declared");
-  features =
-    AnalyticFeatures::recogniseSurfacesOfRevolution(graph, surfaces, model_tol, surfaces.size());
+  features = AnalyticFeatures::recogniseSurfacesOfRevolution(graph, surfaces, model_tol, surfaces.size(),
+                                                             &ctx.d0);
 }
 
 /*! The fit stage, under the approximation flag: surfaces the model did not
@@ -278,8 +282,8 @@ void runFits(Context& ctx)
       // Re-run with the fits in hand. Cheaper than threading them through the
       // pass that has already run, and it means a fitted surface goes through
       // exactly the checks a declared one does.
-      features =
-        AnalyticFeatures::recogniseSurfacesOfRevolution(graph, effective, model_tol, surfaces.size());
+      features = AnalyticFeatures::recogniseSurfacesOfRevolution(graph, effective, model_tol,
+                                                                 surfaces.size(), &ctx.d0);
       std::size_t lost = 0, demoted = 0;
       const std::vector<char> rerun_held = ctx.arbiter.held();
       for (std::size_t f = 0; f < exact_consumed.size() && f < rerun_held.size(); f++) {
@@ -362,7 +366,7 @@ void runPropose(Context& ctx)
   const std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
   ctx.bezier_proposals = AnalyticFeatures::proposeBezierPatches(graph, effective);
   ctx.grid_proposals = AnalyticFeatures::proposeGrids(graph, effective);
-  ctx.quadric_proposals = AnalyticFeatures::proposeQuadrics(graph, effective, ctx.provenance,
+  ctx.quadric_proposals = AnalyticFeatures::proposeQuadrics(graph, effective, ctx.provenance, ctx.d0,
                                                             ctx.smooth_angle, ctx.in.approximate);
   for (const auto& proposal : ctx.quadric_proposals) {
     for (std::size_t k = 0; k < proposal.facets.size(); k++) {
@@ -976,9 +980,9 @@ struct Stage {
 };
 constexpr Stage kStages[] = {
   {"region", kGraph | kDeclarations | kProvenance, kRegions, runRegions},
-  {"band", kGraph | kDeclarations, kBands, runBands},
-  {"fit", kGraph | kDeclarations | kBands, kFits | kBands, runFits},
-  {"propose", kGraph | kFits | kProvenance, kProposals, runPropose},
+  {"band", kGraph | kDeclarations | kRegions, kBands, runBands},
+  {"fit", kGraph | kDeclarations | kBands | kRegions, kFits | kBands, runFits},
+  {"propose", kGraph | kFits | kProvenance | kRegions, kProposals, runPropose},
   {"Bezier", kGraph | kFits | kProposals | kBands, kBezierFaces, runBezier},
   {"grid", kGraph | kFits | kProposals | kBands | kBezierFaces, kSweepFaces, runGrids},
   {"quadric", kGraph | kFits | kProvenance | kProposals | kBands | kBezierFaces | kSweepFaces,
