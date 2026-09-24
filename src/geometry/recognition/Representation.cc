@@ -155,6 +155,59 @@ std::vector<RegionRepresentation> representRegions(const FacetGraph& graph,
         rep.ring_closed.push_back(closed ? 1 : 0);
       }
     }
+    // A ring whose far rim is cut by a plane at an angle: one flat rim, and
+    // every other vertex on one *declared* plane that crosses the axis - which
+    // is what an oblique cut is, and what the model states. The band pass takes
+    // this case by fitting a plane to the mesh at a tolerance; here it is a
+    // declaration asked at machine precision. A full turn of a cylinder only,
+    // as the band writes it: a cone cut off-axis has no single-radius rim, and a
+    // part turn would need an elliptical arc.
+    if (rep.not_rings != nullptr && dynamic_cast<const CylinderSurface *>(s) != nullptr &&
+        region.surface_index < surfaces.size()) {
+      const Vector3d axis = s->normdir.normalized();
+      // the flat rim: the lowest level, or the highest - whichever the region's
+      // vertices on it close a full turn
+      std::size_t low_level = level[0], high_level = level[0];
+      for (const std::size_t l : level) {
+        low_level = std::min(low_level, l);
+        high_level = std::max(high_level, l);
+      }
+      for (const std::size_t flat : {low_level, high_level}) {
+        std::vector<int> on_flat, rest;
+        for (std::size_t i = 0; i < verts.size(); i++)
+          (level[i] == flat ? on_flat : rest).push_back(verts[i]);
+        if (on_flat.size() != region.facets.size() || rest.size() != region.facets.size()) continue;
+        const Surface *cut = nullptr;
+        for (const auto& candidate : surfaces) {
+          const auto *plane = dynamic_cast<const PlaneSurface *>(candidate.get());
+          if (plane == nullptr) continue;
+          // crosses the axis: a plane containing the axis direction cuts a
+          // cylinder in straight lines, and there is no rim there to write.
+          // At machine precision: two normalisations (9 each) and a dot (5).
+          if (fabs(plane->normdir.normalized().dot(axis)) <= forwardError(23, 2.0)) continue;
+          bool all = true;
+          for (const int v : rest) all = all && onExactly(plane, vertices[v]);
+          if (all) {
+            cut = plane;
+            break;
+          }
+        }
+        if (cut == nullptr) continue;
+        const std::set<int> flat_set(on_flat.begin(), on_flat.end());
+        bool walls = true;
+        for (const std::size_t f : region.facets) {
+          std::size_t n_flat = 0;
+          for (const int v : loops[f]) n_flat += flat_set.count(v);
+          walls = walls && n_flat == 2 && loops[f].size() == 4;
+        }
+        if (!walls) continue;
+        rep.not_rings = nullptr;
+        rep.caps.clear();
+        rep.rings.assign(1, region.facets);
+        rep.ring_closed.assign(1, 1);
+        break;
+      }
+    }
     if (rep.not_rings == nullptr) {
       rep.kind = RegionRepresentation::Rings;
     } else {
