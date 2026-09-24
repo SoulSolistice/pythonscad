@@ -1,6 +1,8 @@
 #include "geometry/Polygon2d.h"
 
+#include <cmath>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -154,6 +156,36 @@ void Polygon2d::transform(const Transform2d& mat)
  * map rather than the caller's intent is what makes this safe: `scale([2,1])` and
  * a matrix assembled by hand arrive here the same way.
  */
+void Polygon2d::placeOnArcs(double grid)
+{
+  if (arcs.empty() || !(grid > 0)) return;
+  for (auto& outline : theoutlines) {
+    for (auto& v : outline.vertices) {
+      const Arc2d *best = nullptr;
+      double best_residual = 0;
+      for (const auto& arc : arcs) {
+        const Vector2d c(arc.centre[0], arc.centre[1]);
+        const double d = (v - c).norm();
+        if (!(d > 0)) continue;
+        const double residual = fabs(d - arc.r);
+        // Half a grid cell in each coordinate is at most grid / sqrt(2) off, and
+        // measuring it - 2 subtractions, 2 squares, a sum, a root and the
+        // difference, 7 roundings - adds gamma_7 of the magnitudes involved.
+        const double eps7 = 7 * std::numeric_limits<double>::epsilon();
+        const double reach = grid * M_SQRT1_2 + eps7 / (1 - eps7) * (v.norm() + c.norm() + arc.r);
+        if (residual > reach) continue;
+        if (best == nullptr || residual < best_residual) {
+          best = &arc;
+          best_residual = residual;
+        }
+      }
+      if (best == nullptr) continue;
+      const Vector2d c(best->centre[0], best->centre[1]);
+      v = c + (v - c) * (best->r / (v - c).norm());
+    }
+  }
+}
+
 void Polygon2d::transformArcs(const Transform2d& mat)
 {
   // A Bezier is not fussy the way a circle is: an affine map takes one to

@@ -2249,7 +2249,13 @@ Each of these cost real time and each will recur.
   `CLIPPER2_MAX_DECIMAL_PRECISION=8`, so a vertex that should be exactly on a
   recorded arc is within about 1e-8 of it and no closer. A test asking "are these
   two points on this circle" can afford to be loose — a straight edge's ends are
-  nowhere near one — and at 1e-9 it matched nothing.
+  nowhere near one — and at 1e-9 it matched nothing. **Since 2026-09-24 the
+  points go back on their arcs at the origin**: `Polygon2d::placeOnArcs`, after
+  `offset()` and after every 2D boolean that carries arc records, undoes exactly
+  the grid's rounding (half a cell per coordinate) by the closed form. The loose
+  test had hidden it from everything downstream; a D0 test at machine precision
+  turned `step-rounded-profile`'s four tori into 32 cones until it was fixed
+  there. `step-rounded-profile-notched` asserts the boolean half.
 - **A declared plane must only ever confirm a plane the mesh already carries**,
   never invent one. `refpt` is not reliably a rim, so the test runs from the
   mesh's plane outwards, never from the declaration in.

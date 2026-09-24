@@ -38,6 +38,7 @@
 #include <src/geometry/GeometryEvaluator.h>
 #include <src/geometry/Surface.h>
 #include <src/geometry/AnalyticFeatures.h>
+#include <src/geometry/recognition/Exact.h>
 #include <set>
 #include <limits>
 #include <climits>
@@ -252,36 +253,21 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   // the declarations there. Letting a plane in here would put a corner on its
   // own cap into the three-owner bucket, which places nothing at all.
 
-  // On the surface, tightly. See the note above for why not pointMember.
-  const double tol = 1e-7;
+  // On the surface, exactly: a declared quadric or torus at machine precision
+  // (recognition::onExactly - the forward error of the residual, no chosen
+  // threshold; this was 1e-7 until 2026-09-24 and decided nothing between the
+  // two). A grid answers by its own net's points. A Bezier patch is D1, an
+  // interpolant reached by projection, and keeps the projection's tolerance.
+  // See the note above for why not pointMember.
+  const double patch_tol = 1e-7;
   auto runsThrough = [&](const Surface *s, const Vector3d& p) {
     if (const auto *grid = dynamic_cast<const GridSurface *>(s)) return grid->isDeclaredPoint(p);
-    if (const auto *cyl = dynamic_cast<const CylinderSurface *>(s)) {
-      const Vector3d rel = p - cyl->refpt;
-      const Vector3d axis = cyl->normdir.normalized();
-      return fabs((rel - axis * rel.dot(axis)).norm() - cyl->r) <= tol;
-    }
-    if (const auto *cone = dynamic_cast<const ConeSurface *>(s)) {
-      const Vector3d rel = p - cone->refpt;
-      const Vector3d axis = cone->normdir.normalized();
-      return fabs((rel - axis * rel.dot(axis)).norm() - cone->radiusAt(p)) <= tol;
-    }
-    if (const auto *sph = dynamic_cast<const SphereSurface *>(s)) {
-      return fabs((p - sph->refpt).norm() - sph->r) <= tol;
-    }
-    if (const auto *tor = dynamic_cast<const TorusSurface *>(s)) {
-      const Vector3d rel = p - tor->refpt;
-      const Vector3d axis = tor->normdir.normalized();
-      const double along = rel.dot(axis);
-      const double radial = (rel - axis * along).norm();
-      return fabs(hypot(radial - tor->r_major, along) - tor->r_minor) <= tol;
-    }
     if (const auto *patch = dynamic_cast<const BezierPatchSurface *>(s)) {
       double u = 0, v = 0;
       if (!patch->project(p, u, v)) return false;
-      return (patch->evaluate(u, v) - p).norm() <= tol;
+      return (patch->evaluate(u, v) - p).norm() <= patch_tol;
     }
-    return false;
+    return recognition::onExactly(s, p);
   };
 
   // Which surfaces run through each vertex, once, rather than per facet.
@@ -363,8 +349,8 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     // A facet wholly on a declared plane is a facet *of that plane*, whatever
     // curved surface its corners also lie on: a cylinder's cap has every corner
     // on the rim, and its interior is the disc, not the wall. The plane is the
-    // closed form it lies on, stated by a declaration, by the same float
-    // equality `runsThrough` holds - so this is D0, where the facing band below
+    // closed form it lies on, stated by a declaration, at the same machine
+    // precision `runsThrough` holds - so this is D0, where the facing band below
     // is a measurement. Measured without it on step-chamfered-cylinder:
     // hull() swallows the r = 8 disc's wall entirely, and the hull's bottom cap
     // alone made the disc's original "present" on that cylinder.
@@ -372,11 +358,10 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     for (std::size_t j = 0; j < nsurf && !on_declared_plane; j++) {
       if (is_plane[j] == 0) continue;
       const Surface *plane = ps.surfaces[j].get();
-      const Vector3d n = plane->normdir.normalized();
       bool all = true;
       for (const int v : f) {
         if (v < 0 || std::size_t(v) >= ps.vertices.size() ||
-            fabs((ps.vertices[v] - plane->refpt).dot(n)) > tol) {
+            !recognition::onExactly(plane, ps.vertices[v])) {
           all = false;
           break;
         }

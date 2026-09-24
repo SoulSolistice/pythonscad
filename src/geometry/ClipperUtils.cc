@@ -255,9 +255,22 @@ std::unique_ptr<Polygon2d> apply(const std::vector<Clipper2Lib::Paths64>& pathsv
  * Records that no longer describe anything are harmless: an Arc2d is a hint and
  * the consumer fits it before believing it. Only the duplicates are dropped, and
  * only to keep the list from growing with every operation in a deep tree.
+ *
+ * And the points go back on them. The boolean has just rounded every vertex to
+ * Clipper's grid, `grid` wide, so a point an operand had exactly on its arc -
+ * an offset's round join, put there by applyOffset - is half a cell off it
+ * again. Polygon2d::placeOnArcs undoes exactly that rounding. Only where no
+ * operand carries a pending 3D transform: Clipper saw the transformed outlines
+ * and such an operand's records are in its own frame, so the two would not be
+ * comparable.
  */
-static void carryArcs(Polygon2d& result, const std::vector<std::shared_ptr<const Polygon2d>>& operands)
+static void carryArcs(Polygon2d& result, const std::vector<std::shared_ptr<const Polygon2d>>& operands,
+                      double grid)
 {
+  bool same_frame = true;
+  for (const auto& operand : operands) {
+    if (operand != nullptr && operand->hasTransform3d()) same_frame = false;
+  }
   for (const auto& operand : operands) {
     if (operand == nullptr) continue;
     for (const auto& arc : operand->arcs) {
@@ -277,6 +290,7 @@ static void carryArcs(Polygon2d& result, const std::vector<std::shared_ptr<const
     // the comparison would cost more than the duplicates do.
     for (const auto& bez : operand->beziers) result.beziers.push_back(bez);
   }
+  if (same_frame) result.placeOnArcs(grid);
 }
 
 Polygon2d cleanUnion(const std::vector<std::shared_ptr<const Polygon2d>>& polygons)
@@ -402,7 +416,7 @@ Polygon2d cleanUnion(const std::vector<std::shared_ptr<const Polygon2d>>& polygo
   }
   union_result = union_sanitized;
   union_result.setSanitized(true);
-  carryArcs(union_result, polygons);
+  carryArcs(union_result, polygons, std::ldexp(1.0, -scale_bits));
   for (const auto& poly : polygons) {
     if (poly == nullptr) continue;
     for (const auto& pl : poly->polylines()) {
@@ -585,7 +599,7 @@ std::unique_ptr<Polygon2d> apply(const std::vector<std::shared_ptr<const Polygon
   }
 
   result.setSanitized(true);
-  carryArcs(result, polygons);
+  carryArcs(result, polygons, std::ldexp(1.0, -scale_bits));
 
   return std::make_unique<Polygon2d>(result);
 }
@@ -654,8 +668,6 @@ std::unique_ptr<Polygon2d> applyOffset(const Polygon2d& poly, double offset,
   Clipper2Lib::PolyTree64 result;
   co.Execute(std::ldexp(offset, scale_bits), result);
   auto r = toPolygon2d(result, scale_bits);
-  r->transform3d(poly.getTransform3d());
-  r->stamp_color(poly);
 
   // A round join *is* an arc, and this is where its radius is known exactly:
   // Clipper places the join's points on a circle of radius |offset| about the
@@ -683,7 +695,16 @@ std::unique_ptr<Polygon2d> applyOffset(const Polygon2d& poly, double offset,
       const double moved = arc.r + offset;
       if (moved > 0) r->arcs.push_back(Arc2d{arc.centre, moved});
     }
+    // The records are exact and the points Clipper returned are on its grid,
+    // up to half a cell off the circle it computed them on - so a rotate_extrude
+    // of this profile had its points ~1e-8 off the torus it declares, which a
+    // test at machine precision rightly calls off the surface. Put them back
+    // where they were computed, here, where the grid is known and before the
+    // pending transform, while the vertices and the records share a frame.
+    r->placeOnArcs(std::ldexp(1.0, -scale_bits));
   }
+  r->transform3d(poly.getTransform3d());
+  r->stamp_color(poly);
   return r;
 }
 

@@ -20,6 +20,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Internal.h"
 #include "geometry/recognition/Ledger.h"
 
@@ -1050,16 +1051,9 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       if (sph == nullptr && tor == nullptr) return false;
       for (const std::size_t f : bands[bi].walls) {
         for (const int v : loops[f]) {
-          if (sph != nullptr) {
-            if (fabs((vertices[v] - sph->refpt).norm() - sph->r) > 1e-7 * sph->r) return false;
-          } else {
-            const Vector3d rel = vertices[v] - tor->refpt;
-            const double along = rel.dot(tor->normdir);
-            const double radial = (rel - tor->normdir * along).norm() - tor->r_major;
-            if (fabs(sqrt(radial * radial + along * along) - tor->r_minor) > 1e-7 * tor->r_minor) {
-              return false;
-            }
-          }
+          // On the declared zone exactly - machine precision, see
+          // recognition/Exact.h; a relative 1e-7 until 2026-09-24.
+          if (!recognition::onExactly(zone, vertices[v])) return false;
         }
       }
       return true;
@@ -1310,11 +1304,7 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       auto on_torus = [&](std::size_t bi) {
         for (const std::size_t f : bands[bi].walls) {
           for (const int v : loops[f]) {
-            const Vector3d rel = vertices[v] - tor->refpt;
-            const double along = rel.dot(tor->normdir);
-            const double radial = (rel - tor->normdir * along).norm();
-            const double d = radial - tor->r_major;
-            if (fabs(sqrt(d * d + along * along) - tor->r_minor) > 1e-7 * tor->r_minor) return false;
+            if (!recognition::onExactly(tor, vertices[v])) return false;  // see recognition/Exact.h
           }
         }
         return true;

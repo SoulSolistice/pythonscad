@@ -29,10 +29,19 @@
  * a threshold standing where only machine precision belongs, and the entity
  * census of all 106 exports shows it decided nothing there.
  *
- * Not yet used everywhere D0 is asked: export_step.cc's `runsThrough` and the
- * band pass still hold 1e-7, and the band pass compares a measured axis and
- * radius against the declaration rather than the generator's points against it.
- * Each is its own landing, proven the same way.
+ * Asked here by the quadric pass, by export_step.cc's `runsThrough` (ownership
+ * and presence) and by the band pass's sphere and torus zones. The first export
+ * it was not neutral on was step-rounded-profile, whose four tori became 32
+ * cones: offset()'s points came off Clipper's 2^-27 grid, half a cell off the
+ * arcs they were computed on, and the relative 1e-7 had hidden it. Fixed at the
+ * origin - Polygon2d::placeOnArcs, after the offset and after every 2D boolean -
+ * and asserted by step-rounded-profile-notched.
+ *
+ * Not yet asked here: the band pass still compares an axis and a radius it
+ * measured from the mesh against the declaration, at a relative 1e-7, where the
+ * D0 question is the generator's points against the declaration itself; a
+ * declared grid still matches its net through a 1e-9 quantisation; and a Bezier
+ * patch, D1, keeps its projection's tolerance.
  *
  * Anything that fails this is not on the surface at D0, however close. Its
  * membership is then a D4 question - the tessellation band - and is labelled so.
@@ -62,7 +71,7 @@ inline double forwardError(int n, double scale)
   return ne / (1 - ne) * scale;
 }
 
-/*! How far `p` is from a declared cylinder, cone, sphere or torus, and the
+/*! How far `p` is from a declared plane, cylinder, cone, sphere or torus, and the
  * bound the arithmetic puts on that figure. Any other kind of surface answers
  * with an infinite residual: it has no closed-form residual here. */
 inline Residual residualOf(const Surface *s, const Vector3d& p)
@@ -93,6 +102,12 @@ inline Residual residualOf(const Surface *s, const Vector3d& p)
     // rel: 3; norm: 6; minus r: 1.
     out.value = fabs(rel.norm() - sph->r);
     out.bound = forwardError(10, base + fabs(sph->r));
+    return out;
+  }
+  if (dynamic_cast<const PlaneSurface *>(s) != nullptr) {
+    // normal: 9; rel: 3; dot: 5 - the distance along the normal.
+    out.value = fabs(rel.dot(s->normdir.normalized()));
+    out.bound = forwardError(17, base);
     return out;
   }
   if (const auto *tor = dynamic_cast<const TorusSurface *>(s)) {

@@ -113,6 +113,24 @@ public:
    * channel, same rules - see Bezier2d. */
   std::vector<Bezier2d> beziers;
 
+  /*! Put back on its arc every vertex a rounding grid moved off one.
+   *
+   * Clipper computes a round join's points on the circle `arcs` records and
+   * then rounds each coordinate to its integer grid, `grid` wide, so a point the
+   * generator meant on the arc arrives up to half a cell off it in each
+   * coordinate. The record is exact and the points are not, and everything
+   * downstream that asks whether a point is on its declared surface - a
+   * rotate_extrude's torus, a linear_extrude's cylinder - is then asking about
+   * the grid instead of the model.
+   *
+   * A vertex within that rounding of a recorded arc (half a cell per
+   * coordinate, plus the forward error of measuring it) is put on the arc by the
+   * closed form, centre + r * (v - centre) / |v - centre|: the point the
+   * generator computed, before the grid moved it. Nothing chosen - the reach is
+   * the grid's own rounding. Operates on the untransformed outlines, in the frame
+   * the records are in; the caller calls it where the two agree. */
+  void placeOnArcs(double grid);
+
   void reverse(void);
   [[nodiscard]] std::unique_ptr<PolySet> tessellate(bool in3d = false) const;
   [[nodiscard]] double area() const;

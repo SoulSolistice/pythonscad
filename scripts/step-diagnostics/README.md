@@ -14,7 +14,7 @@ point and sometimes a trap — see *Kernel agreement is not proof* in
 | command | does |
 | --- | --- |
 | `scripts/step-dev.sh build` | incremental build and stage — never configures |
-| `scripts/step-dev.sh test` | the STEP suite, `export-step-\|mutations`, 59 tests, staging DLLs on PATH |
+| `scripts/step-dev.sh test` | the STEP suite, `export-step-\|mutations`, 60 tests, staging DLLs on PATH |
 | `scripts/step-dev.sh flagship` | the three flagship tests alone |
 | `scripts/step-dev.sh export lid10\|bayonet\|f02\|f04\|<file.scad>` | export with both feature flags and the right customizer set, into `build/step-dev/` |
 | `scripts/step-dev.sh census <file.stp>…` | the fault census, with the OCP-capable interpreter |
