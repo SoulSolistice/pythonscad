@@ -133,179 +133,174 @@ void revolveArc(const Arc2d& arc, RevolutionRecords& records)
 // Extrusion
 // ---------------------------------------------------------------------------
 
-/*! The cylinders and cones a straight extrusion of the profile's arcs sweeps.
- *
- * An arc extruded along the normal of its own plane sweeps a circular cylinder,
- * exactly. With a uniform `scale` it sweeps a cone instead, stated today - as
- * every cone was until 2026-09-24 - by declaring the circle at each of its two
- * ends, which the band pass accepts as a frustum when both rims match.
- *
- * Everything that would make either untrue is refused rather than approximated:
- *
- *   - a twist, which sweeps a helicoid, or an uneven scale, which sweeps a
- *     general ruled surface;
- *   - an oblique sweep, which sweeps an *oblique* cylinder - a real surface, but
- *     not a CYLINDRICAL_SURFACE, whose circular section is not perpendicular to
- *     its axis;
- *   - a profile plane whose 3D transform is not a similarity, which turns the
- *     circle into an ellipse before it is swept at all;
- *   - a scaled arc whose centre is not the origin the scale is taken about.
- *     `scale` moves such a centre sideways as well as shrinking its radius, so
- *     the surface is an *oblique* cone: still exact, still describable, and not
- *     a CONICAL_SURFACE. Only an arc concentric with the scaling origin tapers
- *     into one.
- */
-void extrudeArcs(const Profile2d& profile, const Extrusion& sweep, Surfaces& out)
+// Every station of a linear extrusion is the profile under one map,
+//
+//   X(p, t) = L (S(t) R(t) p) + base + t h,   t from 0 to 1,
+//
+// L the profile's own placement, S(t) the scale growing from 1 to (sx, sy), R(t)
+// the twist turning from 0 to its angle, h the height. What the extrusion makes
+// follows from three facts about that map, each asked once:
+//
+//   - every station lies in a plane parallel to the first: the caps;
+//   - it is affine in t exactly when nothing turns (no twist), and an affine map
+//     sweeps a straight edge into the bilinear patch through its four corners,
+//     a Bezier into the (n, 1) patch of its control points - exact, because both
+//     are affine in their control points;
+//   - it keeps a circle a circle exactly when every station is a similarity (L
+//     one, sx = sy), and the circle then sweeps the right cone through its two
+//     end circles where its centre travels along the plane's normal - a cylinder
+//     where the radius does not change.
+//
+// Until 2026-09-25 these were a chain of refusals per record kind, and the
+// taper declared its end circles and not its cone (item 7 and the taper row of
+// doc/step-export-wip.md, *Inferred where a declaration was possible*). The
+// degenerate forms are not cases: a bilinear patch whose far edge is parallel to
+// its near one is a plane; a cone whose radius does not change is a cylinder.
+
+/*! The extrusion's map, and the facts about it the derivations ask. */
+struct StationMap {
+  const Extrusion& sweep;
+  Eigen::Matrix3d linear;
+  Vector3d ex, ey;
+
+  explicit StationMap(const Extrusion& s)
+    : sweep(s),
+      linear(s.placement.linear()),
+      ex(linear * Vector3d(1., 0., 0.)),
+      ey(linear * Vector3d(0., 1., 0.))
+  {
+  }
+
+  /*! Where the profile point `p` is at the near (t = 0) or far (t = 1) cap. */
+  [[nodiscard]] Vector3d at(const Vector2d& p, int t) const
+  {
+    if (t == 0) return sweep.placement * Vector3d(p[0], p[1], 0.) + sweep.base;
+    const double turn = sweep.twist * M_PI / 180.0;
+    const Vector2d q(cos(turn) * p[0] - sin(turn) * p[1], sin(turn) * p[0] + cos(turn) * p[1]);
+    return sweep.placement * Vector3d(q[0] * sweep.scale_x, q[1] * sweep.scale_y, 0.) + sweep.base +
+           sweep.height;
+  }
+
+  /*! Affine in t: nothing turns. */
+  [[nodiscard]] bool affine() const { return sweep.twist == 0; }
+
+  /*! Every station a similarity. The placement is tested as it always was, to
+   * 1e-12 of its own scale: it is a composition of the user's transforms, whose
+   * rounding this cannot bound - the one comparison here that is not machine
+   * precision. */
+  [[nodiscard]] bool similar(double& scale) const
+  {
+    const double sx = ex.norm(), sy = ey.norm();
+    if (sx < 1e-12 || sy < 1e-12) return false;
+    if (fabs(sx - sy) > 1e-12 * sx) return false;          // an ellipse, not a circle
+    if (fabs(ex.dot(ey)) > 1e-12 * sx * sy) return false;  // sheared, likewise
+    if (sweep.scale_x != sweep.scale_y)
+      return false;  // uneven: an ellipse at every station but the first
+    scale = 0.5 * (sx + sy);
+    return true;
+  }
+
+  /*! The unit normal of the profile's plane, or zero where it has none. */
+  [[nodiscard]] Vector3d normal() const
+  {
+    const Vector3d n = ex.cross(ey);
+    return n.norm() < 1e-12 ? Vector3d::Zero() : Vector3d(n.normalized());
+  }
+};
+
+/*! The two caps: the profile's plane at either end. A far cap scaled to nothing
+ * is a point, and has no face. */
+void extrudeCaps(const StationMap& map, Surfaces& out)
 {
-  if (profile.arcs.empty()) return;
-  if (sweep.twist != 0 || sweep.scale_x != sweep.scale_y) return;
-  const double taper = sweep.scale_x;
-  if (!(taper >= 0) || !std::isfinite(taper)) return;
-  const double len = sweep.height.norm();
-  if (len < 1e-12) return;
-  const Vector3d axis = sweep.height / len;
-
-  const Eigen::Matrix3d linear = sweep.placement.linear();
-  // the plane the profile lies in, and the scale the transform applies inside it
-  const Vector3d ex = linear * Vector3d(1., 0., 0.);
-  const Vector3d ey = linear * Vector3d(0., 1., 0.);
-  const double sx = ex.norm(), sy = ey.norm();
-  if (sx < 1e-12 || sy < 1e-12) return;
-  if (fabs(sx - sy) > 1e-12 * sx) return;          // an ellipse, not a circle
-  if (fabs(ex.dot(ey)) > 1e-12 * sx * sy) return;  // sheared, likewise
-  // and the sweep has to run along that plane's normal, or the cylinder is oblique
-  const Vector3d normal = ex.cross(ey) / (sx * sy);
-  if (fabs(fabs(normal.dot(axis)) - 1.) > 1e-12) return;
-
-  const double scale = 0.5 * (sx + sy);
-  for (const auto& arc : profile.arcs) {
-    if (arc.r <= 0) continue;
-    const Vector3d centre = sweep.placement * Vector3d(arc.centre[0], arc.centre[1], 0.) + sweep.base;
-    const double radius = arc.r * scale;
-    if (taper == 1.0) {
-      addSurfaceUnique(out, std::make_shared<CylinderSurface>(centre, axis, radius));
-      continue;
-    }
-    // A taper. Only an arc about the scaling origin stays concentric as it
-    // shrinks; any other one slides sideways too and sweeps an oblique cone.
-    if (arc.centre.norm() > 1e-12 * std::max(1.0, arc.r)) continue;
-    // Both are rims of the cone the taper sweeps - evidence, not faces: no facet
-    // of this solid lies on either. See Surface::witnesses.
-    auto base_rim = std::make_shared<CylinderSurface>(centre, axis, radius);
-    base_rim->evidence_only = true;
-    addSurfaceUnique(out, base_rim);
-    if (taper > 0) {
-      auto top_rim = std::make_shared<CylinderSurface>(centre + sweep.height, axis, radius * taper);
-      top_rim->evidence_only = true;
-      addSurfaceUnique(out, top_rim);
-    }
+  const Vector3d n = map.normal();
+  if (n.isZero()) return;
+  if (!std::isfinite(map.sweep.scale_x) || !std::isfinite(map.sweep.scale_y)) return;
+  addSurfaceUnique(out, std::make_shared<PlaneSurface>(map.sweep.base, n));
+  if (map.sweep.scale_x != 0. || map.sweep.scale_y != 0.) {
+    addSurfaceUnique(out, std::make_shared<PlaneSurface>(map.sweep.base + map.sweep.height, n));
   }
 }
 
-/*! The Bezier patches a straight extrusion of the profile's Bezier segments
- * sweeps.
- *
- * A Bezier segment swept along a straight line is a tensor product patch of
- * degree (n, 1) whose control net is the segment's own control points at each
- * end of the sweep - exact, and needing no fit, because both a Bezier and a
- * linear sweep are affine in their control points. So a Bezier survives the
- * shear, the non-uniform scale and the oblique sweep an arc has to refuse: the
- * extrusion's station at t is the profile scaled by lerp(1, s, t), and the
- * patch's own linear interpolation in v gives lerp(P, sP, t), the same points.
- *
- * What it cannot take is a twist, where the station at t is the profile
- * *rotated* by t times the angle. A rotation is not linear in t, and the swept
- * surface is not a Bezier patch of any degree.
- */
-void extrudeBeziers(const Profile2d& profile, const Extrusion& sweep, Surfaces& out)
+/*! A straight edge, swept by an affine map: the bilinear patch through its four
+ * corners - a plane, where the far edge is parallel to the near one. S(1) sends
+ * the edge's direction u to (sx u_x, sy u_y), parallel to u exactly when
+ * (sx - sy) u_x u_y = 0: an even scale, or an edge along either axis. */
+void extrudeLine(const ProfileEdge& e, const StationMap& map, Surfaces& out)
 {
-  if (profile.beziers.empty()) return;
-  if (sweep.twist != 0) return;
-  const Vector2d top_scale(sweep.scale_x, sweep.scale_y);
-  if (!top_scale.allFinite()) return;
-
-  for (const auto& bez : profile.beziers) {
-    if (bez.degree < 2 || bez.degree > 3) continue;
-    // v varies fastest, so the net is control point by control point, each one
-    // as a pair: where it starts and where the sweep takes it.
-    std::vector<Vector3d> net;
-    net.reserve((bez.degree + 1) * 2);
-    for (int i = 0; i <= bez.degree; i++) {
-      const Vector2d p(bez.ctrl[i][0], bez.ctrl[i][1]);
-      net.push_back(sweep.placement * Vector3d(p[0], p[1], 0.) + sweep.base);
-      net.push_back(sweep.placement * Vector3d(p[0] * top_scale[0], p[1] * top_scale[1], 0.) +
-                    sweep.base + sweep.height);
-    }
-    out.push_back(std::make_shared<BezierPatchSurface>(bez.degree, 1, std::move(net)));
+  if (!map.affine()) return;  // a twist turns the far edge: no patch of any degree
+  const Vector2d u = e.b - e.a;
+  if (u[0] == 0 && u[1] == 0) return;  // no edge
+  const Vector3d a0 = map.at(e.a, 0), b0 = map.at(e.b, 0), a1 = map.at(e.a, 1), b1 = map.at(e.b, 1);
+  const bool parallel = map.sweep.scale_x == map.sweep.scale_y || u[0] == 0 || u[1] == 0;
+  if (parallel) {
+    const Vector3d wall = (b0 - a0).cross(a1 - a0);
+    if (wall.norm() < 1e-12) return;  // the far edge on the near one's line: no wall
+    addSurfaceUnique(out, std::make_shared<PlaneSurface>(a0, Vector3d(wall.normalized())));
+    return;
   }
+  // v varies fastest: each corner as a pair, where it starts and where it goes
+  out.push_back(std::make_shared<BezierPatchSurface>(1, 1, std::vector<Vector3d>{a0, a1, b0, b1}));
 }
 
-/*! The planes a straight extrusion sweeps: its two caps, and each straight wall.
- *
- * A plane is exact whether it is declared or fitted, so this is not about
- * accuracy - it is about the coefficients staying put. A plane fitted to mesh
- * vertices moves with the tessellation, with whatever a boolean left behind, and
- * with any later pass that touches a vertex; the declared one cannot move.
- *
- * **The caps are always planar.** Every station of a linear extrusion is the
- * profile scaled and rotated *within its own plane* and then translated, so the
- * first and last lie in two parallel planes whatever the sweep does. Only a
- * degenerate top - scaled to nothing - has no face there.
- *
- * **A straight wall is planar unless something turns it.** The wall over a
- * straight profile edge AB is the ruled surface between AB and its image A'B',
- * and it is planar exactly when those two are parallel:
- *
- *   - a twist rotates the image, so A'B' is AB turned and the two are skew;
- *   - an uneven scale sends AB to (sx*u1, sy*u2), parallel to u = (u1, u2) only
- *     when the edge already runs along x or y - so an uneven scale is refused
- *     except for those edges, which are exactly the ones it leaves alone;
- *   - a uniform scale and any sweep direction, oblique included, keep them
- *     parallel, because A'B' = s*AB and the translation is common to both ends.
- *
- * A chord of a recorded arc or Bezier is *not* a straight edge, whatever the
- * outline says: it is the tessellation's chord, its plane moves with `$fn`, and
- * declaring it would put a tessellation artefact on a channel whose whole point
- * is that a declaration does not move. Profile2d says which edges those are.
- */
-void extrudePlanes(const Profile2d& profile, const Extrusion& sweep, Surfaces& out)
+/*! A Bezier segment, swept by an affine map: the (n, 1) patch whose control net
+ * is the segment's own control points at either end. */
+void extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
 {
-  const Eigen::Matrix3d linear = sweep.placement.linear();
-  const Vector3d ex = linear * Vector3d(1., 0., 0.);
-  const Vector3d ey = linear * Vector3d(0., 1., 0.);
-  const Vector3d normal = ex.cross(ey);
-  if (normal.norm() < 1e-12) return;
-  const Vector3d unit_normal = normal.normalized();
-  const Vector2d top_scale(sweep.scale_x, sweep.scale_y);
-  if (!top_scale.allFinite()) return;
-
-  // The two caps.
-  addSurfaceUnique(out, std::make_shared<PlaneSurface>(sweep.base, unit_normal));
-  if (top_scale[0] != 0. || top_scale[1] != 0.) {
-    addSurfaceUnique(out, std::make_shared<PlaneSurface>(sweep.base + sweep.height, unit_normal));
+  if (!map.affine()) return;
+  if (bez.degree < 2 || bez.degree > 3) return;
+  std::vector<Vector3d> net;
+  net.reserve((bez.degree + 1) * 2);
+  for (int i = 0; i <= bez.degree; i++) {
+    const Vector2d p(bez.ctrl[i][0], bez.ctrl[i][1]);
+    net.push_back(map.at(p, 0));
+    net.push_back(map.at(p, 1));
   }
+  out.push_back(std::make_shared<BezierPatchSurface>(bez.degree, 1, std::move(net)));
+}
 
-  if (sweep.twist != 0) return;
-  const bool even_scale = sweep.scale_x == sweep.scale_y;
-
-  for (const auto& loop : profile.loops) {
-    if (loop.size() < 2) continue;
-    for (const ProfileEdge& edge : loop) {
-      const Vector2d& a = edge.a;
-      const Vector2d& b = edge.b;
-      if ((b - a).norm() < 1e-12) continue;
-      if (edge.kind != EdgeKind::Line) continue;
-      // An uneven scale keeps only the edges it does not shear.
-      if (!even_scale && fabs(b[0] - a[0]) > 1e-12 && fabs(b[1] - a[1]) > 1e-12) continue;
-      const Vector3d p = sweep.placement * Vector3d(a[0], a[1], 0.) + sweep.base;
-      const Vector3d q = sweep.placement * Vector3d(b[0], b[1], 0.) + sweep.base;
-      const Vector3d up = sweep.placement * Vector3d(a[0] * top_scale[0], a[1] * top_scale[1], 0.) +
-                          sweep.base + sweep.height - p;
-      const Vector3d wall = (q - p).cross(up);
-      if (wall.norm() < 1e-12) continue;
-      addSurfaceUnique(out, std::make_shared<PlaneSurface>(p, Vector3d(wall.normalized())));
-    }
+/*! A circle, swept by a map whose every station is a similarity: the right cone
+ * through its two end circles, where the centre travels along the plane's normal
+ * - a cylinder where the radius does not change. A centre that travels any other
+ * way - an oblique sweep, or a scale about a point that is not the centre -
+ * sweeps an oblique cone: exact, and not a CONICAL_SURFACE. A twist turns a
+ * circle about its own centre into itself, so it only matters where it moves the
+ * centre.
+ *
+ * The cone is a face; the two end circles are evidence, the rims the band pass
+ * identifies it by. */
+void extrudeArc(const Arc2d& arc, const StationMap& map, Surfaces& out)
+{
+  if (!(arc.r > 0)) return;
+  double scale = 0;
+  if (!map.similar(scale)) return;
+  const Vector2d c(arc.centre[0], arc.centre[1]);
+  if (!map.affine() && !(c[0] == 0 && c[1] == 0)) return;  // the centre turns with the twist
+  const Vector3d c0 = map.at(c, 0), c1 = map.at(c, 1);
+  const Vector3d n = map.normal();
+  const Vector3d d = c1 - c0;
+  const double len = d.norm();
+  if (n.isZero() || !(len > 0)) return;
+  // along the normal, at machine precision: the cross product's forward error
+  if (d.cross(n).norm() > forwardError(12, len)) return;
+  const Vector3d axis = d / len;
+  const double r0 = arc.r * scale, r1 = arc.r * scale * map.sweep.scale_x;
+  if (!(r1 >= 0) || !std::isfinite(r1)) return;
+  if (r1 == r0) {
+    addSurfaceUnique(out, std::make_shared<CylinderSurface>(c0, axis, r0));
+    return;
   }
+  // Anchored at the wider end, as every cone here is.
+  const bool near_wider = r0 >= r1;
+  addSurfaceUnique(out, std::make_shared<ConeSurface>(near_wider ? c0 : c1, axis, near_wider ? r0 : r1,
+                                                      (r1 - r0) / len));
+  auto rim = [&](const Vector3d& at, double r) {
+    if (!(r > 0)) return;
+    auto record = std::make_shared<CylinderSurface>(at, axis, r);
+    record->evidence_only = true;
+    addSurfaceUnique(out, record);
+  };
+  rim(c0, r0);
+  rim(c1, r1);
 }
 
 }  // namespace
@@ -336,9 +331,15 @@ std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Re
 
 std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Extrusion& sweep)
 {
+  const StationMap map(sweep);
   Surfaces out;
-  extrudeArcs(profile, sweep, out);
-  extrudeBeziers(profile, sweep, out);
-  extrudePlanes(profile, sweep, out);
+  for (const auto& arc : profile.arcs) extrudeArc(arc, map, out);
+  for (const auto& bez : profile.beziers) extrudeBezier(bez, map, out);
+  extrudeCaps(map, out);
+  for (const auto& loop : profile.loops) {
+    for (const ProfileEdge& edge : loop) {
+      if (edge.kind == EdgeKind::Line) extrudeLine(edge, map, out);
+    }
+  }
   return out;
 }

@@ -7,25 +7,26 @@
 // fit rejects it, so the export stayed correct and stayed faceted, and the
 // report said neither "nothing was declared" nor "something was recognised".
 //
-// A cone states its intent here the way every other cone in this codebase does:
-// by declaring the circle at each of its two ends, which the band pass accepts
-// as a frustum when both rims match. So this comes out identical to
-// cylinder(h=20, r1=10, r2=5) - three faces, one CONICAL_SURFACE - which is the
-// point, since the two are the same solid written two ways.
+// Since 2026-09-25 the extrusion declares the cone itself, as a face, and the
+// circle at each of its two ends as evidence - the way rotate_extrude has
+// declared a sloped edge's cone since 2026-09-24, and cylinder(r1, r2) always
+// has. Until then it declared the two circles alone, the band pass recognised
+// the frustum from them, and every facet was held on the tessellation's
+// evidence (D3) though the model stated the surface exactly. It is what the
+// sweep gives: every station of an even taper is a similarity, so the circle
+// stays a circle, its centre travels along the normal, and its radius changes
+// linearly - the right cone through its two end circles. So this comes out
+// identical to cylinder(h=20, r1=10, r2=5) - three faces, one CONICAL_SURFACE -
+// which is the point, since the two are the same solid written two ways.
 //
-// Two refusals belong to this fixture and are exercised beside it rather than
-// in it, because both are correct and produce a valid faceted body:
+// An off-centre arc under a taper is refused by the same fact, not a rule of
+// its own: `scale` is taken about the profile origin, so such an arc's centre
+// slides sideways as it shrinks, travels off the normal, and sweeps an
+// *oblique* cone - exact, describable, and not a CONICAL_SURFACE.
 //
-//   an off-centre arc under a taper. `scale` is taken about the profile origin,
-//   so such an arc slides sideways as it shrinks and sweeps an *oblique* cone -
-//   exact, describable, and not a CONICAL_SURFACE. Nothing is declared.
-//
-//   scale = 0. The top rim is an apex rather than a circle, so there is no
-//   second rim to declare and the body stays faceted - exactly what
-//   cylinder(r2 = 0) does, the two paths agreeing by construction.
-//
-// EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 3 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 // EXPECT: 1 surface recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 32 facets replaced
+// EXPECT: what decided each written facet: 32 D0, 0 D1, 0 D2, 0 D3, 0 D4
 //
 // scale=0.5 on r=10 over h=20 is the frustum r1=10, r2=5:
 // (pi*20/3)(100 + 50 + 25).

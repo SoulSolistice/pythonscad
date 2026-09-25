@@ -182,6 +182,55 @@ TEST_CASE("extrude: a chord is not a wall", "[sweep-table]")
   CHECK(ofKind<CylinderSurface>(surfaces)[0]->r == 5.);
 }
 
+TEST_CASE("extrude: an uneven scale sweeps a diagonal edge into a bilinear patch", "[sweep-table]")
+{
+  // step-extrude-uneven-scale.scad
+  const VectorOfVector2d triangle{{0., 0.}, {10., 0.}, {0., 10.}};
+  Extrusion sweep;
+  sweep.height = Vector3d(0., 0., 10.);
+  sweep.scale_x = 0.5;
+  const auto surfaces = extrude(classifyProfile({triangle}, {}, {}), sweep);
+  // the caps, and the walls over the two edges along the axes, which the scale
+  // keeps parallel to themselves
+  CHECK(ofKind<PlaneSurface>(surfaces).size() == 4);
+  const auto patches = ofKind<BezierPatchSurface>(surfaces);
+  REQUIRE(patches.size() == 1);
+  CHECK(patches[0]->degree_u == 1);
+  CHECK(patches[0]->degree_v == 1);
+  // the hypotenuse's far end: (0, 10) stays, (10, 0) goes to (5, 0)
+  CHECK(patches[0]->control(0, 1) == Vector3d(5., 0., 10.));
+}
+
+TEST_CASE("extrude: an even taper sweeps the cone through its end circles", "[sweep-table]")
+{
+  // step-tapered-extrude.scad
+  Extrusion sweep;
+  sweep.height = Vector3d(0., 0., 20.);
+  sweep.scale_x = sweep.scale_y = 0.5;
+  const auto surfaces = extrude(classifyProfile({}, {Arc2d{Vector2d(0., 0.), 10.}}, {}), sweep);
+  const auto cones = ofKind<ConeSurface>(surfaces);
+  REQUIRE(cones.size() == 1);
+  CHECK(cones[0]->r == 10.);
+  CHECK(cones[0]->slope == -0.25);
+  // its two end circles, as evidence
+  CHECK(ofKind<CylinderSurface>(surfaces).size() == 2);
+  // an arc off the scaling origin slides sideways as it shrinks: an oblique cone
+  const auto off = extrude(classifyProfile({}, {Arc2d{Vector2d(3., 0.), 2.}}, {}), sweep);
+  CHECK(ofKind<ConeSurface>(off).empty());
+}
+
+TEST_CASE("extrude: a twist turns a circle about its own centre into itself", "[sweep-table]")
+{
+  Extrusion sweep;
+  sweep.height = Vector3d(0., 0., 20.);
+  sweep.twist = 90.;
+  CHECK(ofKind<CylinderSurface>(extrude(classifyProfile({}, {Arc2d{Vector2d(0., 0.), 4.}}, {}), sweep))
+          .size() == 1);
+  // off the twist axis the centre turns too, and sweeps a helix
+  CHECK(ofKind<CylinderSurface>(extrude(classifyProfile({}, {Arc2d{Vector2d(5., 0.), 1.}}, {}), sweep))
+          .empty());
+}
+
 // A straight edge whose two ends both lie on a recorded circle - the flat of a
 // D-shaft, the back of a half disc - is a chord by every measurement there is.
 // Only its maker knows it is not: doc/step-export-wip.md, *Inferred where a
