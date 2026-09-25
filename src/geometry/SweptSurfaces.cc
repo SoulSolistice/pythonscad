@@ -84,8 +84,21 @@ void revolveEdge(const ProfileEdge& e, bool has_beziers, RevolutionRecords& reco
     return;
   case Course::OnAxis: return;  // the axis sweeps nothing
   case Course::Apex:
-    // A cone whose apex is on the axis - exact, and not declared yet: doc/
-    // step-export-wip.md, *Inferred where a declaration was possible*, item 4.
+    // A cone whose apex is on the axis, and a wall like any other: the cone
+    // itself as a face, anchored at its one rim. Refused
+    // until 2026-09-25 - first because the fan at the apex left zero-area facets
+    // that opened the shell (rotate_extrude welds them now), then because nobody
+    // took the refusal out: doc/step-export-wip.md, *Inferred where a
+    // declaration was possible*, item 4.
+    // No rim as evidence: evidence names a cone by its two rims, and this one
+    // has a point where the second would be.
+    {
+      const Vector2d& rim = a[0] > b[0] ? a : b;
+      if (has_beziers || e.kind != EdgeKind::Line) return;
+      addSurfaceUnique(records.out,
+                       std::make_shared<ConeSurface>(records.at(rim[1]), records.sweep.axis, rim[0],
+                                                     (b[0] - a[0]) / (b[1] - a[1])));
+    }
     return;
   case Course::Along:
     records.cylinder(a, true);  // a wall, on that cylinder - a face of this solid

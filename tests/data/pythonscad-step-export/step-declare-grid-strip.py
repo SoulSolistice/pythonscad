@@ -68,7 +68,8 @@ standing off the chords by about that band, in the direction it should.
 # that matters is that it is below the band beside it.
 # EXPECT: the fitted sweep passes within 0.0609 of the middle of every facet it claims, against a tessellation band of 0.1290
 # as in step-declare-grid.py, the facet the sweep refuses is claimed here instead: 290 rather than 289.
-# APPROX: 9 trimmed quadrics written as one face each, replacing 290 facets
+# The same facets in six faces rather than nine - see the census below.
+# APPROX: 6 trimmed quadrics written as one face each, replacing 290 facets
 #
 # What a kernel makes of each export: the declared strip survives as a surface.
 # Validity says the file is well formed; only this says the surface
@@ -102,9 +103,14 @@ standing off the chords by about that band, in the direction it should.
 # trimmed-quadric path claims them by distance to the axis instead and bounds
 # them with the mesh's own polyline, which is what the faceted faces around
 # them close against. So the census below is the whole part rather than the
-# sweep alone - the several cylinder faces are one wall each side of the seam
-# it is cut at, since a face written on an open rectangle cannot wrap.
-# ROUNDTRIP-APPROX: BSplineSurface=2 Cylinder=9 Plane=4
+# sweep alone - the wall's claim comes in six connected pieces, and each is one
+# face. Until 2026-09-25 it was nine: three of the pieces reach round all four
+# quadrants without closing, and the quadric pass cut every such region in two
+# at the seam - an edge the model does not have, between two faces of one
+# surface (checklist D1). A region that does not close round the axis needs no
+# seam and no cut; only a disc round a cone's apex needs the one, and nothing
+# needs the other. The count of pieces is the claim's, not derived here.
+# ROUNDTRIP-APPROX: BSplineSurface=2 Cylinder=6 Plane=4
 #
 # Known systemic defect: on the CGAL backend only, a planar face is written
 # with a bound that leaves its plane by more than the mesh's own coplanarity

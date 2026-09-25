@@ -56,14 +56,25 @@
 // of the disc gives 1650.966482, which is what the mesh measures, so the
 // integral is checked against something the exporter had no hand in.
 //
-// The approximation tier now reads 1661.646504 - eight parts in a million of a
-// millimetre cubed from the ideal solid, where before this it was 1.94 short.
-// So the window comes off: the default 1e-6 relative is 0.0017, and being
-// inside that is the assertion that the exported solid *is* the intended one.
+// The approximation tier read 1661.646504 - eight parts in a million of a
+// millimetre cubed from the ideal solid, where before that it was 1.94 short.
+// So the window came off: the default 1e-6 relative is 0.0017, and being inside
+// it is the assertion that the exported solid *is* the intended one. Since
+// 2026-09-25 OCCT reads 1661.647752 (1661.647203 integrated tightly): the taper
+// is one face now, not two, and the reader projects its own pcurve for the
+// ellipse across the whole of it. The file's geometry did not move with it - a
+// triangulation of each at 1e-4 agrees with the two-face file's to 1e-4.
 // VOLUME-APPROX: 1661.646512
 //
-// APPROX: 2 trimmed quadrics written as one face each, replacing 32 facets
-// ROUNDTRIP-APPROX: Cone=2 Plane=2
+// At this tier the taper is one region, and it wraps the axis with the apex
+// inside it: a disc on the cone, bounded by one loop - the base arcs and the
+// ellipse. The quadric pass used to cut every wrapping region in two, which put
+// a generator between two faces of one surface that the model does not have
+// (checklist D1). A disc containing the apex needs no cut, only a seam up a
+// generator, because the surface is periodic round the axis.
+// APPROX: 1 trimmed quadric written as one face each, replacing 32 facets
+// APPROX: 1 cone face closed round its apex by a seam up a generator
+// ROUNDTRIP-APPROX: Cone=1 Plane=2
 //
 // The exact tier reads 1660.807437, 0.84 short, and the shortfall is named
 // rather than tolerated: its corner placement does not run, so the two points

@@ -101,6 +101,21 @@ TEST_CASE("revolve: each straight edge by its course", "[sweep-table]")
   CHECK(planes[1]->refpt[2] == 16.);
 }
 
+TEST_CASE("revolve: an edge reaching the axis sweeps its cone, apex on the axis", "[sweep-table]")
+{
+  // step-revolve-axis-point.scad: rotate_extrude() polygon([[0,0], [10,0], [0,20]])
+  const VectorOfVector2d triangle{{0., 0.}, {10., 0.}, {0., 20.}};
+  const auto surfaces = revolve(classifyProfile({triangle}, {}, {}), Revolution{});
+  const auto cones = ofKind<ConeSurface>(surfaces);
+  REQUIRE(cones.size() == 1);
+  CHECK(cones[0]->r == 10.);
+  CHECK(cones[0]->slope == -0.5);
+  CHECK(cones[0]->refpt == Vector3d(0., 0., 0.));
+  // one rim, so nothing to offer as evidence; the axis sweeps nothing
+  CHECK(ofKind<CylinderSurface>(surfaces).empty());
+  CHECK(ofKind<PlaneSurface>(surfaces).size() == 1);
+}
+
 TEST_CASE("revolve: a plane is at the level its edge is at", "[sweep-table]")
 {
   // rotate_extrude hands the table the profile as it is swept - offset already

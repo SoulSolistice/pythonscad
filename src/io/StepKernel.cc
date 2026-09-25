@@ -4846,6 +4846,7 @@ void StepKernel::build_tri_body(
   // written as chords by both rather than as a conic by one. Reached only
   // where a planar loop no longer carries the run - see below.
   std::size_t section_unshared = 0;
+  std::size_t apex_seams = 0;            // cone faces closed round their apex
   std::set<std::set<int>> section_subs;  // sections already handed to a planar face
   int sections_declared = 0, sections_fitted = 0;
   // Boundary sections refused because their plane was a facet of something
@@ -5134,6 +5135,38 @@ void StepKernel::build_tri_body(
         i++;
       }
       if (loop.size() < 2) continue;
+      // A cone face bounded by one loop that goes once round the axis has the
+      // apex inside it: the region is a disc, pinched to a point where the
+      // surface is. The surface is periodic round the axis, so a face covering
+      // the whole turn needs a seam, as a band's does - the loop continues from
+      // where it started up a generator to the apex and back down the same
+      // edge. Without one the face is not bounded in its own parameters, and a
+      // reader has to invent the seam; OCCT did, which is not the same as the
+      // file being right.
+      if (cone != nullptr && boundary.size() == 1) {
+        double turn = 0.0;
+        for (std::size_t k = 0; k < n; k++) {
+          auto angle = [&](int v) {
+            const Vector3d rel = vertices[v] - base;
+            return atan2(rel.dot(ref2), rel.dot(ref));
+          };
+          double d = angle(cycle[(k + 1) % n]) - angle(cycle[k]);
+          if (d > M_PI) d -= 2 * M_PI;
+          if (d < -M_PI) d += 2 * M_PI;
+          turn += d;
+        }
+        // A winding number, so it is an integer: round the axis once, or not.
+        if (fabs(turn) > M_PI && cone->slope != 0) {
+          const Vector3d apex = base - axis * (cone->r / cone->slope);
+          Vertex *start = get_vertex(cycle[0]);
+          auto tip = new Vertex(entities, new Point(entities, apex));
+          EdgeCurve *seam = create_line_edge_curve(start, tip, true);
+          loop.push_back(new OrientedEdge(entities, seam, true));
+          loop.push_back(new OrientedEdge(entities, seam, false));
+          face_edges_here.push_back(seam);
+          apex_seams++;
+        }
+      }
       auto edge_loop = new EdgeLoop(entities, loop);
       bounds.push_back(new FaceBound(entities, edge_loop, true, entry.first == outer));
     }
@@ -6054,6 +6087,10 @@ void StepKernel::build_tri_body(
       "plane - the wrong curve, kept because the chord it would fall back to is further off the "
       "face; the fix is upstream, in the claim",
       sections_on_facet, sections_on_facet == 1 ? " is" : "s are");
+  }
+  if (apex_seams > 0) {
+    LOG("STEP export: %1$d cone face%2$s closed round %3$s apex by a seam up a generator",
+        int(apex_seams), apex_seams == 1 ? "" : "s", apex_seams == 1 ? "its" : "their");
   }
   if (sections_declared + sections_fitted > 0) {
     // Where each section's plane came from, because it is the difference

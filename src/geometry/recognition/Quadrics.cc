@@ -580,7 +580,19 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
       theta[i] = t;
       quadrant[std::min(3, int(t / (M_PI / 2)))] = 1;
     }
-    const bool wraps = quadrant[0] && quadrant[1] && quadrant[2] && quadrant[3];
+    bool wraps = quadrant[0] && quadrant[1] && quadrant[2] && quadrant[3];
+    // Unless it wraps around a point the surface itself pinches to - a cone's
+    // apex. Such a region is a disc, bounded by one loop, with the apex inside
+    // it: there is no seam to need, and cutting it in two writes an edge the
+    // model does not have between two faces of one surface (checklist D1). A
+    // band, which wraps without containing the apex, has two loops and keeps
+    // the cut.
+    if (wraps) {
+      std::vector<std::size_t> facets;
+      for (const Member& m : claimed) facets.push_back(m.facet);
+      std::vector<std::vector<int>> cycles;
+      if (boundaryCycles(loops, facets, cycles) == nullptr && cycles.size() == 1) wraps = false;
+    }
 
     std::vector<std::vector<Member>> split;
     if (!wraps) {

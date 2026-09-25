@@ -4596,6 +4596,11 @@ that knows its surface and does not say so, which is the shape
 
 ### A revolve that touches its own axis collapses to nothing
 
+**Declared and written 2026-09-25** - see *Inferred where a declaration was
+possible*, item 4, and step-revolve-axis-point. What is left of it is below
+the table there: a full band written by the quadric pass is still cut at the
+seam, and an apex cone's base circle is written as one arc per facet.
+
 The largest single gap by measured cost. The same wine-glass outline:
 
 | outline | faces written |
@@ -4724,7 +4729,7 @@ box, and neither asks the other.
 
 | # | where | inferred or refused |
 | --- | --- | --- |
-| 4 | `rotate_extrude`, a sloped edge touching the axis | declares nothing: the apex cone, above. (The zero-area facets at the axis are a separate, mesh-side defect.) |
+| 4 | `rotate_extrude`, a sloped edge touching the axis - **done 2026-09-25**: the sweep table's apex row declares the cone, the quadric pass writes it as one face round its apex with a seam, 32 D0 on step-revolve-axis-point | declares nothing: the apex cone, above. (The zero-area facets at the axis are a separate, mesh-side defect.) |
 | 5 | `rotate_extrude`, any Bezier in the profile | every sloped edge's cone is withheld, not only the Beziers' chords; the Bezier edges themselves declare nothing, though a revolved Bezier is exact |
 | 6 | `rotate_extrude`, frames | the plane records add `offset_y`, the cylinders and cones do not - one of the two is in the wrong frame |
 | 7 | `linear_extrude`, uneven scale | a sheared straight wall declares nothing; it is exactly the bilinear patch between AB and A'B', a (1,1) Bezier the exporter already writes. An arc under it is a rational (2,1) patch |
@@ -4744,6 +4749,19 @@ box, and neither asks the other.
 
 Not gaps, and staying that way (checklist E5): `polyhedron()`, `import()`,
 `surface()` - no intent reaches them.
+
+**Found on the way: the quadric pass cuts what wraps.** A claim that reaches
+all four quadrants round the axis was cut in two at the seam - "the simpler
+answer ... is to cut it so that no face wraps at all" - which writes an edge the
+model does not have between two faces of one surface (checklist D1). Since
+2026-09-25 only a region bounded by more than one loop is cut: a disc round a
+cone's apex is written whole with a seam up a generator, and a region that never
+closes round the axis - three wall pieces on step-declare-grid-strip - needed
+no cut at all. What remains is the full band the band pass did not write, whose
+two rims the quadric pass still cuts between; its fix is the band writer's seam,
+not a cut. And an apex cone's base circle comes out as one arc per facet it
+bounded, where a band writes its rim as one CIRCLE - vertices on a circle the
+model has none on.
 
 **Found on the way, not the exporter's.** `Polygon2d::stamp_color`, which every
 `offset()` calls, intersects every outline of the result with every outline of
