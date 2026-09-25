@@ -18,7 +18,10 @@
 #include <utility>
 #include <vector>
 
+#include "geometry/AnalyticFeatures.h"
 #include "geometry/Surface.h"
+#include "geometry/recognition/Pipeline.h"
+#include "io/step/BoundaryCycles.h"
 #include "geometry/linalg.h"
 #include "io/StepKernel.h"
 
@@ -90,6 +93,35 @@ struct StepKernel::BodyBuild {
    * encloses it. */
   void buildLoops();
 
+  /*! Recognition: which facets are written on which declared surface. The
+   * writer's half of the question - which of a standing set of regions it could
+   * write, given the sections they agree on - is decideSections and
+   * boundaryLiesOnSurface, asked through recognition::Writability. */
+  void recognise();
+
+  /*! Deciding which plane sections get written, over a given set of faces. This
+   * is a function rather than a step because it has to be asked **twice**, on
+   * two different meshes: once while it is being settled which faces are
+   * analytic at all, and again immediately before they are written. The corner
+   * placement runs between those two points and moves vertices - by up to 0.07
+   * on step-band-family - so a section agreed on the first mesh need not exist
+   * on the second, and a curve one face writes and its neighbour does not is a
+   * hole in the shell. Measured before this was split in two: 132 edges with one
+   * face, every one of them an ellipse the other side had stopped seeing.
+   *
+   * It decides the crossing curves first - the edges where two declared
+   * surfaces cross, `crossing_edges` - and then the plane sections both faces
+   * of an edge agree to write, `section_curves`. */
+  void decideSections(const std::vector<const AnalyticFeatures::Patch *>& standing);
+
+  /*! The writer's half of "can this region be written": the sections a
+   * standing set of quadric regions agree on, and whether each one's whole
+   * boundary then lies on its surface. The writer's boundary machinery;
+   * recognition asks it through recognition::Writability and decides what to
+   * do with the answer. */
+  bool boundaryLiesOnSurface(const AnalyticFeatures::Patch& patch,
+                             const std::set<std::set<int>>& agreed);
+
   // ---- what the phases hand each other
 
   // A working copy, because the corner placement moves junction corners onto
@@ -136,6 +168,90 @@ struct StepKernel::BodyBuild {
   std::map<std::tuple<double, double, double>, Vertex *> vertex_at;
   /*! The one VERTEX_POINT for vertex `ind`, made on first asking. */
   Vertex *get_vertex(int ind);
+
+  // The faces the analytic emitters write, and the edges of each.
+  std::vector<Face *> sfaces_extra;
+  std::vector<std::vector<EdgeCurve *>> face_edges_extra;
+
+  // Shared by every emitter because a partial
+  // cylinder's two end edges are ordinary straight edges shared with a
+  // neighbouring planar face, so both have to come from the same map.
+  std::map<std::pair<int, int>, EdgeCurve *> edge_map;
+  int merged_edge_cnt = 0;
+
+  // Recognise the bands of facets that were modelled as a surface of
+  // revolution. The recogniser is format neutral and lives in
+  // geometry/AnalyticFeatures - everything below this point is the STEP
+  // specific half, turning its answer into entities.
+  // What recognition hands the writer - see recognition::runPipeline. The
+  // names below are views into it, so the writer reads as it always has.
+  recognition::Recognition rec;
+  AnalyticFeatures::Result& features = rec.features;
+  std::vector<AnalyticFeatures::Patch>& bezier_patches = rec.bezier_patches;
+  // Runs whose curve is exactly a circular arc, keyed by their vertices - which
+  // is how the emitter shares one EdgeCurve between the two faces that meet
+  // there. Decided per run rather than per face; see where it is filled.
+  std::set<std::set<int>>& circular_runs = rec.circular_runs;
+  // Declared sweeps whose claimed region can be written as one face: a strip,
+  // whose boundary stays inside the surface's parameter rectangle. One closing
+  // around its profile crosses the surface's seam and is left faceted.
+  std::vector<AnalyticFeatures::Patch>& grid_faces = rec.grid_faces;
+  std::vector<AnalyticFeatures::Patch>& quadric_faces = rec.quadric_faces;
+  // The plane sections that both of their two faces agree to write as one
+  // conic, each named by the set of mesh vertices it runs through. A curve one
+  // face writes and its neighbour does not is a hole in the shell, so this is a
+  // joint decision and not one a face can take for itself.
+  std::set<std::set<int>> section_curves;
+  // The planes the model declared, kept where the writer can reach them. A
+  // declared plane cannot drift with the mesh, and a section derived from one is
+  // exact rather than merely close, so it is preferred wherever it agrees with
+  // the face at hand.
+  std::vector<std::pair<Vector3d, Vector3d>> declared_planes;  // point, unit normal
+  // Which entry of `surfaces` each of those came from, so that a face written
+  // on one can be attributed back to the declaration it honoured. Parallel to
+  // `declared_planes`; `surfaces.size()` for a fitted plane, which no census
+  // row is owed.
+  std::vector<std::size_t> declared_plane_index;
+  // The declaration census, indexed as `surfaces`. A declaration is written
+  // when a face stands on it, evidence when something read it to identify a
+  // surface without a face ever standing on it, and otherwise unused - which
+  // *a declaration that is not taken is a bug report* makes a defect to
+  // explain. See doc/step-rungs.md, *How to read a result*.
+  std::vector<char> decl_written = std::vector<char>(surfaces.size(), 0);
+  // What class actually wrote each facet: 0 the tessellation, 1 a declared
+  // plane, 2 a declared curved surface, 3 a surface the approximation fitted.
+  // Per facet and not per declaration, because "a face stands on this
+  // declaration" cannot see a declaration that kept one facet of a hundred,
+  // and cannot see ground a fit took.
+  std::vector<unsigned char> facet_class = std::vector<unsigned char>(faces.size(), 0);
+  struct SectionMiss {
+    double tilt, offset;
+  };
+  std::vector<SectionMiss> section_misses;
+  // Edges that lie on the curve where two declared quadrics cross, and which two
+  // they are. Both faces derive the arc from the same pair of declarations, so
+  // they agree on it exactly and the shell closes without either having to know
+  // what the other did - which is what makes a curve taken from declarations
+  // different in kind from one fitted to the mesh.
+  std::map<std::pair<int, int>, std::pair<const Surface *, const Surface *>> crossing_edges;
+  std::set<std::pair<int, int>> crossing_keys;  // the same, as the sections' skip set
+  double crossing_fit = 0;                      // the worst any of those arcs leaves either surface
+  // What the fitter knew and used to discard. A count of chorded edges cannot
+  // tell a fit that missed by 3.4e-05 from one that missed by a tenth of a
+  // millimetre, and those want different work.
+  std::size_t arc_refused = 0, arc_no_fit = 0, arc_creased = 0, arc_uncreased = 0;
+  std::vector<double> arc_errors, arc_on_quadric, arc_on_fitted;
+  // Which facet loops are not available to be written as planar faces. Filled
+  // by the quadric pass and read again by its writer, so both sides of every
+  // section agree about who is across it.
+  std::vector<char> taken;
+  // The planes that cut each quadric surface, gathered once so that every face
+  // of that surface sees the same list and they agree about the curve between
+  // them. Filled by the quadric pass, read again by its writer.
+  std::map<const Surface *, std::vector<step::CutPlane>> section_planes;
+  // Parallel to `bezier_patches`: the exact quadric that patch lies on, or null
+  // where it is written as the spline it is in general. See quadricOfPatch.
+  std::vector<std::shared_ptr<Surface>>& patch_quadric = rec.patch_quadric;
 
   // ---- the kernel methods the phases call
   EdgeCurve *create_line_edge_curve(Vertex *vert1, Vertex *vert2, bool dir)
