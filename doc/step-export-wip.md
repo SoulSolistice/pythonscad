@@ -4702,7 +4702,7 @@ box, and neither asks the other.
 | # | where | inferred today | what declares it |
 | --- | --- | --- | --- |
 | 1 | a straight profile edge, both extruders | "a line, because it is not a chord of any recorded arc" - two different tests, one a threshold (C2, F6) | the generator: `square`, `polygon`, `offset(delta)` and a glyph's line segments make lines, `circle` and a round join make arcs |
-| 2 | arcs and Beziers through a 2D boolean or `offset` | `ClipperUtils` keeps the operands' records as hints, re-tested by position; `placeOnArcs` restores a vertex by its distance from the arc | identity: Clipper2's per-vertex `Z` (`USINGZ`, not enabled here) carries which segment a vertex came from - the 2D `mintOriginals` |
+| 2 | arcs and Beziers through a 2D boolean or `offset` | `ClipperUtils` keeps the operands' records as hints, re-tested by position; `placeOnArcs` restores a vertex by its distance from the arc | identity: Clipper2's per-vertex `Z` (`USINGZ`, not enabled here) carries which segment a vertex came from - the 2D `mintOriginals`. Measurement cannot tell the two cases a D-shaft makes: a boolean's cut puts the flat's ends on the polygon's chord, not the circle, so the two cut chords beside it read as straight walls; and a flat drawn with both ends on the circle reads as a chord and loses its wall (`sweep_table_test.cc`, marked `[!shouldfail]`) |
 | 3 | a 2D transform that is not a similarity | `Polygon2d::transform` drops the arcs (behind an `isApprox(1e-12)`) | the transform states the ellipse exactly; needs an ellipse record. The same gap in 3D: `CylinderSurface::transform` refuses a non-uniform scale |
 
 **The sweeps - consumers of the channel.**

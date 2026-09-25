@@ -18,6 +18,7 @@
 #include "geometry/PolySetBuilder.h"
 #include "geometry/PolySetUtils.h"
 #include "geometry/Profile2d.h"
+#include "geometry/SweptSurfaces.h"
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
 #include "glview/RenderSettings.h"
@@ -321,226 +322,34 @@ void prepareVerticesAndIndices(const Polygon2d& polyref, Vector3d h1, Vector3d h
 
 using namespace LinearExtrudeInternals;
 
+namespace {
+
+/*! Declare the surfaces the extrusion makes - SweptSurfaces.h, from the
+ * profile's own declarations. Only for a sweep whose stations are this profile:
+ * a Python profile or twist function makes each station its own. */
+void declareExtrudedSurfaces(const LinearExtrudeNode& node, const Polygon2d& profile,
+                             const Vector3d& height, const Vector3d& base, PolySet& polyset)
+{
+#ifdef ENABLE_PYTHON
+  if (node.profile_func != nullptr || node.twist_func != nullptr) return;
+#endif
+  Extrusion sweep;
+  sweep.placement = profile.getTransform3d();
+  sweep.base = base;
+  sweep.height = height;
+  sweep.scale_x = node.scale_x;
+  sweep.scale_y = node.scale_y;
+  sweep.twist = node.twist;
+  for (auto& surface : extrude(classifyProfile(profile), sweep))
+    polyset.surfaces.push_back(std::move(surface));
+}
+
+}  // namespace
+
 /*!
    Input to extrude should be sanitized. This means non-intersecting, correct winding order
    etc., the input coming from a library like Clipper.
  */
-namespace {
-
-/*! The cylinders and cones a straight extrusion of the profile's arcs sweeps.
- *
- * An arc extruded along the normal of its own plane sweeps a circular cylinder,
- * exactly - the declaration the STEP exporter needs, and the reason Arc2d is
- * carried this far. With a uniform `scale` it sweeps a cone instead, and a cone
- * states its intent the way every other cone in this codebase does: by declaring
- * the circle at each of its two ends, which an exporter accepts as a frustum
- * when both rims match. That is the taper idiom - a draft angle, a lead-in, a
- * tapered boss - and it is as common as the straight case.
- *
- * Everything that would make either untrue is refused rather than approximated:
- *
- *   - a twist, which sweeps a helicoid, or an uneven scale, which sweeps a
- *     general ruled surface;
- *   - a Python profile or twist function, where the profile is not this one;
- *   - an oblique `v`, which sweeps an *oblique* cylinder - a real surface, but
- *     not a CYLINDRICAL_SURFACE, whose circular section is not perpendicular to
- *     its axis;
- *   - a profile plane whose 3D transform is not a similarity, which turns the
- *     circle into an ellipse before it is swept at all;
- *   - a scaled arc whose centre is not the origin the scale is taken about.
- *     `scale` moves such a centre sideways as well as shrinking its radius, so
- *     the surface is an *oblique* cone: still exact, still describable, and not
- *     a CONICAL_SURFACE. Only an arc concentric with the scaling origin tapers
- *     into one.
- *
- * Like every record on this channel these are hints. The recogniser fits each
- * one to the mesh and writes only what actually agrees, so an arc that a
- * boolean has since cut down to nothing simply never matches.
- */
-void declareExtrudedCylinders(const LinearExtrudeNode& node, const Polygon2d& profile,
-                              const Vector3d& height, const Vector3d& base, PolySet& polyset)
-{
-  if (profile.arcs.empty()) return;
-  if (node.twist != 0 || node.scale_x != node.scale_y) return;
-  const double taper = node.scale_x;
-  if (!(taper >= 0) || !std::isfinite(taper)) return;
-#ifdef ENABLE_PYTHON
-  if (node.profile_func != nullptr || node.twist_func != nullptr) return;
-#endif
-  const double len = height.norm();
-  if (len < 1e-12) return;
-  const Vector3d axis = height / len;
-
-  const Transform3d tr = profile.getTransform3d();
-  const Eigen::Matrix3d linear = tr.linear();
-  // the plane the profile lies in, and the scale the transform applies inside it
-  const Vector3d ex = linear * Vector3d(1., 0., 0.);
-  const Vector3d ey = linear * Vector3d(0., 1., 0.);
-  const double sx = ex.norm(), sy = ey.norm();
-  if (sx < 1e-12 || sy < 1e-12) return;
-  if (fabs(sx - sy) > 1e-12 * sx) return;          // an ellipse, not a circle
-  if (fabs(ex.dot(ey)) > 1e-12 * sx * sy) return;  // sheared, likewise
-  // and the sweep has to run along that plane's normal, or the cylinder is oblique
-  const Vector3d normal = ex.cross(ey) / (sx * sy);
-  if (fabs(fabs(normal.dot(axis)) - 1.) > 1e-12) return;
-
-  const double scale = 0.5 * (sx + sy);
-  for (const auto& arc : profile.arcs) {
-    if (arc.r <= 0) continue;
-    const Vector3d centre = tr * Vector3d(arc.centre[0], arc.centre[1], 0.) + base;
-    const double radius = arc.r * scale;
-    if (taper == 1.0) {
-      addSurfaceUnique(polyset.surfaces, std::make_shared<CylinderSurface>(centre, axis, radius));
-      continue;
-    }
-    // A taper. Only an arc about the scaling origin stays concentric as it
-    // shrinks; any other one slides sideways too and sweeps an oblique cone.
-    if (arc.centre.norm() > 1e-12 * std::max(1.0, arc.r)) continue;
-    // Both are rims of the cone the taper sweeps - evidence, not faces: no facet
-    // of this solid lies on either. See Surface::witnesses.
-    auto base_rim = std::make_shared<CylinderSurface>(centre, axis, radius);
-    base_rim->evidence_only = true;
-    addSurfaceUnique(polyset.surfaces, base_rim);
-    if (taper > 0) {
-      auto top_rim = std::make_shared<CylinderSurface>(centre + height, axis, radius * taper);
-      top_rim->evidence_only = true;
-      addSurfaceUnique(polyset.surfaces, top_rim);
-    }
-  }
-}
-
-/*! The Bezier patches a straight extrusion of the profile's Bezier segments
- * sweeps.
- *
- * A Bezier segment swept along a straight line is a tensor product patch of
- * degree (n, 1) whose control net is the segment's own control points at each
- * end of the sweep - exact, and needing no fit, because both a Bezier and a
- * linear sweep are affine in their control points.
- *
- * That makes this far less fussy than the arc case next door. An arc has to
- * refuse a shear, a non-uniform scale and an oblique `v`, because each of them
- * turns its circle into something no quadric describes; a Bezier survives all
- * three, comes out a Bezier of the same degree, and is written by the same
- * B_SPLINE_SURFACE_WITH_KNOTS either way. Even the uneven scale works: the
- * extrusion's station at t is the profile scaled by lerp(1, s, t), and the
- * patch's own linear interpolation in v gives lerp(P, sP, t), which is the same
- * points.
- *
- * What it cannot take is a twist, where the station at t is the profile
- * *rotated* by t times the angle. A rotation is not linear in t, the swept
- * surface is not a Bezier patch of any degree, and this is the same helicoid
- * the arc case refuses.
- */
-void declareExtrudedPatches(const LinearExtrudeNode& node, const Polygon2d& profile,
-                            const Vector3d& height, const Vector3d& base, PolySet& polyset)
-{
-  if (profile.beziers.empty()) return;
-  if (node.twist != 0) return;
-#ifdef ENABLE_PYTHON
-  if (node.profile_func != nullptr || node.twist_func != nullptr) return;
-#endif
-  const Transform3d tr = profile.getTransform3d();
-  const Vector2d top_scale(node.scale_x, node.scale_y);
-  if (!top_scale.allFinite()) return;
-
-  for (const auto& bez : profile.beziers) {
-    if (bez.degree < 2 || bez.degree > 3) continue;
-    // v varies fastest, so the net is control point by control point, each one
-    // as a pair: where it starts and where the sweep takes it.
-    std::vector<Vector3d> net;
-    net.reserve((bez.degree + 1) * 2);
-    for (int i = 0; i <= bez.degree; i++) {
-      const Vector2d p(bez.ctrl[i][0], bez.ctrl[i][1]);
-      net.push_back(tr * Vector3d(p[0], p[1], 0.) + base);
-      net.push_back(tr * Vector3d(p[0] * top_scale[0], p[1] * top_scale[1], 0.) + base + height);
-    }
-    polyset.surfaces.push_back(std::make_shared<BezierPatchSurface>(bez.degree, 1, std::move(net)));
-  }
-}
-
-/*! The planes a straight extrusion sweeps: its two caps, and each straight wall.
- *
- * A plane is exact whether it is declared or fitted, so this is not about
- * accuracy - it is about the coefficients staying put. A plane fitted to mesh
- * vertices moves with the tessellation, with whatever a boolean left behind, and
- * with any later pass that touches a vertex; the declared one cannot move at
- * all, and anything derived from it inherits that.
- *
- * **The caps are always planar.** Every station of a linear extrusion is the
- * profile scaled and rotated *within its own plane* and then translated, so the
- * first and last lie in two parallel planes whatever `v`, `scale`, `twist` or
- * `center` do. Only a degenerate top - scaled to nothing - has no face there.
- *
- * **A straight wall is planar unless something turns it.** The wall over a
- * straight profile edge AB is the ruled surface between AB and its image A'B',
- * and it is planar exactly when those two are parallel:
- *
- *   - a twist rotates the image, so A'B' is AB turned and the two are skew;
- *   - an uneven scale sends AB to (sx*u1, sy*u2), parallel to u = (u1, u2) only
- *     when the edge already runs along x or y - so an uneven scale is refused
- *     except for those edges, which are exactly the ones it leaves alone;
- *   - a uniform scale and any `v`, oblique included, keep them parallel, because
- *     A'B' = s*AB and the translation is common to both ends.
- *
- * A chord of a recorded arc or Bezier is *not* a straight edge, whatever the
- * outline says: it is the tessellation's chord, its plane moves with `$fn`, and
- * declaring it would put a tessellation artefact on a channel whose whole point
- * is that a declaration does not move. The arcs are tested exactly - both ends
- * at the recorded radius from the recorded centre - and the Beziers by their
- * control points' bounding box, which errs towards declaring nothing.
- */
-void declareExtrudedPlanes(const LinearExtrudeNode& node, const Polygon2d& profile,
-                           const Vector3d& height, const Vector3d& base, PolySet& polyset)
-{
-#ifdef ENABLE_PYTHON
-  if (node.profile_func != nullptr || node.twist_func != nullptr) return;
-#endif
-  const Transform3d tr = profile.getTransform3d();
-  const Eigen::Matrix3d linear = tr.linear();
-  const Vector3d ex = linear * Vector3d(1., 0., 0.);
-  const Vector3d ey = linear * Vector3d(0., 1., 0.);
-  const Vector3d normal = ex.cross(ey);
-  if (normal.norm() < 1e-12) return;
-  const Vector3d unit_normal = normal.normalized();
-  const Vector2d top_scale(node.scale_x, node.scale_y);
-  if (!top_scale.allFinite()) return;
-
-  // The two caps.
-  addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(base, unit_normal));
-  if (top_scale[0] != 0. || top_scale[1] != 0.) {
-    addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(base + height, unit_normal));
-  }
-
-  if (node.twist != 0) return;
-  const bool even_scale = node.scale_x == node.scale_y;
-
-  // Untransformed, because the arcs and Beziers the edges are classified against
-  // are: they are recorded in the profile's own 2D frame and the transform is
-  // applied below, where the wall is built. Comparing a transformed vertex
-  // against an untransformed centre finds no arc at all, and every chord of one
-  // is then declared a straight wall - which is how a rounded square came to
-  // declare thirty planes for six faces. See Profile2d.h.
-  for (const auto& loop : classifyProfile(profile).loops) {
-    if (loop.size() < 2) continue;
-    for (const ProfileEdge& edge : loop) {
-      const Vector2d& a = edge.a;
-      const Vector2d& b = edge.b;
-      if ((b - a).norm() < 1e-12) continue;
-      if (edge.kind != EdgeKind::Line) continue;
-      // An uneven scale keeps only the edges it does not shear.
-      if (!even_scale && fabs(b[0] - a[0]) > 1e-12 && fabs(b[1] - a[1]) > 1e-12) continue;
-      const Vector3d p = tr * Vector3d(a[0], a[1], 0.) + base;
-      const Vector3d q = tr * Vector3d(b[0], b[1], 0.) + base;
-      const Vector3d up =
-        tr * Vector3d(a[0] * top_scale[0], a[1] * top_scale[1], 0.) + base + height - p;
-      const Vector3d wall = (q - p).cross(up);
-      if (wall.norm() < 1e-12) continue;
-      addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(p, Vector3d(wall.normalized())));
-    }
-  }
-}
-
-}  // namespace
 
 std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Polygon2d& poly)
 {
@@ -730,9 +539,7 @@ std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Po
   // vertex and carries no records, and it only exists where a twist forced
   // segmentation - which refuses the declaration anyway. Both share the same 3D
   // transform, so the frame is the same either way.
-  declareExtrudedCylinders(node, poly, h2 - h1, h1, *result);
-  declareExtrudedPatches(node, poly, h2 - h1, h1, *result);
-  declareExtrudedPlanes(node, poly, h2 - h1, h1, *result);
+  declareExtrudedSurfaces(node, poly, h2 - h1, h1, *result);
   return result;
 }
 

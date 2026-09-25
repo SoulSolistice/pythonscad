@@ -20,6 +20,7 @@
 #include "geometry/PolySetUtils.h"
 #include "geometry/Polygon2d.h"
 #include "geometry/Profile2d.h"
+#include "geometry/SweptSurfaces.h"
 #include "geometry/Barcode1d.h"
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
@@ -143,25 +144,12 @@ static std::unique_ptr<PolySet> assemblePolySetForManifold(const Polygon2d& poly
 VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double scaley, double origin_x,
                               double origin_y, double offset_x, double offset_y, double rot);
 
-/*! Record the surfaces of revolution a straight profile edge sweeps out.
+/*! Declare the surfaces the revolution makes - SweptSurfaces.h, from the
+ * profile's own declarations.
  *
- * A rotate_extrude of a *line segment* produces exactly what the analytic
- * exporter already knows how to write: a cylinder where the segment is parallel
- * to the axis, a frustum where it is tilted. There is no emission work in it at
- * all, only the statement of intent - which is needed, because a ring of N
- * quads is equally the mesh of an N sided prism and nothing in the geometry
- * says which was meant.
- *
- * A tilted segment declares the cone it sweeps, as a face, and the circle at
- * each of its ends as evidence - rims the band pass can identify it by. Until
- * 2026-09-24 it declared the rims alone, and the cone was recognised from them
- * and named after one.
- *
- * An *arc* in the profile sweeps a torus, or a sphere where its centre sits on
- * the axis, and those come from the profile's Arc2d records rather than from its
- * vertices - which is the whole reason for that channel. Without them a rounded
- * profile is a stack of cones: a fillet drawn into a section is the commonest
- * curved profile there is, and it was reaching the exporter as fifteen frusta.
+ * There is no emission work in it at all, only the statement of intent - which
+ * is needed, because a ring of N quads is equally the mesh of an N sided prism
+ * and nothing in the geometry says which was meant.
  *
  * Only for a sweep whose stations are all the same profile in the same place. A
  * twist, a helical `v`, or a Python `profile_func` makes every station
@@ -170,122 +158,27 @@ VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double s
  */
 static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
                                         const std::vector<VectorOfVector2d>& profiles,
-                                        const std::vector<Arc2d>& arcs, bool has_beziers,
-                                        PolySet& polyset)
+                                        const Polygon2d& poly, PolySet& polyset)
 {
   if (node.v.norm() != 0 || node.twist != 0) return;
 #ifdef ENABLE_PYTHON
   if (node.profile_func != nullptr || node.twist_func != nullptr) return;
 #endif
-
-  // the profile's x is the radius and its y is the height along the axis
-  const double eps = 1e-12;
-  // One record per radius. A vertex shared by two walls would otherwise be
-  // declared twice, and a record is only ever matched on its radius and axis -
-  // the height it carries says where the circle was, not how far the surface
-  // reaches, since a boolean may since have cut it back.
-  //
-  // A vertical edge sweeps a wall on that cylinder, a face of this solid. A
-  // sloped edge sweeps a cone and declares the cylinders at its two ends only as
-  // *evidence* - rims the band pass identifies the cone by - and no facet lies
-  // on them. Where one radius is both, the face wins (addSurfaceUnique merges
-  // the roles). See Surface::witnesses.
-  // What each edge is. The arc records are in the profile's own frame, so they
-  // take the offset the swept profile already has; then an edge that is a chord
-  // of one sweeps a piece of the arc's torus or sphere, declared below, and not a
-  // cone of its own. See Profile2d.h.
-  std::vector<Arc2d> swept_arcs;
-  for (const auto& arc : arcs) {
-    swept_arcs.push_back(
-      Arc2d{Vector2d(arc.centre[0] + node.offset_x, arc.centre[1] + node.offset_y), arc.r});
+  // `profiles` is the profile as it is actually swept: with the twist 0 and the
+  // scale fixed at 1, alterprofile() reduces to a translation by the offset. The
+  // records are in the profile's own frame, so they follow it by that much.
+  const Vector2d offset(node.offset_x, node.offset_y);
+  std::vector<Arc2d> arcs;
+  for (const auto& arc : poly.arcs) arcs.push_back(Arc2d{Vector2d(arc.centre) + offset, arc.r});
+  std::vector<Bezier2d> beziers = poly.beziers;
+  for (auto& bez : beziers) {
+    for (int i = 0; i <= bez.degree; i++) bez.ctrl[i] = Vector2d(bez.ctrl[i]) + offset;
   }
-  const Profile2d profile = classifyProfile(profiles, swept_arcs, {});
-  std::vector<double> declared;
-  auto declare = [&](const Vector2d& p, bool face) {
-    auto record = std::make_shared<CylinderSurface>(Vector3d(0, 0, p[1]), Vector3d(0, 0, 1), p[0]);
-    record->evidence_only = !face;
-    for (const double r : declared) {
-      if (fabs(r - p[0]) <= eps * std::max(1.0, r)) {
-        if (face) addSurfaceUnique(polyset.surfaces, record);  // upgrades the kept record to a face
-        return;
-      }
-    }
-    declared.push_back(p[0]);
-    addSurfaceUnique(polyset.surfaces, record);
-  };
-
-  for (const auto& loop : profile.loops) {
-    for (const ProfileEdge& edge : loop) {
-      const Vector2d& a = edge.a;
-      const Vector2d& b = edge.b;
-      // An edge at one height sweeps a flat annulus, and one touching the axis
-      // sweeps a disc or an apex. Neither is a wall - but the annulus is a
-      // *plane*, exactly, at the height the profile puts it, and saying so is
-      // worth as much as saying which cylinder a wall is on. A plane fitted to
-      // the mesh instead moves with the tessellation and with whatever a boolean
-      // leaves behind; this one is the model's own number.
-      if (fabs(a[1] - b[1]) < eps) {
-        if (fabs(a[0] - b[0]) > eps) {
-          addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(
-                                               Vector3d(0, 0, a[1] + node.offset_y), Vector3d(0, 0, 1)));
-        }
-        continue;
-      }
-      if (a[0] <= eps || b[0] <= eps) continue;
-      const bool wall = fabs(a[0] - b[0]) <= eps;
-      declare(a, wall);
-      if (!wall) {
-        declare(b, false);
-        // A chord of a recorded arc is the arc's surface, not a cone; and where
-        // the profile carries Bezier records an edge may be a chord of one of
-        // those, which this does not test - so it declares nothing it cannot
-        // state, and the rims stay evidence only.
-        if (has_beziers || edge.kind == EdgeKind::Arc) continue;
-        // And the cone itself, which the two rims only witness. Until
-        // 2026-09-24 a sloped edge declared its rims alone, so the cone it
-        // sweeps was *recognised* from them and claimed under a rim's name: on
-        // lid10 the seal bead's two flanks - 120 facets - were held on
-        // cylinders no facet lies on, and no identity could make them D0.
-        // Declarations are the foundation of D0; the edge states its cone
-        // exactly, so it says so - anchored at the wider rim, as cylinder(r1,
-        // r2) anchors its own (primitives.cc).
-        const Vector2d& wide = a[0] >= b[0] ? a : b;
-        addSurfaceUnique(polyset.surfaces,
-                         std::make_shared<ConeSurface>(Vector3d(0, 0, wide[1]), Vector3d(0, 0, 1),
-                                                       wide[0], (b[0] - a[0]) / (b[1] - a[1])));
-      }
-    }
-  }
-
-  // The two faces a partial sweep is closed with. Each is the profile's own
-  // plane, standing at one end of the arc and containing the axis, so its normal
-  // is perpendicular to that plane and the axis both. A full turn closes on
-  // itself and has neither.
-  if (fabs(node.angle) < 360 - 1e-9) {
-    for (const double at : {node.start, node.start + node.angle}) {
-      const double rad = at * G_PI / 180.0;
-      addSurfaceUnique(polyset.surfaces, std::make_shared<PlaneSurface>(
-                                           Vector3d(0, 0, 0), Vector3d(-sin(rad), cos(rad), 0)));
-    }
-  }
-
-  // The arcs. With twist == 0 and the scale fixed at 1, alterprofile() reduces
-  // to a translation by the offset, so that is all the records need to follow.
-  for (const auto& arc : arcs) {
-    if (arc.r <= eps) continue;
-    const Vector2d centre(arc.centre[0] + node.offset_x, arc.centre[1] + node.offset_y);
-    if (fabs(centre[0]) <= eps) {
-      // the centre is on the axis: the arc sweeps a sphere, not a ring
-      addSurfaceUnique(polyset.surfaces, std::make_shared<SphereSurface>(Vector3d(0, 0, centre[1]),
-                                                                         Vector3d(0, 0, 1), arc.r));
-    } else if (centre[0] > arc.r + eps) {
-      addSurfaceUnique(
-        polyset.surfaces,
-        std::make_shared<TorusSurface>(Vector3d(0, 0, centre[1]), Vector3d(0, 0, 1), centre[0], arc.r));
-    }
-    // An arc reaching the axis without being centred on it sweeps a horn or a
-    // spindle torus, which is self-intersecting; rotatePolygon() has rejected a
-    // profile crossing the axis long before this, so there is nothing to say.
+  Revolution sweep;
+  sweep.start = node.start;
+  sweep.angle = node.angle;
+  for (auto& surface : revolve(classifyProfile(profiles, std::move(arcs), std::move(beziers)), sweep)) {
+    polyset.surfaces.push_back(std::move(surface));
   }
 }
 
@@ -456,7 +349,7 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   auto result = assemblePolySetForManifold(poly, vertices, indices, colors, color_indices, closed,
                                            node.convexity, slice_stride * num_sections, flip_faces);
   if (result != nullptr) {
-    declareSurfacesOfRevolution(node, first_ring, poly.arcs, !poly.beziers.empty(), *result);
+    declareSurfacesOfRevolution(node, first_ring, poly, *result);
   }
   return result;
 }

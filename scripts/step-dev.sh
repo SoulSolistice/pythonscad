@@ -10,7 +10,7 @@
 # its own location so it works in any worktree.
 #
 #   scripts/step-dev.sh build              incremental build and stage (no configure)
-#   scripts/step-dev.sh test               the STEP suite: export-step-|mutations, 60 tests
+#   scripts/step-dev.sh test               the STEP suite: export-step-|mutations, 61 tests
 #   scripts/step-dev.sh flagship           the three flagship tests only
 #   scripts/step-dev.sh export <part> [dir]
 #                                          lid10 | bayonet | f02 | f04 | <file.scad>

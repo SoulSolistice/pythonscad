@@ -6,7 +6,11 @@
 
 #include <catch2/catch_all.hpp>
 #include <cmath>
+#include <memory>
 #include <vector>
+
+#include "geometry/Surface.h"
+#include "geometry/SweptSurfaces.h"
 
 namespace {
 
@@ -20,6 +24,19 @@ VectorOfVector2d sampled(const Vector2d& centre, double r, int n)
   }
   return out;
 }
+
+template <class T>
+std::vector<const T *> ofKind(const std::vector<std::shared_ptr<Surface>>& surfaces)
+{
+  std::vector<const T *> out;
+  for (const auto& s : surfaces) {
+    if (const auto *t = dynamic_cast<const T *>(s.get())) out.push_back(t);
+  }
+  return out;
+}
+
+/*! step-rotate-extrude.scad's stepped tube: a bore, two walls and a taper. */
+const VectorOfVector2d kSteppedTube{{8., 0.}, {10., 0.}, {10., 6.}, {12., 10.}, {12., 16.}, {8., 16.}};
 
 }  // namespace
 
@@ -47,7 +64,9 @@ TEST_CASE("Profile2d: an arc is asked at machine precision, not within a thresho
   CHECK_FALSE(onArc(off, arc));
   const Profile2d p = classifyProfile({VectorOfVector2d{on, off, Vector2d(-1., 0.)}}, {arc}, {});
   CHECK(p.loops[0][0].kind == EdgeKind::Line);
-  CHECK(p.loops[0][2].kind == EdgeKind::Arc);  // (-1, 0) back to (1, 0): a diameter, both ends on it
+  // (-1, 0) back to (1, 0) is a diameter: both ends on the circle, so by
+  // measurement a chord - see "a D-shaft's flat is a wall" below
+  CHECK(p.loops[0][2].kind == EdgeKind::Arc);
 }
 
 TEST_CASE("Profile2d: every edge is classified, the closing one included", "[sweep-table]")
@@ -57,4 +76,110 @@ TEST_CASE("Profile2d: every edge is classified, the closing one included", "[swe
   REQUIRE(p.loops[0].size() == 3);
   CHECK(p.loops[0][2].a == Vector2d(0., 1.));
   CHECK(p.loops[0][2].b == Vector2d(0., 0.));
+}
+
+TEST_CASE("revolve: each straight edge by its course", "[sweep-table]")
+{
+  const auto surfaces = revolve(classifyProfile({kSteppedTube}, {}, {}), Revolution{});
+  // three walls, each a face; the taper's rims are the r = 10 and r = 12 walls
+  // already, so no radius is evidence only
+  const auto cylinders = ofKind<CylinderSurface>(surfaces);
+  REQUIRE(cylinders.size() == 3);
+  for (const auto *c : cylinders) CHECK(c->declaresFace());
+  // the taper's cone, anchored at its wider rim
+  const auto cones = ofKind<ConeSurface>(surfaces);
+  REQUIRE(cones.size() == 1);
+  CHECK(cones[0]->r == 12.);
+  CHECK(cones[0]->slope == 0.5);
+  CHECK(cones[0]->refpt == Vector3d(0., 0., 10.));
+  // the two annuli
+  const auto planes = ofKind<PlaneSurface>(surfaces);
+  REQUIRE(planes.size() == 2);
+  CHECK(planes[0]->refpt[2] == 0.);
+  CHECK(planes[1]->refpt[2] == 16.);
+}
+
+TEST_CASE("revolve: a plane is at the level its edge is at", "[sweep-table]")
+{
+  // rotate_extrude hands the table the profile as it is swept - offset already
+  // applied - and until 2026-09-25 added the offset to the planes a second time.
+  VectorOfVector2d lifted = kSteppedTube;
+  for (auto& v : lifted) v[1] += 5.;
+  const auto planes = ofKind<PlaneSurface>(revolve(classifyProfile({lifted}, {}, {}), Revolution{}));
+  REQUIRE(planes.size() == 2);
+  CHECK(planes[0]->refpt[2] == 5.);
+  CHECK(planes[1]->refpt[2] == 21.);
+}
+
+TEST_CASE("revolve: about any axis, not only z", "[sweep-table]")
+{
+  Revolution sweep;
+  sweep.origin = Vector3d(1., 2., 3.);
+  sweep.axis = Vector3d(1., 0., 0.);
+  const auto cones = ofKind<ConeSurface>(revolve(classifyProfile({kSteppedTube}, {}, {}), sweep));
+  REQUIRE(cones.size() == 1);
+  CHECK(cones[0]->refpt == Vector3d(11., 2., 3.));
+  CHECK(cones[0]->normdir == Vector3d(1., 0., 0.));
+}
+
+TEST_CASE("revolve: an arc is a sphere on the axis and a torus off it", "[sweep-table]")
+{
+  const Arc2d on_axis{Vector2d(0., 4.), 3.};
+  const Arc2d ring{Vector2d(10., 0.), 2.};
+  const auto surfaces = revolve(classifyProfile({}, {on_axis, ring}, {}), Revolution{});
+  const auto spheres = ofKind<SphereSurface>(surfaces);
+  const auto tori = ofKind<TorusSurface>(surfaces);
+  REQUIRE(spheres.size() == 1);
+  REQUIRE(tori.size() == 1);
+  CHECK(spheres[0]->refpt == Vector3d(0., 0., 4.));
+}
+
+TEST_CASE("revolve: a partial turn is closed by the profile's plane at each end", "[sweep-table]")
+{
+  Revolution sweep;
+  sweep.angle = 90.;
+  const auto planes = ofKind<PlaneSurface>(revolve(classifyProfile({kSteppedTube}, {}, {}), sweep));
+  // the two annuli, and the ends at 0 and 90 degrees
+  CHECK(planes.size() == 4);
+}
+
+TEST_CASE("extrude: a chord is not a wall", "[sweep-table]")
+{
+  // a half circle closed by three straight edges, two of them clear of it
+  const Arc2d arc{Vector2d(0., 0.), 5.};
+  VectorOfVector2d profile;
+  for (int i = 0; i <= 8; i++) {
+    const double t = -M_PI / 2 + M_PI * i / 8;
+    profile.emplace_back(5. * cos(t), 5. * sin(t));
+  }
+  profile.emplace_back(-3., 5.);
+  profile.emplace_back(-3., -5.);
+  Extrusion sweep;
+  sweep.height = Vector3d(0., 0., 7.);
+  const auto surfaces = extrude(classifyProfile({profile}, {arc}, {}), sweep);
+  // two caps and the three straight walls - none of the eight chords
+  CHECK(ofKind<PlaneSurface>(surfaces).size() == 5);
+  REQUIRE(ofKind<CylinderSurface>(surfaces).size() == 1);
+  CHECK(ofKind<CylinderSurface>(surfaces)[0]->r == 5.);
+}
+
+// KNOWN DEFECT, marked rather than deleted: the day identity reaches the
+// classifier this starts passing, Catch2 reports it, and the mark comes off.
+//
+// A straight edge whose two ends both lie on a recorded circle - the flat of a
+// D-shaft, the back of a half disc - is a chord by every measurement there is,
+// and its wall is not declared. Only the maker knows which it is:
+// doc/step-export-wip.md, *Inferred where a declaration was possible*, item 2.
+TEST_CASE("extrude: a D-shaft's flat is a wall", "[sweep-table][!shouldfail]")
+{
+  const Arc2d arc{Vector2d(0., 0.), 5.};
+  VectorOfVector2d d;
+  for (int i = 0; i <= 8; i++) {
+    const double t = -M_PI / 2 + M_PI * i / 8;
+    d.emplace_back(5. * cos(t), 5. * sin(t));
+  }
+  Extrusion sweep;
+  sweep.height = Vector3d(0., 0., 7.);
+  // two caps and the flat
+  CHECK(ofKind<PlaneSurface>(extrude(classifyProfile({d}, {arc}, {}), sweep)).size() == 3);
 }
