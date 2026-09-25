@@ -9,6 +9,7 @@
  * phase hands on a member, one phase at a time and each step proven neutral by
  * `scripts/step-dev.sh compare` (checklist A8, A9). */
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -121,6 +122,13 @@ struct StepKernel::BodyBuild {
    * do with the answer. */
   bool boundaryLiesOnSurface(const AnalyticFeatures::Patch& patch,
                              const std::set<std::set<int>>& agreed);
+
+  /*! The corner placement: every corner a rung can place is moved onto the
+   * surfaces the file asserts there, the arbiter choosing among the rungs'
+   * candidates (CornerLadder.h), and a planar face bent by a move is split into
+   * the triangles it is written as, `split_for_corners`. Runs once recognition
+   * has said which faces are analytic, and before any face is written. */
+  void placeCorners();
 
   // ---- what the phases hand each other
 
@@ -252,6 +260,13 @@ struct StepKernel::BodyBuild {
   // Parallel to `bezier_patches`: the exact quadric that patch lies on, or null
   // where it is written as the spline it is in general. See quadricOfPatch.
   std::vector<std::shared_ptr<Surface>>& patch_quadric = rec.patch_quadric;
+
+  // Views into what recognition decided.
+  const std::vector<AnalyticFeatures::Band>& bands = features.bands;
+  const std::vector<std::pair<AnalyticFeatures::RimRef, AnalyticFeatures::RimRef>>& rims = features.rims;
+  const std::vector<char>& consumed = features.consumed;
+  // A planar face the corner placement bent -> the triangles it is written as.
+  std::map<std::size_t, std::vector<std::array<int, 3>>> split_for_corners;
 
   // ---- the kernel methods the phases call
   EdgeCurve *create_line_edge_curve(Vertex *vert1, Vertex *vert2, bool dir)
