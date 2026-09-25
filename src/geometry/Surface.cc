@@ -1320,22 +1320,41 @@ int sweepStations(double turns, int asked)
 
 /*! The sampled net, so the inherited GridSurface has something to interpolate. */
 std::vector<Vector3d> sweepNet(const Vector3d& origin, const Vector3d& axis, const Vector3d& ref,
-                               double radius, double pitch, double turns,
-                               const std::vector<Vector2d>& profile, int stations)
+                               const SweepLaws& laws, double pitch, double turns, int stations)
 {
   const Vector3d other = axis.cross(ref);
   std::vector<Vector3d> net;
-  net.reserve(std::size_t(stations) * profile.size());
+  net.reserve(std::size_t(stations) * laws.points());
   for (int i = 0; i < stations; i++) {
     const double t = stations > 1 ? double(i) / (stations - 1) : 0.0;
     const double theta = 2 * M_PI * turns * t;
     const double z = pitch * turns * t;
     const Vector3d radial = ref * cos(theta) + other * sin(theta);
-    for (const auto& p : profile) {
-      net.push_back(origin + radial * (radius + p[0]) + axis * (z + p[1]));
+    const double r = laws.radiusAt(t);
+    for (std::size_t k = 0; k < laws.points(); k++) {
+      const Vector2d p = laws.pointAt(k, t);
+      net.push_back(origin + radial * (r + p[0]) + axis * (z + p[1]));
     }
   }
   return net;
+}
+
+/*! Where `t` falls in a table of keys: the key at or below it, and how far on
+ * to the next - clamped, so past either end the law is its end value. */
+void lawSpan(const std::vector<double>& at, double t, std::size_t& k, double& f)
+{
+  if (at.size() < 2 || t <= at.front()) {
+    k = 0;
+    f = 0.0;
+    return;
+  }
+  if (t >= at.back()) {
+    k = at.size() - 1;
+    f = 0.0;
+    return;
+  }
+  k = std::size_t(std::upper_bound(at.begin(), at.end(), t) - at.begin()) - 1;
+  f = (t - at[k]) / (at[k + 1] - at[k]);
 }
 
 /*! The reference direction, squared up against the axis. */
@@ -1347,17 +1366,123 @@ Vector3d sweepRef(const Vector3d& axis, const Vector3d& ref)
 
 }  // namespace
 
+SweepLaws SweepLaws::constant(double r, std::vector<Vector2d> p)
+{
+  SweepLaws laws;
+  laws.radius_at = {0.0};
+  laws.radius = {r};
+  laws.profile_at = {0.0};
+  laws.profile = {std::move(p)};
+  return laws;
+}
+
+double SweepLaws::radiusAt(double t) const
+{
+  std::size_t k = 0;
+  double f = 0;
+  lawSpan(radius_at, t, k, f);
+  return f == 0.0 ? radius[k] : radius[k] + (radius[k + 1] - radius[k]) * f;
+}
+
+Vector2d SweepLaws::pointAt(std::size_t i, double t) const
+{
+  std::size_t k = 0;
+  double f = 0;
+  lawSpan(profile_at, t, k, f);
+  return f == 0.0 ? profile[k][i] : Vector2d(profile[k][i] + (profile[k + 1][i] - profile[k][i]) * f);
+}
+
+std::vector<double> SweepLaws::corners() const
+{
+  std::vector<double> out;
+  for (const auto *at : {&radius_at, &profile_at}) {
+    for (const double t : *at) {
+      if (t > 0.0 && t < 1.0) out.push_back(t);
+    }
+  }
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
+double SweepLaws::largestRadius() const
+{
+  double r = 0.0;
+  for (const double x : radius) r = std::max(r, fabs(x));
+  return r;
+}
+
+std::string SweepLaws::invalid() const
+{
+  if (radius.empty() || radius.size() != radius_at.size()) return "the radius has no value";
+  if (profile.empty() || profile.size() != profile_at.size()) return "the profile has no points";
+  for (const auto *at : {&radius_at, &profile_at}) {
+    for (std::size_t k = 0; k < at->size(); k++) {
+      if (!std::isfinite((*at)[k])) return "a key of a law is not a finite number";
+      if (k > 0 && !((*at)[k] > (*at)[k - 1])) return "the keys of a law have to increase";
+    }
+  }
+  for (const double r : radius) {
+    if (!std::isfinite(r)) return "a radius is not a finite number";
+  }
+  const std::size_t n = profile.front().size();
+  if (n < 3) return "a closed profile needs at least three points, got " + std::to_string(n);
+  for (std::size_t k = 0; k < profile.size(); k++) {
+    if (profile[k].size() != n) {
+      return "every profile of the law needs the same number of points - " + std::to_string(n) +
+             " at the first, " + std::to_string(profile[k].size()) + " at key " + std::to_string(k);
+    }
+    for (std::size_t i = 0; i < n; i++) {
+      if (!std::isfinite(profile[k][i][0]) || !std::isfinite(profile[k][i][1])) {
+        return "profile point " + std::to_string(i) + " is not two finite numbers";
+      }
+      // A repeated point leaves a zero length segment, which has no direction,
+      // and the distance to the profile would be ill defined at that corner.
+      if ((profile[k][i] - profile[k][(i + 1) % n]).norm() < 1e-12) {
+        return "profile points " + std::to_string(i) + " and " + std::to_string((i + 1) % n) +
+               " are the same point";
+      }
+    }
+  }
+  return {};
+}
+
+SweepLaws SweepLaws::scaled(double s) const
+{
+  SweepLaws out = *this;
+  for (double& r : out.radius) r *= s;
+  for (auto& p : out.profile) {
+    for (auto& q : p) q *= s;
+  }
+  return out;
+}
+
+bool SweepLaws::sameAs(const SweepLaws& o, double tol) const
+{
+  if (radius.size() != o.radius.size() || profile.size() != o.profile.size() || points() != o.points()) {
+    return false;
+  }
+  for (std::size_t k = 0; k < radius.size(); k++) {
+    if (fabs(radius_at[k] - o.radius_at[k]) > tol || fabs(radius[k] - o.radius[k]) > tol) return false;
+  }
+  for (std::size_t k = 0; k < profile.size(); k++) {
+    if (fabs(profile_at[k] - o.profile_at[k]) > tol) return false;
+    for (std::size_t i = 0; i < points(); i++) {
+      if ((profile[k][i] - o.profile[k][i]).norm() > tol) return false;
+    }
+  }
+  return true;
+}
+
 SweepSurface::SweepSurface(const Vector3d& origin, const Vector3d& axis, const Vector3d& ref_in,
-                           double radius_in, double pitch_in, double turns_in,
-                           std::vector<Vector2d> profile_in, int stations_in)
-  : GridSurface(sweepStations(turns_in, stations_in), int(profile_in.size()),
-                sweepNet(origin, axis.normalized(), sweepRef(axis, ref_in), radius_in, pitch_in,
-                         turns_in, profile_in, sweepStations(turns_in, stations_in)),
+                           SweepLaws laws_in, double pitch_in, double turns_in, int stations_in)
+  : GridSurface(sweepStations(turns_in, stations_in), int(laws_in.points()),
+                sweepNet(origin, axis.normalized(), sweepRef(axis, ref_in), laws_in, pitch_in, turns_in,
+                         sweepStations(turns_in, stations_in)),
                 true),
-    radius(radius_in),
+    laws(std::move(laws_in)),
     pitch(pitch_in),
     turns(turns_in),
-    profile(std::move(profile_in)),
     stations(sweepStations(turns_in, stations_in))
 {
   refpt = origin;
@@ -1366,9 +1491,9 @@ SweepSurface::SweepSurface(const Vector3d& origin, const Vector3d& axis, const V
 }
 
 std::shared_ptr<SweepSurface> SweepSurface::make(const Vector3d& origin, const Vector3d& axis,
-                                                 const Vector3d& ref_in, double radius, double pitch,
-                                                 double turns, const std::vector<Vector2d>& profile_in,
-                                                 int stations_in, std::string& why)
+                                                 const Vector3d& ref_in, const SweepLaws& laws,
+                                                 double pitch, double turns, int stations_in,
+                                                 std::string& why)
 {
   if (axis.norm() < 1e-12) {
     why = "declare_sweep: the axis has no direction";
@@ -1382,30 +1507,16 @@ std::shared_ptr<SweepSurface> SweepSurface::make(const Vector3d& origin, const V
       "for the profile to be measured from";
     return nullptr;
   }
-  if (profile_in.size() < 3) {
-    why = "declare_sweep: a closed profile needs at least three points, got " +
-          std::to_string(profile_in.size());
+  const std::string bad = laws.invalid();
+  if (!bad.empty()) {
+    why = "declare_sweep: " + bad;
     return nullptr;
   }
-  if (!std::isfinite(radius) || !std::isfinite(pitch) || !std::isfinite(turns) || turns == 0) {
-    why = "declare_sweep: radius, pitch and turns have to be finite, and turns cannot be zero";
+  if (!std::isfinite(pitch) || !std::isfinite(turns) || turns == 0) {
+    why = "declare_sweep: pitch and turns have to be finite, and turns cannot be zero";
     return nullptr;
   }
-  for (std::size_t i = 0; i < profile_in.size(); i++) {
-    if (!std::isfinite(profile_in[i][0]) || !std::isfinite(profile_in[i][1])) {
-      why = "declare_sweep: profile point " + std::to_string(i) + " is not two finite numbers";
-      return nullptr;
-    }
-    // A repeated point leaves a zero length segment, which has no direction, and
-    // the distance to the profile would be ill defined at that corner.
-    const Vector2d& b = profile_in[(i + 1) % profile_in.size()];
-    if ((profile_in[i] - b).norm() < 1e-12) {
-      why = "declare_sweep: profile points " + std::to_string(i) + " and " +
-            std::to_string((i + 1) % profile_in.size()) + " are the same point";
-      return nullptr;
-    }
-  }
-  return std::make_shared<SweepSurface>(origin, a, r, radius, pitch, turns, profile_in, stations_in);
+  return std::make_shared<SweepSurface>(origin, a, r, laws, pitch, turns, stations_in);
 }
 
 void SweepSurface::localCoords(const Vector3d& pt, double& t, double& dr, double& dz) const
@@ -1422,19 +1533,19 @@ void SweepSurface::localCoords(const Vector3d& pt, double& t, double& dr, double
   const double k = pitch != 0 ? std::round(along / pitch - frac) : 0.0;
   const double turn = frac + k;
   t = turns != 0 ? turn / turns : 0.0;
-  dr = radial.norm() - radius;
+  dr = radial.norm() - laws.radiusAt(t);
   dz = along - turn * pitch;
 }
 
-double SweepSurface::profileDistance(double dr, double dz, double *at) const
+double SweepSurface::profileDistance(double t, double dr, double dz, double *at) const
 {
-  const std::size_t n = profile.size();
+  const std::size_t n = laws.points();
   double best = std::numeric_limits<double>::infinity();
   double best_at = 0;
   const Vector2d q(dr, dz);
   for (std::size_t i = 0; i < n; i++) {
-    const Vector2d& a = profile[i];
-    const Vector2d& b = profile[(i + 1) % n];
+    const Vector2d a = laws.pointAt(i, t);
+    const Vector2d b = laws.pointAt((i + 1) % n, t);
     const Vector2d e = b - a;
     const double len2 = e.squaredNorm();
     double s = len2 > 0 ? (q - a).dot(e) / len2 : 0.0;
@@ -1453,17 +1564,18 @@ Vector3d SweepSurface::evaluate(double u, double v) const
 {
   u = std::clamp(u, 0.0, 1.0);
   v = std::clamp(v, 0.0, 1.0);
-  const std::size_t n = profile.size();
+  const std::size_t n = laws.points();
   const double s = v * double(n);
   std::size_t i = std::size_t(s);
   if (i >= n) i = n - 1;
   const double f = s - double(i);
-  const Vector2d p = profile[i] + (profile[(i + 1) % n] - profile[i]) * f;
+  const Vector2d a = laws.pointAt(i, u);
+  const Vector2d p = a + (laws.pointAt((i + 1) % n, u) - a) * f;
   const double theta = 2 * M_PI * turns * u;
   const double z = pitch * turns * u;
   const Vector3d other = normdir.cross(ref);
   const Vector3d radial = ref * cos(theta) + other * sin(theta);
-  return refpt + radial * (radius + p[0]) + normdir * (z + p[1]);
+  return refpt + radial * (laws.radiusAt(u) + p[0]) + normdir * (z + p[1]);
 }
 
 bool SweepSurface::project(const Vector3d& pt, double& u, double& v) const
@@ -1473,7 +1585,7 @@ bool SweepSurface::project(const Vector3d& pt, double& u, double& v) const
   double t = 0, dr = 0, dz = 0;
   localCoords(pt, t, dr, dz);
   double at = 0;
-  profileDistance(dr, dz, &at);
+  profileDistance(t, dr, dz, &at);
   u = std::clamp(t, 0.0, 1.0);
   v = at;
   return true;
@@ -1486,10 +1598,10 @@ bool SweepSurface::onSurface(const Vector3d& pt, double tol) const
   // Past either end of the sweep the surface is simply not there. The allowance
   // is stated in the sweep's own parameter, so it means the same distance
   // whatever the sweep's length.
-  const double per_turn = std::max(1e-9, hypot(2 * M_PI * radius, pitch));
+  const double per_turn = std::max(1e-9, hypot(2 * M_PI * laws.largestRadius(), pitch));
   const double slack = turns != 0 ? tol / (fabs(turns) * per_turn) : 0.0;
   if (t < -slack || t > 1 + slack) return false;
-  return profileDistance(dr, dz) <= tol;
+  return profileDistance(t, dr, dz) <= tol;
 }
 
 int SweepSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
@@ -1502,7 +1614,7 @@ int SweepSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
 
 std::shared_ptr<Surface> SweepSurface::clone() const
 {
-  return std::make_shared<SweepSurface>(refpt, normdir, ref, radius, pitch, turns, profile, stations);
+  return std::make_shared<SweepSurface>(refpt, normdir, ref, laws, pitch, turns, stations);
 }
 
 bool SweepSurface::transform(const Transform3d& mat)
@@ -1537,10 +1649,8 @@ bool SweepSurface::transform(const Transform3d& mat)
     }
   }
   const double scale = sqrt(scale2);
-  std::vector<Vector2d> moved = profile;
-  for (auto& q : moved) q *= scale;
-  *this = SweepSurface(mat * refpt, (m * normdir).normalized(), (m * ref).normalized(), radius * scale,
-                       pitch * scale, turns, moved, stations);
+  *this = SweepSurface(mat * refpt, (m * normdir).normalized(), (m * ref).normalized(),
+                       laws.scaled(scale), pitch * scale, turns, stations);
   return true;
 }
 
@@ -1548,18 +1658,11 @@ bool SweepSurface::sameAs(const Surface& other) const
 {
   const auto *o = dynamic_cast<const SweepSurface *>(&other);
   if (o == nullptr) return false;
-  if (profile.size() != o->profile.size()) return false;
   if ((refpt - o->refpt).norm() > 1e-9) return false;
   if ((normdir - o->normdir).norm() > 1e-9) return false;
   if ((ref - o->ref).norm() > 1e-9) return false;
-  if (fabs(radius - o->radius) > 1e-9 || fabs(pitch - o->pitch) > 1e-9 ||
-      fabs(turns - o->turns) > 1e-9) {
-    return false;
-  }
-  for (std::size_t i = 0; i < profile.size(); i++) {
-    if ((profile[i] - o->profile[i]).norm() > 1e-9) return false;
-  }
-  return true;
+  if (fabs(pitch - o->pitch) > 1e-9 || fabs(turns - o->turns) > 1e-9) return false;
+  return laws.sameAs(o->laws, 1e-9);
 }
 
 // ---------------------------------------------------------------------------

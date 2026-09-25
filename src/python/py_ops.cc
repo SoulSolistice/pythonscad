@@ -583,7 +583,8 @@ static PyObject *python_declare_sweep_core(PyObject *obj, PyObject *profile, dou
   }
 
   std::string why;
-  auto surface = SweepSurface::make(o, ax, rf, radius, pitch, turns, pts, stations, why);
+  auto surface =
+    SweepSurface::make(o, ax, rf, SweepLaws::constant(radius, pts), pitch, turns, stations, why);
   if (surface == nullptr) {
     PyErr_SetString(PyExc_TypeError, why.c_str());
     return nullptr;

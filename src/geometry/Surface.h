@@ -713,21 +713,51 @@ private:
  * rather than handed in; the declaration is the closed form, and the overrides
  * below are what membership actually asks.
  *
- * The profile is closed and constant along the sweep. One that changes shape -
- * `step-band-family` tapers its ridge in and out - is a different declaration
- * and is not this one. */
+ * The radius and the profile may change along the sweep, each by its own law -
+ * SweepLaws: piecewise linear in the sweep's parameter, which is how a thread
+ * fades in and out and follows a tapered socket. What stays the same is the
+ * path: a helix about the axis, the angle and the rise both linear in t. That is
+ * what keeps membership an inversion - the angle and the height still say which
+ * station a point belongs to, and the laws say what the profile is there. */
+/*! How a sweep's radius and profile change along it: each a table of values at
+ * points of the sweep's own parameter t, linear between them and constant past
+ * the first and the last. One entry is a constant law. The corners of the
+ * laws - where a table turns - are corners of the surface too, and whatever
+ * renders it has to keep them. */
+struct SweepLaws {
+  std::vector<double> radius_at;               // t of each radius key, increasing
+  std::vector<double> radius;                  // the radius there
+  std::vector<double> profile_at;              // t of each profile key, increasing
+  std::vector<std::vector<Vector2d>> profile;  // the closed profile there, one point count throughout
+
+  /*! One radius and one profile, the whole way. */
+  static SweepLaws constant(double r, std::vector<Vector2d> p);
+  [[nodiscard]] double radiusAt(double t) const;
+  /*! Profile point `i` at `t`. */
+  [[nodiscard]] Vector2d pointAt(std::size_t i, double t) const;
+  [[nodiscard]] std::size_t points() const { return profile.empty() ? 0 : profile.front().size(); }
+  /*! The keys of both laws strictly inside (0, 1), merged: where the surface
+   * may turn a corner along the sweep. */
+  [[nodiscard]] std::vector<double> corners() const;
+  [[nodiscard]] double largestRadius() const;
+  /*! Why these are not laws a sweep can follow, or empty. */
+  [[nodiscard]] std::string invalid() const;
+  /*! Both tables scaled by `s`, as a uniform scale of the sweep scales them. */
+  [[nodiscard]] SweepLaws scaled(double s) const;
+  [[nodiscard]] bool sameAs(const SweepLaws& o, double tol) const;
+};
+
 class SweepSurface : public GridSurface
 {
 public:
-  SweepSurface(const Vector3d& origin, const Vector3d& axis, const Vector3d& ref, double radius,
-               double pitch, double turns, std::vector<Vector2d> profile_in, int stations_in);
+  SweepSurface(const Vector3d& origin, const Vector3d& axis, const Vector3d& ref, SweepLaws laws,
+               double pitch, double turns, int stations_in);
 
   /*! Build one, or say why the arguments do not describe a sweep. Both front
    * ends validate here, for the reason `GridSurface::fromRows` does. */
   static std::shared_ptr<SweepSurface> make(const Vector3d& origin, const Vector3d& axis,
-                                            const Vector3d& ref, double radius, double pitch,
-                                            double turns, const std::vector<Vector2d>& profile_in,
-                                            int stations_in, std::string& why);
+                                            const Vector3d& ref, const SweepLaws& laws, double pitch,
+                                            double turns, int stations_in, std::string& why);
 
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] Vector3d evaluate(double u, double v) const override;
@@ -742,11 +772,12 @@ public:
    * point is on the surface exactly when (`dr`, `dz`) is on the profile. */
   void localCoords(const Vector3d& pt, double& t, double& dr, double& dz) const;
 
-  /*! Distance from (dr, dz) to the closed profile, and where along it. */
-  [[nodiscard]] double profileDistance(double dr, double dz, double *at = nullptr) const;
+  /*! Distance from (dr, dz) to the closed profile at station `t`, and where
+   * along it. */
+  [[nodiscard]] double profileDistance(double t, double dr, double dz, double *at = nullptr) const;
 
-  double radius = 0, pitch = 0, turns = 0;
+  SweepLaws laws;
+  double pitch = 0, turns = 0;
   Vector3d ref;  // where theta is measured from; unit, perpendicular to normdir
-  std::vector<Vector2d> profile;
   int stations = 0;
 };

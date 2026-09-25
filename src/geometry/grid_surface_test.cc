@@ -420,8 +420,8 @@ TEST_CASE("a point off the end of a grid projects to its boundary", "[gridsurfac
 TEST_CASE("a mirrored sweep is refused rather than declared wrongly", "[sweepsurface]")
 {
   const std::vector<Vector2d> profile = {Vector2d(0, 0), Vector2d(1, 0), Vector2d(0, 1)};
-  SweepSurface sweep(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0), 10.0, 4.0, 1.0, profile,
-                     16);
+  SweepSurface sweep(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0),
+                     SweepLaws::constant(10.0, profile), 4.0, 1.0, 16);
 
   // A quarter turn along the helix, on the profile's first vertex.
   const Vector3d before = sweep.evaluate(0.25, 0.0);
@@ -459,12 +459,83 @@ TEST_CASE("a mirrored sweep is refused rather than declared wrongly", "[sweepsur
  * Found in external review 2026-09-10, stated here rather than fixed: the repair
  * is a decision about what `declare_sweep` should accept, not a local edit.
  */
+/*! A thread that fades in and out and follows a tapered socket: the radius and
+ * the profile change along the sweep by piecewise-linear laws (SweepLaws). Every
+ * number here is the laws' own - the expectations are what the tables state. */
+TEST_CASE("a sweep follows its laws", "[sweepsurface][laws]")
+{
+  SweepLaws laws;
+  laws.radius_at = {0.0, 0.6, 1.0};
+  laws.radius = {20.0, 23.0, 23.0};  // a taper that stops at t = 0.6
+  const std::vector<Vector2d> flat = {Vector2d(0.3, -2.0), Vector2d(0.0, -0.75), Vector2d(0.0, 0.75),
+                                      Vector2d(0.3, 2.0)};
+  const std::vector<Vector2d> full = {Vector2d(0.3, -2.0), Vector2d(-1.5, -0.75), Vector2d(-1.5, 0.75),
+                                      Vector2d(0.3, 2.0)};
+  laws.profile_at = {0.0, 0.2, 0.9, 1.0};  // in over a fifth, out over a tenth
+  laws.profile = {flat, full, full, flat};
+  REQUIRE(laws.invalid().empty());
+
+  SECTION("the laws say what their tables say")
+  {
+    CHECK(laws.radiusAt(0.0) == 20.0);
+    CHECK(laws.radiusAt(0.3) == Catch::Approx(21.5).epsilon(1e-15));
+    CHECK(laws.radiusAt(0.6) == 23.0);
+    CHECK(laws.radiusAt(2.0) == 23.0);   // constant past the last key
+    CHECK(laws.radiusAt(-1.0) == 20.0);  // and before the first
+    CHECK(laws.pointAt(1, 0.1)[0] == Catch::Approx(-0.75).epsilon(1e-15));
+    CHECK(laws.pointAt(1, 0.5)[0] == -1.5);
+    CHECK(laws.pointAt(0, 0.1)[0] == 0.3);
+    CHECK(laws.corners() == std::vector<double>{0.2, 0.6, 0.9});
+  }
+
+  std::string why;
+  const auto sweep =
+    SweepSurface::make(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0), laws, 6.0, 3.0, 0, why);
+  REQUIRE(sweep != nullptr);
+
+  SECTION("every point it makes is on it, by the inverse")
+  {
+    for (int i = 0; i <= 60; i++) {
+      for (int j = 0; j < 16; j++) {
+        const Vector3d p = sweep->evaluate(i / 60.0, j / 16.0);
+        CHECK(sweep->onSurface(p, 1e-12 * std::max(1.0, p.norm())));
+      }
+    }
+  }
+
+  SECTION("and a point off its profile at that station is not")
+  {
+    // Inside the fade, the crest is where the law puts it and nowhere else: the
+    // same point on the full profile is off this station's.
+    const double u = 0.05;  // a quarter of the way in
+    const Vector3d on = sweep->evaluate(u, 1.5 / 4.0);
+    CHECK(sweep->onSurface(on, 1e-9));
+    const double theta = 2 * M_PI * 3.0 * u;
+    const Vector3d radial(cos(theta), sin(theta), 0);
+    const Vector3d off = on + radial * 1e-6;
+    CHECK_FALSE(sweep->onSurface(off, 1e-9));
+  }
+
+  SECTION("a constant law is the sweep it always was")
+  {
+    const auto constant = SweepSurface::make(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0),
+                                             SweepLaws::constant(23.0, full), 6.0, 3.0, 0, why);
+    REQUIRE(constant != nullptr);
+    for (int i = 0; i <= 10; i++) {
+      const double u = i / 10.0, theta = 2 * M_PI * 3.0 * u;
+      const Vector3d radial(cos(theta), sin(theta), 0);
+      const Vector3d want = radial * (23.0 + full[2][0]) + Vector3d(0, 0, 18.0 * u + full[2][1]);
+      CHECK((constant->evaluate(u, 2.0 / 4.0) - want).norm() < 1e-12);
+    }
+  }
+}
+
 TEST_CASE("a zero-pitch sweep inverts its own points", "[sweepsurface][!shouldfail]")
 {
   const std::vector<Vector2d> profile = {Vector2d(0, 0), Vector2d(1, 0), Vector2d(0, 1)};
   std::string why;
-  const auto ring = SweepSurface::make(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0), 10.0,
-                                       0.0, 1.0, profile, 16, why);
+  const auto ring = SweepSurface::make(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0),
+                                       SweepLaws::constant(10.0, profile), 0.0, 1.0, 16, why);
   REQUIRE(ring != nullptr);  // zero pitch is accepted
 
   // Three quarters of the way round, on a point the evaluator itself produced.
