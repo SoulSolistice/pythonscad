@@ -343,3 +343,32 @@ std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Ex
   }
   return out;
 }
+
+std::vector<std::shared_ptr<Surface>> roofSurfaces(const Profile2d& profile, bool voronoi)
+{
+  Surfaces out;
+  const Vector3d up(0., 0., 1.);
+  addSurfaceUnique(out, std::make_shared<PlaneSurface>(Vector3d(0., 0., 0.), up));
+  for (const auto& loop : profile.loops) {
+    const std::size_t n = loop.size();
+    for (std::size_t i = 0; i < n; i++) {
+      const ProfileEdge& e = loop[i];
+      if (e.kind != EdgeKind::Line) continue;
+      const Vector2d d = e.b - e.a;
+      if (d[0] == 0 && d[1] == 0) continue;
+      // Over the edge: away from the material, which is on the edge's left, is
+      // its right; the height is the distance behind the edge.
+      const Vector2d away = Vector2d(d[1], -d[0]).normalized();
+      addSurfaceUnique(out, std::make_shared<PlaneSurface>(Vector3d(e.a[0], e.a[1], 0.),
+                                                           Vector3d(away[0], away[1], 1.).normalized()));
+      // Over the corner this edge turns into: reflex where it turns right, away
+      // from the material. Anchored one unit up, where its radius is one.
+      const ProfileEdge& next = loop[(i + 1) % n];
+      if (!voronoi || next.kind != EdgeKind::Line) continue;
+      const Vector2d d2 = next.b - next.a;
+      if (d[0] * d2[1] - d[1] * d2[0] >= 0) continue;
+      addSurfaceUnique(out, std::make_shared<ConeSurface>(Vector3d(e.b[0], e.b[1], 1.), up, 1., 1.));
+    }
+  }
+  return out;
+}

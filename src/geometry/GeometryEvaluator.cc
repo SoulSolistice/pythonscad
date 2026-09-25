@@ -52,6 +52,8 @@
 #include "geometry/roof_ss.h"
 #include "geometry/roof_vd.h"
 #include "geometry/rotate_extrude.h"
+#include "geometry/Profile2d.h"
+#include "geometry/SweptSurfaces.h"
 #include "glview/RenderSettings.h"
 #include "utils/calc.h"
 #include "utils/degree_trig.h"
@@ -3649,7 +3651,8 @@ static std::unique_ptr<Geometry> roofOverPolygon(const RoofNode& node, const Pol
   } else {
     assert(false && "Invalid roof method");
   }
-
+  // What the roof is, from the profile's own edges: SweptSurfaces.h.
+  if (roof) roof->surfaces = roofSurfaces(classifyProfile(poly), node.method == "voronoi");
   return roof;
 }
 

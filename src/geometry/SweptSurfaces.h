@@ -54,3 +54,16 @@ struct Extrusion {
 
 /*! The surfaces `profile` makes extruded by `sweep`. */
 std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Extrusion& sweep);
+
+/*! The surfaces a roof over `profile` makes. Both roof methods raise a point by
+ * its distance to the nearest feature of the profile - the straight skeleton's
+ * time, the Voronoi diagram's distance - so each face is what that distance is
+ * to one feature: over a straight edge, the plane through it rising at slope 1;
+ * and, for the Voronoi roof, over a reflex corner - where the nearest feature is
+ * the point itself - the right cone with its apex there, axis up, slope 1. The
+ * straight skeleton meets a reflex corner with planes instead. And the floor.
+ *
+ * The profile's loops must run with the material on their left, as a sanitized
+ * polygon's do. A chord of a curve is left alone: over a circle the roof the
+ * model means is a cone, and a skeleton of chords is not on it. */
+std::vector<std::shared_ptr<Surface>> roofSurfaces(const Profile2d& profile, bool voronoi);

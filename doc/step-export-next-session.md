@@ -352,7 +352,7 @@ powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 compare <a> <b>
   fate, measured and carried ownership, centroid, why) and `<file>.surfaces.tsv`
   (every declared surface's parameters, owners and witnesses). Facet indices match
   between tiers, so tier differences are a join of two files.
-- **The suite**: `ctest --test-dir build -R 'export-step-|mutations'`, 62 tests
+- **The suite**: `ctest --test-dir build -R 'export-step-|mutations'`, 64 tests
   (via `step-dev.ps1 test`). Two are **`WILL_FAIL` on purpose** and report
   green while failing: `export-step-flagship-corners`,
   `export-step-representation`. (`step-region-pocket` was the third until

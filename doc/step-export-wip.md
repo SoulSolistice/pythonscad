@@ -4735,7 +4735,7 @@ box, and neither asks the other.
 | 7 | `linear_extrude`, uneven scale - **done 2026-09-25**, with the taper's cone and a twisted circle centred on its axis, by deriving what the station map does (step-extrude-uneven-scale); the patch is written at D1, as every Bezier is - membership in one is asked by projection, where a bilinear patch has a closed-form inverse and could be D0 | a sheared straight wall declares nothing; it is exactly the bilinear patch between AB and A'B', a (1,1) Bezier the exporter already writes. An arc under it is a rational (2,1) patch |
 | 8 | `linear_extrude(twist)`, `rotate_extrude` with `v` or twist | the sweep is known in closed form; written D1, since a helicoid has no rational form (above) |
 | 9 | `path_extrude`, `skin` | as above |
-| 10 | `roof(method = "straight")` | every roof face is the plane through one profile edge at the roof's slope - closed form from the 2D edge, declares nothing |
+| 10 | `roof()` - **done 2026-09-25**: a plane over each straight edge, and for the Voronoi roof a cone over each reflex corner (step-roof-straight, step-roof-voronoi); the cones are declared and not yet written - their boundary with the planes beside them is a parabola, and the plane-section writer knows ellipses only (KNOWN-EXPORT-ERROR) | every roof face is the plane through one profile edge at the roof's slope - closed form from the 2D edge, declares nothing |
 | 11 | `wrap` | bends onto a cylinder of known radius; a flat face becomes a cylinder in closed form, declares nothing |
 
 **Operations on solids.**

@@ -231,6 +231,26 @@ TEST_CASE("extrude: a twist turns a circle about its own centre into itself", "[
           .empty());
 }
 
+TEST_CASE("roof: a plane over each edge, and a cone over each reflex corner of a Voronoi roof",
+          "[sweep-table]")
+{
+  // an L, material on the left: counter clockwise, one reflex corner at (5, 5)
+  const VectorOfVector2d ell{{0., 0.}, {10., 0.}, {10., 5.}, {5., 5.}, {5., 10.}, {0., 10.}};
+  const Profile2d profile = classifyProfile({ell}, {}, {});
+  const auto straight = roofSurfaces(profile, false);
+  CHECK(ofKind<PlaneSurface>(straight).size() == 7);  // the floor and six edges
+  CHECK(ofKind<ConeSurface>(straight).empty());
+  const auto voronoi = roofSurfaces(profile, true);
+  const auto cones = ofKind<ConeSurface>(voronoi);
+  REQUIRE(cones.size() == 1);
+  CHECK(cones[0]->refpt == Vector3d(5., 5., 1.));
+  CHECK(cones[0]->r == 1.);
+  CHECK(cones[0]->slope == 1.);
+  // the plane over the bottom edge rises away from y = 0 into the material
+  const auto planes = ofKind<PlaneSurface>(straight);
+  CHECK(planes[1]->normdir.isApprox(Vector3d(0., -1., 1.).normalized()));
+}
+
 // A straight edge whose two ends both lie on a recorded circle - the flat of a
 // D-shaft, the back of a half disc - is a chord by every measurement there is.
 // Only its maker knows it is not: doc/step-export-wip.md, *Inferred where a

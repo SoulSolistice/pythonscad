@@ -267,6 +267,23 @@ def expectations(path):
     return want, unwanted
 
 
+def enabled_features(path):
+    """The ENABLE: lines a fixture states: experimental features its model needs.
+
+        // ENABLE: roof
+
+    Each becomes an --enable= on every run of the fixture, so a model built from
+    an experimental module is exported at all rather than as an empty top level
+    object - which would pass every check that only asks the file be valid."""
+    features = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.search(r"(?<![-\w])ENABLE:\s*(\S+)\s*$", line)
+            if m:
+                features.append("--enable=" + m.group(1))
+    return features
+
+
 def roundtrip_expectations(path):
     """The ROUNDTRIP: line a fixture states about what a CAD kernel reads.
 
@@ -482,6 +499,7 @@ args, remaining_args = parser.parse_known_args()
 inputfile = remaining_args[0]  # Can be .scad file or a file to be imported
 stepfile = remaining_args[-1] + ".stp"
 remaining_args = remaining_args[1:-1]  # Passed on to the OpenSCAD executable
+remaining_args += enabled_features(inputfile)
 
 if not os.path.exists(inputfile):
     failquit("cant find input file named: " + inputfile)
