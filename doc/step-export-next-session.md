@@ -421,6 +421,38 @@ of 58, unit tests unchanged.
 
 ## 6. Next steps, in order
 
+**Revised 2026-09-25 - the feedstock session.** What landed, against the survey
+in `doc/step-export-wip.md`, *Inferred where a declaration was possible*:
+
+| commit | what |
+| --- | --- |
+| `1e496c3fa` | `Profile2d`: one answer to what a profile edge is |
+| `9d5b5f2ef` | `SweptSurfaces`: one table for what a sweep makes; the `offset_y` double add |
+| `10035ade2` | the hull of coaxial solids of revolution - lid10's exact tier 909 D0, 0 D3 |
+| `d92d4e6f7` `523e9ff80` | Clipper2 with Z; **edge identity** through Clipper (`EdgeIdentity.h`, checklist E6); offset records joins per corner, not per vertex |
+| `87d1d14e9` `3fd680725` | the apex cone, written whole round its apex with a seam; no quadric cut of a region with one loop |
+| `125ac26f3` | `text()` names its edges |
+| `7f9a2a360` `57627f425` | revolution and extrusion as derivations from one fact each (checklist **A10**) - bilinear walls, the taper's cone, a twisted circle's cylinder |
+| `a712fa118` | `roof()` planes, and the Voronoi roof's corner cones (declared, not yet written) |
+| `67318a35b` `46b1b2337` | upstream: exact pi; a configure that survives a silent `python` |
+
+Next, in the survey's order, each its own landing:
+
+1. **Plane sections of a cone that are not ellipses** - parabolas (step-roof-voronoi's
+   KNOWN-EXPORT-ERROR) and hyperbolas. A writer gap exposed by a true declaration.
+2. **Bezier membership at D0** where the patch has a closed-form inverse - a
+   bilinear patch first (step-extrude-uneven-scale is written at D1).
+3. **The full band the quadric pass still cuts at the seam** (two loops) - the band
+   writer's seam, not a cut; and an apex cone's base written as one CIRCLE.
+4. **Names for the producers that still make unnamed edges**: a rounded
+   `polygon()` point (it samples an arc nothing records), `import()`, the 2D hull.
+5. **An ellipse record** (survey item 3), then the sweeps (8, 9), `wrap` (11),
+   minkowski (13), the general hull (12).
+6. Upstream, own commits: `stamp_color`'s pairwise Clipper intersections (8.6 s of
+   a 19 s 2D model).
+
+The older list below stands after these.
+
 **Revised 2026-09-24 (second session)** - items 1 and 2's first candidate are
 done (section 2b). In order now:
 
