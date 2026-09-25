@@ -800,8 +800,22 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 		[ [steps*np + 3, steps*np + 2, steps*np + 1, steps*np] ]
 	);
 
-	// The profile closes on itself - four points round the ridge - so `closed`.
-	declare_grid(points = rows, closed = true)
+	// The same rib, stated as the shape it is rather than as its stations: the
+	// profile carried along the helix, the radius following the socket's taper
+	// until it stops and the protruding points fading in and out - each a law
+	// linear in t, the very formulas the rows above sample. With the stations
+	// alone the exporter could only interpolate between them.
+	profileAt = function (f) [[back, -rootWidth/2], [-ridgeDepth*f, -crestWidth/2],
+	                          [-ridgeDepth*f, crestWidth/2], [back, rootWidth/2]];
+	rAt = function (t) radius0 + slope*min(zStart + span*t, taperLength);
+	tTaper = (taperLength - zStart)/span;
+	declare_sweep(profile = [[0, profileAt(0)], [leadIn, profileAt(1)],
+	                         [1 - leadOut, profileAt(1)], [1, profileAt(0)]],
+	              radius = tTaper > 0 && tTaper < 1
+	                ? [[0, rAt(0)], [tTaper, rAt(tTaper)], [1, rAt(1)]]
+	                : [[0, rAt(0)], [1, rAt(1)]],
+	              pitch = pitch, turns = turns, origin = [0, 0, zStart],
+	              stations = steps + 1)  // the rows above: what the mesh was cut from
 	polyhedron(points = points, faces = faces, convexity = 8);
 }
 

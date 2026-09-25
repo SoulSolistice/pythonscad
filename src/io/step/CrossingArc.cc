@@ -7,6 +7,8 @@
 #include <Eigen/Dense>
 
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/MachinePrecision.h"
+#include "io/step/Meridian.h"
 
 namespace step {
 
@@ -17,6 +19,23 @@ using AnalyticFeatures::surfaceImplicit;
 bool onCrossing(const Surface *a, const Surface *b, Vector3d& q, const Vector3d& p0, const Vector3d& p1,
                 double tol)
 {
+  // A declared sweep and a surface of revolution about its own axis cross in
+  // closed form (Meridian): at the station through `q`, on the profile edge
+  // the stretch's two ends lie on - not the one `q` projects to, which near a
+  // lens can be the crest the chord passes over.
+  Meridian meridian;
+  if (Meridian::of(a, b, meridian)) {
+    const std::vector<std::size_t> e0 = meridian.edgesOf(p0), e1 = meridian.edgesOf(p1);
+    for (const std::size_t e : e0) {
+      if (std::find(e1.begin(), e1.end(), e) == e1.end()) continue;
+      Vector3d exact;
+      if (meridian.crossingOnEdge(meridian.station(q), e, exact)) {
+        q = exact;
+        return true;
+      }
+      break;
+    }
+  }
   Vector3d newton = q;
   if (projectOntoBoth(a, b, newton, tol)) {
     q = newton;

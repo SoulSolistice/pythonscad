@@ -1697,6 +1697,7 @@ set(CORE_SOURCES
   src/io/StepKernel.cc
   src/io/step/BodyBuild.cc
   src/io/step/CrossingRuns.cc
+  src/io/step/Meridian.cc
   src/io/step/DecideCrossingRuns.cc
   src/io/step/CornersApply.cc
   src/io/step/CornersStayOnFaces.cc

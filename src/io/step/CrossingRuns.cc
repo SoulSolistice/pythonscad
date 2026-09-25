@@ -11,6 +11,7 @@
 
 #include "geometry/AnalyticFeatures.h"
 #include "io/step/CrossingArc.h"
+#include "io/step/Meridian.h"
 
 namespace step {
 
@@ -224,6 +225,18 @@ bool joinC0(const std::vector<CurveFit>& parts, CurveFit& out)
 std::vector<Vector3d> creaseCorners(const Surface *a, const Surface *b, const Vector3d& p0,
                                     const Vector3d& p1)
 {
+  // A declared sweep and a coaxial surface of revolution: the corners in closed
+  // form, where a profile vertex reaches the other surface and where a law turns.
+  Meridian meridian;
+  if (Meridian::of(a, b, meridian)) {
+    std::vector<Vector3d> out;
+    const Vector3d span = p1 - p0;
+    for (const Vector3d& c : meridian.corners(p0, p1)) {
+      const double along = span.squaredNorm() > 0 ? (c - p0).dot(span) / span.squaredNorm() : -1.0;
+      if (along > 0.0 && along < 1.0) out.push_back(c);
+    }
+    return out;
+  }
   const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
   const double solve_tol = 1e-14 * scale;  // the precision the crossing's own points are solved to
   const Vector3d chord = p1 - p0;
