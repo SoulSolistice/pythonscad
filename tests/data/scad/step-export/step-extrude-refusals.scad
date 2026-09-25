@@ -9,7 +9,7 @@
 // neither "nothing was declared" nor "something was recognised". See
 // step-tapered-extrude.scad, which is that case once it was understood.
 //
-// Four sweeps of a circle, three of them not in the quadric vocabulary:
+// Four sweeps of a circle, two of them in no vocabulary this exporter writes:
 //
 //   twist      turns every station - but a circle turned about its own centre
 //              is itself, and this one is centred on the twist axis. So the
@@ -25,24 +25,30 @@
 //              rather than trusting the caller.
 //   v=[..]     an oblique cylinder: a real surface, exactly describable, and not
 //              a CYLINDRICAL_SURFACE - its circular section is not perpendicular
-//              to its axis. SURFACE_OF_LINEAR_EXTRUSION is what would write it.
+//              to its axis. Since 2026-09-25 it is declared as what it is: every
+//              station the same circle, swept along v, which is an elliptic
+//              cylinder whose section across v is an ellipse, written as the
+//              SURFACE_OF_LINEAR_EXTRUSION of it.
 //
 // The bodies are set apart so each is its own shell and a stray declaration
 // cannot be absorbed by a neighbour. What is asserted is the *availability*
-// line: one curved surface reaches the exporter - the twisted body's cylinder -
-// and no other, which is stronger than nothing else being written and is the
-// property that actually broke.
+// line: two curved surfaces reach the exporter - the twisted body's cylinder
+// and the oblique one's elliptic cylinder - and no other, which is stronger than
+// nothing else being written and is the property that actually broke.
 //
 // The zeros are the assertion, and they say it more exactly than "nothing
 // else was declared" would. Planes *are* declared here - a linear extrusion's
 // two caps are planar whatever its twist, scale or v do, because every station
 // is the profile moved within its own plane. None of that is a claim about a
 // curved surface.
-// EXPECT: 1 analytic surface available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 elliptic)
 //
-// And the twisted wall is written on it: every vertex of every slice is on the
-// cylinder, however many slices the mesher takes.
-// EXPECT: 1 declared surfaces: 1 written as a face
+// And both walls are written on them: every vertex of every slice of the
+// twisted body is on its cylinder, however many slices the mesher takes, and
+// every vertex of the oblique one is the circle moved along v. The oblique wall
+// goes all the way round between its caps, and is closed by a seam.
+// EXPECT: 2 declared surfaces: 2 written as a face
+// EXPECT: 1 face round its axis between two rims closed by a seam along a ruling
 //
 // And the plane channel, pinned since 2026-09-25. Until then the third body - an
 // ellipse whose arc record the shear drops on the way in - declared one plane
@@ -58,14 +64,15 @@
 //
 // The census is exhaustive, and for a refusal fixture that is the whole point:
 // the assertion is not the number of planes, which is the mesher's business and
-// was read off a run - it is that one Cylinder, the twisted wall, and no Cone,
-// Sphere, Torus or BSplineSurface appears beside them. A recogniser that started
-// accepting any of the other three would have to put the surface somewhere, and
-// there is nowhere here for it to go unnoticed. The planes are 2152 less the 32
-// facets of the twisted wall, which are one face now. No VOLUME: line: three of
-// these are faceted exports of sheared extrusions, so the figure would be the
-// mesh's own and has no closed form to check it against.
-// ROUNDTRIP: Cylinder=1 Plane=2120
+// was read off a run - it is that one Cylinder, the twisted wall, one surface of
+// extrusion, the oblique wall, and no Cone, Sphere, Torus or BSplineSurface
+// appears beside them. A recogniser that started accepting either of the other
+// two would have to put the surface somewhere, and there is nowhere here for it
+// to go unnoticed. The planes are 2152 less the 32 facets of each of those two
+// walls, which are one face each now. No VOLUME: line: two of these are faceted
+// exports of sheared extrusions, so the figure would be the mesh's own and has
+// no closed form to check it against.
+// ROUNDTRIP: Cylinder=1 SurfaceOfExtrusion=1 Plane=2088
 $fn = 32;
 linear_extrude(height = 20, twist = 90) circle(r = 4);
 translate([20, 0, 0]) linear_extrude(height = 20, scale = [0.5, 1]) circle(r = 4);

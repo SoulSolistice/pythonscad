@@ -258,9 +258,10 @@ void extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
   out.push_back(std::make_shared<BezierPatchSurface>(bez.degree, 1, std::move(net)));
 }
 
-/*! A circle, swept by a map whose every station is a similarity: the right cone
- * through its two end circles, where the centre travels along the plane's normal
- * - a cylinder where the radius does not change. A centre that travels any other
+/*! A circle, swept. With no taper, the cylinder over the section the placement
+ * makes of it, along the sweep - circular or elliptic. With a taper, and every
+ * station a similarity, the right cone through its two end circles, where the
+ * centre travels along the plane's normal. A centre that travels any other
  * way - an oblique sweep, or a scale about a point that is not the centre -
  * sweeps an oblique cone: exact, and not a CONICAL_SURFACE. A twist turns a
  * circle about its own centre into itself, so it only matters where it moves the
@@ -271,8 +272,6 @@ void extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
 void extrudeArc(const Arc2d& arc, const StationMap& map, Surfaces& out)
 {
   if (!(arc.r > 0)) return;
-  double scale = 0;
-  if (!map.similar(scale)) return;
   const Vector2d c(arc.centre[0], arc.centre[1]);
   if (!map.affine() && !(c[0] == 0 && c[1] == 0)) return;  // the centre turns with the twist
   const Vector3d c0 = map.at(c, 0), c1 = map.at(c, 1);
@@ -281,7 +280,23 @@ void extrudeArc(const Arc2d& arc, const StationMap& map, Surfaces& out)
   const double len = d.norm();
   if (n.isZero() || !(len > 0)) return;
   // along the normal, at machine precision: the cross product's forward error
-  if (d.cross(n).norm() > forwardError(12, len)) return;
+  const bool along_normal = d.cross(n).norm() <= forwardError(12, len);
+  double scale = 0;
+  const bool similar = map.similar(scale);
+
+  // No taper: every station's section is the same curve, the image of the
+  // circle under the placement, and the arc sweeps the cylinder over it along
+  // d. A circular one where the placement is a similarity and d its normal; an
+  // elliptic one otherwise - a shear or an uneven scale in the placement, or an
+  // oblique v, which until 2026-09-25 were refusals.
+  if (map.sweep.scale_x == 1 && map.sweep.scale_y == 1 && !(similar && along_normal)) {
+    const Eigen::Matrix3d L = map.sweep.placement.linear();
+    auto elliptic = std::make_shared<EllipticCylinderSurface>(c0, d, L * Vector3d(arc.r, 0., 0.),
+                                                              L * Vector3d(0., arc.r, 0.));
+    if (elliptic->usable()) addSurfaceUnique(out, elliptic);
+    return;
+  }
+  if (!similar || !along_normal) return;  // a tapered ellipse, or an oblique cone: no surface here yet
   const Vector3d axis = d / len;
   const double r0 = arc.r * scale, r1 = arc.r * scale * map.sweep.scale_x;
   if (!(r1 >= 0) || !std::isfinite(r1)) return;

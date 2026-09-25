@@ -231,6 +231,21 @@ TEST_CASE("extrude: a twist turns a circle about its own centre into itself", "[
           .empty());
 }
 
+TEST_CASE("extrude: an oblique circle sweeps an elliptic cylinder, not nothing", "[sweep-table]")
+{
+  // step-extrude-oblique.scad
+  Extrusion sweep;
+  sweep.height = Vector3d(6., 0., 20.).normalized() * 20.;
+  const auto surfaces = extrude(classifyProfile({}, {Arc2d{Vector2d(0., 0.), 4.}}, {}), sweep);
+  CHECK(ofKind<CylinderSurface>(surfaces).empty());
+  const auto elliptic = ofKind<EllipticCylinderSurface>(surfaces);
+  REQUIRE(elliptic.size() == 1);
+  // across v the circle is foreshortened in x: minor 4, major 4 / cos
+  const double cos_tilt = 20. / sqrt(436.);
+  CHECK(elliptic[0]->b() == Catch::Approx(4. * cos_tilt));
+  CHECK(elliptic[0]->a() == Catch::Approx(4.));
+}
+
 TEST_CASE("roof: a plane over each edge, and a cone over each reflex corner of a Voronoi roof",
           "[sweep-table]")
 {
