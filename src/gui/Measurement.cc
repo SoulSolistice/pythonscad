@@ -37,7 +37,9 @@
 #include <sstream>
 
 namespace Measurement {
-Measurement::Measurement() {}
+Measurement::Measurement()
+{
+}
 
 void Measurement::setView(QGLView *qglview)
 {
@@ -225,13 +227,13 @@ std::vector<QString> Measurement::statemachine(QPoint mouse)
       if (obj1.type == SelectionType::SELECTION_LINE && obj2.type == SelectionType::SELECTION_POINT) {
         side1 = (obj1.pt[1] - obj1.pt[0]).normalized();
         side2 = (obj1.pt[1] - obj2.pt[0]).normalized();
-        ang = acos(side1.dot(side2)) * 180.0 / 3.14159265359;
+        ang = acos(side1.dot(side2)) * 180.0 / M_PI;
         goto display_angle;
       } else if (obj1.type == SelectionType::SELECTION_POINT &&
                  obj2.type == SelectionType::SELECTION_LINE) {
         side1 = (obj2.pt[1] - obj2.pt[0]).normalized();
         side2 = (obj2.pt[1] - obj1.pt[0]).normalized();
-        ang = acos(side1.dot(side2)) * 180.0 / 3.14159265359;
+        ang = acos(side1.dot(side2)) * 180.0 / M_PI;
         goto display_angle;
       } else if (obj1.type == SelectionType::SELECTION_LINE &&
                  obj2.type == SelectionType::SELECTION_LINE) {
@@ -253,7 +255,7 @@ std::vector<QString> Measurement::statemachine(QPoint mouse)
         permutation(obj1.pt[0], obj1.pt[1], obj2.pt[1], obj2.pt[0]);
         permutation(obj1.pt[1], obj1.pt[0], obj2.pt[1], obj2.pt[0]);
 
-        ang = acos(side1.dot(side2)) * 180.0 / 3.14159265359;
+        ang = acos(side1.dot(side2)) * 180.0 / M_PI;
         goto display_angle;
       } else qglview->measure_state = MEASURE_ANG3;
     }
@@ -267,7 +269,7 @@ std::vector<QString> Measurement::statemachine(QPoint mouse)
           obj3.type == SelectionType::SELECTION_POINT) {
         Vector3d side1 = (obj2.pt[0] - obj1.pt[0]).normalized();
         Vector3d side2 = (obj2.pt[0] - obj3.pt[0]).normalized();
-        ang = acos(side1.dot(side2)) * 180.0 / 3.14159265359;
+        ang = acos(side1.dot(side2)) * 180.0 / M_PI;
       } else {
         ret.push_back("If selecting three things, they must all be points");
         return ret;

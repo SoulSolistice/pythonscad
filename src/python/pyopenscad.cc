@@ -691,7 +691,7 @@ Outline2d python_getprofile(void *v_cbfunc, int fn, double arg)
       PyObject *pypt = PyObject_CallObject(cbfunc, args1);
       double r = PyFloat_AsDouble(pypt);
       if (r < 0) r = -r;  // TODO who the hell knows, why this is needed
-      double ang1 = ang * 3.1415 / 180.0;
+      double ang1 = ang * M_PI / 180.0;
       double x = r * cos(ang1);
       double y = r * sin(ang1);
       result.vertices.push_back(Vector2d(x, y));

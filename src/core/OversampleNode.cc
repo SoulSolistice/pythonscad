@@ -173,8 +173,8 @@ Vector3d CubicProjection::calcDisplacement(const Vector3d& pt, const Vector3d& n
 int SphericalProjection::convertToUv(const Vector3d& pt, double& u, double& v)
 {
   Vector3d ptc = pt - center;
-  u = 10 * (atan2(ptc[1], ptc[0]) / (2 * 3.1415926) + 0.5);
-  v = 10 * acos(pt[2] / pt.norm()) / 3.1415926;
+  u = 10 * (atan2(ptc[1], ptc[0]) / (2 * M_PI) + 0.5);
+  v = 10 * acos(pt[2] / pt.norm()) / M_PI;
   return 0;
 }
 
@@ -214,7 +214,7 @@ Vector3d SphericalProjection::calcDisplacement(const Vector3d& pt, const Vector3
 int CylindricProjection::convertToUv(const Vector3d& pt, double& u, double& v)
 {
   Vector3d ptc = pt - center;
-  u = 10 * (atan2(ptc[1], ptc[0]) / (2 * 3.1415926) + 0.5);
+  u = 10 * (atan2(ptc[1], ptc[0]) / (2 * M_PI) + 0.5);
   v = pt[2];
   return 0;
 }

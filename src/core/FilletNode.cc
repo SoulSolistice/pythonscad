@@ -358,7 +358,7 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
                                                 std::vector<bool> corner_selected, double r_, int bn,
                                                 double minang)
 {
-  double cos_minang = cos(minang * 3.1415 / 180.0);
+  double cos_minang = cos(minang * M_PI / 180.0);
   std::vector<Vector4d> normals, newnormals;
   std::vector<int> faceParents;
   normals = calcTriangleNormals(ps->vertices, ps->indices);

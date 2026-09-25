@@ -45,19 +45,19 @@ def lv_vec_unit(v):
     return lv_vec_scale(v,1.0/lv_len(v))
 
 def lv_rotxy(p,ang):
-     s=math.cos(3.14*ang/180)
-     c=math.sin(3.14*ang/180)
+     s=math.cos(math.radians(ang))
+     c=math.sin(math.radians(ang))
      return  p[1]*c-p[0]*s,p[0]*c+p[1]*s,p[2]
 
 def lv_rotxz(p,ang):
-     s=math.cos(3.14*ang/180)
-     c=math.sin(3.14*ang/180)
+     s=math.cos(math.radians(ang))
+     c=math.sin(math.radians(ang))
      return  p[2]*c-p[0]*s,p[1],p[0]*c+p[2]*s
 
 def lv_rotyz(p,ang):
-     s=math.cos(3.14*ang/180)
-     c=math.sin(3.14*ang/180)
-     return  p[0],p[2]*c-p[1]*sp[1]*c+p[2]*s
+     s=math.cos(math.radians(ang))
+     c=math.sin(math.radians(ang))
+     return  p[0],p[2]*c-p[1]*s,p[1]*c+p[2]*s
 
 def lv_mirror(c,n1):
     n=lv_vec_unit(n1)
@@ -91,7 +91,7 @@ def lv_dodmirror(c, func):
    return r
 
 def lv_sphere(c,r):
-    return lv_length(c)-r 
+    return lv_length(c)-r
 
 def lv_box(c, box):
 	q= lv.abs(c[0])-box[0], lv.abs(c[1])-box[1], lv.abs(c[2])-box[2]
@@ -110,7 +110,7 @@ def lv_cylinder_c(c, h,r):
     distvert=lv.max(c[2]-h,-c[2])
     return lv_length([ lv.max(distlat,0), 0, lv.max(distvert,0)])+ lv.min(lv.max(distlat,distvert),0)
 
-# https://www.youtube.com/watch?v=-pdSjBPH3zM    
+# https://www.youtube.com/watch?v=-pdSjBPH3zM
 
 def lv_segment(c, a, b):
     v1=lv_vecsub(c,a)
@@ -145,7 +145,7 @@ def lv_union_stairs(a,b,r,n): # Credit: original algorithm in GLSL by @paniq
 
 
 def lv_intersection(a, b):
-    return -lv_union(-a,-b) 
+    return -lv_union(-a,-b)
 
 def lv_intersection_chamfer(a, b,r):
     return -lv_union_chamfer(-a,-b,r)
@@ -163,7 +163,7 @@ def lv_intersection_stairs(a, b,r,n):
     return -lv_union_stairs(-a,-b,r,n)
 
 def lv_difference(a, b):
-    return -lv_union(-a,b) 
+    return -lv_union(-a,b)
 
 def lv_difference_chamfer(a, b,r):
     return -lv_union_chamfer(-a,b,r)
@@ -182,5 +182,3 @@ def lv_difference_stairs(a, b,r,n):
 
 def lv_juntion_ring(a,b,r):
     return lv.sqrt(a*a+b*b)-r
-
-         

@@ -1074,7 +1074,7 @@ std::shared_ptr<const Geometry> offset3D(const std::shared_ptr<const PolySet>& p
 
     for (int i = 1; i < eff_fn - 1; i++) {
       Transform3d matrix = Transform3d::Identity();
-      auto M = angle_axis_degrees(180 / 3.14 * totang * i / (double)(eff_fn - 1), axis);
+      auto M = angle_axis_degrees(180 / M_PI * totang * i / (double)(eff_fn - 1), axis);
       matrix.rotate(M);
       Vector3d rotv = matrix * fan;
       startarc.push_back(p1 + off * rotv);
@@ -2216,7 +2216,7 @@ VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double s
                               double origin_y, double offset_x, double offset_y, double rot)
 {
   VectorOfVector2d result;
-  double ang = rot * 3.14 / 180.0;
+  double ang = rot * M_PI / 180.0;
   double c = cos(ang);
   double s = sin(ang);
   int n = vertices.size();

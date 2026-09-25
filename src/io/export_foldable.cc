@@ -625,7 +625,7 @@ std::vector<sheetS> fold_3d(std::shared_ptr<const PolySet> ps, const plotSetting
               p1 = p1 + py * lasche_eff * -0.35;
               lnew.pt = p1;
               snprintf(lnew.text, sizeof(lnew.text), "%d", num);
-              lnew.rot = atan2(py[1], py[0]) * 180.0 / 3.1415;
+              lnew.rot = atan2(py[1], py[0]) * 180.0 / M_PI;
               lnew.size = lasche_eff;
               sheet.label.push_back(lnew);
             }
