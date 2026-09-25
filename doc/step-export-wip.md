@@ -4180,6 +4180,22 @@ plus exact membership, pure) against what holds it - raises three
   approximation tier, 3: the grant between claimants is pass order, not
   provenance.
 
+**Cut facets, attempted 2026-09-25 and parked** (`claude/step-cut-facets-parked`,
+`36999f5c2`). The rule is identity and exact position only: a facet is D0 on S
+when its maker owns S, it is not wholly on a declared plane, two or more of its
+corners are on S at machine precision, and every other corner is the cut's - on
+no other surface its maker owns. It fixes what it was for: lid10's double-T
+faces, wall facets of the bayonet cylinder the channel cut through, are held by
+the cylinder instead of written as planes. It cannot land alone. The band pass
+holds the whole facets of the same D0 region and the quadric pass the cut ones,
+so the quadric's region is a checkerboard whose facets touch corner to corner:
+every region it then fails to bound has pinch vertices (two region facets
+meeting only at a vertex), and on lid10 surface 12's 27 written facets fall to
+the tessellation (C5). step-partial-cylinder writes its 8 cut facets as 8 faces
+beside the band's 16, one surface in two kinds by pass order (B3). **R0 first**:
+a D0 region written by one representation, chosen among the claims that will be
+written - then the cut facets join it.
+
 **The region's own gap, named so it is not mistaken for complete**: a D0 region
 holds *whole* facets only - every corner on the surface. A boolean-*cut* facet of
 the same maker, whose cut corner is on no surface exactly, is not in it, so a
