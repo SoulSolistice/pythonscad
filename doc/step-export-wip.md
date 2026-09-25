@@ -4057,6 +4057,28 @@ id belongs on every primitive where it is generated, not only where a boolean
 happens to run. Its own landing; R0 reaches only facets that carry provenance,
 so it widens what R0 can fix.
 
+**Fixed 2026-09-25, and what identity then showed.** A plain PolySet reaching
+the exporter is one generator's output - every combination of makers on the
+Manifold backend goes through Manifold, which mints ids, and on CGAL comes back
+as a Nef polyhedron, left silent - so it is given the identity Manifold would
+give it, by the same rule (`ManifoldUtils::mintOriginals`, one id per colour
+group, shared with `createManifoldFromTriangularPolySet`). A `GeometryList` is
+several makers and stays silent. With identity, step-rotate-extrude reads 128
+D0 of 128, step-rounded-box 60, step-extrude-circle and step-cone-primitive 32
+each - and the D0 checks reached the sphere and torus fixtures for the first
+time and failed there, on two defects fixed at the root:
+
+- **A zone's walls were claimed for the rings, not the zone.** Merging bands into
+  a sphere or torus zone rewrote the band and left each wall's claim naming the
+  ring cylinder that band was matched by - often a witness. The file wrote a
+  torus; the ledger said sixteen cylinders. The merge now withdraws those claims
+  and makes them on the zone (`claim_for_zone`, Bands.cc). step-torus: 1024 D0;
+  step-rounded-profile 1088 D0.
+- **`sphere()` declared its ring cylinders as faces.** They are evidence - how a
+  zone's bands are identified - and as faces they made the 34 facets between the
+  equatorial rings D0 on the sphere *and* on a cylinder (the C9 error). Now
+  witnesses; step-sphere 482 D0, no conflict.
+
 ### 36. lid10's 240 band walls are not on their declaration at machine precision
 
 **Found 2026-09-24**, the same relabel. The 240 walls item 31 left open (originals
@@ -4068,6 +4090,23 @@ generator's points off their own declaration? - is answered for the first half.
 The second is the origin question (checklist E1, E3): which primitive emits those
 points, and why are they not on the surface it declares? Chase with the ledger
 dump's centroids and `.surfaces.tsv`, as items 31's originals 26-32 were.
+
+**Chased to the origin 2026-09-25**, with a new ledger column `d0` (D0, or the
+first condition a claimed facet fails, with the worst residual against the
+machine bound): every one of the 240 fails on identity, not position - they are
+**cones the model never declared**, and the band named each after a rim.
+lid10's `sealBead` is a `rotate_extrude` of a triangle whose two sloped flanks
+declared only their rim radii, as witnesses (120 walls); `hoseCollar` is a
+`hull()` of two coaxial cylinders, which declares the cylinders and never the
+cone between them (120 walls). The first is fixed at the generator:
+`rotate_extrude` now declares the cone a sloped profile edge sweeps, as a face,
+anchored at the wider rim as `cylinder(r1, r2)` does - except for a chord of a
+recorded arc, which is the arc's torus or sphere and not a cone, and where the
+profile carries Bezier records, which it cannot test and so declares nothing.
+lid10's exact tier: 669 to 789 D0; the 120 left are the hull's, and the hull of
+coaxial solids of revolution declaring its cones is the next landing. Found on
+the way, and recorded rather than fixed blind: `rotate_extrude`'s plane records
+add `offset_y` to a profile that already carries it.
 
 ### 32. The fixture sanity test does not look for `EXPORT-ERROR`
 
