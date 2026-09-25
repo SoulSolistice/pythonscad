@@ -1696,6 +1696,8 @@ set(CORE_SOURCES
   src/io/import_step.cc
   src/io/StepKernel.cc
   src/io/step/BodyBuild.cc
+  src/io/step/EmitBezierFaces.cc
+  src/io/step/EmitBands.cc
   src/io/step/CornerPlacement.cc
   src/io/step/DecideSections.cc
   src/io/step/Recognise.cc

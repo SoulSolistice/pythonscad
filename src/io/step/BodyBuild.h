@@ -130,6 +130,23 @@ struct StepKernel::BodyBuild {
    * has said which faces are analytic, and before any face is written. */
   void placeCorners();
 
+  /*! Emit the recognised bands: one CYLINDRICAL_SURFACE or CONICAL_SURFACE face
+   * each, bounded by a circle or an arc at either rim.
+   *
+   * A band which covers the full turn is periodic, so it cannot be bounded by
+   * the rims alone - the loop walks up a seam and back down it, the same edge
+   * used once in each direction. One which does not is bounded by an arc at
+   * either rim and the band's two end edges, and needs no seam. */
+  void emitBands();
+
+  /*! A patch face is bounded by its runs, each of which is one curve read off
+   * the same control net the surface is written from - so the curve provably
+   * lies on the surface rather than approximately. A seam between two patches
+   * is one EdgeCurve used by both, in opposite senses; a run cutting into a
+   * planar neighbour is spliced into that loop through the same substitution
+   * the arcs use. */
+  void emitBezierFaces();
+
   // ---- what the phases hand each other
 
   // A working copy, because the corner placement moves junction corners onto
@@ -267,6 +284,20 @@ struct StepKernel::BodyBuild {
   const std::vector<char>& consumed = features.consumed;
   // A planar face the corner placement bent -> the triangles it is written as.
   std::map<std::size_t, std::vector<std::array<int, 3>>> split_for_corners;
+
+  // What a planar loop gives up to a curve an analytic face writes along it.
+  /*! One run of loop edges replaced by a single arc. */
+  struct ArcSubstitution {
+    std::size_t start = 0, count = 0;
+    EdgeCurve *edge = nullptr;
+    bool sense = true;  // orientation for this loop's own traversal
+  };
+  std::map<std::size_t, std::pair<EdgeCurve *, bool>> rim_of_loop;  // whole loop -> circle
+  std::map<std::size_t, std::vector<ArcSubstitution>> arc_subs;     // runs inside a loop
+  // Rims written as chords by both faces because the face across is fanned into
+  // triangles and cannot be handed the arc. See the band writer below.
+  std::size_t rim_unshared = 0;
+  std::map<std::set<int>, EdgeCurve *> shared_rim_edges;  // rim vertices -> circle
 
   // ---- the kernel methods the phases call
   EdgeCurve *create_line_edge_curve(Vertex *vert1, Vertex *vert2, bool dir)
