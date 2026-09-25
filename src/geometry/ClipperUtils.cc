@@ -340,6 +340,7 @@ void carryDeclarations(Polygon2d& result, const std::vector<const Polygon2d *>& 
   // The records, and where each operand's landed in the result's lists.
   std::vector<std::vector<int>> arc_at(operands.size());
   std::vector<int> bezier_base(operands.size(), 0);
+  std::vector<int> ellipse_base(operands.size(), 0);
   for (std::size_t k = 0; k < operands.size(); k++) {
     const Polygon2d *operand = operands[k];
     if (operand == nullptr) continue;
@@ -364,6 +365,9 @@ void carryDeclarations(Polygon2d& result, const std::vector<const Polygon2d *>& 
     // the comparison would cost more than the duplicates do.
     bezier_base[k] = int(result.beziers.size());
     for (const auto& bez : operand->beziers) result.beziers.push_back(bez);
+    // And the ellipses, the same way.
+    ellipse_base[k] = int(result.ellipses.size());
+    for (const auto& el : operand->ellipses) result.ellipses.push_back(el);
   }
   // What each edge of the result is, as the operand that made it declared.
   for (const auto& outline : result.untransformedOutlines()) {
@@ -376,6 +380,7 @@ void carryDeclarations(Polygon2d& result, const std::vector<const Polygon2d *>& 
         EdgeDecl decl = it->second;
         if (decl.record >= 0 && decl.kind == EdgeKind::Arc) decl.record = arc_at[k][decl.record];
         if (decl.record >= 0 && decl.kind == EdgeKind::Bezier) decl.record += bezier_base[k];
+        if (decl.record >= 0 && decl.kind == EdgeKind::Ellipse) decl.record += ellipse_base[k];
         result.edge_decls.emplace(id, decl);
         break;
       }
@@ -854,7 +859,8 @@ std::unique_ptr<Polygon2d> applyOffset(const Polygon2d& poly, double offset,
       decl = it->second;
       if (decl.kind == EdgeKind::Arc && decl.record >= 0)
         decl.record = isRound ? moved_arc[decl.record] : -1;
-      if (decl.kind == EdgeKind::Bezier) decl.record = -1;
+      // An offset Bezier or ellipse is curved but neither: named so, with no record.
+      if (decl.kind == EdgeKind::Bezier || decl.kind == EdgeKind::Ellipse) decl.record = -1;
     }
     const EdgeId id = reserveEdgeIds(1);
     decls.emplace(id, decl);

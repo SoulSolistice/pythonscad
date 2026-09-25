@@ -30,9 +30,10 @@
 
 /*! What a profile edge is. */
 enum class EdgeKind {
-  Line,    //!< a straight segment
-  Arc,     //!< a chord of a circle - see EdgeDecl::record
-  Bezier,  //!< a chord of a Bezier segment - see EdgeDecl::record
+  Line,     //!< a straight segment
+  Arc,      //!< a chord of a circle - see EdgeDecl::record
+  Bezier,   //!< a chord of a Bezier segment - see EdgeDecl::record
+  Ellipse,  //!< a chord of an ellipse - a circle an affine map took there
 };
 
 /*! One maker's edge, unique for the life of the process; 0 is "not known". At

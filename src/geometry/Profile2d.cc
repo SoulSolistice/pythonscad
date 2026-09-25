@@ -41,11 +41,12 @@ bool inControlBox(const Vector2d& p, const Vector2d& q, const Bezier2d& bez)
 
 Profile2d classifyProfile(const std::vector<VectorOfVector2d>& loops, std::vector<Arc2d> arcs,
                           std::vector<Bezier2d> beziers, const std::vector<std::vector<EdgeId>>& ids,
-                          const EdgeDecls *decls)
+                          const EdgeDecls *decls, std::vector<Ellipse2d> ellipses)
 {
   Profile2d out;
   out.arcs = std::move(arcs);
   out.beziers = std::move(beziers);
+  out.ellipses = std::move(ellipses);
   for (std::size_t l = 0; l < loops.size(); l++) {
     const auto& loop = loops[l];
     std::vector<ProfileEdge> edges;
@@ -94,7 +95,7 @@ Profile2d classifyProfile(const Polygon2d& poly)
     loops.push_back(outline.vertices);
     ids.push_back(outline.edge_ids);
   }
-  return classifyProfile(loops, poly.arcs, poly.beziers, ids, &poly.edge_decls);
+  return classifyProfile(loops, poly.arcs, poly.beziers, ids, &poly.edge_decls, poly.ellipses);
 }
 
 Profile2d translated(Profile2d profile, const Vector2d& by)
@@ -109,5 +110,6 @@ Profile2d translated(Profile2d profile, const Vector2d& by)
   for (auto& bez : profile.beziers) {
     for (int i = 0; i <= bez.degree; i++) bez.ctrl[i] = Vector2d(bez.ctrl[i]) + by;
   }
+  for (auto& el : profile.ellipses) el.centre = Vector2d(el.centre) + by;
   return profile;
 }

@@ -53,6 +53,7 @@ struct Profile2d {
   std::vector<std::vector<ProfileEdge>> loops;
   std::vector<Arc2d> arcs;
   std::vector<Bezier2d> beziers;
+  std::vector<Ellipse2d> ellipses;
 };
 
 /*! Whether `p` is on `arc`, at machine precision: the forward error of
@@ -67,7 +68,7 @@ bool onArc(const Vector2d& p, const Arc2d& arc);
 Profile2d classifyProfile(const std::vector<VectorOfVector2d>& loops, std::vector<Arc2d> arcs,
                           std::vector<Bezier2d> beziers,
                           const std::vector<std::vector<EdgeId>>& ids = {},
-                          const EdgeDecls *decls = nullptr);
+                          const EdgeDecls *decls = nullptr, std::vector<Ellipse2d> ellipses = {});
 
 /*! The polygon's own outlines, untransformed - the frame its records are in. */
 Profile2d classifyProfile(const Polygon2d& poly);

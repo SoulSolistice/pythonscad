@@ -269,10 +269,28 @@ void extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
  *
  * The cone is a face; the two end circles are evidence, the rims the band pass
  * identifies it by. */
+void extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const StationMap& map,
+                  Surfaces& out);
+
 void extrudeArc(const Arc2d& arc, const StationMap& map, Surfaces& out)
 {
   if (!(arc.r > 0)) return;
-  const Vector2d c(arc.centre[0], arc.centre[1]);
+  extrudeConic(Vector2d(arc.centre), Vector2d(arc.r, 0.), Vector2d(0., arc.r), map, out);
+}
+
+/*! An ellipse in the profile, swept: the circle's derivation, since a circle is
+ * the ellipse whose semi-diameters are two perpendicular radii. */
+void extrudeEllipse(const Ellipse2d& el, const StationMap& map, Surfaces& out)
+{
+  extrudeConic(Vector2d(el.centre), Vector2d(el.u), Vector2d(el.v), map, out);
+}
+
+/*! The conic centre + u cos t + v sin t in the profile, swept. */
+void extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const StationMap& map,
+                  Surfaces& out)
+{
+  // a circle: u and v two perpendicular radii of one length
+  const bool circle = u.norm() == v.norm() && u.dot(v) == 0;
   if (!map.affine() && !(c[0] == 0 && c[1] == 0)) return;  // the centre turns with the twist
   const Vector3d c0 = map.at(c, 0), c1 = map.at(c, 1);
   const Vector3d n = map.normal();
@@ -289,16 +307,17 @@ void extrudeArc(const Arc2d& arc, const StationMap& map, Surfaces& out)
   // d. A circular one where the placement is a similarity and d its normal; an
   // elliptic one otherwise - a shear or an uneven scale in the placement, or an
   // oblique v, which until 2026-09-25 were refusals.
-  if (map.sweep.scale_x == 1 && map.sweep.scale_y == 1 && !(similar && along_normal)) {
+  if (map.sweep.scale_x == 1 && map.sweep.scale_y == 1 && !(circle && similar && along_normal)) {
     const Eigen::Matrix3d L = map.sweep.placement.linear();
-    auto elliptic = std::make_shared<EllipticCylinderSurface>(c0, d, L * Vector3d(arc.r, 0., 0.),
-                                                              L * Vector3d(0., arc.r, 0.));
+    auto elliptic = std::make_shared<EllipticCylinderSurface>(c0, d, L * Vector3d(u[0], u[1], 0.),
+                                                              L * Vector3d(v[0], v[1], 0.));
     if (elliptic->usable()) addSurfaceUnique(out, elliptic);
     return;
   }
-  if (!similar || !along_normal) return;  // a tapered ellipse, or an oblique cone: no surface here yet
+  if (!circle || !similar || !along_normal)
+    return;  // a tapered ellipse, or an oblique cone: none here yet
   const Vector3d axis = d / len;
-  const double r0 = arc.r * scale, r1 = arc.r * scale * map.sweep.scale_x;
+  const double r0 = u.norm() * scale, r1 = u.norm() * scale * map.sweep.scale_x;
   if (!(r1 >= 0) || !std::isfinite(r1)) return;
   if (r1 == r0) {
     addSurfaceUnique(out, std::make_shared<CylinderSurface>(c0, axis, r0));
@@ -349,6 +368,7 @@ std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Ex
   const StationMap map(sweep);
   Surfaces out;
   for (const auto& arc : profile.arcs) extrudeArc(arc, map, out);
+  for (const auto& el : profile.ellipses) extrudeEllipse(el, map, out);
   for (const auto& bez : profile.beziers) extrudeBezier(bez, map, out);
   extrudeCaps(map, out);
   for (const auto& loop : profile.loops) {

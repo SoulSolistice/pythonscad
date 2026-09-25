@@ -89,6 +89,17 @@ struct Arc2d {
   double r{0.};
 };
 
+/*! An ellipse some of a polygon's vertices lie on: centre + u cos t + v sin t,
+ * `u` and `v` two conjugate semi-diameters. What a circle becomes under an affine
+ * map that is not a similarity - and an affine map takes one ellipse to another
+ * by mapping its centre and its semi-diameters, so the record travels exactly.
+ * Unaligned for the reason Arc2d's centre is. */
+struct Ellipse2d {
+  using Point = Eigen::Matrix<double, 2, 1, Eigen::DontAlign>;
+  Point centre{0., 0.};
+  Point u{0., 0.}, v{0., 0.};
+};
+
 class Polygon2d : public Geometry
 {
   enum class Transform3dState { NONE = 0, PENDING = 1, CACHED = 2 };
@@ -125,6 +136,9 @@ public:
   /*! Bezier segments some of this polygon's vertices were sampled from. Same
    * channel, same rules - see Bezier2d. */
   std::vector<Bezier2d> beziers;
+
+  /*! Ellipses some of this polygon's vertices lie on - see Ellipse2d. */
+  std::vector<Ellipse2d> ellipses;
 
   /*! What each edge id in the outlines was declared to be (EdgeIdentity.h). */
   EdgeDecls edge_decls;

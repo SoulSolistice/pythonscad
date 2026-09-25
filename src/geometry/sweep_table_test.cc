@@ -380,3 +380,48 @@ TEST_CASE("hull of revolution: operands on two axes state nothing", "[sweep-tabl
     {cylinderRecords(10., 2., 18.), cylinderRecords(8., 0., 0.01, Vector3d(1., 0., 0.))});
   CHECK(surfaces.empty());
 }
+
+TEST_CASE("2D ellipse: a circle under an uneven scale keeps its curve and its chords' names",
+          "[sweep-table]")
+{
+  Outline2d c;
+  for (int i = 0; i < 16; i++) {
+    const double t = 2 * M_PI * i / 16;
+    c.vertices.emplace_back(2. * cos(t), 2. * sin(t));
+  }
+  auto poly = std::make_shared<Polygon2d>(c);
+  poly->arcs.push_back(Arc2d{Vector2d(0., 0.), 2.});
+  poly->declareEdges(EdgeKind::Arc, 0);
+  Transform2d stretch = Transform2d::Identity();
+  stretch.scale(Vector2d(2., 1.));
+  poly->transform(stretch);
+  CHECK(poly->arcs.empty());
+  REQUIRE(poly->ellipses.size() == 1);
+  CHECK(Vector2d(poly->ellipses[0].u) == Vector2d(4., 0.));
+  CHECK(Vector2d(poly->ellipses[0].v) == Vector2d(0., 2.));
+  const Profile2d p = classifyProfile(*poly);
+  for (const auto& e : p.loops[0]) {
+    CHECK(e.kind == EdgeKind::Ellipse);
+    CHECK(e.record == 0);
+  }
+  Extrusion sweep;
+  sweep.height = Vector3d(0., 0., 20.);
+  const auto elliptic = ofKind<EllipticCylinderSurface>(extrude(p, sweep));
+  REQUIRE(elliptic.size() == 1);
+  CHECK(elliptic[0]->a() == Catch::Approx(4.));
+  CHECK(elliptic[0]->b() == Catch::Approx(2.));
+#ifdef USINGZ
+  // and through a boolean, record and names together
+  Outline2d q;
+  q.vertices = {{-10., -10.}, {10., -10.}, {10., 10.}, {-10., 10.}};
+  auto square = std::make_shared<Polygon2d>(q);
+  square->declareEdges(EdgeKind::Line);
+  const auto cut = ClipperUtils::apply({square, poly}, Clipper2Lib::ClipType::Difference);
+  REQUIRE(cut->ellipses.size() == 1);
+  int ellipse_edges = 0;
+  for (const auto& loop : classifyProfile(*cut).loops) {
+    for (const auto& e : loop) ellipse_edges += e.kind == EdgeKind::Ellipse ? 1 : 0;
+  }
+  CHECK(ellipse_edges == 16);
+#endif
+}

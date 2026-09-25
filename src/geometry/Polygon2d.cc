@@ -230,18 +230,37 @@ void Polygon2d::transformArcs(const Transform2d& mat)
       bez.ctrl[i] = moved;
     }
   }
-  if (this->arcs.empty()) return;
   const Eigen::Matrix2d linear = mat.linear();
+  // An ellipse under any affine map is the ellipse of the mapped centre and
+  // semi-diameters.
+  for (auto& el : this->ellipses) {
+    el.centre = mat * Vector2d(el.centre);
+    el.u = linear * Vector2d(el.u);
+    el.v = linear * Vector2d(el.v);
+  }
+  if (this->arcs.empty()) return;
   // a similarity has L^T L = s^2 I
   const Eigen::Matrix2d gram = linear.transpose() * linear;
   const double s2 = 0.5 * (gram(0, 0) + gram(1, 1));
   if (s2 <= 0 || !gram.isApprox(s2 * Eigen::Matrix2d::Identity(), 1e-12)) {
+    // Any other map takes each circle to an ellipse - exactly: the images of the
+    // centre and of two perpendicular radii. Until 2026-09-25 the record was
+    // dropped here, and the chords kept only their name as curved.
+    std::vector<int> ellipse_of(this->arcs.size());
+    for (std::size_t k = 0; k < this->arcs.size(); k++) {
+      const Arc2d& arc = this->arcs[k];
+      ellipse_of[k] = int(this->ellipses.size());
+      Ellipse2d el;
+      el.centre = mat * Vector2d(arc.centre);
+      el.u = linear * Vector2d(arc.r, 0.);
+      el.v = linear * Vector2d(0., arc.r);
+      this->ellipses.push_back(el);
+    }
     this->arcs.clear();
-    // The chords are chords of an ellipse now: still curved, and with no record
-    // to name. They stay arcs without one, rather than becoming straight edges
-    // by default - a wall declared on a chord moves with `$fn`.
     for (auto& [id, decl] : edge_decls) {
-      if (decl.kind == EdgeKind::Arc) decl.record = -1;
+      if (decl.kind != EdgeKind::Arc) continue;
+      decl = decl.record >= 0 ? EdgeDecl{EdgeKind::Ellipse, ellipse_of[decl.record]}
+                              : EdgeDecl{EdgeKind::Arc, -1};
     }
     return;
   }
