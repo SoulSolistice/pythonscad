@@ -159,31 +159,63 @@ void Polygon2d::transform(const Transform2d& mat)
 void Polygon2d::placeOnArcs(double grid)
 {
   if (arcs.empty() || !(grid > 0)) return;
+  // The arc record a named edge is a chord of, or -1.
+  auto arcOf = [this](EdgeId id) {
+    const auto it = id != 0 ? edge_decls.find(id) : edge_decls.end();
+    return it != edge_decls.end() && it->second.kind == EdgeKind::Arc ? it->second.record : -1;
+  };
+  auto named = [this](EdgeId id) { return id != 0 && edge_decls.count(id) != 0; };
+  bool moved = false;
   for (auto& outline : theoutlines) {
-    for (auto& v : outline.vertices) {
+    const std::size_t n = outline.vertices.size();
+    const bool has_ids = outline.hasEdgeIds();
+    for (std::size_t i = 0; i < n; i++) {
+      Vector2d& v = outline.vertices[i];
+      // Which arcs this point can be a sample of. Where both its edges are
+      // named, only the arcs they are chords of - none, if both are straight -
+      // and that is identity, not a search. Otherwise every record, as before.
+      int candidates[2] = {-1, -1};
+      bool search_all = true;
+      if (has_ids) {
+        const EdgeId in = outline.edge_ids[(i + n - 1) % n], out = outline.edge_ids[i];
+        if (named(in) && named(out)) {
+          search_all = false;
+          candidates[0] = arcOf(in);
+          candidates[1] = arcOf(out) != candidates[0] ? arcOf(out) : -1;
+        }
+      }
       const Arc2d *best = nullptr;
       double best_residual = 0;
-      for (const auto& arc : arcs) {
+      auto consider = [&](const Arc2d& arc) {
         const Vector2d c(arc.centre[0], arc.centre[1]);
         const double d = (v - c).norm();
-        if (!(d > 0)) continue;
+        if (!(d > 0)) return;
         const double residual = fabs(d - arc.r);
         // Half a grid cell in each coordinate is at most grid / sqrt(2) off, and
         // measuring it - 2 subtractions, 2 squares, a sum, a root and the
         // difference, 7 roundings - adds gamma_7 of the magnitudes involved.
         const double eps7 = 7 * std::numeric_limits<double>::epsilon();
         const double reach = grid * M_SQRT1_2 + eps7 / (1 - eps7) * (v.norm() + c.norm() + arc.r);
-        if (residual > reach) continue;
+        if (residual > reach) return;
         if (best == nullptr || residual < best_residual) {
           best = &arc;
           best_residual = residual;
+        }
+      };
+      if (search_all) {
+        for (const auto& arc : arcs) consider(arc);
+      } else {
+        for (const int k : candidates) {
+          if (k >= 0 && k < int(arcs.size())) consider(arcs[k]);
         }
       }
       if (best == nullptr) continue;
       const Vector2d c(best->centre[0], best->centre[1]);
       v = c + (v - c) * (best->r / (v - c).norm());
+      moved = true;
     }
   }
+  if (moved) dropTransformedCache();
 }
 
 void Polygon2d::transformArcs(const Transform2d& mat)
@@ -205,6 +237,12 @@ void Polygon2d::transformArcs(const Transform2d& mat)
   const double s2 = 0.5 * (gram(0, 0) + gram(1, 1));
   if (s2 <= 0 || !gram.isApprox(s2 * Eigen::Matrix2d::Identity(), 1e-12)) {
     this->arcs.clear();
+    // The chords are chords of an ellipse now: still curved, and with no record
+    // to name. They stay arcs without one, rather than becoming straight edges
+    // by default - a wall declared on a chord moves with `$fn`.
+    for (auto& [id, decl] : edge_decls) {
+      if (decl.kind == EdgeKind::Arc) decl.record = -1;
+    }
     return;
   }
   const double s = sqrt(s2);
@@ -316,7 +354,7 @@ void Polygon2d::transform3d(const Transform3d& mat)
     // If that happens with a sanitized polygon, we need to reverse
     // the winding order for it to be correct.
     if (sanitized && t.matrix().determinant() < 0)
-      for (auto& o : this->theoutlines) std::reverse(o.vertices.begin(), o.vertices.end());
+      for (auto& o : this->theoutlines) o.reverse();
   } else {
     if (mat.matrix().determinant() == 0) {
       LOG(message_group::Warning, "Scaling a 2D object with 0 - removing object");
@@ -385,15 +423,68 @@ void Polygon2d::applyTrans3dToOutlines(Polygon2d::Outlines2d& outlines) const
   // If that happens with a sanitized polygon, we need to reverse
   // the winding order for it to be correct.
   if (sanitized && t.matrix().determinant() < 0)
-    for (auto& o : outlines) std::reverse(o.vertices.begin(), o.vertices.end());
+    for (auto& o : outlines) o.reverse();
+}
+
+void Outline2d::reverse()
+{
+  std::reverse(vertices.begin(), vertices.end());
+  if (!hasEdgeIds()) {
+    edge_ids.clear();
+    return;
+  }
+  // Edge i ran from vertex i to i + 1. Reversed, new edge i runs from old vertex
+  // n - 1 - i to n - 2 - i, which is old edge n - 2 - i walked backwards.
+  const std::size_t n = edge_ids.size();
+  std::vector<EdgeId> reversed(n);
+  for (std::size_t i = 0; i < n; i++) reversed[i] = edge_ids[(2 * n - 2 - i) % n];
+  edge_ids = std::move(reversed);
 }
 
 void Polygon2d::reverse(void)
 {
-  for (auto& o : theoutlines) std::reverse(o.vertices.begin(), o.vertices.end());
-  for (auto& o : trans3dOutlines) std::reverse(o.vertices.begin(), o.vertices.end());
-  for (auto& o : thepolylines) std::reverse(o.vertices.begin(), o.vertices.end());
-  for (auto& o : trans3dPolylines) std::reverse(o.vertices.begin(), o.vertices.end());
+  for (auto& o : theoutlines) o.reverse();
+  for (auto& o : trans3dOutlines) o.reverse();
+  for (auto& o : thepolylines) o.reverse();
+  for (auto& o : trans3dPolylines) o.reverse();
+}
+
+namespace {
+
+/*! Fresh ids for every edge of `o`. */
+void nameEdges(Outline2d& o)
+{
+  const std::size_t n = o.vertices.size();
+  const EdgeId first = reserveEdgeIds(n);
+  o.edge_ids.resize(n);
+  for (std::size_t i = 0; i < n; i++) o.edge_ids[i] = first + EdgeId(i);
+}
+
+}  // namespace
+
+void Polygon2d::declareEdges(EdgeKind kind, int record)
+{
+  for (std::size_t k = 0; k < theoutlines.size(); k++) {
+    nameEdges(theoutlines[k]);
+    for (const EdgeId id : theoutlines[k].edge_ids) edge_decls[id] = EdgeDecl{kind, record};
+  }
+  dropTransformedCache();
+}
+
+void Polygon2d::nameUnnamedEdges()
+{
+  for (std::size_t k = 0; k < theoutlines.size(); k++) {
+    if (theoutlines[k].hasEdgeIds()) continue;
+    nameEdges(theoutlines[k]);
+  }
+  dropTransformedCache();
+}
+
+void Polygon2d::dropTransformedCache()
+{
+  // The transformed outlines are a cache of these, moved; drop it so that it is
+  // made again from outlines that now carry their ids.
+  if (trans3dState == Transform3dState::CACHED) trans3dState = Transform3dState::PENDING;
 }
 
 void Polygon2d::setColor(const Color4f& c)

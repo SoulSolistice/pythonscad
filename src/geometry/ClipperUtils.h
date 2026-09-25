@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -21,6 +23,16 @@ Clipper2Lib::Paths64 fromPolygon2d(const Polygon2d& poly, int scale_bits);
 Clipper2Lib::Paths64 fromPolygon2d(const Polygon2d& poly, int scale_bits, Color4f *col);
 std::unique_ptr<Polygon2d> toPolygon2d(const Clipper2Lib::PolyTree64& poly, int scale_bits);
 std::unique_ptr<Polygon2d> toPolygon2d(const Clipper2Lib::Paths64& poly, int scale_bits);
+
+/*! Names an edge of a Clipper result from its two ends' Z (EdgeIdentity.h). The
+ * default is commonEdge; an operation that makes new edges says what they are. */
+using EdgeNamer = std::function<EdgeId(std::int64_t, std::int64_t)>;
+std::unique_ptr<Polygon2d> toPolygon2d(const Clipper2Lib::PolyTree64& poly, int scale_bits,
+                                       const EdgeNamer& name);
+
+/*! The operands' records and edge declarations, onto the result of a 2D
+ * operation on them - see ClipperUtils.cc. */
+void carryDeclarations(Polygon2d& result, const std::vector<const Polygon2d *>& operands, double grid);
 
 std::unique_ptr<Polygon2d> applyOffset(const Polygon2d& poly, double offset,
                                        Clipper2Lib::JoinType joinType, double miter_limit,

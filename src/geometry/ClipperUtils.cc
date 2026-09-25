@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <memory>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include "src/core/ColorUtil.h"
@@ -21,12 +22,58 @@ namespace ClipperUtils {
 
 namespace {
 
+/*! Identity through Clipper - see EdgeIdentity.h.
+ *
+ * Each vertex goes in with its two edges' ids in Z (fromPolygon2d), and a vertex
+ * Clipper makes where two edges cross is named by those two edges: each is the
+ * one edge its own two ends both name. On the way out (toPolygon2d) each edge of
+ * the result is the one edge its two ends name. Without USINGZ - a system Clipper2
+ * built without it - nothing is named and every edge is measured, as before. */
+#ifdef USINGZ
+void nameCrossing(const Clipper2Lib::Point64& e1bot, const Clipper2Lib::Point64& e1top,
+                  const Clipper2Lib::Point64& e2bot, const Clipper2Lib::Point64& e2top,
+                  Clipper2Lib::Point64& pt)
+{
+  pt.z = packEdges(commonEdge(e1bot.z, e1top.z), commonEdge(e2bot.z, e2top.z));
+}
+#endif
+
+/*! A Clipper for this file: collinear points dropped, as everywhere here, and
+ * crossings named. */
+void configure(Clipper2Lib::Clipper64& clipper)
+{
+  clipper.PreserveCollinear(false);
+#ifdef USINGZ
+  clipper.SetZCallback(nameCrossing);
+#endif
+}
+
+/*! Each edge of `path` as the one edge its two ends name, by `name`. */
+std::vector<EdgeId> edgeIdsOf(const Clipper2Lib::Path64& path, const EdgeNamer& name)
+{
+  std::vector<EdgeId> ids;
+#ifdef USINGZ
+  const std::size_t n = path.size();
+  ids.resize(n);
+  bool any = false;
+  for (std::size_t i = 0; i < n; i++) {
+    ids[i] = name ? name(path[i].z, path[(i + 1) % n].z) : commonEdge(path[i].z, path[(i + 1) % n].z);
+    any = any || ids[i] != 0;
+  }
+  if (!any) ids.clear();
+#else
+  (void)path;
+  (void)name;
+#endif
+  return ids;
+}
+
 Clipper2Lib::Paths64 process(const Clipper2Lib::Paths64& polygons, Clipper2Lib::ClipType cliptype,
                              Clipper2Lib::FillRule polytype)
 {
   Clipper2Lib::Paths64 result;
   Clipper2Lib::Clipper64 clipper;
-  clipper.PreserveCollinear(false);
+  configure(clipper);
   clipper.AddSubject(polygons);
   clipper.Execute(cliptype, polytype, result);
   return result;
@@ -137,8 +184,17 @@ Clipper2Lib::Paths64 fromPolygon2d(const Polygon2d& poly, int scale_bits, Color4
   for (const auto& outline : poly.transformedOutlines()) {
     Clipper2Lib::Path64 p;
     if (col == nullptr || *col == outline.color) {
-      for (const auto& v : outline.vertices) {
+      const std::size_t n = outline.vertices.size();
+      const bool named = outline.hasEdgeIds();
+      for (std::size_t i = 0; i < n; i++) {
+        const auto& v = outline.vertices[i];
         p.emplace_back(v[0] * scale, v[1] * scale);
+#ifdef USINGZ
+        // the edge in and the edge out
+        if (named) p.back().z = packEdges(outline.edge_ids[(i + n - 1) % n], outline.edge_ids[i]);
+#else
+        (void)named;
+#endif
       }
     }
     // Make sure all polygons point up, since we project also
@@ -163,7 +219,7 @@ std::unique_ptr<Clipper2Lib::PolyTree64> sanitize(const Clipper2Lib::Paths64& pa
 {
   auto result = std::make_unique<Clipper2Lib::PolyTree64>();
   Clipper2Lib::Clipper64 clipper;
-  clipper.PreserveCollinear(false);
+  configure(clipper);
   try {
     clipper.AddSubject(paths);
   } catch (...) {
@@ -185,6 +241,7 @@ std::unique_ptr<Polygon2d> sanitize(const Polygon2d& poly)
   auto result = toPolygon2d(*sanitize(paths), scale_bits);
   result->stamp_color(poly);
   for (const auto& p : poly.polylines()) result->addPolyline(p);
+  carryDeclarations(*result, {&poly}, std::ldexp(1.0, -scale_bits));
   return result;
 }
 
@@ -203,19 +260,24 @@ std::unique_ptr<Polygon2d> toPolygon2d(const Clipper2Lib::Paths64& paths, int sc
     for (const auto& ip : path) {
       outline.vertices.emplace_back(scale * ip.x, scale * ip.y);
     }
-
+    outline.edge_ids = edgeIdsOf(path, nullptr);
     result->addOutline(outline);
   }
-  return result;
   return result;
 }
 
 std::unique_ptr<Polygon2d> toPolygon2d(const Clipper2Lib::PolyTree64& polytree, int scale_bits)
 {
+  return toPolygon2d(polytree, scale_bits, nullptr);
+}
+
+std::unique_ptr<Polygon2d> toPolygon2d(const Clipper2Lib::PolyTree64& polytree, int scale_bits,
+                                       const EdgeNamer& name)
+{
   auto result = std::make_unique<Polygon2d>();
   const double scale = std::ldexp(1.0, -scale_bits);
-  auto processChildren = [scale, &result](auto&& processChildren,
-                                          const Clipper2Lib::PolyPath64& node) -> void {
+  auto processChildren = [scale, &result, &name](auto&& processChildren,
+                                                 const Clipper2Lib::PolyPath64& node) -> void {
     Outline2d outline;
     // When using offset, clipper can get the hole status wrong.
     // IsPositive() calculates the area of the polygon, and if it's negative, it's a hole.
@@ -229,6 +291,7 @@ std::unique_ptr<Polygon2d> toPolygon2d(const Clipper2Lib::PolyTree64& polytree, 
       for (const auto& ip : cleaned_path) {
         outline.vertices.emplace_back(scale * ip.x, scale * ip.y);
       }
+      outline.edge_ids = edgeIdsOf(cleaned_path, name);
       result->addOutline(outline);
     }
     for (const auto& child : node) {
@@ -245,53 +308,92 @@ std::unique_ptr<Polygon2d> toPolygon2d(const Clipper2Lib::PolyTree64& polytree, 
 std::unique_ptr<Polygon2d> apply(const std::vector<Clipper2Lib::Paths64>& pathsvector,
                                  Clipper2Lib::ClipType clipType, int scale_bits, bool is_polyline);
 
-/*! Carry the arc hints of the operands onto the result of a 2D operation.
+/*! Carry the operands' declarations onto the result of a 2D operation: their
+ * arc and Bezier records, and what each edge of the result was declared to be.
  *
  * Every operand's records go on, the subtracted ones included. A difference
  * leaves the tool's surface standing in the result - a bore is a cylinder, and
  * it is the tool that knows its radius - which is exactly what the 3D channel
- * does with `PolySet::surfaces` for the same reason.
+ * does with `PolySet::surfaces` for the same reason. Records that no longer
+ * describe anything are harmless; only the duplicates are dropped, to keep the
+ * list from growing with every operation in a deep tree.
  *
- * Records that no longer describe anything are harmless: an Arc2d is a hint and
- * the consumer fits it before believing it. Only the duplicates are dropped, and
- * only to keep the list from growing with every operation in a deep tree.
+ * Each edge of the result that Clipper let through with its maker's id
+ * (toPolygon2d) takes that maker's declaration, its record renumbered into the
+ * result's lists. Ids are unique for the life of the process, so at most one
+ * operand declares any of them.
  *
- * And the points go back on them. The boolean has just rounded every vertex to
- * Clipper's grid, `grid` wide, so a point an operand had exactly on its arc -
- * an offset's round join, put there by applyOffset - is half a cell off it
- * again. Polygon2d::placeOnArcs undoes exactly that rounding. Only where no
- * operand carries a pending 3D transform: Clipper saw the transformed outlines
- * and such an operand's records are in its own frame, so the two would not be
- * comparable.
+ * And the points go back on their arcs. The boolean has just rounded every
+ * vertex to Clipper's grid, `grid` wide, so a point an operand had exactly on
+ * its arc - an offset's round join, put there by applyOffset - is half a cell
+ * off it again. Polygon2d::placeOnArcs undoes exactly that rounding. Only where
+ * no operand carries a pending 3D transform: Clipper saw the transformed
+ * outlines and such an operand's records are in its own frame, so the two would
+ * not be comparable.
  */
-static void carryArcs(Polygon2d& result, const std::vector<std::shared_ptr<const Polygon2d>>& operands,
-                      double grid)
+void carryDeclarations(Polygon2d& result, const std::vector<const Polygon2d *>& operands, double grid)
 {
   bool same_frame = true;
-  for (const auto& operand : operands) {
+  for (const auto *operand : operands) {
     if (operand != nullptr && operand->hasTransform3d()) same_frame = false;
   }
-  for (const auto& operand : operands) {
+  // The records, and where each operand's landed in the result's lists.
+  std::vector<std::vector<int>> arc_at(operands.size());
+  std::vector<int> bezier_base(operands.size(), 0);
+  for (std::size_t k = 0; k < operands.size(); k++) {
+    const Polygon2d *operand = operands[k];
     if (operand == nullptr) continue;
     for (const auto& arc : operand->arcs) {
-      bool known = false;
-      for (const auto& have : result.arcs) {
+      int at = -1;
+      for (std::size_t j = 0; j < result.arcs.size() && at < 0; j++) {
+        const auto& have = result.arcs[j];
         if (fabs(have.r - arc.r) <= 1e-12 * std::max(1.0, arc.r) &&
             (have.centre - arc.centre).norm() <= 1e-12 * std::max(1.0, arc.r)) {
-          known = true;
-          break;
+          at = int(j);
         }
       }
-      if (!known) result.arcs.push_back(arc);
+      if (at < 0) {
+        at = int(result.arcs.size());
+        result.arcs.push_back(arc);
+      }
+      arc_at[k].push_back(at);
     }
     // The Bezier records travel the same way and for the same reasons. No
     // deduplication: two segments of one glyph share their endpoints but not
     // their interior control points, so equality is rarer than for a circle and
     // the comparison would cost more than the duplicates do.
+    bezier_base[k] = int(result.beziers.size());
     for (const auto& bez : operand->beziers) result.beziers.push_back(bez);
+  }
+  // What each edge of the result is, as the operand that made it declared.
+  for (const auto& outline : result.untransformedOutlines()) {
+    for (const EdgeId id : outline.edge_ids) {
+      if (id == 0 || result.edge_decls.count(id) != 0) continue;
+      for (std::size_t k = 0; k < operands.size(); k++) {
+        if (operands[k] == nullptr) continue;
+        const auto it = operands[k]->edge_decls.find(id);
+        if (it == operands[k]->edge_decls.end()) continue;
+        EdgeDecl decl = it->second;
+        if (decl.record >= 0 && decl.kind == EdgeKind::Arc) decl.record = arc_at[k][decl.record];
+        if (decl.record >= 0 && decl.kind == EdgeKind::Bezier) decl.record += bezier_base[k];
+        result.edge_decls.emplace(id, decl);
+        break;
+      }
+    }
   }
   if (same_frame) result.placeOnArcs(grid);
 }
+
+namespace {
+
+std::vector<const Polygon2d *> operandsOf(const std::vector<std::shared_ptr<const Polygon2d>>& polygons)
+{
+  std::vector<const Polygon2d *> out;
+  for (const auto& p : polygons) out.push_back(p.get());
+  return out;
+}
+
+}  // namespace
 
 Polygon2d cleanUnion(const std::vector<std::shared_ptr<const Polygon2d>>& polygons)
 {
@@ -416,7 +518,7 @@ Polygon2d cleanUnion(const std::vector<std::shared_ptr<const Polygon2d>>& polygo
   }
   union_result = union_sanitized;
   union_result.setSanitized(true);
-  carryArcs(union_result, polygons, std::ldexp(1.0, -scale_bits));
+  carryDeclarations(union_result, operandsOf(polygons), std::ldexp(1.0, -scale_bits));
   for (const auto& poly : polygons) {
     if (poly == nullptr) continue;
     for (const auto& pl : poly->polylines()) {
@@ -435,7 +537,7 @@ std::unique_ptr<Polygon2d> apply(const std::vector<Clipper2Lib::Paths64>& pathsv
                                  Clipper2Lib::ClipType clipType, int scale_bits, bool is_open)
 {
   Clipper2Lib::Clipper64 clipper;
-  clipper.PreserveCollinear(false);
+  configure(clipper);
 
   if (clipType == Clipper2Lib::ClipType::Intersection && pathsvector.size() >= 2) {
     // intersection operations must be split into a sequence of binary operations
@@ -599,7 +701,7 @@ std::unique_ptr<Polygon2d> apply(const std::vector<std::shared_ptr<const Polygon
   }
 
   result.setSanitized(true);
-  carryArcs(result, polygons, std::ldexp(1.0, -scale_bits));
+  carryDeclarations(result, operandsOf(polygons), std::ldexp(1.0, -scale_bits));
 
   return std::make_unique<Polygon2d>(result);
 }
@@ -663,38 +765,105 @@ std::unique_ptr<Polygon2d> applyOffset(const Polygon2d& poly, double offset,
   const int scale_bits = scaleBitsFromPrecision();
   Clipper2Lib::ClipperOffset co(isMiter ? miter_limit : 2.0,
                                 isRound ? std::ldexp(arc_tolerance, scale_bits) : 1.0);
-  auto p = ClipperUtils::fromPolygon2d(poly, scale_bits, nullptr);
+#ifdef USINGZ
+  co.SetZCallback(nameCrossing);
+#endif
+  // Every source edge named, whether or not its maker named it: each point
+  // Clipper makes at a vertex carries that vertex's Z, and that is how the
+  // points of one join are known to be one join.
+  Polygon2d named(poly);
+  named.nameUnnamedEdges();
+  auto p = ClipperUtils::fromPolygon2d(named, scale_bits, nullptr);
   co.AddPaths(p, joinType, Clipper2Lib::EndType::Polygon);
   Clipper2Lib::PolyTree64 result;
   co.Execute(std::ldexp(offset, scale_bits), result);
-  auto r = toPolygon2d(result, scale_bits);
+
+  // An offset circle is a circle: the same centre, the radius moved by the
+  // offset. Which is why offset() of a circle stays declarable rather than
+  // becoming a hundred rounded corners.
+  std::vector<Arc2d> arcs;
+  std::vector<int> moved_arc(poly.arcs.size(), -1);
+  if (isRound) {
+    for (std::size_t k = 0; k < poly.arcs.size(); k++) {
+      const double moved = poly.arcs[k].r + offset;
+      if (moved > 0) {
+        moved_arc[k] = int(arcs.size());
+        arcs.push_back(Arc2d{poly.arcs[k].centre, moved});
+      }
+    }
+  }
+  auto arcRecordOf = [&named](EdgeId id) {
+    const auto it = named.edge_decls.find(id);
+    return it != named.edge_decls.end() && it->second.kind == EdgeKind::Arc ? it->second.record : -1;
+  };
 
   // A round join *is* an arc, and this is where its radius is known exactly:
   // Clipper places the join's points on a circle of radius |offset| about the
   // vertex being rounded, and the grid it rounds them to is 2^-27 of a unit,
   // three orders finer than the tolerance any consumer fits with. So a record
-  // per input vertex, which is what makes `linear_extrude(offset(r=2, ...))` -
-  // the rounded box, the most common curved profile there is - export as four
+  // per corner, which is what makes `linear_extrude(offset(r=2, ...))` - the
+  // rounded box, the most common curved profile there is - export as four
   // cylinders instead of a hundred and twenty planes.
   //
-  // Every vertex, not only the convex ones: at a concave vertex Clipper mitres
-  // instead of rounding, no run of points lies on the circle, and the consumer's
-  // fit rejects the record. Deciding it here would mean reimplementing Clipper's
-  // own choice, and getting that subtly wrong is worse than offering a hint that
-  // does not match.
-  if (isRound) {
-    for (const auto& outline : poly.outlines()) {
-      for (const auto& v : outline.vertices) {
-        r->arcs.push_back(Arc2d{v, fabs(offset)});
+  // Per *corner*, not per vertex. A vertex both of whose edges are chords of one
+  // arc is a sample of that arc, not a corner, and its join is a piece of the
+  // moved arc: an offset circle is one circle, not one circle and a ring of
+  // tiny ones. Until the edges were named that could not be told, and every
+  // vertex recorded a join - twenty thousand r = 0.3 cylinders for an offset
+  // 20000-gon, each claiming its sliver of the one surface the model has.
+  //
+  // At a concave corner Clipper mitres instead of rounding, no run of points
+  // lies on the circle, and no edge of the result is a chord of it.
+  std::unordered_map<std::int64_t, int> join_arc;   // a corner's Z -> its join's record
+  std::unordered_map<std::int64_t, int> sample_of;  // a sample's Z -> the arc it samples
+  for (const auto& outline : named.outlines()) {
+    const std::size_t n = outline.vertices.size();
+    for (std::size_t i = 0; i < n; i++) {
+      const EdgeId in = outline.edge_ids[(i + n - 1) % n], out = outline.edge_ids[i];
+      const std::int64_t z = packEdges(in, out);
+      const int k = arcRecordOf(in);
+      if (k >= 0 && k == arcRecordOf(out)) {
+        sample_of[z] = k;
+      } else if (isRound) {
+        join_arc[z] = int(arcs.size());
+        arcs.push_back(Arc2d{outline.vertices[i], fabs(offset)});
       }
     }
-    // An offset circle is a circle: the same centre, the radius moved by the
-    // offset. Which is why offset() of a circle stays declarable rather than
-    // becoming a hundred rounded corners.
-    for (const auto& arc : poly.arcs) {
-      const double moved = arc.r + offset;
-      if (moved > 0) r->arcs.push_back(Arc2d{arc.centre, moved});
+  }
+
+  // What each edge of the result is. Between two points of one join it is the
+  // join: of a sample, a piece of its moved arc; of a corner, a chord of the
+  // corner's own arc where the join is round and a straight edge where it is
+  // mitred or squared. Otherwise it is the offset of the one source edge its
+  // ends both name: a line's offset is a line, an arc's the moved arc, and a
+  // Bezier's is curved but no Bezier. Anything else is unnamed, and measured.
+  EdgeDecls decls;
+  auto name = [&](std::int64_t za, std::int64_t zb) -> EdgeId {
+    EdgeDecl decl;
+    if (za == zb && za != 0) {
+      const auto sample = sample_of.find(za);
+      const auto join = join_arc.find(za);
+      if (sample != sample_of.end())
+        decl = EdgeDecl{EdgeKind::Arc, isRound ? moved_arc[sample->second] : -1};
+      else if (join != join_arc.end()) decl = EdgeDecl{EdgeKind::Arc, join->second};
+      else decl = EdgeDecl{EdgeKind::Line, -1};
+    } else {
+      const EdgeId source = commonEdge(za, zb);
+      const auto it = source != 0 ? named.edge_decls.find(source) : named.edge_decls.end();
+      if (it == named.edge_decls.end()) return 0;
+      decl = it->second;
+      if (decl.kind == EdgeKind::Arc && decl.record >= 0)
+        decl.record = isRound ? moved_arc[decl.record] : -1;
+      if (decl.kind == EdgeKind::Bezier) decl.record = -1;
     }
+    const EdgeId id = reserveEdgeIds(1);
+    decls.emplace(id, decl);
+    return id;
+  };
+  auto r = toPolygon2d(result, scale_bits, name);
+  r->arcs = std::move(arcs);
+  r->edge_decls = std::move(decls);
+  if (isRound) {
     // The records are exact and the points Clipper returned are on its grid,
     // up to half a cell off the circle it computed them on - so a rotate_extrude
     // of this profile had its points ~1e-8 off the torus it declares, which a
@@ -713,7 +882,7 @@ std::unique_ptr<Polygon2d> applyProjection(const std::vector<std::shared_ptr<con
   const int scale_bits = scaleBitsFromPrecision();
 
   Clipper2Lib::Clipper64 sumclipper;
-  sumclipper.PreserveCollinear(false);
+  configure(sumclipper);
   for (const auto& poly : polygons) {
     Clipper2Lib::Paths64 result = ClipperUtils::fromPolygon2d(*poly, scale_bits, nullptr);
     // Using NonZero ensures that we don't create holes from polygons sharing

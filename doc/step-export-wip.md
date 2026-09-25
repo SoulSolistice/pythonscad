@@ -4717,8 +4717,8 @@ box, and neither asks the other.
 | # | where | inferred today | what declares it |
 | --- | --- | --- | --- |
 | 1 | a straight profile edge, both extruders | "a line, because it is not a chord of any recorded arc" - two different tests, one a threshold (C2, F6) | the generator: `square`, `polygon`, `offset(delta)` and a glyph's line segments make lines, `circle` and a round join make arcs |
-| 2 | arcs and Beziers through a 2D boolean or `offset` | `ClipperUtils` keeps the operands' records as hints, re-tested by position; `placeOnArcs` restores a vertex by its distance from the arc | identity: Clipper2's per-vertex `Z` (`USINGZ`, not enabled here) carries which segment a vertex came from - the 2D `mintOriginals`. Measurement cannot tell the two cases a D-shaft makes: a boolean's cut puts the flat's ends on the polygon's chord, not the circle, so the two cut chords beside it read as straight walls; and a flat drawn with both ends on the circle reads as a chord and loses its wall (`sweep_table_test.cc`, marked `[!shouldfail]`) |
-| 3 | a 2D transform that is not a similarity | `Polygon2d::transform` drops the arcs (behind an `isApprox(1e-12)`) | the transform states the ellipse exactly; needs an ellipse record. The same gap in 3D: `CylinderSurface::transform` refuses a non-uniform scale |
+| 2 | arcs and Beziers through a 2D boolean or `offset` - **identity landed 2026-09-25**, for what `circle()`, `square()` and an unrounded `polygon()` make, and for `offset`'s joins and offset edges; `text()`, `import()`, a rounded `polygon()` and the 2D hull still make unnamed edges, which are measured | `ClipperUtils` keeps the operands' records as hints, re-tested by position; `placeOnArcs` restores a vertex by its distance from the arc | identity: Clipper2's per-vertex `Z` (`USINGZ`, not enabled here) carries which segment a vertex came from - the 2D `mintOriginals`. Measurement cannot tell the two cases a D-shaft makes: a boolean's cut puts the flat's ends on the polygon's chord, not the circle, so the two cut chords beside it read as straight walls; and a flat drawn with both ends on the circle reads as a chord and loses its wall (`sweep_table_test.cc`, marked `[!shouldfail]`) |
+| 3 | a 2D transform that is not a similarity - **half landed 2026-09-25**: the chords keep their name as curved with the record lost, so they no longer declare 32 planes (step-extrude-refusals); the ellipse record itself is still missing | `Polygon2d::transform` drops the arcs (behind an `isApprox(1e-12)`) | the transform states the ellipse exactly; needs an ellipse record. The same gap in 3D: `CylinderSurface::transform` refuses a non-uniform scale |
 
 **The sweeps - consumers of the channel.**
 
@@ -4744,6 +4744,12 @@ box, and neither asks the other.
 
 Not gaps, and staying that way (checklist E5): `polyhedron()`, `import()`,
 `surface()` - no intent reaches them.
+
+**Found on the way, not the exporter's.** `Polygon2d::stamp_color`, which every
+`offset()` calls, intersects every outline of the result with every outline of
+its source through Clipper - 8.6 s of a 19 s 2D model (a 20 x 20 grid of circles
+less squares, offset by 0.3) and there before any of this work. It wants its own
+commit, proposed upstream.
 
 **The order it lands in.** Each is its own landing, walked against the
 checklist:

@@ -81,6 +81,7 @@ needs an instrument that does not exist, that is a finding.
 | E3 | **A generator's points lie on its own declaration** at machine precision. *2026-09-24: offset()'s grid* | Does anything between the generator and the exporter move a point off the surface it declared? | fixtures step-rounded-profile(-notched) - D0 tests at machine precision fail when it does |
 | E4 | **Faces and witnesses are different roles**: a face declarer owns the surface; a witness offers evidence. *development: who declared a surface* | Does the change treat evidence as a face, or the reverse? | B5's error |
 | E5 | **No intent to read is a boundary, not a gap**: `polyhedron()`, `import()` declare nothing; `declare_*` is the channel. *rungs: Feedstock* | Is D4 here because nothing could be declared, or because nothing was? | census split by whether the maker declares anything |
+| E6 | **An edge's kind is its maker's word**: what a 2D edge is - straight, or a chord of which record - is named where it is made and carried through Clipper by identity (`EdgeIdentity.h`); measuring its ends is the fallback for an edge nothing named, never a second opinion. *2026-09-25: survey item 2, the D-shaft* | Does the change make 2D edges without naming them, drop or reorder `edge_ids` without keeping them in step with `vertices`, or decide an edge's kind by position where a name exists? | `sweep_table_test.cc` (the D-shaft through Clipper); a producer that names nothing reads as measured, not as an error |
 
 ## F. Evidence, testing and process
 

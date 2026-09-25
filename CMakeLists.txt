@@ -1636,6 +1636,7 @@ set(CORE_SOURCES
   src/geometry/ClipperUtils.cc
   src/geometry/Geometry.cc
   src/geometry/GeometryCache.cc
+  src/geometry/EdgeIdentity.cc
   src/geometry/HullOfRevolution.cc
   src/geometry/Profile2d.cc
   src/geometry/SweptSurfaces.cc

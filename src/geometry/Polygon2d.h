@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "geometry/EdgeIdentity.h"
 #include "geometry/Geometry.h"
 #include "geometry/linalg.h"
 
@@ -19,7 +20,19 @@ struct Outline2d {
   VectorOfVector2d vertices;
   bool positive{true};
   Color4f color;
+  /*! The maker's id of each edge, edge i running from vertex i to vertex i + 1
+   * (EdgeIdentity.h) - or empty, where nothing named them. Anything that
+   * reorders `vertices` reorders these with them (reverseOutline); anything
+   * else that changes them leaves the two out of step, which reads as unnamed. */
+  std::vector<EdgeId> edge_ids;
   [[nodiscard]] BoundingBox getBoundingBox() const;
+  /*! Whether every edge carries its maker's id. */
+  [[nodiscard]] bool hasEdgeIds() const
+  {
+    return !edge_ids.empty() && edge_ids.size() == vertices.size();
+  }
+  /*! Reverse the vertex order, and the edge ids with it. */
+  void reverse();
 };
 double outline_area(const Outline2d o);
 
@@ -113,6 +126,17 @@ public:
    * channel, same rules - see Bezier2d. */
   std::vector<Bezier2d> beziers;
 
+  /*! What each edge id in the outlines was declared to be (EdgeIdentity.h). */
+  EdgeDecls edge_decls;
+
+  /*! Name every edge of every outline as made by one maker of one kind: fresh
+   * ids, each declared `kind` with `record`. For a generator that knows. */
+  void declareEdges(EdgeKind kind, int record = -1);
+
+  /*! Give every edge no maker named an id of its own, declaring nothing: for an
+   * operation that has to tell its source edges apart, whoever made them. */
+  void nameUnnamedEdges();
+
   /*! Put back on its arc every vertex a rounding grid moved off one.
    *
    * Clipper computes a round join's points on the circle `arcs` records and
@@ -128,7 +152,12 @@ public:
    * closed form, centre + r * (v - centre) / |v - centre|: the point the
    * generator computed, before the grid moved it. Nothing chosen - the reach is
    * the grid's own rounding. Operates on the untransformed outlines, in the frame
-   * the records are in; the caller calls it where the two agree. */
+   * the records are in; the caller calls it where the two agree.
+   *
+   * A vertex whose two edges are both named (EdgeIdentity.h) is asked only of
+   * the arcs those edges are chords of: identity, and linear in the vertices,
+   * where asking every record was quadratic after an offset, which records one
+   * arc per source vertex. */
   void placeOnArcs(double grid);
 
   void reverse(void);
@@ -188,6 +217,7 @@ private:
   Outlines2d trans3dOutlines;
   Outlines2d trans3dPolylines;
   void mergeTrans3d();
+  void dropTransformedCache();
   void transformArcs(const Transform2d& mat);
   void applyTrans3dToOutlines(Polygon2d::Outlines2d& outlines) const;
 };

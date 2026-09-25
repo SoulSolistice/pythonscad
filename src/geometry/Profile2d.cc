@@ -40,19 +40,33 @@ bool inControlBox(const Vector2d& p, const Vector2d& q, const Bezier2d& bez)
 }  // namespace
 
 Profile2d classifyProfile(const std::vector<VectorOfVector2d>& loops, std::vector<Arc2d> arcs,
-                          std::vector<Bezier2d> beziers)
+                          std::vector<Bezier2d> beziers, const std::vector<std::vector<EdgeId>>& ids,
+                          const EdgeDecls *decls)
 {
   Profile2d out;
   out.arcs = std::move(arcs);
   out.beziers = std::move(beziers);
-  for (const auto& loop : loops) {
+  for (std::size_t l = 0; l < loops.size(); l++) {
+    const auto& loop = loops[l];
     std::vector<ProfileEdge> edges;
     const std::size_t n = loop.size();
+    const bool named = decls != nullptr && l < ids.size() && ids[l].size() == n;
     edges.reserve(n);
     for (std::size_t i = 0; i < n; i++) {
       ProfileEdge e;
       e.a = loop[i];
       e.b = loop[(i + 1) % n];
+      // What its maker said it is, where it said.
+      if (named && ids[l][i] != 0) {
+        const auto it = decls->find(ids[l][i]);
+        if (it != decls->end()) {
+          e.kind = it->second.kind;
+          e.record = it->second.record;
+          e.declared = true;
+          edges.push_back(e);
+          continue;
+        }
+      }
       for (std::size_t k = 0; k < out.arcs.size() && e.record < 0; k++) {
         if (out.arcs[k].r > 0 && onArc(e.a, out.arcs[k]) && onArc(e.b, out.arcs[k])) {
           e.kind = EdgeKind::Arc;
@@ -75,6 +89,25 @@ Profile2d classifyProfile(const std::vector<VectorOfVector2d>& loops, std::vecto
 Profile2d classifyProfile(const Polygon2d& poly)
 {
   std::vector<VectorOfVector2d> loops;
-  for (const auto& outline : poly.untransformedOutlines()) loops.push_back(outline.vertices);
-  return classifyProfile(loops, poly.arcs, poly.beziers);
+  std::vector<std::vector<EdgeId>> ids;
+  for (const auto& outline : poly.untransformedOutlines()) {
+    loops.push_back(outline.vertices);
+    ids.push_back(outline.edge_ids);
+  }
+  return classifyProfile(loops, poly.arcs, poly.beziers, ids, &poly.edge_decls);
+}
+
+Profile2d translated(Profile2d profile, const Vector2d& by)
+{
+  for (auto& loop : profile.loops) {
+    for (auto& e : loop) {
+      e.a += by;
+      e.b += by;
+    }
+  }
+  for (auto& arc : profile.arcs) arc.centre = Vector2d(arc.centre) + by;
+  for (auto& bez : profile.beziers) {
+    for (int i = 0; i <= bez.degree; i++) bez.ctrl[i] = Vector2d(bez.ctrl[i]) + by;
+  }
+  return profile;
 }

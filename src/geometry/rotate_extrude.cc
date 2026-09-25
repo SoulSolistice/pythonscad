@@ -156,28 +156,22 @@ VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double s
  * different, and what comes out is then not a surface of revolution at all -
  * which is exactly how a screw thread is built, so this is not a corner case.
  */
-static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
-                                        const std::vector<VectorOfVector2d>& profiles,
-                                        const Polygon2d& poly, PolySet& polyset)
+static void declareSurfacesOfRevolution(const RotateExtrudeNode& node, const Polygon2d& poly,
+                                        PolySet& polyset)
 {
   if (node.v.norm() != 0 || node.twist != 0) return;
 #ifdef ENABLE_PYTHON
   if (node.profile_func != nullptr || node.twist_func != nullptr) return;
 #endif
-  // `profiles` is the profile as it is actually swept: with the twist 0 and the
-  // scale fixed at 1, alterprofile() reduces to a translation by the offset. The
-  // records are in the profile's own frame, so they follow it by that much.
-  const Vector2d offset(node.offset_x, node.offset_y);
-  std::vector<Arc2d> arcs;
-  for (const auto& arc : poly.arcs) arcs.push_back(Arc2d{Vector2d(arc.centre) + offset, arc.r});
-  std::vector<Bezier2d> beziers = poly.beziers;
-  for (auto& bez : beziers) {
-    for (int i = 0; i <= bez.degree; i++) bez.ctrl[i] = Vector2d(bez.ctrl[i]) + offset;
-  }
+  // The profile as it is actually swept: with the twist 0 and the scale fixed
+  // at 1, alterprofile() reduces to a translation by the offset. It is
+  // classified in its own frame, where its records and its edges' names are,
+  // and moved by that much.
+  const Profile2d profile = translated(classifyProfile(poly), Vector2d(node.offset_x, node.offset_y));
   Revolution sweep;
   sweep.start = node.start;
   sweep.angle = node.angle;
-  for (auto& surface : revolve(classifyProfile(profiles, std::move(arcs), std::move(beziers)), sweep)) {
+  for (auto& surface : revolve(profile, sweep)) {
     polyset.surfaces.push_back(std::move(surface));
   }
 }
@@ -211,7 +205,6 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   }
   num_vertices = slice_stride * num_rings;
   std::vector<Vector3d> vertices;
-  std::vector<VectorOfVector2d> first_ring;
   vertices.reserve(num_vertices);
   PolygonIndices indices;
   std::vector<int> color_indices;
@@ -252,11 +245,6 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
         }
         xmid = (xmin + xmax) / 2;
       }
-
-      // The profile as it is actually swept, after alterprofile() has applied
-      // the origin and offset. Kept for the surface records below, which have
-      // to describe where the wall ended up rather than where it was drawn.
-      if (j == fragstart) first_ring.push_back(vertices2d);
 
       for (const auto& v : vertices2d) {
         double tan_pitch = fact / (std::isnan(xmid) ? v[0] : xmid);
@@ -349,7 +337,7 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   auto result = assemblePolySetForManifold(poly, vertices, indices, colors, color_indices, closed,
                                            node.convexity, slice_stride * num_sections, flip_faces);
   if (result != nullptr) {
-    declareSurfacesOfRevolution(node, first_ring, poly, *result);
+    declareSurfacesOfRevolution(node, poly, *result);
   }
   return result;
 }

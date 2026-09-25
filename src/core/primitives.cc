@@ -815,7 +815,9 @@ std::unique_ptr<const Geometry> SquareNode::createGeometry() const
   Outline2d o;
   o.vertices = {v1, {v2[0], v1[1]}, v2, {v1[0], v2[1]}};
   o.color = *OpenSCAD::parse_color("#f9d72c");
-  return std::make_unique<Polygon2d>(o);
+  auto poly = std::make_unique<Polygon2d>(o);
+  poly->declareEdges(EdgeKind::Line);
+  return poly;
 }
 
 static std::shared_ptr<AbstractNode> builtin_square(
@@ -886,6 +888,14 @@ std::unique_ptr<const Geometry> CircleNode::createGeometry() const
   // circle, and the two straight radii are simply not on it - a consumer fits
   // the record to whichever run of vertices does lie on it.
   poly->arcs.push_back(Arc2d{Vector2d(0., 0.), this->r});
+  // And which edges are its chords: all of them, but for a partial circle's two
+  // radii, the last two edges, which are straight.
+  poly->declareEdges(EdgeKind::Arc, 0);
+  if (this->angle < 360.0) {
+    const auto& ids = poly->untransformedOutlines().front().edge_ids;
+    for (std::size_t i = ids.size() - 2; i < ids.size(); i++)
+      poly->edge_decls[ids[i]] = EdgeDecl{EdgeKind::Line, -1};
+  }
   return poly;
 }
 
@@ -1021,6 +1031,12 @@ std::unique_ptr<const Geometry> PolygonNode::createGeometry() const
   if (p->outlines().size() > 0) {
     p->setConvexity(convexity);
   }
+  // The edges are the straight segments between the points given - unless a
+  // point carries a radius, whose rounding is sampled from an arc nothing
+  // records yet, so those edges stay unnamed and are measured.
+  bool rounded = false;
+  for (const auto& pt : this->points) rounded = rounded || pt[2] != 0;
+  if (!rounded) p->declareEdges(EdgeKind::Line);
   p->setColor(*OpenSCAD::parse_color("#f9d72c"));
   return p;
 }

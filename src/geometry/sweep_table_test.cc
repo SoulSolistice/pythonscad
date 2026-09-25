@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 
+#include "geometry/ClipperUtils.h"
 #include "geometry/HullOfRevolution.h"
 #include "geometry/Surface.h"
 #include "geometry/SweptSurfaces.h"
@@ -66,7 +67,7 @@ TEST_CASE("Profile2d: an arc is asked at machine precision, not within a thresho
   const Profile2d p = classifyProfile({VectorOfVector2d{on, off, Vector2d(-1., 0.)}}, {arc}, {});
   CHECK(p.loops[0][0].kind == EdgeKind::Line);
   // (-1, 0) back to (1, 0) is a diameter: both ends on the circle, so by
-  // measurement a chord - see "a D-shaft's flat is a wall" below
+  // measurement a chord - only its maker can say otherwise (the D-shaft below)
   CHECK(p.loops[0][2].kind == EdgeKind::Arc);
 }
 
@@ -164,26 +165,87 @@ TEST_CASE("extrude: a chord is not a wall", "[sweep-table]")
   CHECK(ofKind<CylinderSurface>(surfaces)[0]->r == 5.);
 }
 
-// KNOWN DEFECT, marked rather than deleted: the day identity reaches the
-// classifier this starts passing, Catch2 reports it, and the mark comes off.
-//
 // A straight edge whose two ends both lie on a recorded circle - the flat of a
-// D-shaft, the back of a half disc - is a chord by every measurement there is,
-// and its wall is not declared. Only the maker knows which it is:
-// doc/step-export-wip.md, *Inferred where a declaration was possible*, item 2.
-TEST_CASE("extrude: a D-shaft's flat is a wall", "[sweep-table][!shouldfail]")
+// D-shaft, the back of a half disc - is a chord by every measurement there is.
+// Only its maker knows it is not: doc/step-export-wip.md, *Inferred where a
+// declaration was possible*, item 2. This was marked [!shouldfail] until the
+// maker's word reached the classifier.
+TEST_CASE("extrude: a D-shaft's flat is a wall, because its maker says so", "[sweep-table]")
 {
-  const Arc2d arc{Vector2d(0., 0.), 5.};
-  VectorOfVector2d d;
+  Outline2d d;
   for (int i = 0; i <= 8; i++) {
     const double t = -M_PI / 2 + M_PI * i / 8;
-    d.emplace_back(5. * cos(t), 5. * sin(t));
+    d.vertices.emplace_back(5. * cos(t), 5. * sin(t));
   }
+  Polygon2d poly(d);
+  poly.arcs.push_back(Arc2d{Vector2d(0., 0.), 5.});
+  poly.declareEdges(EdgeKind::Arc, 0);
+  // the last edge closes the outline straight back across the diameter
+  poly.edge_decls[poly.untransformedOutlines()[0].edge_ids.back()] = EdgeDecl{EdgeKind::Line, -1};
+
+  const Profile2d measured = classifyProfile({d.vertices}, poly.arcs, {});
+  CHECK(measured.loops[0].back().kind == EdgeKind::Arc);  // what measurement says
+  const Profile2d declared = classifyProfile(poly);
+  CHECK(declared.loops[0].back().kind == EdgeKind::Line);
+  CHECK(declared.loops[0].back().declared);
+
   Extrusion sweep;
   sweep.height = Vector3d(0., 0., 7.);
   // two caps and the flat
-  CHECK(ofKind<PlaneSurface>(extrude(classifyProfile({d}, {arc}, {}), sweep)).size() == 3);
+  CHECK(ofKind<PlaneSurface>(extrude(declared, sweep)).size() == 3);
 }
+
+TEST_CASE("identity: an edge is the one edge its two ends both name", "[sweep-table]")
+{
+  CHECK(commonEdge(packEdges(1, 2), packEdges(2, 3)) == 2);
+  CHECK(commonEdge(packEdges(1, 2), packEdges(3, 4)) == 0);  // nothing in common
+  CHECK(commonEdge(packEdges(1, 2), packEdges(2, 1)) == 0);  // two: no one edge between them
+  CHECK(commonEdge(packEdges(0, 2), packEdges(0, 2)) == 2);  // unnamed halves name nothing
+  CHECK(commonEdge(packEdges(0, 0), packEdges(0, 0)) == 0);
+}
+
+TEST_CASE("identity: reversing an outline reverses its edges' names", "[sweep-table]")
+{
+  Outline2d o;
+  o.vertices = {{0., 0.}, {1., 0.}, {1., 1.}, {0., 1.}};
+  o.edge_ids = {10, 11, 12, 13};  // 10: (0,0)-(1,0), 11: (1,0)-(1,1), ...
+  o.reverse();
+  // now (0,1), (1,1), (1,0), (0,0): edge 0 is (0,1)-(1,1), which was 12
+  CHECK(o.edge_ids == std::vector<EdgeId>{12, 11, 10, 13});
+}
+
+#ifdef USINGZ
+TEST_CASE("identity: a D-shaft through Clipper keeps its flat a wall and its arc an arc",
+          "[sweep-table]")
+{
+  // circle(r = 5, $fn = 32) intersected with a square whose side cuts it at x = 3
+  Outline2d c;
+  for (int i = 0; i < 32; i++) {
+    const double t = 2 * M_PI * i / 32;
+    c.vertices.emplace_back(5. * cos(t), 5. * sin(t));
+  }
+  auto circle = std::make_shared<Polygon2d>(c);
+  circle->arcs.push_back(Arc2d{Vector2d(0., 0.), 5.});
+  circle->declareEdges(EdgeKind::Arc, 0);
+  Outline2d q;
+  q.vertices = {{-10., -10.}, {3., -10.}, {3., 10.}, {-10., 10.}};
+  auto square = std::make_shared<Polygon2d>(q);
+  square->declareEdges(EdgeKind::Line);
+
+  const auto shaft = ClipperUtils::apply({circle, square}, Clipper2Lib::ClipType::Intersection);
+  const Profile2d p = classifyProfile(*shaft);
+  REQUIRE(p.loops.size() == 1);
+  int flats = 0, chords = 0, unnamed = 0;
+  for (const auto& e : p.loops[0]) {
+    if (!e.declared) unnamed++;
+    else if (e.kind == EdgeKind::Line) flats++;
+    else if (e.kind == EdgeKind::Arc && e.record == 0) chords++;
+  }
+  CHECK(unnamed == 0);
+  CHECK(flats == 1);
+  CHECK(chords == int(p.loops[0].size()) - 1);
+}
+#endif
 
 namespace {
 

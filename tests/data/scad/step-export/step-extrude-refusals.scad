@@ -35,12 +35,17 @@
 // surface, and the count below is what says none was made.
 // EXPECT: 0 analytic surfaces available (0 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
 //
-// The plane channel is deliberately *not* pinned here, unlike in step-concave
-// where the number falls out of the profile. The third body is an ellipse whose
-// arc record was dropped on the way in, so what it declares is one plane per
-// tessellation chord and the count is the mesher's, not the model's. Asserting
-// it would be capture. The census below is what guards this fixture, and it is
-// exhaustive.
+// And the plane channel, pinned since 2026-09-25. Until then the third body - an
+// ellipse whose arc record the shear drops on the way in - declared one plane
+// per tessellation chord: with the record gone, nothing could tell a chord from
+// a straight edge, so its 32 chords were measured straight, and the count was
+// the mesher's. Now circle() names its edges as chords of its arc, and the name
+// survives the shear with the record lost - curved, and no longer straight by
+// default - so no body declares a wall. What is left falls out of the model: the
+// near caps of all four at z = 0, the far caps of the first three at z = 20, and
+// the oblique one's far cap, 20 along v = [6, 0, 20], at z = 400 / sqrt(436).
+// EXPECT: and 3 declared planes
+// EXPECT: 3 declared planes: 3 written as a face, 0 read to identify a surface without one standing on them, 0 with no mesh left on them, 0 unexplained
 //
 // The census is exhaustive, and for a refusal fixture that is the whole point:
 // the assertion is not the number 2152, which is the mesher's business and was
