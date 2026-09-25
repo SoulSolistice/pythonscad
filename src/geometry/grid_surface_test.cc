@@ -530,6 +530,95 @@ TEST_CASE("a sweep follows its laws", "[sweepsurface][laws]")
   }
 }
 
+/*! A written B-spline surface, degree du along u and dv along v, at (u, v). */
+static Vector3d evalSplineSurface(int du, int dv, int nr, int nc, const std::vector<Vector3d>& ctrl,
+                                  const std::vector<double>& ku, const std::vector<int>& mu,
+                                  const std::vector<double>& kv, const std::vector<int>& mv, double u,
+                                  double v)
+{
+  auto full = [](const std::vector<double>& k, const std::vector<int>& m) {
+    std::vector<double> out;
+    for (std::size_t i = 0; i < k.size(); i++) out.insert(out.end(), m[i], k[i]);
+    return out;
+  };
+  auto basis = [](const std::vector<double>& U, int n, int p, double t) {
+    std::vector<double> N(n, 0.0);
+    // Cox - de Boor from degree 0 up, the half-open intervals closed at the end.
+    std::vector<double> B(U.size() - 1, 0.0);
+    for (std::size_t i = 0; i + 1 < U.size(); i++) {
+      B[i] = (U[i] <= t && t < U[i + 1]) || (t == U.back() && U[i] < U[i + 1] && U[i + 1] == U.back())
+               ? 1.0
+               : 0.0;
+    }
+    for (int d = 1; d <= p; d++) {
+      for (std::size_t i = 0; i + d + 1 < U.size(); i++) {
+        double a = 0, b = 0;
+        if (U[i + d] > U[i]) a = (t - U[i]) / (U[i + d] - U[i]) * B[i];
+        if (U[i + d + 1] > U[i + 1]) b = (U[i + d + 1] - t) / (U[i + d + 1] - U[i + 1]) * B[i + 1];
+        B[i] = a + b;
+      }
+    }
+    for (int i = 0; i < n; i++) N[i] = B[i];
+    return N;
+  };
+  const std::vector<double> Nu = basis(full(ku, mu), nr, du, u);
+  const std::vector<double> Nv = basis(full(kv, mv), nc, dv, v);
+  Vector3d p = Vector3d::Zero();
+  for (int i = 0; i < nr; i++) {
+    for (int j = 0; j < nc; j++) p += ctrl[std::size_t(i) * nc + j] * (Nu[i] * Nv[j]);
+  }
+  return p;
+}
+
+TEST_CASE("a sweep is written as its closed form, corners kept", "[sweepsurface][laws][render]")
+{
+  SweepLaws laws;
+  laws.radius_at = {0.0, 0.6, 1.0};
+  laws.radius = {20.0, 23.0, 23.0};
+  const std::vector<Vector2d> flat = {Vector2d(0.3, -2.0), Vector2d(0.0, -0.75), Vector2d(0.0, 0.75),
+                                      Vector2d(0.3, 2.0)};
+  const std::vector<Vector2d> full = {Vector2d(0.3, -2.0), Vector2d(-1.5, -0.75), Vector2d(-1.5, 0.75),
+                                      Vector2d(0.3, 2.0)};
+  laws.profile_at = {0.0, 0.2, 0.9, 1.0};
+  laws.profile = {flat, full, full, flat};
+  std::string why;
+  const auto sweep =
+    SweepSurface::make(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0), laws, 6.0, 3.0, 0, why);
+  REQUIRE(sweep != nullptr);
+  int du = 0, dv = 0, nr = 0, nc = 0;
+  std::vector<Vector3d> ctrl;
+  std::vector<double> ku, kv;
+  std::vector<int> mu, mv;
+  REQUIRE(sweep->splineForm(du, dv, nr, nc, ctrl, ku, mu, kv, mv));
+  CHECK(du == 3);
+  CHECK(dv == 1);
+  REQUIRE(int(ctrl.size()) == nr * nc);
+
+  SECTION("clamped, and C0 exactly at the corners of the laws")
+  {
+    CHECK(mu.front() == 4);
+    CHECK(mu.back() == 4);
+    for (const double c : {0.2, 0.6, 0.9}) {
+      const auto it = std::find(ku.begin(), ku.end(), c);
+      REQUIRE(it != ku.end());
+      CHECK(mu[std::size_t(it - ku.begin())] == 3);
+    }
+  }
+
+  SECTION("within its tolerance of the closed form, u being the sweep's own t")
+  {
+    double worst = 0.0;
+    for (int i = 0; i <= 400; i++) {
+      for (int j = 0; j <= 16; j++) {
+        const double u = i / 400.0, v = j / 16.0;
+        const Vector3d written = evalSplineSurface(du, dv, nr, nc, ctrl, ku, mu, kv, mv, u, v);
+        worst = std::max(worst, (written - sweep->evaluate(u, v)).norm());
+      }
+    }
+    CHECK(worst <= SweepSurface::kRenderTolerance);
+  }
+}
+
 TEST_CASE("a zero-pitch sweep inverts its own points", "[sweepsurface][!shouldfail]")
 {
   const std::vector<Vector2d> profile = {Vector2d(0, 0), Vector2d(1, 0), Vector2d(0, 1)};

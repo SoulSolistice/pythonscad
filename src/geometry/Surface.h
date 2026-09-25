@@ -651,10 +651,10 @@ public:
    * no cut. */
   [[nodiscard]] double seamShift(int seam_column) const;
 
-  [[nodiscard]] bool splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
-                                std::vector<Vector3d>& ctrl, std::vector<double>& knots_u,
-                                std::vector<int>& mults_u, std::vector<double>& knots_v,
-                                std::vector<int>& mults_v, int seam_column = 0) const;
+  [[nodiscard]] virtual bool splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
+                                        std::vector<Vector3d>& ctrl, std::vector<double>& knots_u,
+                                        std::vector<int>& mults_u, std::vector<double>& knots_v,
+                                        std::vector<int>& mults_v, int seam_column = 0) const;
 
   int rows = 0, cols = 0;
   bool closed_v = false;
@@ -664,7 +664,9 @@ protected:
   /*! How many spans the profile has across it. See vspans() below. */
   [[nodiscard]] int vspansCount() const { return vspans(); }
 
-private:
+protected:
+  // What a closed form deriving from the grid renders itself with - see
+  // SweepSurface::splineForm.
   /*! Positions rounded to a grid, so membership is a lookup rather than a scan
    * over every declared point for every vertex of the mesh. Rebuilt whenever
    * the points move. 1e-9 is far below anything measured and far above one ulp
@@ -776,8 +778,33 @@ public:
    * along it. */
   [[nodiscard]] double profileDistance(double t, double dr, double dz, double *at = nullptr) const;
 
+  /*! The B-spline this sweep is written as: the closed form rendered, not the
+   * inherited grid's interpolant of a few stations. Parametrised by the sweep's
+   * own t along u - which is what `project` answers, and so what every pcurve
+   * on a face of it means - and held to kRenderTolerance of the closed form,
+   * the tolerance the curves on it are held to: along each column a clamped
+   * cubic in t, its stations doubled wherever a point between them misses, and
+   * a knot of multiplicity 3 at every corner of the laws, where the surface is
+   * only C0. Across the profile it is exact, the closed form being linear along
+   * each profile edge at a station. */
+  [[nodiscard]] bool splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
+                                std::vector<Vector3d>& ctrl, std::vector<double>& knots_u,
+                                std::vector<int>& mults_u, std::vector<double>& knots_v,
+                                std::vector<int>& mults_v, int seam_column = 0) const override;
+  static constexpr double kRenderTolerance = 1e-7;
+
   SweepLaws laws;
   double pitch = 0, turns = 0;
   Vector3d ref;  // where theta is measured from; unit, perpendicular to normdir
   int stations = 0;
+
+private:
+  /*! The rendering along u, made once: rows * cols control points, and u's
+   * distinct knots with their multiplicities. */
+  bool renderAlongU() const;
+  mutable bool rendered_ = false, render_ok_ = false;
+  mutable int render_rows_ = 0;
+  mutable std::vector<Vector3d> render_ctrl_;
+  mutable std::vector<double> render_knots_;
+  mutable std::vector<int> render_mults_;
 };

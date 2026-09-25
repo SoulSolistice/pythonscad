@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <Eigen/Dense>
 #include <Eigen/LU>
+#include <Eigen/Sparse>
+#include <Eigen/SparseLU>
 #include <limits>
 #include <memory>
 #include <typeinfo>
@@ -916,9 +918,12 @@ std::vector<Vector3d> GridSurface::withClosingColumn(const std::vector<Vector3d>
 {
   if (!closed_v || cols < 1) return src;
   const int start = ((seam_column % cols) + cols) % cols;
+  // As many rows as the net handed in has - the grid's own, or a rendering of
+  // a closed form with rows of its own.
+  const int n = int(src.size()) / cols;
   std::vector<Vector3d> out;
-  out.reserve(src.size() + rows);
-  for (int i = 0; i < rows; i++) {
+  out.reserve(src.size() + std::size_t(n));
+  for (int i = 0; i < n; i++) {
     for (int j = 0; j < cols; j++) {
       out.push_back(src[std::size_t(i) * cols + (start + j) % cols]);
     }
@@ -1610,6 +1615,134 @@ int SweepSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
   // answers this outright, and the only tolerance is the one the caller is
   // entitled to state about its own mesh.
   return onSurface(pt, membershipTolerance()) ? 1 : 0;
+}
+
+bool SweepSurface::renderAlongU() const
+{
+  if (rendered_) return render_ok_;
+  rendered_ = true;
+  render_ok_ = false;
+  const int n_cols = cols;
+  const int spans_v = vspans();
+  if (n_cols < 1 || spans_v < 1) return false;
+  // Where the laws turn a corner the surface is only C0 along the sweep, and
+  // each stretch between corners is rendered on its own.
+  std::vector<double> ends{0.0};
+  for (const double c : laws.corners()) ends.push_back(c);
+  ends.push_back(1.0);
+
+  std::vector<Vector3d> rows_out;  // accumulated control rows, n_cols each
+  std::vector<double> knots{0.0};
+  std::vector<int> mults{GRID_DEGREE + 1};
+  for (std::size_t s = 0; s + 1 < ends.size(); s++) {
+    const double a = ends[s], b = ends[s + 1];
+    // Enough stations to start with that a cubic has something to fit, and
+    // then as many more as the closed form needs.
+    int n = std::max(GRID_DEGREE + 1, int(std::ceil(8.0 * fabs(turns) * (b - a))) + 1);
+    std::vector<double> full;
+    std::vector<Vector3d> poles_seg;
+    for (;;) {
+      std::vector<double> t(n);
+      for (int i = 0; i < n; i++) t[i] = a + (b - a) * double(i) / double(n - 1);
+      t.back() = b;
+      // The knots: clamped at the ends of the stretch, averaged inside it.
+      full.assign(std::size_t(n) + GRID_DEGREE + 1, a);
+      for (int i = 0; i <= GRID_DEGREE; i++) full[std::size_t(n) + i] = b;
+      for (int j = 1; j <= n - GRID_DEGREE - 1; j++) {
+        double acc = 0.0;
+        for (int i = j; i <= j + GRID_DEGREE - 1; i++) acc += t[i];
+        full[std::size_t(j) + GRID_DEGREE] = acc / GRID_DEGREE;
+      }
+      // Banded - four basis functions a row - so solved sparse: the cost grows
+      // with the stations, not with their square.
+      std::vector<Eigen::Triplet<double>> entries;
+      entries.reserve(std::size_t(n) * (GRID_DEGREE + 1));
+      for (int i = 0; i < n; i++) {
+        const int span = findSpan(full, n, t[i]);
+        double basis[GRID_DEGREE + 1];
+        basisFuns(full, span, t[i], basis);
+        for (int k = 0; k <= GRID_DEGREE; k++) {
+          if (basis[k] != 0.0) entries.emplace_back(i, span - GRID_DEGREE + k, basis[k]);
+        }
+      }
+      Eigen::SparseMatrix<double> A(n, n);
+      A.setFromTriplets(entries.begin(), entries.end());
+      Eigen::SparseLU<Eigen::SparseMatrix<double>> lu;
+      lu.compute(A);
+      if (lu.info() != Eigen::Success) return false;
+      poles_seg.assign(std::size_t(n) * n_cols, Vector3d::Zero());
+      Eigen::MatrixXd rhs(n, 3);
+      for (int j = 0; j < n_cols; j++) {
+        const double v = double(j) / spans_v;
+        for (int i = 0; i < n; i++) rhs.row(i) = evaluate(t[i], v).transpose();
+        const Eigen::MatrixXd sol = lu.solve(rhs);
+        if (!sol.allFinite()) return false;
+        for (int i = 0; i < n; i++) poles_seg[std::size_t(i) * n_cols + j] = sol.row(i).transpose();
+        // The ends are the closed form's own points at the corners, so the
+        // stretches either side meet exactly.
+        poles_seg[std::size_t(j)] = evaluate(t.front(), v);
+        poles_seg[std::size_t(n - 1) * n_cols + j] = evaluate(t.back(), v);
+      }
+      // How far the rendering strays between its stations, against the form.
+      double worst = 0.0;
+      for (int i = 0; i + 1 < n; i++) {
+        const double mid = 0.5 * (t[i] + t[i + 1]);
+        const int span = findSpan(full, n, mid);
+        double basis[GRID_DEGREE + 1];
+        basisFuns(full, span, mid, basis);
+        for (int j = 0; j < n_cols; j++) {
+          Vector3d p = Vector3d::Zero();
+          for (int k = 0; k <= GRID_DEGREE; k++)
+            p += poles_seg[std::size_t(span - GRID_DEGREE + k) * n_cols + j] * basis[k];
+          worst = std::max(worst, (p - evaluate(mid, double(j) / spans_v)).norm());
+        }
+      }
+      if (worst <= kRenderTolerance) break;
+      // A safety bound, not a tolerance. Between the laws' corners the form is
+      // analytic - linear laws on a helix - so a cubic converges like h^4 and
+      // comes nowhere near it; only a corner the laws did not name could, and
+      // then the sweep is left to the inherited grid.
+      if (n > 1 << 16) return false;
+      n = 2 * n - 1;  // every station kept, one more between each two
+    }
+    const std::size_t skip = s == 0 ? 0 : 1;  // the corner row the stretch before ended on
+    rows_out.insert(rows_out.end(), poles_seg.begin() + long(skip * n_cols), poles_seg.end());
+    for (int k = GRID_DEGREE + 1; k < n; k++) {
+      knots.push_back(full[std::size_t(k)]);
+      mults.push_back(1);
+    }
+    knots.push_back(b);
+    mults.push_back(s + 2 == ends.size() ? GRID_DEGREE + 1 : GRID_DEGREE);
+  }
+  render_rows_ = int(rows_out.size()) / n_cols;
+  render_ctrl_ = std::move(rows_out);
+  render_knots_ = std::move(knots);
+  render_mults_ = std::move(mults);
+  render_ok_ = true;
+  return true;
+}
+
+bool SweepSurface::splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
+                              std::vector<Vector3d>& ctrl, std::vector<double>& knots_u,
+                              std::vector<int>& mults_u, std::vector<double>& knots_v,
+                              std::vector<int>& mults_v, int seam_column) const
+{
+  if (!renderAlongU()) {
+    return GridSurface::splineForm(degree_u, degree_v, rows_out, cols_out, ctrl, knots_u, mults_u,
+                                   knots_v, mults_v, seam_column);
+  }
+  // Across the profile, the grid's own form: ruled, degree 1, the closing
+  // column repeated for a closed profile, and the seam where the caller puts it.
+  if (!GridSurface::splineForm(degree_u, degree_v, rows_out, cols_out, ctrl, knots_u, mults_u, knots_v,
+                               mults_v, seam_column)) {
+    return false;
+  }
+  degree_u = GRID_DEGREE;
+  rows_out = render_rows_;
+  knots_u = render_knots_;
+  mults_u = render_mults_;
+  ctrl = withClosingColumn(render_ctrl_, seam_column);
+  return true;
 }
 
 std::shared_ptr<Surface> SweepSurface::clone() const
