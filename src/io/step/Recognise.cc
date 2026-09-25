@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include "geometry/recognition/Pipeline.h"
+#include "geometry/recognition/Reports.h"
 
 void StepKernel::BodyBuild::recognise()
 {
@@ -39,4 +40,20 @@ void StepKernel::BodyBuild::recognise()
     inputs.approximate = approximate;
     recognition::runPipeline(inputs, writability, rec);
   }
+}
+
+void StepKernel::BodyBuild::reportRecognition()
+{
+  const recognition::ReportInputs report_inputs{
+    features,
+    surfaces,
+    recognition::Mesh{&vertices, &loops, &loop_valid, &loop_is_hole, &loop_normals},
+    faceOrigin,
+    owned,
+    &rec.d0_regions,
+    &rec.d0_representations};
+  recognition::dumpLedger(report_inputs);
+  recognition::reportArbitration(report_inputs);
+  recognition::reportRegions(report_inputs);
+  recognition::reportRepresentations(report_inputs);
 }

@@ -23,6 +23,7 @@
 #include "geometry/Surface.h"
 #include "geometry/recognition/Pipeline.h"
 #include "io/step/BoundaryCycles.h"
+#include "io/step/CornerLadder.h"
 #include "geometry/linalg.h"
 #include "io/StepKernel.h"
 
@@ -123,12 +124,187 @@ struct StepKernel::BodyBuild {
   bool boundaryLiesOnSurface(const AnalyticFeatures::Patch& patch,
                              const std::set<std::set<int>>& agreed);
 
-  /*! The corner placement: every corner a rung can place is moved onto the
-   * surfaces the file asserts there, the arbiter choosing among the rungs'
-   * candidates (CornerLadder.h), and a planar face bent by a move is split into
-   * the triangles it is written as, `split_for_corners`. Runs once recognition
-   * has said which faces are analytic, and before any face is written. */
+  /*! Put the junction corners on the curve their two owners cross along - but
+   * only once it is known which faces are analytic, and only if no face that
+   * keeps a PLANE would be bent by it.
+   *
+   * A corner two declared surfaces made belongs on their intersection, and
+   * reportOwnership has computed that point all along. Where it may be applied
+   * is the whole difficulty, and two earlier places are ruled out by
+   * measurement, both recorded in doc/step-export-development.md, *Corner
+   * placement*: before mergeTriangles it keeps the neighbours planar and
+   * destroys the merge, at twelve to sixty-two times the faces; after the merge
+   * but before recognition it bends the faceted neighbours by 0.0331 where they
+   * are polygons.
+   *
+   * Here is the place that costs neither. Recognition has already run on the
+   * untouched, fully merged mesh, so the claims are what they were; and an
+   * analytic face does not care whether its corners are coplanar, only a PLANE
+   * does. On step-bored-cone 52 faces use a movable corner and every one of
+   * them is written analytic, so nothing is bent and nothing is split.
+   *
+   * Where a polygon that keeps its plane would be bent, the corners it
+   * implicates are refused and the rest kept - see applyCornerMoves. It was all
+   * of them or none, per export, while a boundary half moved could open the
+   * shell (doc/step-export-development.md, *Half a fix is worse than none*);
+   * open item 11 closed the causes of that. */
   void placeCorners();
+  // ...whose steps, in order:
+  /*! The other half of the placement: a corner one declared surface shares with
+   * a plane the mesh carries and nothing declared.
+   *
+   * Here rather than beside the two-owner case in reportOwnership, because
+   * *which* plane is only answerable here. Asked of raw triangles it cannot be
+   * done: a frustum cap shares an original with its wall, and no distance
+   * threshold separates a cut facet near the rim from a wall facet, or a thin
+   * base sliver from either - three attempts, all in
+   * doc/step-export-development.md. mergeTriangles has since answered it
+   * exactly, because a merged face that keeps a PLANE *is* a plane: the planes
+   * at a corner are the distinct ones among the faces using it.
+   *
+   * One plane, and the corner goes on the conic where it meets the declared
+   * surface. Two, and it is a triple point - the cut and the sliver of base a
+   * tilted cut leaves behind - which belongs on neither conic and stays. */
+  void placeOnMeshPlanes();
+
+  /*! The recognition ledger and its reports, printed between the placement
+   * rungs that read recognition and the ones that write the file. */
+  void reportRecognition();
+
+  /*! Ordered after the two paths above, and that order is the doctrine rather
+   * than a convenience: where the model declared what a corner is on, the
+   * declaration decides, and this general path applies only to what the
+   * declarations left. Every path checks `moves.count(v)` first, so first refusal
+   * is all the ordering does. Measured on step-exact-trim, where 32 corners are
+   * reachable both ways: run first, this claimed all 32 and the declared rung
+   * reported none.
+   * A corner belongs where the surfaces of the analytic faces it bounds cross.
+   *
+   * This is the general statement of what the two placements above do for
+   * special cases, and it is the one the *file* can be held to: whatever
+   * provenance says about which original made a vertex, the faces written on it
+   * assert that the corner lies on their surfaces, and where two of them meet it
+   * asserts both. Provenance cannot answer this on its own - it is per original
+   * solid, so it names a cylinder for a corner sitting on that solid's cap
+   * (open item 18), and it names two coaxial cylinders 3.000 mm apart, which
+   * never meet, for the corners where the band family's sweep crosses its bore.
+   * Both are cases where the owners are not the surfaces the file will assert.
+   *
+   * Measured on `step-band-family` at $fn 32: 47 of its 1234 candidate edges
+   * fall back to chords, and they are exactly the edges whose endpoints are off
+   * the sweep - by 2.2e-02 to 1.0e-01, the 32-gon's own sagitta
+   * 20(1 - cos(pi/32)) = 0.0963, so those ends sit on chord planes and were
+   * never placed at all. A Bezier interpolates its endpoints, so no degree and
+   * no better tracing can rescue an edge whose ends are not on the surface:
+   * placing them is what turns those chords into the curve the two surfaces
+   * actually cross along. See open items 3 and 9.
+   *
+   * Held to the ladder's own rules. The crossing is solved to an absolute
+   * 1e-11, accepted only where the result is on *both* surfaces to 1e-9, and a
+   * corner may travel no further than its nearest neighbouring vertex - which is
+   * section 4's bound, and not the longest edge at it, which is the trap that
+   * licensed a 1.9976 move on step-partial-cylinder. */
+  void placeOnFileFaces();
+
+  /*! A corner of a trimmed quadric that nothing else holds goes on that quadric.
+   *
+   * The placement above reaches a corner two surfaces made. It does not reach a
+   * corner the *mesh* made in the middle of a facet, which a trim then left on
+   * the boundary of the face written on that quadric: nothing declared it, so
+   * provenance names no owners for it and no crossing curve applies. It is
+   * nonetheless a corner of an analytic face, sitting at the inradius of the
+   * polygon the surface was tessellated as - 20(1 - cos(pi/32)) = 0.0963 inside
+   * the cylinder its own face is written on.
+   *
+   * On step-band-family that is the last 39 corners, at the height where the
+   * ridge tapers to nothing and the trim runs along the bore's own facets
+   * instead of across them. They are moved onto the surface their face names,
+   * and only where no other exact declared surface already holds them - a
+   * corner on two of them belongs where both agree, which is the crossing curve
+   * the paths above compute, not on either one alone. */
+  void placeOnOwnQuadric();
+
+  /*! A welded vertex stays where it is.
+   *
+   * Those are the insertions that keep the shell conformal: a vertex one face
+   * has on an edge another face spans in one line, added to both so they meet
+   * edge for edge. It therefore sits on the *boundary* of faces whose loops do
+   * not contain it, and the bend gate below - which reads each face's own loop -
+   * cannot see what moving it does to them. On step-declare-grid-two-bands one
+   * such vertex was moved 1.73e-07 off the flat bottom it lies on the rim of,
+   * and every loop in the file was still within 1e-9 of its own plane: the face
+   * asserted a plane a corner of it was off, and nothing internal could tell. */
+  void holdWeldedVertices();
+
+  /*! Keep every exact thing the corner is already on.
+   *
+   * A corner owned by a declared quadric and a declared sweep was being put
+   * where the two cross - but the two are not worth the same. The quadric
+   * states where its surface is; the sweep was interpolated through the model's
+   * stations and publishes a tessellation band saying how well. Aiming at their
+   * crossing curve spends an exact surface to satisfy a fitted one.
+   *
+   * It shows up as a plane. The mesh's flat bottom on step-declare-grid.py is a
+   * 95-corner face, and one of its corners is owned by the wall cylinder and
+   * the ridge's sweep; placed on their crossing curve it leaves z = 0 by
+   * 0.0423, and a face that big cannot be fanned without turning the part's
+   * flat bottom into 93 triangles, three of them off level and one by 21
+   * degrees. The corner was exactly on that plane, 0.0103 off the cylinder -
+   * 19.2(1 - cos(pi/96)), the wall's own sagitta - and 0.0378 off the sweep,
+   * which had declared a band of 0.1290. Nothing was wrong with it that the
+   * sweep was entitled to complain about.
+   *
+   * So: a plane the mesh carries *and a declaration vouches for* is kept, and
+   * the corner is placed on that plane crossed with its exact owner instead.
+   * Measured over the fixture set, 1533 merged planes are bent by a move and
+   * exactly 2 are vouched for - the flat bottoms of step-declare-grid.py and
+   * -strip, matching a declaration's own plane to 0.00e+00 - so this reaches
+   * the case it is for and no other.
+   *
+   * The direction is what makes it safe: a declaration only ever *confirms* a
+   * plane the mesh already has, and never invents one. refpt is not reliably a
+   * rim - declare_cylinder takes the caller's centre, and a fitted cylinder's
+   * refpt is wherever the fit landed - so a plane the mesh does not carry must
+   * not be conjured out of one. */
+  void keepExactSurfaces();
+
+  /*! No move may take a corner off the surface of an analytic face it bounds.
+   *
+   * The veto below asks that of a face that keeps a PLANE, and nothing asked it
+   * of a curved one: the corner is written as a vertex of that face, and a face
+   * bounded by a point off its own surface is describing a different surface.
+   * Every path above is meant to satisfy this by construction - the crossing
+   * puts a corner on both its owners, the conic and triple placements on their
+   * owner, the pass onto a quadric on the face's own - and one of them did not.
+   * The placement onto a conic trusted provenance's single owner, and where a
+   * boolean cut every facet of a bore, that owner was the wall across the cap:
+   * band-fn024's 48 bore corners were slid 3.0 off the face they bound, lid10's
+   * 120 chamfer corners 0.65 and 2.25, hidden only by the plane veto. That path
+   * now keeps a corner on the quadric it is already on (see deserts_exact), and
+   * this is measured to be reached by no fixture and no flagship coupon, with
+   * the veto and without it.
+   *
+   * So it is an error, not a report: reaching it means a placement has a defect
+   * the file would carry. The move is held, so the file stays right, and the
+   * flagship check fails on the message, so the defect cannot come back quietly.
+   *
+   * Against each face's own declaration: a quadric states where it is, a grid
+   * or patch publishes its band - AnalyticFeatures::declaredBand - and a corner
+   * already that far off is judged only on whether the move takes it further.
+   * A band is not a Surface record, so its cone or cylinder is read off its
+   * axis and rims. A projection that does not answer judges nothing. */
+  void checkMovesStayOnFaces();
+
+  /*! The moves, written into the working vertices: the corners a bent planar
+   * face implicates are refused, settling until no face bends (refusals only
+   * grow), and a polygon a kept move still bends goes into `split_for_corners`
+   * to be written as the triangles its corners now lie on.
+   *
+   * Under the approximation flag only. The exact tier asserts nothing the mesh
+   * does not already state, and moving a vertex is such an assertion - without
+   * this gate step-bored-cone's analytic export comes out with a PLANE
+   * disagreeing with the winding of its own bound. */
+  void applyCornerMoves();
 
   /*! Emit the recognised bands: one CYLINDRICAL_SURFACE or CONICAL_SURFACE face
    * each, bounded by a circle or an arc at either rim.
@@ -467,6 +643,44 @@ struct StepKernel::BodyBuild {
   // Every face of the shell, and the edges bounding each; see assembleFaces.
   std::vector<Face *> sfaces;
   std::vector<std::vector<EdgeCurve *>> face_edges;
+
+  // The corner placement's working state: the moves it proposes, which rung
+  // proposed each, and what each path added.
+  std::map<int, Vector3d> moves = cornerMoves;
+  // Which rung placed each move, so the arbiter can weigh it against the
+  // others. See kCornerRungs.
+  std::map<int, step::CornerRung> move_rung;
+  // what each path added
+  std::size_t on_conic = 0, on_triple = 0, on_own = 0, on_faces = 0, on_plane_face = 0;
+  /*! Whether placing corner `v` at `target` would take it off an exact surface the
+   * model declared and the corner is already on - one other than `own`, which is
+   * where it is being placed.
+   *
+   * The placement onto a conic below rests on provenance naming *one* declared
+   * owner, and provenance is per original solid, decided by whole facets: an
+   * original none of whose facets a boolean left whole owns nothing. Its surface
+   * is then invisible to the vote, and a corner on it is handed to whatever the
+   * other original at that junction owns. Measured on step-band-family at $fn
+   * 24, the ridge cuts all but 2 of the bore's facets - three are needed - so
+   * its 48 rim corners, generated on the r = 20 bore to 1e-14, were given the
+   * r = 23 outer wall as sole owner, slid 3.0 along the cap onto it, and left the
+   * bore face they bound 3.0 off its own surface. lid10 does the same to 120
+   * corners of two chamfers, 0.65 and 2.25 along its z = 95 face. On both, only
+   * the plane veto kept it out of the file - and it does not need the flagship
+   * coupons: a bore with a frustum subtracted through its whole length, three
+   * primitives, writes the bore 3.0 off itself with the veto silent.
+   *
+   * So the question is asked of the declarations rather than of the vote: a
+   * corner on a declared quadric stays on it. That is the rule the pass placing
+   * corners onto their own quadric already keeps, and the one the reroute below
+   * is named for. A surface that answers by projecting is not asked - a grid
+   * states a band, not a position, and a corner off it is its fit's business.
+   *
+   * Asked here and not of the triple-point placement, which rests on the same
+   * single owner: across every fixture and flagship coupon it moved no corner
+   * off a quadric, and a guard with nothing to refuse has regressions nothing
+   * would see. The check before the veto below covers it, loudly. */
+  bool deserts_exact(int v, const Surface *own, const Vector3d& target);
 
   // ---- the kernel methods the phases call
   EdgeCurve *create_line_edge_curve(Vertex *vert1, Vertex *vert2, bool dir)

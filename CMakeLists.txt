@@ -1696,6 +1696,13 @@ set(CORE_SOURCES
   src/io/import_step.cc
   src/io/StepKernel.cc
   src/io/step/BodyBuild.cc
+  src/io/step/CornersApply.cc
+  src/io/step/CornersStayOnFaces.cc
+  src/io/step/CornersKeepExact.cc
+  src/io/step/CornersWelded.cc
+  src/io/step/CornersOnOwnQuadric.cc
+  src/io/step/CornersOnFileFaces.cc
+  src/io/step/CornersOnMeshPlanes.cc
   src/io/step/WriteShells.cc
   src/io/step/CheckAndReport.cc
   src/io/step/PromoteCurves.cc
