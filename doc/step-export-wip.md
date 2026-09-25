@@ -4730,8 +4730,8 @@ box, and neither asks the other.
 | # | where | inferred or refused |
 | --- | --- | --- |
 | 4 | `rotate_extrude`, a sloped edge touching the axis - **done 2026-09-25**: the sweep table's apex row declares the cone, the quadric pass writes it as one face round its apex with a seam, 32 D0 on step-revolve-axis-point | declares nothing: the apex cone, above. (The zero-area facets at the axis are a separate, mesh-side defect.) |
-| 5 | `rotate_extrude`, any Bezier in the profile | every sloped edge's cone is withheld, not only the Beziers' chords; the Bezier edges themselves declare nothing, though a revolved Bezier is exact |
-| 6 | `rotate_extrude`, frames | the plane records add `offset_y`, the cylinders and cones do not - one of the two is in the wrong frame |
+| 5 | `rotate_extrude`, any Bezier in the profile - **done 2026-09-25**: only a straight edge sweeps a surface of its own, so a Bezier chord withholds only its own | every sloped edge's cone is withheld, not only the Beziers' chords; the Bezier edges themselves declare nothing, though a revolved Bezier is exact |
+| 6 | `rotate_extrude`, frames - **done 2026-09-25** with the sweep table | the plane records add `offset_y`, the cylinders and cones do not - one of the two is in the wrong frame |
 | 7 | `linear_extrude`, uneven scale | a sheared straight wall declares nothing; it is exactly the bilinear patch between AB and A'B', a (1,1) Bezier the exporter already writes. An arc under it is a rational (2,1) patch |
 | 8 | `linear_extrude(twist)`, `rotate_extrude` with `v` or twist | the sweep is known in closed form; written D1, since a helicoid has no rational form (above) |
 | 9 | `path_extrude`, `skin` | as above |

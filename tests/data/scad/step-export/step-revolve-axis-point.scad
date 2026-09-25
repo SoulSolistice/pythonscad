@@ -17,11 +17,12 @@
 // refused it, first because the fan left the shell open and then because
 // nobody took the refusal out once the weld had closed it (doc/step-export-wip.md,
 // *Inferred where a declaration was possible*, item 4). The sweep table declares
-// it now as it declares every sloped edge's cone: a face, anchored at its one
-// rim, r = 10 at z = 0. Only the cone - the rims a sloped edge offers as
-// evidence name a cone by its two circles, and this one has a point for the
-// second.
-// EXPECT: 1 analytic surface available (0 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
+// it now as it declares every straight edge's surface - the conic through the
+// circles its two ends sweep, which with one end on the axis is a cone with its
+// apex there: a face, anchored at the rim, r = 10 at z = 0. That rim is
+// declared too, as evidence, as every vertex off the axis is: the circle it
+// sweeps is real whatever the band pass can make of it.
+// EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 //
 // One plane, and it is the model's: of the profile triangle's three edges, the
 // one from [0,0] to [10,0] lies at a single height and sweeps a flat disc, the

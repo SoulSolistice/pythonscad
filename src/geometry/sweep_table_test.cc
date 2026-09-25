@@ -111,8 +111,10 @@ TEST_CASE("revolve: an edge reaching the axis sweeps its cone, apex on the axis"
   CHECK(cones[0]->r == 10.);
   CHECK(cones[0]->slope == -0.5);
   CHECK(cones[0]->refpt == Vector3d(0., 0., 0.));
-  // one rim, so nothing to offer as evidence; the axis sweeps nothing
-  CHECK(ofKind<CylinderSurface>(surfaces).empty());
+  // the rim, as every vertex off the axis is, is evidence; the axis sweeps nothing
+  REQUIRE(ofKind<CylinderSurface>(surfaces).size() == 1);
+  CHECK(ofKind<CylinderSurface>(surfaces)[0]->r == 10.);
+  CHECK_FALSE(ofKind<CylinderSurface>(surfaces)[0]->declaresFace());
   CHECK(ofKind<PlaneSurface>(surfaces).size() == 1);
 }
 

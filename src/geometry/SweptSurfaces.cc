@@ -6,37 +6,34 @@
 #include <utility>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Exact.h"
 
 namespace {
 
+using recognition::forwardError;
 using Surfaces = std::vector<std::shared_ptr<Surface>>;
 
 // ---------------------------------------------------------------------------
 // Revolution
 // ---------------------------------------------------------------------------
 
-/*! Where a profile edge runs, relative to the axis it turns about. Every edge is
- * exactly one of these, and each has its row in revolveEdge. */
-enum class Course {
-  Point,   //!< no extent at all
-  Across,  //!< one level, two radii: an annulus, or a disc where it reaches the axis
-  OnAxis,  //!< along the axis itself
-  Apex,    //!< changing level, one end on the axis
-  Along,   //!< one radius, two levels: a wall
-  Sloped,  //!< neither, and off the axis at both ends
-};
+// The profile's x is the radius and its y the level along the axis.
+//
+// What a revolution makes is four derivations, each from one fact and none
+// asking another: a vertex off the axis sweeps a circle; a straight edge sweeps
+// the conic through its two end circles; a curve record sweeps its own surface;
+// a partial turn has an end plane at either end. Until 2026-09-25 the second was
+// a six-way classification of each edge's course with a row per case - and a
+// chord flag threaded through the rows, each of which had to remember it - and
+// two of the rows had forgotten. The degenerate conics are not cases: they are
+// what the one formula gives where a difference is zero.
 
-// the profile's x is the radius and its y the level along the axis
-const double kEps = 1e-12;
-
-Course courseOf(const ProfileEdge& e)
+/*! Whether two coordinates of the profile are the same number, at machine
+ * precision: each carries at most the rounding of the translation that placed
+ * the profile, and the difference one more. */
+bool same(double u, double v)
 {
-  const Vector2d& a = e.a;
-  const Vector2d& b = e.b;
-  if (fabs(a[1] - b[1]) < kEps) return fabs(a[0] - b[0]) > kEps ? Course::Across : Course::Point;
-  if (a[0] <= kEps && b[0] <= kEps) return Course::OnAxis;
-  if (a[0] <= kEps || b[0] <= kEps) return Course::Apex;
-  return fabs(a[0] - b[0]) <= kEps ? Course::Along : Course::Sloped;
+  return fabs(u - v) <= forwardError(2, fabs(u) + fabs(v));
 }
 
 /*! The records one revolution declares, with the one bookkeeping rule they
@@ -58,7 +55,7 @@ struct RevolutionRecords {
     auto record = std::make_shared<CylinderSurface>(at(p[1]), sweep.axis, p[0]);
     record->evidence_only = !face;
     for (const double r : radii) {
-      if (fabs(r - p[0]) <= kEps * std::max(1.0, r)) {
+      if (same(r, p[0])) {
         if (face) addSurfaceUnique(out, record);  // upgrades the kept record to a face
         return;
       }
@@ -68,75 +65,62 @@ struct RevolutionRecords {
   }
 };
 
-/*! What one straight edge of the profile sweeps. */
-void revolveEdge(const ProfileEdge& e, bool has_beziers, RevolutionRecords& records)
+/*! A vertex off the axis sweeps a circle - whatever its edges are. The circles
+ * are evidence, not faces: no facet lies on a circle, and they are the rims the
+ * band pass identifies a cone or a torus's rings by. */
+void revolveVertex(const Vector2d& p, RevolutionRecords& records)
+{
+  if (p[0] > 0) records.cylinder(p, false);
+}
+
+/*! A straight edge sweeps the conic through the circles its two ends sweep: the
+ * cone whose radius changes by b - a in r over b - a in level. Where the level
+ * does not change that is the plane both circles lie in - an annulus, or a disc
+ * where one end is on the axis; where the radius does not, the cylinder both lie
+ * on - or the axis itself, which sweeps nothing. Where one end is on the axis the
+ * cone's apex is there, and it is a cone like any other.
+ *
+ * Only a straight edge: a chord of a curve sweeps a piece of that curve's
+ * surface, which the curve's record declares (revolveArc). */
+void revolveLine(const ProfileEdge& e, RevolutionRecords& records)
 {
   const Vector2d& a = e.a;
   const Vector2d& b = e.b;
-  switch (courseOf(e)) {
-  case Course::Point: return;  // sweeps a circle, which bounds a face and is not one
-  case Course::Across:
-    // A flat annulus, or a disc - a *plane*, exactly, at the level the profile
-    // puts it, and saying so is worth as much as saying which cylinder a wall is
-    // on. A plane fitted to the mesh instead moves with the tessellation and
-    // with whatever a boolean leaves behind; this one is the model's own number.
-    addSurfaceUnique(records.out, std::make_shared<PlaneSurface>(records.at(a[1]), records.sweep.axis));
-    return;
-  case Course::OnAxis: return;  // the axis sweeps nothing
-  case Course::Apex:
-    // A cone whose apex is on the axis, and a wall like any other: the cone
-    // itself as a face, anchored at its one rim. Refused
-    // until 2026-09-25 - first because the fan at the apex left zero-area facets
-    // that opened the shell (rotate_extrude welds them now), then because nobody
-    // took the refusal out: doc/step-export-wip.md, *Inferred where a
-    // declaration was possible*, item 4.
-    // No rim as evidence: evidence names a cone by its two rims, and this one
-    // has a point where the second would be.
-    {
-      const Vector2d& rim = a[0] > b[0] ? a : b;
-      if (has_beziers || e.kind != EdgeKind::Line) return;
+  if (same(a[1], b[1])) {
+    // A plane at the level the profile puts it - the model's own number, where
+    // one fitted to the mesh moves with the tessellation and with whatever a
+    // boolean leaves behind. Or, with the radius unchanged too, no edge at all.
+    if (!same(a[0], b[0])) {
       addSurfaceUnique(records.out,
-                       std::make_shared<ConeSurface>(records.at(rim[1]), records.sweep.axis, rim[0],
-                                                     (b[0] - a[0]) / (b[1] - a[1])));
-    }
-    return;
-  case Course::Along:
-    records.cylinder(a, true);  // a wall, on that cylinder - a face of this solid
-    return;
-  case Course::Sloped:
-    // A cone, and the circle at each end of it as *evidence* - rims the band
-    // pass identifies it by; no facet lies on them.
-    records.cylinder(a, false);
-    records.cylinder(b, false);
-    // A chord of a recorded arc is the arc's surface, not a cone; and where the
-    // profile carries Bezier records an edge may be a chord of one of those, so
-    // it declares nothing it cannot state, and the rims stay evidence only.
-    if (has_beziers || e.kind == EdgeKind::Arc) return;
-    // Until 2026-09-24 a sloped edge declared its rims alone, so the cone it
-    // sweeps was *recognised* from them and claimed under a rim's name: on lid10
-    // the seal bead's two flanks - 120 facets - were held on cylinders no facet
-    // lies on, and no identity could make them D0. Anchored at the wider rim, as
-    // cylinder(r1, r2) anchors its own (primitives.cc).
-    {
-      const Vector2d& wide = a[0] >= b[0] ? a : b;
-      addSurfaceUnique(records.out,
-                       std::make_shared<ConeSurface>(records.at(wide[1]), records.sweep.axis, wide[0],
-                                                     (b[0] - a[0]) / (b[1] - a[1])));
+                       std::make_shared<PlaneSurface>(records.at(a[1]), records.sweep.axis));
     }
     return;
   }
+  if (same(a[0], b[0])) {
+    if (a[0] > 0) records.cylinder(a, true);  // a wall, on that cylinder - a face of this solid
+    return;
+  }
+  // Anchored at the wider end, as cylinder(r1, r2) anchors its own
+  // (primitives.cc). Until 2026-09-24 a sloped edge declared its end circles
+  // alone and the cone was recognised from them under a rim's name - on lid10
+  // the seal bead's flanks, 120 facets held on cylinders no facet lies on; until
+  // 2026-09-25 one reaching the axis declared nothing (doc/step-export-wip.md,
+  // *Inferred where a declaration was possible*, item 4).
+  const Vector2d& wide = a[0] >= b[0] ? a : b;
+  addSurfaceUnique(records.out, std::make_shared<ConeSurface>(records.at(wide[1]), records.sweep.axis,
+                                                              wide[0], (b[0] - a[0]) / (b[1] - a[1])));
 }
 
-/*! What one arc record sweeps: a sphere where its centre is on the axis, a ring
- * torus where the whole circle is off it. */
+/*! A circle in the profile sweeps a sphere where its centre is on the axis, and
+ * a ring torus where the whole circle is off it. */
 void revolveArc(const Arc2d& arc, RevolutionRecords& records)
 {
-  if (arc.r <= kEps) return;  // a point
+  if (!(arc.r > 0)) return;  // a point
   const Vector2d centre(arc.centre[0], arc.centre[1]);
-  if (fabs(centre[0]) <= kEps) {
+  if (centre[0] == 0) {
     addSurfaceUnique(records.out,
                      std::make_shared<SphereSurface>(records.at(centre[1]), records.sweep.axis, arc.r));
-  } else if (centre[0] > arc.r + kEps) {
+  } else if (centre[0] > arc.r) {
     addSurfaceUnique(records.out, std::make_shared<TorusSurface>(records.at(centre[1]),
                                                                  records.sweep.axis, centre[0], arc.r));
   }
@@ -329,24 +313,24 @@ void extrudePlanes(const Profile2d& profile, const Extrusion& sweep, Surfaces& o
 std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Revolution& sweep)
 {
   RevolutionRecords records{sweep, {}, {}};
-  const bool has_beziers = !profile.beziers.empty();
   for (const auto& loop : profile.loops) {
-    for (const ProfileEdge& edge : loop) revolveEdge(edge, has_beziers, records);
+    for (const ProfileEdge& edge : loop) {
+      revolveVertex(edge.a, records);
+      if (edge.kind == EdgeKind::Line) revolveLine(edge, records);
+    }
   }
+  for (const auto& arc : profile.arcs) revolveArc(arc, records);
 
-  // The two faces a partial sweep is closed with. Each is the profile's own
-  // plane, standing at one end of the arc and containing the axis, so its normal
-  // is perpendicular to that plane and the axis both. A full turn closes on
-  // itself and has neither.
-  if (fabs(sweep.angle) < 360 - 1e-9) {
+  // The two faces a partial turn is closed with. Each is the profile's own
+  // plane, standing at one end of the turn and containing the axis, so its
+  // normal is perpendicular to that plane and the axis both.
+  if (fabs(sweep.angle) < 360) {
     for (const double at : {sweep.start, sweep.start + sweep.angle}) {
       const double rad = at * M_PI / 180.0;
       addSurfaceUnique(records.out,
                        std::make_shared<PlaneSurface>(sweep.origin, Vector3d(-sin(rad), cos(rad), 0)));
     }
   }
-
-  for (const auto& arc : profile.arcs) revolveArc(arc, records);
   return std::move(records.out);
 }
 
