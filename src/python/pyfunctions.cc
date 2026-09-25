@@ -1013,6 +1013,10 @@ PyMethodDef PyOpenSCADFunctions[] = {
    "band to trust. Use it wherever the model knows its profile and its helix,\n"
    "and keep declare_grid for a sweep that has neither.\n"
    "profile is a list of (dr, dz) pairs measured from radius, on the axis.\n"
+   "Either may change along the sweep, by a law linear in t from 0 to 1 between\n"
+   "keys: radius=[[t, r], ...], profile=[[t, [[dr, dz], ...]], ...], every\n"
+   "profile the same number of points - a thread fading in and out, a socket's\n"
+   "taper.\n"
    "declare_sweep(obj, profile=[[0.6,-1.2],[-1,-0.4],[-1,0.4],[0.6,1.2]],\n"
    "              radius=20, pitch=6, turns=1.5, origin=[0,0,0], axis=[0,0,1])"},
   {"declare_grid", (PyCFunction)python_declare_grid, METH_VARARGS | METH_KEYWORDS,

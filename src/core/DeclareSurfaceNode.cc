@@ -239,6 +239,105 @@ std::shared_ptr<AbstractNode> builtin_declare_grid(
   return withSurface(inst, children, std::move(surface));
 }
 
+/*! A closed profile, as a vector of [dr, dz] pairs. */
+bool sweepProfile(const Value& value, std::vector<Vector2d>& pts)
+{
+  if (value.type() != Value::Type::VECTOR) return false;
+  pts.clear();
+  for (const Value& p : value.toVector()) {
+    double dr = 0, dz = 0;
+    if (!p.getVec2(dr, dz)) return false;
+    pts.emplace_back(dr, dz);
+  }
+  return true;
+}
+
+/*! The radius and the profile as laws - a number or [[t, r], ...], and a
+ * profile or [[t, profile], ...]. Only the extraction is OpenSCAD's: what makes
+ * them laws a sweep can follow is SweepLaws::invalid, which the Python channel
+ * asks too. */
+bool sweepLaws(const Value& radius, const Value& profile, SweepLaws& laws, std::string& why)
+{
+  laws = SweepLaws();
+  if (radius.type() == Value::Type::NUMBER) {
+    laws.radius_at = {0.0};
+    laws.radius = {radius.toDouble()};
+  } else if (radius.type() == Value::Type::VECTOR) {
+    for (const Value& key : radius.toVector()) {
+      double t = 0, r = 0;
+      if (!key.getVec2(t, r)) {
+        why = "radius must be a number or a vector of [t, radius] pairs";
+        return false;
+      }
+      laws.radius_at.push_back(t);
+      laws.radius.push_back(r);
+    }
+  } else {
+    why = "radius must be a number or a vector of [t, radius] pairs";
+    return false;
+  }
+  if (profile.type() != Value::Type::VECTOR || profile.toVector().size() == 0) {
+    why = "profile must be a vector of [dr, dz] pairs, or of [t, profile] pairs";
+    return false;
+  }
+  // A keyed profile's entries are [t, profile] - the second item is a vector -
+  // where a plain profile's are [dr, dz].
+  const Value& first = profile.toVector()[0];
+  const bool keyed = first.type() == Value::Type::VECTOR && first.toVector().size() == 2 &&
+                     first.toVector()[1].type() == Value::Type::VECTOR;
+  if (!keyed) {
+    std::vector<Vector2d> pts;
+    if (!sweepProfile(profile, pts)) {
+      why = "profile must be a vector of [dr, dz] pairs";
+      return false;
+    }
+    laws.profile_at = {0.0};
+    laws.profile = {std::move(pts)};
+    return true;
+  }
+  for (const Value& key : profile.toVector()) {
+    std::vector<Vector2d> pts;
+    if (key.type() != Value::Type::VECTOR || key.toVector().size() != 2 ||
+        key.toVector()[0].type() != Value::Type::NUMBER || !sweepProfile(key.toVector()[1], pts)) {
+      why = "a keyed profile must be a vector of [t, [[dr, dz], ...]] pairs";
+      return false;
+    }
+    laws.profile_at.push_back(key.toVector()[0].toDouble());
+    laws.profile.push_back(std::move(pts));
+  }
+  return true;
+}
+
+std::shared_ptr<AbstractNode> builtin_declare_sweep(
+  const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
+{
+  Parameters parameters =
+    Parameters::parse(std::move(arguments), inst->location(),
+                      {"profile", "radius", "pitch", "turns", "origin", "axis", "ref", "stations"});
+  Vector3d origin(0, 0, 0), axis(0, 0, 1), ref(1, 0, 0);
+  std::shared_ptr<Surface> surface;
+  SweepLaws laws;
+  std::string why;
+  if (!sweepLaws(parameters["radius"], parameters["profile"], laws, why)) {
+    LOG(message_group::Warning, inst->location(), parameters.documentRoot(), "declare_sweep: %1$s", why);
+  } else if (parameters["pitch"].type() != Value::Type::NUMBER ||
+             parameters["turns"].type() != Value::Type::NUMBER) {
+    LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
+        "declare_sweep needs a pitch and a number of turns");
+  } else if (declaredVector(parameters, "origin", inst, false, origin) &&
+             declaredVector(parameters, "axis", inst, true, axis) &&
+             declaredVector(parameters, "ref", inst, false, ref)) {
+    const int stations =
+      parameters["stations"].type() == Value::Type::NUMBER ? int(parameters["stations"].toDouble()) : 0;
+    surface = SweepSurface::make(origin, axis, ref, laws, parameters["pitch"].toDouble(),
+                                 parameters["turns"].toDouble(), stations, why);
+    if (surface == nullptr) {
+      LOG(message_group::Warning, inst->location(), parameters.documentRoot(), "%1$s", why);
+    }
+  }
+  return withSurface(inst, children, std::move(surface));
+}
+
 }  // namespace
 
 void register_builtin_declare_surface()
@@ -269,6 +368,16 @@ void register_builtin_declare_surface()
   // them - so a declared grid is written only with step-approximate-surfaces as
   // well as step-analytic-surfaces, and only where the fit stays inside the band
   // the model's own tessellation already leaves open.
+  // A profile carried along a helix, as the shape: membership is an inversion
+  // of the closed form rather than a projection onto an interpolation. The
+  // radius and the profile may change along it by laws linear between keys.
+  Builtins::init(
+    "declare_sweep", new BuiltinModule(builtin_declare_sweep),
+    {
+      "declare_sweep(profile = [[dr, dz], ...], radius = r, pitch = p, turns = n) { ... }",
+      "declare_sweep(profile = [[t, [[dr, dz], ...]], ...], radius = [[t, r], ...], pitch = p, "
+      "turns = n, origin = [x, y, z], axis = [x, y, z], ref = [x, y, z]) { ... }",
+    });
   Builtins::init("declare_grid", new BuiltinModule(builtin_declare_grid),
                  {
                    "declare_grid(points = [[p, p, ...], [p, p, ...], ...]) { ... }",

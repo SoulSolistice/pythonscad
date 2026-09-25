@@ -530,19 +530,15 @@ static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int c
   return python_declare_core(obj, std::move(surface));
 }
 
-static PyObject *python_declare_sweep_core(PyObject *obj, PyObject *profile, double radius, double pitch,
-                                           double turns, PyObject *origin, PyObject *axis, PyObject *ref,
-                                           int stations)
+/*! A closed profile, as a sequence of (dr, dz) pairs. */
+static bool python_sweep_profile(PyObject *profile, std::vector<Vector2d>& pts)
 {
-  // As with declare_grid, only the extraction is language specific; what makes
-  // the arguments a sweep is decided in SweepSurface::make, so both front ends
-  // reject the same declarations for the same reasons.
   if (profile == nullptr || !PySequence_Check(profile) || PyUnicode_Check(profile)) {
-    PyErr_SetString(PyExc_TypeError, "declare_sweep: profile must be a sequence of (dr, dz) pairs");
-    return nullptr;
+    PyErr_SetString(PyExc_TypeError, "declare_sweep: a profile must be a sequence of (dr, dz) pairs");
+    return false;
   }
   const Py_ssize_t n = PySequence_Size(profile);
-  std::vector<Vector2d> pts;
+  pts.clear();
   pts.reserve(n < 0 ? 0 : std::size_t(n));
   for (Py_ssize_t i = 0; i < n; i++) {
     auto item = py_owned(PySequence_GetItem(profile, i));
@@ -551,10 +547,91 @@ static PyObject *python_declare_sweep_core(PyObject *obj, PyObject *profile, dou
     if (item.get() == nullptr ||
         python_vectorval(item.get(), 2, 2, &a, &b, &unused_z, &unused_w, nullptr)) {
       PyErr_Format(PyExc_TypeError, "declare_sweep: profile point %zd must be two numbers", i);
-      return nullptr;
+      return false;
     }
     pts.emplace_back(a, b);
   }
+  return true;
+}
+
+/*! The radius and the profile as laws (SweepLaws): a radius is a number or a
+ * sequence of (t, radius) pairs; a profile is a sequence of (dr, dz) pairs or
+ * a sequence of (t, profile) pairs. Only the extraction is Python's - what
+ * makes them laws a sweep can follow is SweepLaws::invalid, which the OpenSCAD
+ * builtin asks too. */
+static bool python_sweep_laws(PyObject *radius, PyObject *profile, SweepLaws& laws)
+{
+  laws = SweepLaws();
+  if (radius != nullptr && PyNumber_Check(radius) && !PySequence_Check(radius)) {
+    laws.radius_at = {0.0};
+    laws.radius = {PyFloat_AsDouble(radius)};
+    if (PyErr_Occurred()) return false;
+  } else if (radius != nullptr && PySequence_Check(radius) && !PyUnicode_Check(radius)) {
+    const Py_ssize_t n = PySequence_Size(radius);
+    for (Py_ssize_t i = 0; i < n; i++) {
+      auto item = py_owned(PySequence_GetItem(radius, i));
+      double t = 0, r = 0, unused_z = 0, unused_w = 0;
+      if (item.get() == nullptr ||
+          python_vectorval(item.get(), 2, 2, &t, &r, &unused_z, &unused_w, nullptr)) {
+        PyErr_Format(PyExc_TypeError, "declare_sweep: radius key %zd must be a (t, radius) pair", i);
+        return false;
+      }
+      laws.radius_at.push_back(t);
+      laws.radius.push_back(r);
+    }
+  } else {
+    PyErr_SetString(PyExc_TypeError,
+                    "declare_sweep: radius must be a number or a sequence of (t, radius) pairs");
+    return false;
+  }
+
+  // A keyed profile's entries are (t, profile) - their second item is itself a
+  // sequence - where a plain profile's are (dr, dz).
+  bool keyed = false;
+  if (profile != nullptr && PySequence_Check(profile) && !PyUnicode_Check(profile) &&
+      PySequence_Size(profile) > 0) {
+    auto first = py_owned(PySequence_GetItem(profile, 0));
+    if (first.get() != nullptr && PySequence_Check(first.get()) && PySequence_Size(first.get()) == 2) {
+      auto second = py_owned(PySequence_GetItem(first.get(), 1));
+      keyed =
+        second.get() != nullptr && PySequence_Check(second.get()) && !PyUnicode_Check(second.get());
+    }
+  }
+  if (!keyed) {
+    std::vector<Vector2d> pts;
+    if (!python_sweep_profile(profile, pts)) return false;
+    laws.profile_at = {0.0};
+    laws.profile = {std::move(pts)};
+    return true;
+  }
+  const Py_ssize_t n = PySequence_Size(profile);
+  for (Py_ssize_t i = 0; i < n; i++) {
+    auto key = py_owned(PySequence_GetItem(profile, i));
+    if (key.get() == nullptr || !PySequence_Check(key.get()) || PySequence_Size(key.get()) != 2) {
+      PyErr_Format(PyExc_TypeError, "declare_sweep: profile key %zd must be a (t, profile) pair", i);
+      return false;
+    }
+    auto t = py_owned(PySequence_GetItem(key.get(), 0));
+    auto pts_obj = py_owned(PySequence_GetItem(key.get(), 1));
+    const double at = t.get() != nullptr ? PyFloat_AsDouble(t.get()) : 0.0;
+    if (PyErr_Occurred()) return false;
+    std::vector<Vector2d> pts;
+    if (!python_sweep_profile(pts_obj.get(), pts)) return false;
+    laws.profile_at.push_back(at);
+    laws.profile.push_back(std::move(pts));
+  }
+  return true;
+}
+
+static PyObject *python_declare_sweep_core(PyObject *obj, PyObject *profile, PyObject *radius,
+                                           double pitch, double turns, PyObject *origin, PyObject *axis,
+                                           PyObject *ref, int stations)
+{
+  // As with declare_grid, only the extraction is language specific; what makes
+  // the arguments a sweep is decided in SweepSurface::make, so both front ends
+  // reject the same declarations for the same reasons.
+  SweepLaws laws;
+  if (!python_sweep_laws(radius, profile, laws)) return nullptr;
 
   Vector3d o(0, 0, 0), ax(0, 0, 1), rf(1, 0, 0);
   if (origin != nullptr && origin != Py_None) {
@@ -583,8 +660,7 @@ static PyObject *python_declare_sweep_core(PyObject *obj, PyObject *profile, dou
   }
 
   std::string why;
-  auto surface =
-    SweepSurface::make(o, ax, rf, SweepLaws::constant(radius, pts), pitch, turns, stations, why);
+  auto surface = SweepSurface::make(o, ax, rf, laws, pitch, turns, stations, why);
   if (surface == nullptr) {
     PyErr_SetString(PyExc_TypeError, why.c_str());
     return nullptr;
@@ -596,10 +672,11 @@ PyObject *python_declare_sweep(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   char *kwlist[] = {"obj",    "profile", "radius", "pitch",    "turns",
                     "origin", "axis",    "ref",    "stations", nullptr};
-  PyObject *obj = nullptr, *profile = nullptr, *origin = nullptr, *axis = nullptr, *ref = nullptr;
-  double radius = 0, pitch = 0, turns = 0;
+  PyObject *obj = nullptr, *profile = nullptr, *radius = nullptr, *origin = nullptr, *axis = nullptr,
+           *ref = nullptr;
+  double pitch = 0, turns = 0;
   int stations = 0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOddd|OOOi", kwlist, &obj, &profile, &radius, &pitch,
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOOdd|OOOi", kwlist, &obj, &profile, &radius, &pitch,
                                    &turns, &origin, &axis, &ref, &stations)) {
     return nullptr;
   }
@@ -609,10 +686,10 @@ PyObject *python_declare_sweep(PyObject *self, PyObject *args, PyObject *kwargs)
 PyObject *python_oo_declare_sweep(PyObject *obj, PyObject *args, PyObject *kwargs)
 {
   char *kwlist[] = {"profile", "radius", "pitch", "turns", "origin", "axis", "ref", "stations", nullptr};
-  PyObject *profile = nullptr, *origin = nullptr, *axis = nullptr, *ref = nullptr;
-  double radius = 0, pitch = 0, turns = 0;
+  PyObject *profile = nullptr, *radius = nullptr, *origin = nullptr, *axis = nullptr, *ref = nullptr;
+  double pitch = 0, turns = 0;
   int stations = 0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oddd|OOOi", kwlist, &profile, &radius, &pitch, &turns,
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOdd|OOOi", kwlist, &profile, &radius, &pitch, &turns,
                                    &origin, &axis, &ref, &stations)) {
     return nullptr;
   }

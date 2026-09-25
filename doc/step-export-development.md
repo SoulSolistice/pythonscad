@@ -219,7 +219,7 @@ surface".
 | `linear_extrude` | both caps, always; a plane per straight profile edge the sweep keeps parallel |
 | `FilletNode` | `BezierPatchSurface` |
 | `declare_cylinder` / `_sphere` / `_cone` / `_torus` / `_grid` | SCAD and Python |
-| `declare_sweep` | **Python only** |
+| `declare_sweep` | SCAD and Python; radius and profile may follow piecewise-linear laws in t |
 
 Nothing declares under `polyhedron()`, `import()`, `surface()` or `projection()`,
 correctly: there is no intent to read.

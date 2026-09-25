@@ -992,9 +992,10 @@ the entry above.
   be stated.
 - **`step-band-family.scad` is the obvious first caller.** It computes an exact
   profile and an exact helix, emits a `polyhedron()`, and throws both away.
-- **No SCAD builtin.** `src/python/pyfunctions.cc` has `declare_sweep`;
-  `src/core/DeclareSurfaceNode.cc` does not. `doc/step-export-development.md`
-  says to keep both front ends in step, and this is the one that is not.
+- **No SCAD builtin** - landed 2026-09-25, with laws: the radius as a number or
+  `[[t, r], ...]`, the profile as `[[dr, dz], ...]` or `[[t, profile], ...]`,
+  linear in t between keys, both front ends extracting and `SweepLaws::invalid`
+  deciding.
 
 ### 3. The crossing curve on a sweep: why 142 edges fell back to chords
 
