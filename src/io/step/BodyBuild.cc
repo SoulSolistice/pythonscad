@@ -59,6 +59,8 @@ void StepKernel::BodyBuild::run()
 
   redecideSections();
 
+  decideCrossingRuns();
+
   emitSweepFaces();
 
   emitQuadricFaces();

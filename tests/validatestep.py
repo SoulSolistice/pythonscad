@@ -1057,6 +1057,8 @@ def check_surface_curves(entities, problems):
                 )
                 continue
             degree, mult, knots = knots3
+            if surface.name not in ("CYLINDRICAL_SURFACE", "CONICAL_SURFACE"):
+                continue  # only the two whose parameters this maps; a sweep's is not checked
             placement = _placement(entities, surface.refs()[0]) if surface.refs() else None
             numbers = surface.floats()
             if placement is None or not numbers:
@@ -1069,8 +1071,6 @@ def check_surface_curves(entities, problems):
             ]
             radius = numbers[0]
             half = numbers[1] if surface.name == "CONICAL_SURFACE" and len(numbers) > 1 else 0.0
-            if surface.name not in ("CYLINDRICAL_SURFACE", "CONICAL_SURFACE"):
-                continue  # only the two this exporter writes a fitted pcurve on
             worst = 0.0
             samples = [knots[i] + (knots[i + 1] - knots[i]) * k / 8.0
                        for i in range(len(knots) - 1) for k in range(1, 8)]
@@ -1090,6 +1090,65 @@ def check_surface_curves(entities, problems):
                     "#%d: PCURVE runs %g from the 3D curve it belongs to - the two say different "
                     "things about where the edge is" % (pcurve.id, worst)
                 )
+def check_curve_runs(entities, problems):
+    """One curve between two faces is one edge.
+
+    Where two declared surfaces cross, the boundary between their faces is one
+    curve, and it runs from a vertex where something else meets it to the next.
+    Written a mesh edge at a time it is still that curve, but in hundreds of
+    pieces joined at vertices nothing else touches - on lid10 559 of them round
+    one flank of a helicoid, which a CAD view draws as a zig-zag and a kernel
+    carries as that many edges. So a vertex where exactly two edges meet, both
+    polynomial B-splines between the same two faces, is a curve written in
+    pieces.
+
+    Lines are exempt, as the tessellation's own polylines, and rational
+    B-splines too, which are the runs of a Bezier patch's net. Circles and
+    conics would be the same finding and are not asked yet - a rim written
+    arc by arc is its own open item."""
+    edge_faces = {}
+    for face in entities.values():
+        if face.name != "ADVANCED_FACE":
+            continue
+        for bound_id in face.refs()[:-1]:
+            loop, _ = _bound_loop(entities, bound_id)
+            if loop is None:
+                continue
+            for oe in loop.refs():
+                ends = _edge_endpoints(entities, oe)
+                if ends is not None:
+                    edge_faces.setdefault(ends[2], set()).add(face.id)
+    vertex_edges = {}
+    for ec in entities.values():
+        if ec.name != "EDGE_CURVE" or len(ec.refs()) < 3:
+            continue
+        for v in ec.refs()[:2]:
+            vertex_edges.setdefault(v, set()).add(ec.id)
+
+    def polynomial_spline(ec_id):
+        geometry = entities.get(entities[ec_id].refs()[2])
+        if geometry is not None and geometry.name == "SURFACE_CURVE" and geometry.refs():
+            geometry = entities.get(geometry.refs()[0])
+        return (geometry is not None and geometry.name == "B_SPLINE_CURVE_WITH_KNOTS"
+                and not geometry.has("RATIONAL_B_SPLINE_CURVE"))
+
+    pieces = []
+    for v, edges in sorted(vertex_edges.items()):
+        if len(edges) != 2:
+            continue
+        a, b = sorted(edges)
+        if not (polynomial_spline(a) and polynomial_spline(b)):
+            continue
+        if len(edge_faces.get(a, ())) != 2 or edge_faces.get(a) != edge_faces.get(b):
+            continue
+        pieces.append(v)
+    if pieces:
+        problems.append(
+            "%d vertices join two B-spline edges between the same two faces and meet nothing "
+            "else - one curve written in pieces, first at #%d" % (len(pieces), pieces[0])
+        )
+
+
 def check_closed_sphere(entities, face, surface, radius, oriented, problems):
     """A sphere closed on itself, bounded by its seam meridian and nothing else.
 
@@ -1234,6 +1293,12 @@ def check_cylindrical_faces(entities, problems):
         # so the two are separated by shape instead: a band is a ring closed by
         # a seam or a pair of ends, three or four edges over one bound, and a
         # trimmed patch carries the mesh's whole polyline.
+        #
+        # Or carried it. Since 2026-09-25 the curve two declared surfaces cross
+        # along is written as one edge per run rather than one per mesh edge, so
+        # a patch trimmed by it can have four edges or fewer. An edge on that
+        # curve is a B-spline, which no rim or seam of a ring is, so it is what
+        # says trimmed whatever the count.
         face_edge_ids = []
         for b in bounds:
             bl, _ = _bound_loop(entities, b)
@@ -1285,6 +1350,14 @@ def check_cylindrical_faces(entities, problems):
         # connected pieces a trimmed patch can be small enough to slip under a
         # looser bound and be asked for end edges it was never going to have.
         if len(bounds) != 1 or len(face_edge_ids) > 4:
+            continue
+        crossed = False
+        for oid in face_edge_ids:
+            geom = _edge_geometry(entities, oid)
+            if geom is not None and geom.name == "SURFACE_CURVE" and geom.refs():
+                geom = entities.get(geom.refs()[0])
+            crossed = crossed or (geom is not None and geom.name == "B_SPLINE_CURVE_WITH_KNOTS")
+        if crossed:
             continue
         loop, _ = _bound_loop(entities, bounds[0])
         if loop is None:
@@ -2005,6 +2078,7 @@ def validateSTEP(filename):
         check_bound_enclosure(entities, problems)
         check_cylindrical_faces(entities, problems)
         check_surface_curves(entities, problems)
+        check_curve_runs(entities, problems)
         check_bspline_faces(entities, problems)
         check_shells(entities, problems)
         check_shell_volumes(entities, problems)

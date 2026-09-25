@@ -62,6 +62,19 @@ void StepKernel::BodyBuild::checkAndReport()
       "STEP export: %1$d edge%2$s written as the curve where two declared surfaces cross, "
       "fitted to within %3$.2e of both - a chord and a plane section each lie on only one",
       crossing_written, crossing_written == 1 ? "" : "s", crossing_fit);
+    // One edge per run of the mesh's, from where something else meets it to the
+    // next - see decideCrossingRuns.
+    LOG("STEP export: those %1$d curve%2$s cover %3$d edge%4$s of the mesh", crossing_written,
+        crossing_written == 1 ? "" : "s", int(crossing_mesh_edges), crossing_mesh_edges == 1 ? "" : "s");
+  }
+  if (crossing_unwalked > 0) {
+    // Two faces on one piece that do not both carry it in order: the one that
+    // cannot writes chords where the other writes the curve.
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d crossing edge%2$s met by a face whose boundary does not run along the "
+        "rest of %3$s curve, so the two faces there disagree about an edge",
+        int(crossing_unwalked), crossing_unwalked == 1 ? "" : "s",
+        crossing_unwalked == 1 ? "its" : "their");
   }
   if (arc_refused > 0) {
     std::sort(arc_errors.begin(), arc_errors.end());

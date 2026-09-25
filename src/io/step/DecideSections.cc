@@ -113,7 +113,7 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
   // one owner for such an edge and drop it at the size test below.
   //
   // They are safe to add only because the grid emitter now reads
-  // `crossing_curves` as well: an edge admitted here and taken by the
+  // the crossing pieces as well: an edge admitted here and taken by the
   // cylinder's face while the sweep's face still wrote a chord would give
   // one edge two geometries, which is how this opened the shell on 420
   // edges the first time it was tried.
@@ -336,7 +336,7 @@ void StepKernel::BodyBuild::redecideSections()
     // wrong. `tests/step-flagship-check.py` fails on any EXPORT-ERROR, which
     // is what makes that enforceable rather than merely stated. See open item
     // 11: the fix is to decide an edge's geometry once, keyed by the edge, the
-    // way `crossing_curves` already does.
+    // way the crossing pieces already are.
     LOG(approximate ? message_group::Export_Warning : message_group::Export_Error,
         "STEP export: %1$d plane section%2$s agreed before the corners were placed and %3$s not "
         "after, so %4$s boundary is written as chords%5$s",

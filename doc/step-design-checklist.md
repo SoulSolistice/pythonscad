@@ -72,6 +72,7 @@ needs an instrument that does not exist, that is a finding.
 | D2 | **"On the surface" is not "the right curve"**: a section by a chord plane lies on the quadric and bounds nothing. *rungs: The qualification* | Is a curve accepted because it lies on the surface rather than because it is the boundary? | review; `vertex-on-curve.py`, `edge-on-surface.py` |
 | D3 | **C2 before C5, C0 first**: a declared plane's conic, never a facet plane's; no edge where both sides are one surface. *rungs: What the survey says to do* | Does the change add or keep a conic cut by a plane nothing declared? | report line only |
 | D4 | **Retire C5 only once its inputs are fixed** - the chord it falls back to is further off. *rungs* | Does removing a curve rung leave a worse one in its place? | review; the census |
+| D5 | **One curve between two faces is one edge**, from a vertex where something else meets it to the next; a corner of the curve - a sweep's crease - is a C0 knot of that curve, not a vertex. *author, 2026-09-25: the lead-in's boundary should be a clean curve* | Does the change write a boundary curve in pieces joined where nothing else meets them, or cut one at an arbitrary vertex? | `validatestep.py` `check_curve_runs` (polynomial B-splines); circles and conics not yet - a rim is still written arc by arc |
 
 ## E. Declarations and feedstock
 

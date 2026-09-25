@@ -19,7 +19,8 @@ assumes both.
 | file | role |
 | --- | --- |
 | `src/io/export_step.cc` | entry point: mesh to `StepKernel`, then the ISO-10303-21 header |
-| `src/io/StepKernel.cc/.h` | the entity model, and turning recognised surfaces into entities |
+| `src/io/StepKernel.cc/.h` | the entity model and the reader |
+| `src/io/step/` | turning recognised surfaces into entities: `BodyBuild` (what was `build_tri_body`) runs one phase per file - loops, recognition, the corner placement's rungs, one emitter per kind of face, the crossing runs, the planar faces, the reports - over the helpers `LoopGeometry`, `CornerLadder`, `PlaneSections`, `CrossingArc`, `CrossingRuns`, `BoundaryCycles`, `CurveChecks` |
 | `src/geometry/AnalyticFeatures.cc/.h` | the recogniser: which facets were modelled as a surface |
 | `src/geometry/recognition/` | the recognition module: `FacetGraph`, `Provenance`, `Ledger`, `Arbiter`, `Pipeline` (the stages and their checked table), `Reports`. See `doc/step-recognition-design.md`, *The recognition module, as built* |
 | `src/io/import_step.cc` | the reader, useful as a round-trip oracle |
@@ -55,10 +56,11 @@ The mesh arrives already merged: `export_step.cc` calls `mergeTriangles()`
 polygons and reports, per merged face, an outward normal and a parent index for
 holes. Most of the exporter's difficulty is in consuming that output correctly.
 
-### The boundary machinery is in one namespace on purpose
+### The boundary machinery is in one place on purpose
 
-All of it sits in one anonymous namespace at the top of `src/io/StepKernel.cc`,
-because the three passes that ask about a boundary have to get the same answer:
+All of it sits in `src/io/step/BoundaryCycles.h` (it was one anonymous namespace
+at the top of `StepKernel.cc` until 2026-09-25), because the three passes that
+ask about a boundary have to get the same answer:
 
 | what | where |
 | --- | --- |
@@ -617,7 +619,7 @@ candidate for a corner - each rung's answer, the mesh position, and the solution
 of the constraints themselves taken in pairs and triples - and chooses. It
 measures each candidate against every constraint the file asserts at that corner,
 to the ladder's exactness floor of 1e-9, and takes the one that satisfies the
-most precise set. Two tables at the top of `src/io/StepKernel.cc` are the whole
+most precise set. Two tables in `src/io/step/CornerLadder.h` are the whole
 of the precedence, so reordering the ladder is editing a table:
 
 **`kCornerTiers`** - what kinds of constraint a corner has, and how each counts.

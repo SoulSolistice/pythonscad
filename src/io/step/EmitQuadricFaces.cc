@@ -136,7 +136,13 @@ void StepKernel::BodyBuild::emitQuadricFaces()
         starts_at[bs.start] = int(k);
       }
       std::vector<OrientedEdge *> loop;
-      for (std::size_t i = 0; i < n;) {
+      // From where no crossing piece straddles the start, since each is one
+      // edge. A section never contains a crossing edge, so this start is never
+      // inside a section either.
+      const std::size_t start = walkStart(cycle);
+      bool closed_piece = false;
+      for (std::size_t step = 0; step < n;) {
+        const std::size_t i = (start + step) % n;
         if (starts_at[i] >= 0) {
           const BoundarySection& bs = entry.second.sections[starts_at[i]];
           const int a = cycle[bs.start], b = cycle[(bs.start + bs.count - 1) % n];
@@ -269,32 +275,26 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             if (span == loops[bs.loop].size()) rim_of_loop[bs.loop] = {edge, !dir};
             else arc_subs[bs.loop].push_back({at_j, span, edge, !dir});
           }
-          i = bs.start + bs.count - 1;
+          step += bs.count - 1;
           continue;
         }
         const int a = cycle[i], b = cycle[(i + 1) % n];
         bool dir = true;
         EdgeCurve *edge = nullptr;
-        const std::pair<int, int> key{std::min(a, b), std::max(a, b)};
-        const auto crossing = crossing_edges.find(key);
-        if (crossing != crossing_edges.end()) {
-          const auto found = crossing_curves.find(key);
-          if (found != crossing_curves.end()) {
-            edge = found->second;
-            dir = edge->vert1 == get_vertex(a);
+        std::size_t spans = 1;  // mesh edges this one edge of the file covers
+        // The piece of a crossing this edge belongs to, decided once for both
+        // faces - see decideCrossingRuns.
+        const CrossingPiece *piece = pieceOf(a, b);
+        if (piece != nullptr && piece->edge != nullptr) {
+          bool ok = false;
+          const bool forward = walksForward(*piece, cycle, i, ok);
+          if (ok) {
+            edge = piece->edge;
+            dir = piece->verts.size() == 2 ? edge->vert1 == get_vertex(a) : forward;
+            spans = piece->verts.size() - 1;
+            closed_piece = closed_piece || piece->verts.front() == piece->verts.back();
           } else {
-            std::vector<Vector3d> ctrl;
-            const Vector3d& p0 = vertices[key.first];
-            const Vector3d& p1 = vertices[key.second];
-            if (intersectionArc(crossing->second.first, crossing->second.second, p0, p1, 1e-7, ctrl)) {
-              std::vector<Point *> cp;
-              for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
-              auto curve = new BSplineCurve(entities, "", cp);
-              edge = new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second), curve, true);
-              crossing_curves.emplace(key, edge);
-              crossing_written++;
-              dir = edge->vert1 == get_vertex(a);
-            }
+            crossing_unwalked++;
           }
           if (edge != nullptr && (cyl != nullptr || cone != nullptr)) {
             // What this face's parameters mean, kept until the other face has
@@ -306,7 +306,7 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             side.axis = cone != nullptr && cone->slope < 0 ? Vector3d(-axis) : axis;
             side.ref = ref;
             side.slope = cone != nullptr ? fabs(cone->slope) : 0.0;
-            crossing_sides[key].push_back(side);
+            crossing_sides[std::size_t(piece - crossing_pieces.data())].push_back(side);
           }
         }
         if (edge == nullptr) {
@@ -314,11 +314,12 @@ void StepKernel::BodyBuild::emitQuadricFaces()
         }
         loop.push_back(new OrientedEdge(entities, edge, dir));
         face_edges_here.push_back(edge);
-        i++;
+        step += spans;
       }
-      // A rim that is one whole section is one closed edge, which is a whole
-      // loop on its own.
-      if (loop.empty() || (loop.size() < 2 && !entry.second.seam)) continue;
+      // A rim that is one whole section, or one whole crossing, is one closed
+      // edge, which is a whole loop on its own.
+      const bool one_crossing = loop.size() == 1 && closed_piece;
+      if (loop.empty() || (loop.size() < 2 && !entry.second.seam && !one_crossing)) continue;
       // A cone face bounded by one loop that goes once round the axis has the
       // apex inside it: the region is a disc, pinched to a point where the
       // surface is. The surface is periodic round the axis, so a face covering
@@ -349,7 +350,8 @@ void StepKernel::BodyBuild::emitQuadricFaces()
         }
         // A winding number, so it is an integer: round the axis once, or not.
         if (!through_apex && fabs(turn) > M_PI) {
-          Vertex *start = get_vertex(cycle[0]);
+          // Where the loop starts and ends, which is where it was walked from.
+          Vertex *start = get_vertex(cycle[walkStart(cycle)]);
           auto tip = new Vertex(entities, new Point(entities, apex));
           EdgeCurve *seam = create_line_edge_curve(start, tip, true);
           loop.push_back(new OrientedEdge(entities, seam, true));

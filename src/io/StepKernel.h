@@ -110,6 +110,18 @@ inline std::string step_string(const std::string& str)
   return out;
 }
 
+/*! A B-spline curve's knot data as STEP writes it: `(multiplicities),(knots)`. */
+inline std::string curveKnotLists(const std::vector<double>& knots, const std::vector<int>& mults)
+{
+  std::ostringstream out;
+  out << "(";
+  for (std::size_t i = 0; i < mults.size(); i++) out << (i ? "," : "") << mults[i];
+  out << "),(";
+  for (std::size_t i = 0; i < knots.size(); i++) out << (i ? "," : "") << step_real(knots[i]);
+  out << ")";
+  return out.str();
+}
+
 class StepKernel
 {
 public:
@@ -651,12 +663,28 @@ public:
     }
     virtual ~BSplineCurve() {}
 
+    /*! A clamped B-spline of several spans: its degree, and its distinct knots
+     * with their multiplicities. Left empty, the curve is one Bezier of degree
+     * pts.size() - 1 over (0, 1), which is what every other curve here is. */
+    void setKnots(int degree_in, std::vector<double> knots_in, std::vector<int> mults_in)
+    {
+      spline_degree = degree_in;
+      knots = std::move(knots_in);
+      mults = std::move(mults_in);
+    }
+
     virtual void serialize(std::ostream& stream_in)
     {
-      const int degree = int(pts.size()) - 1;
       std::ostringstream ctrl;
       for (std::size_t i = 0; i < pts.size(); i++) ctrl << (i ? ",#" : "#") << pts[i]->id;
 
+      if (!knots.empty()) {
+        stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << spline_degree
+                  << ",(" << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.," << curveKnotLists(knots, mults)
+                  << ",.UNSPECIFIED.);\n";
+        return;
+      }
+      const int degree = int(pts.size()) - 1;
       if (weights.empty()) {
         stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << degree << ",("
                   << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,(" << degree + 1 << "," << degree + 1
@@ -681,6 +709,9 @@ public:
 
     std::vector<Point *> pts;
     std::vector<double> weights;  // empty for a polynomial curve
+    int spline_degree = -1;       // with `knots`: see setKnots
+    std::vector<double> knots;
+    std::vector<int> mults;
   };
 
   class Circle : public RoundType
@@ -1350,8 +1381,22 @@ public:
       pts = std::move(pts_in);
     }
     virtual ~BSplineCurve2d() {}
+    /*! As BSplineCurve::setKnots: a pcurve carries its 3D curve's degree and knots. */
+    void setKnots(int degree_in, std::vector<double> knots_in, std::vector<int> mults_in)
+    {
+      spline_degree = degree_in;
+      knots = std::move(knots_in);
+      mults = std::move(mults_in);
+    }
     virtual void serialize(std::ostream& stream_in)
     {
+      if (!knots.empty()) {
+        stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << spline_degree
+                  << ",(";
+        for (std::size_t i = 0; i < pts.size(); i++) stream_in << (i ? ",#" : "#") << pts[i]->id;
+        stream_in << "),.UNSPECIFIED.,.F.,.F.," << curveKnotLists(knots, mults) << ",.UNSPECIFIED.);\n";
+        return;
+      }
       const int degree = int(pts.size()) - 1;
       stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << degree << ",(";
       for (std::size_t i = 0; i < pts.size(); i++) stream_in << (i ? ",#" : "#") << pts[i]->id;
@@ -1361,6 +1406,9 @@ public:
     virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args) {}
 
     std::vector<Point2d *> pts;
+    int spline_degree = -1;  // with `knots`: see setKnots
+    std::vector<double> knots;
+    std::vector<int> mults;
   };
 
   class DefinitionalRepresentation : public Entity

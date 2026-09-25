@@ -83,9 +83,20 @@ def pcurve_vs(ents, ec, surf):
     return ents[cr[0]][0], out
 
 
+def jumps_seam(run):
+    """Whether a pcurve steps more than half the profile between two of its
+    points - the long way round a seam it should have stepped across.
+
+    A step, not the whole range: a curve along a whole flank of a sweep can run
+    over more than half the profile without ever reaching the seam, and did once
+    crossings were written one per run rather than one per mesh edge (f04, a
+    pcurve from v 0.17 to 0.68 in 128 points no more than 0.083 apart). The
+    defect this exists for is one step: a LINE from v 0.0000 to 0.9956."""
+    return any(abs(run[i + 1] - run[i]) > 0.5 for i in range(len(run) - 1))
+
+
 def crossings(ents, face):
-    """How many of a face's pcurves run more than half the profile - the long way
-    round a seam it should have stepped across."""
+    """How many of a face's pcurves cross the seam - see jumps_seam."""
     r = voc.refs(ents[face][1])
     surf = r[-1]
     found = 0
@@ -97,7 +108,7 @@ def crossings(ents, face):
             ec = voc.refs(ents[o][1])[0]
             _, runs = pcurve_vs(ents, ec, surf)
             for run in runs:
-                if max(run) - min(run) > 0.5:
+                if jumps_seam(run):
                     found += 1
     return found
 
@@ -121,7 +132,7 @@ def report(ents, face):
             flag = ""
             for run in runs:
                 used.extend(run)
-                if max(run) - min(run) > 0.5:
+                if jumps_seam(run):
                     flag = "   <- crosses the seam"
                     crossings += 1
             print("  edge #%-6d %-26s v %s%s" % (ec, base, text, flag))

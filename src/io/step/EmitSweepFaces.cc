@@ -8,6 +8,7 @@
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
 #include "io/step/CrossingArc.h"
+#include "io/step/CrossingRuns.h"
 
 using namespace step;
 
@@ -138,35 +139,28 @@ void StepKernel::BodyBuild::emitSweepFaces()
     for (const auto& entry : cycles) {
       const std::vector<int>& cycle = entry.second;
       if (cycle.size() < 3) continue;
+      const std::size_t n = cycle.size();
+      // From where no crossing piece straddles the start, since each is one edge.
+      const std::size_t start = walkStart(cycle);
       std::vector<OrientedEdge *> loop;
-      for (std::size_t i = 0; i < cycle.size(); i++) {
-        const int a = cycle[i], b = cycle[(i + 1) % cycle.size()];
+      for (std::size_t step = 0; step < n;) {
+        const std::size_t i = (start + step) % n;
+        const int a = cycle[i], b = cycle[(i + 1) % n];
         bool dir = true;
         EdgeCurve *edge = nullptr;
-        // The one edge a sweep shares with something that can give it a curve.
-        // Same map, same key and the same EdgeCurve object as the quadric
-        // emitter uses, so the two faces on this edge name one geometry however
-        // the passes are ordered.
-        const std::pair<int, int> key{std::min(a, b), std::max(a, b)};
-        const auto crossing = crossing_edges.find(key);
-        if (crossing != crossing_edges.end()) {
-          const auto found = crossing_curves.find(key);
-          if (found != crossing_curves.end()) {
-            edge = found->second;
-            dir = edge->vert1 == get_vertex(a);
+        std::size_t spans = 1;  // mesh edges this one edge of the file covers
+        // The one edge a sweep shares with something that can give it a curve:
+        // the piece of the crossing it belongs to, decided once for both faces.
+        const CrossingPiece *piece = pieceOf(a, b);
+        if (piece != nullptr && piece->edge != nullptr) {
+          bool ok = false;
+          const bool forward = walksForward(*piece, cycle, i, ok);
+          if (ok) {
+            edge = piece->edge;
+            dir = piece->verts.size() == 2 ? edge->vert1 == get_vertex(a) : forward;
+            spans = piece->verts.size() - 1;
           } else {
-            std::vector<Vector3d> ctrl;
-            if (intersectionArc(crossing->second.first, crossing->second.second, vertices[key.first],
-                                vertices[key.second], 1e-7, ctrl)) {
-              std::vector<Point *> cp;
-              cp.reserve(ctrl.size());
-              for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
-              edge = new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
-                                   new BSplineCurve(entities, "", cp), true);
-              crossing_curves.emplace(key, edge);
-              crossing_written++;
-              dir = edge->vert1 == get_vertex(a);
-            }
+            crossing_unwalked++;
           }
         }
         if (edge == nullptr) {
@@ -174,6 +168,38 @@ void StepKernel::BodyBuild::emitSweepFaces()
         }
         loop.push_back(new OrientedEdge(entities, edge, dir));
         face_edges_here.push_back(edge);
+        step += spans;
+        if (spans > 1) {
+          // A piece of several edges is one curve across the surface, and its
+          // pcurve is that curve's own interpolation carried into the sweep's
+          // parameters: the same points, parameters and knots, so the two agree
+          // at every interpolated point. A straight line in (u, v), which is what
+          // one mesh edge is given below, is no description of a whole flank.
+          std::vector<Eigen::Vector2d> uv;
+          for (const auto& p : piece->fit.points) {
+            double pu = 0, pv = 0;
+            if (!parameters(p, pu, pv)) break;
+            uv.emplace_back(pu, pv);
+          }
+          const std::vector<Eigen::Vector2d> ctrl2 = uv.size() == piece->fit.points.size()
+                                                       ? interpolateLike(piece->fit, uv)
+                                                       : std::vector<Eigen::Vector2d>{};
+          if (!ctrl2.empty()) {
+            std::vector<Point2d *> cp;
+            for (const auto& c : ctrl2) cp.push_back(new Point2d(entities, c.x(), c.y()));
+            auto flat = new BSplineCurve2d(entities, cp);
+            flat->setKnots(CurveFit::degree, piece->fit.knots, piece->fit.mults);
+            if (param_context == nullptr) param_context = new ParametricContext(entities);
+            auto pcurve = new PCurve(entities, surface,
+                                     new DefinitionalRepresentation(entities, flat, param_context));
+            if (auto *already = dynamic_cast<SurfaceCurve *>(edge->round)) {
+              if (already->on.size() < 2) already->on.push_back(pcurve);
+            } else {
+              edge->round = new SurfaceCurve(entities, edge->round, {pcurve});
+            }
+          }
+          continue;
+        }
         // Where this edge runs across the surface, written down rather than
         // left to be guessed. A swept surface cannot be projected onto
         // reliably - see the PCURVE classes in StepKernel.h - and this is the

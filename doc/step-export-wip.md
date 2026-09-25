@@ -4793,6 +4793,49 @@ where the model has one smooth curve per flank of the ramp; its rims are 60 and
 A run of edges between the same two surfaces is one curve, as a run of a plane
 section already is.
 
+*Measured first* (`scripts/step-diagnostics/crossing-runs.py`): the pieces were
+already one curve. At all 559 inner vertices the tangent turned 0.000 degrees and
+every vertex was within 1e-11 of both surfaces - the corner placement had put
+them on the crossing. What a CAD view drew as a zig-zag was the curve in 559
+edges, and two chords in the middle of it where the per-edge fit had refused
+(a 42.7 degree turn).
+
+*Landed 2026-09-25.* The crossing edges are decided as runs
+(`decideCrossingRuns`): chained through every vertex where nothing else meets
+them, and ended where a third edge will - another face's boundary, a facet no
+crossing region holds, the seam closing a face round its axis. A run is one edge,
+a clamped cubic interpolating the true curve (`io/step/CrossingRuns.h`), held to
+the same 1e-7 against both surfaces as the per-edge Bezier, and refined where it
+misses. Where a sweep is only C0 - its declared knots of full multiplicity - the
+crossing turns a corner, and the run is fitted flank by flank and joined into one
+curve with a C0 knot there, as the sweep's own face is one face across its
+creases. The pcurves are the same interpolation carried into each surface's
+parameters, with the same knots.
+
+| export | crossing edges before | curves after | mesh edges they cover |
+| --- | --- | --- | --- |
+| lid10 (approximation) | 603 | 8 | 603 |
+| f04 | 1230 | 17 | 1230 |
+| step-band-family / f02 | 638 | 15 | 638 |
+| step-declare-grid | 507 | 2 | 507 |
+| step-bored-cylinder, step-bored-cone | 80 | 6 | 80 |
+
+Enforced by `validatestep.py`'s `check_curve_runs`: a vertex where exactly two
+polynomial B-spline edges between the same two faces meet, and nothing else, is
+one curve written in pieces. It failed on 10 fixtures and all four reference
+parts on the build before, and passes on all 118 exports after. The fault census
+on lid10 is identical before and after - the change adds no fault and removes
+none.
+
+*What is left of the zig-zag* are the chords where the crossing turns a crease
+corner *inside* a mesh edge: the per-edge fit refuses those (`straddles_crease`),
+so they are not crossing edges and they end the run either side. On lid10 that is
+2 chords between the lead-in's two flank curves and 3 on the other side, the
+code-17 `line-on-bspl` and `line-on-cone` of the census. The corner is where the
+crease's iso-curve meets the other surface - one Newton on one parameter - and
+with it the run can go through that edge as well, the corner a C0 knot of the
+same curve. That is the next step.
+
 **Found on the way, not the exporter's.** `Polygon2d::stamp_color`, which every
 `offset()` calls, intersects every outline of the result with every outline of
 its source through Clipper - 8.6 s of a 19 s 2D model (a 20 x 20 grid of circles

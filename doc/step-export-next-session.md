@@ -435,20 +435,30 @@ in `doc/step-export-wip.md`, *Inferred where a declaration was possible*:
 | `7f9a2a360` `57627f425` | revolution and extrusion as derivations from one fact each (checklist **A10**) - bilinear walls, the taper's cone, a twisted circle's cylinder |
 | `a712fa118` | `roof()` planes, and the Voronoi roof's corner cones (declared, not yet written) |
 | `67318a35b` `46b1b2337` | upstream: exact pi; a configure that survives a silent `python` |
+| `368b29afa` `ad951a799` | the surface protocol (`residual`, `normalAt`, `implicitAt`, `quadricForm`, `transformed`); `AxialSurface` for cylinder and cone |
+| `cc4153c05` `e2394d0d9` `9acba11ba` | the elliptic cylinder (`SURFACE_OF_LINEAR_EXTRUSION`): a cylinder under a non-similar map, an oblique extrusion, a 2D ellipse record carried through Clipper |
+| `cc8bab0d5` | a face round its axis between two rims closed by a seam, not cut in two - lid10 48 -> 40 quadric faces |
+| `f69593473` .. `42135cacb` | **StepKernel.cc split**: 6548 lines -> 306; `build_tri_body` is `StepKernel::BodyBuild`, sixteen phases and the corner placement's eight rungs, one file each under `src/io/step/`, every step 0 differences |
+| `73abbcdae` `61e418e14` | `crossing-runs.py`; `validatestep.py` reads B-spline curves with knots |
+| this | **one curve per run of crossing edges** (checklist D5) - lid10's lead-in boundary 567 edges -> 10 |
 
 Next, in the survey's order, each its own landing:
 
-1. **Plane sections of a cone that are not ellipses** - parabolas (step-roof-voronoi's
+1. **The crossing through a crease inside a mesh edge** - the chords left of the
+   lead-in's zig-zag (wip, *A crossing curve is written one mesh edge at a time*):
+   the corner is where the crease's iso-curve meets the other surface, and the run
+   continues through it with a C0 knot.
+2. **Plane sections of a cone that are not ellipses** - parabolas (step-roof-voronoi's
    KNOWN-EXPORT-ERROR) and hyperbolas. A writer gap exposed by a true declaration.
-2. **Bezier membership at D0** where the patch has a closed-form inverse - a
+3. **A rim as one CIRCLE**, not arc by arc - D5 for circles and conics, and an
+   apex cone's base.
+4. **Bezier membership at D0** where the patch has a closed-form inverse - a
    bilinear patch first (step-extrude-uneven-scale is written at D1).
-3. **The full band the quadric pass still cuts at the seam** (two loops) - the band
-   writer's seam, not a cut; and an apex cone's base written as one CIRCLE.
-4. **Names for the producers that still make unnamed edges**: a rounded
+5. **Names for the producers that still make unnamed edges**: a rounded
    `polygon()` point (it samples an arc nothing records), `import()`, the 2D hull.
-5. **An ellipse record** (survey item 3), then the sweeps (8, 9), `wrap` (11),
-   minkowski (13), the general hull (12).
-6. Upstream, own commits: `stamp_color`'s pairwise Clipper intersections (8.6 s of
+6. The tapered ellipse's cone, then the sweeps (8, 9), `wrap` (11), minkowski
+   (13), the general hull (12).
+7. Upstream, own commits: `stamp_color`'s pairwise Clipper intersections (8.6 s of
    a 19 s 2D model).
 
 The older list below stands after these.

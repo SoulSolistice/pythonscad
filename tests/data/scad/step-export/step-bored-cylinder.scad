@@ -69,13 +69,24 @@
 //
 // And in the approximation tier the opening is neither chords nor sections any
 // more: it is the curve itself. Once the corner placement has put the junction
-// vertices on both cylinders, every edge between two of them is an arc of the
-// quartic where the two cross, and the exporter writes that - a Bezier fitted to
-// the true curve found from the two *declarations*, held to 1e-7, and derived
-// identically by both faces because both start from the same two declarations.
-// APPROX: 80 edges written as the curve where two declared surfaces cross
-// APPROX: 80 of those carry a pcurve on each of the two surfaces
-// EDGES-APPROX: BSplineCurve=80
+// vertices on both cylinders, every edge between two of them lies on the quartic
+// where the two cross, and the exporter writes that - fitted to the true curve
+// found from the two *declarations*, held to 1e-7, and read identically by both
+// faces because it is decided once for the edges it covers.
+//
+// One curve per run of those edges, not one per edge: until 2026-09-25 it was
+// eighty, each a Bezier over one mesh edge, joined at vertices nothing else
+// meets - the curve in eighty pieces. A run ends where a third edge meets it,
+// and that is derivable from lines above. Each mouth borders the bore on one
+// side and, since the bore cuts the wall into pieces (ROUNDTRIP-APPROX), two
+// wall faces on the other: two runs a mouth, four. And the bore is one face
+// closed by a seam along a ruling (the APPROX line above), whose two ends are a
+// vertex on each mouth where the seam is the third edge - which cuts one run on
+// each mouth. Four plus two.
+// APPROX: 6 edges written as the curve where two declared surfaces cross
+// APPROX: those 6 curves cover 80 edges of the mesh
+// APPROX: 6 of those carry a pcurve on each of the two surfaces
+// EDGES-APPROX: BSplineCurve=6
 //
 // The pcurves are asserted because nothing else here would notice them. The 3D
 // curve is definitive, so a reader takes it and ignores them, and a pcurve that
@@ -87,7 +98,7 @@
 // Eighty is the model's, and it ties two report lines together: the provenance
 // pass finds exactly 80 junction vertices owned by two surfaces, the bore opens
 // on the wall in two closed loops, and a closed loop through n vertices has n
-// edges. One curve per junction edge.
+// edges - which the six curves cover between them.
 //
 // Why this is allowed to be approximate, measured rather than asserted. Where a
 // ruling of the bore met a facet of the wall the vertex is exactly on the true

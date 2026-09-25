@@ -49,12 +49,18 @@
 //
 // In the approximation tier the opening is neither chords nor plane sections: it
 // is the curve itself. A cone and a cylinder crossing meet in a quartic, which
-// ISO 10303 has no entity for, so it is written as a Bezier fitted to the true
-// curve found from the two *declarations* - held to 1e-7, and derived identically
-// by both faces because both start from the same two declarations.
-// APPROX: 80 edges written as the curve where two declared surfaces cross
-// APPROX: 80 of those carry a pcurve on each of the two surfaces
-// EDGES-APPROX: BSplineCurve=80
+// ISO 10303 has no entity for, so it is written as a B-spline fitted to the true
+// curve found from the two *declarations* - held to 1e-7, and read identically by
+// both faces because it is decided once for the edges it covers.
+//
+// One curve per run of edges, from where a third edge meets it to the next -
+// until 2026-09-25 one per mesh edge, eighty pieces. As on step-bored-cylinder:
+// each mouth borders the bore and two of the cone's faces, two runs a mouth,
+// and the seam closing the bore ends on each mouth and cuts one run there. Six.
+// APPROX: 6 edges written as the curve where two declared surfaces cross
+// APPROX: those 6 curves cover 80 edges of the mesh
+// APPROX: 6 of those carry a pcurve on each of the two surfaces
+// EDGES-APPROX: BSplineCurve=6
 //
 // Eighty ties two report lines together: the provenance pass finds exactly 80
 // junction vertices owned by two surfaces, the bore opens on the taper in two

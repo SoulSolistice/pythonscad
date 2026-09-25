@@ -24,6 +24,7 @@
 #include "geometry/recognition/Pipeline.h"
 #include "io/step/BoundaryCycles.h"
 #include "io/step/CornerLadder.h"
+#include "io/step/CrossingRuns.h"
 #include "geometry/linalg.h"
 #include "io/StepKernel.h"
 
@@ -336,6 +337,17 @@ struct StepKernel::BodyBuild {
    * 1278 edges used once, on the band family at $fn 32. */
   void redecideSections();
 
+  /*! The crossing edges as curves: each maximal run of them between the same
+   * two faces - chained through every vertex where nothing else meets them -
+   * is one piece, and one edge in the file. A vertex ends a run where a third
+   * edge will meet it: another face's boundary, a facet no crossing region
+   * holds, the seam that closes a face round its axis. A run of several edges
+   * is fitted as one curve (CrossingRuns.h), and cut in two where that fit is
+   * refused; a single edge is the Bezier intersectionArc fits. Decided here,
+   * after the sections and before either emitter, so the two faces on a piece
+   * read one geometry for it. */
+  void decideCrossingRuns();
+
   /*! One face per claimed region, on the B-spline the declaration describes,
    * bounded by the mesh's own straight edges.
    *
@@ -579,16 +591,35 @@ struct StepKernel::BodyBuild {
   std::size_t rim_unshared = 0;
   std::map<std::set<int>, EdgeCurve *> shared_rim_edges;  // rim vertices -> circle
 
-  // The crossing curves the emitters build, keyed by their edge.
-  // One neighbour is not a planar facet, and it is the exception that sentence
-  // does not cover: where the sweep meets a *declared* surface, the two cross
-  // along a curve both of them can derive from their own declarations, and
-  // `crossing_edges` holds exactly those edges. Such an edge has to be taken
-  // from `crossing_curves` by the sweep emitter for the same reason the quadric one takes it - it is
-  // one edge, and the two faces on it must name one geometry. Whichever emitter
-  // reaches it first builds it and the other reuses the object, which is why
-  // that map belongs to neither of them.
-  std::map<std::pair<int, int>, EdgeCurve *> crossing_curves;
+  // The crossing curves, decided once and keyed by the run of mesh edges each
+  // one is written for - see decideCrossingRuns.
+  //
+  // Where a sweep or a quadric meets another *declared* surface, the two cross
+  // along a curve both can derive from their own declarations, and
+  // `crossing_edges` holds exactly those mesh edges. The two faces on such a
+  // boundary must name one geometry for it, which is why neither emitter builds
+  // it: each looks its edges up here and writes the piece they belong to.
+  /*! One curve two faces meet along: a run of crossing edges, from a vertex
+   * where something else meets it to the next. */
+  struct CrossingPiece {
+    std::vector<int> verts;  // along the curve; front() == back() for a closed one
+    const Surface *a = nullptr, *b = nullptr;
+    EdgeCurve *edge = nullptr;  // verts.front() to verts.back(); null: written as chords
+    step::CurveFit fit;         // empty for a piece of one edge, which is one Bezier
+  };
+  std::vector<CrossingPiece> crossing_pieces;
+  std::map<std::pair<int, int>, std::size_t> piece_of_edge;  // mesh edge (lo, hi) -> piece
+  std::size_t crossing_mesh_edges = 0;                       // the mesh edges the pieces cover
+  /*! The piece mesh edge (a, b) belongs to, or null. */
+  const CrossingPiece *pieceOf(int a, int b) const;
+  /*! Where to start walking a boundary cycle so that no piece straddles the
+   * start: 0 unless the cycle begins inside a piece of several edges. */
+  std::size_t walkStart(const std::vector<int>& cycle) const;
+  /*! Whether a face walking `cycle` from index `i` traverses `piece` from its
+   * first vertex (true), from its last (false) - and false in `ok` where the
+   * cycle does not carry the piece's vertices in either order from there. */
+  bool walksForward(const CrossingPiece& piece, const std::vector<int>& cycle, std::size_t i,
+                    bool& ok) const;
   /*! One face's view of a crossing edge: the surface entity it wrote and the
    *  placement that entity carries, which is what a PCURVE's parameters mean.
    *
@@ -602,8 +633,11 @@ struct StepKernel::BodyBuild {
     Vector3d base, axis, ref;
     double slope = 0;  // a cone's, in its written direction; zero for a cylinder
   };
-  std::map<std::pair<int, int>, std::vector<CrossingSide>> crossing_sides;
+  std::map<std::size_t, std::vector<CrossingSide>> crossing_sides;  // piece -> the faces on it
   int crossing_written = 0;
+  // A face whose boundary cycle does not carry a piece's vertices in order where
+  // it meets the piece: the two faces then disagree about an edge.
+  std::size_t crossing_unwalked = 0;
 
   // One per file - nothing about a 2D parametric context varies.
   ParametricContext *param_context = nullptr;
