@@ -1748,8 +1748,14 @@ if(USE_BUILTIN_CLIPPER2)
   set(CLIPPER2_TESTS OFF)
   add_subdirectory("submodules/Clipper2/CPP" EXCLUDE_FROM_ALL)
   set(Clipper2_FOUND "YES")
+  # Clipper2Z: the same library with a per-vertex Z, which the 2D declaration
+  # channel carries each vertex's edge identity in through booleans and offsets
+  # (ClipperUtils.cc, *identity through Clipper*). One variant for the whole
+  # program - Manifold's CrossSection links this alias too - because the two
+  # differ in the layout of Point64. Without it the channel falls back to
+  # measuring, as a system Clipper2 built without Z does.
   if(NOT TARGET Clipper2::Clipper2)
-    add_library(Clipper2::Clipper2 ALIAS Clipper2)
+    add_library(Clipper2::Clipper2 ALIAS Clipper2Z)
   endif()
   message(STATUS "Clipper2 submodule")
 else()
