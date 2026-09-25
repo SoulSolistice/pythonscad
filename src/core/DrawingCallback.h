@@ -61,9 +61,14 @@ private:
   double size;
 
   Outline2d outline;
+  /*! What the edge arriving at each vertex of `outline` is: a straight segment,
+   * or a chord of the Bezier segment it was sampled from. The first vertex of a
+   * contour has none; the contour's closing edge is straight. */
+  std::vector<EdgeDecl> arriving;
   std::shared_ptr<Polygon2d> polygon;
   std::vector<std::shared_ptr<const Polygon2d>> polygons;
 
-  void add_vertex(const Vector2d& v);
+  void add_vertex(const Vector2d& v, EdgeDecl edge = EdgeDecl{EdgeKind::Line, -1});
   void add_bezier(const Vector2d *ctrl, int degree);
+  void close_outline();
 };

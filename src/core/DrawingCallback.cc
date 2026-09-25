@@ -51,10 +51,7 @@ void DrawingCallback::start_glyph()
 
 void DrawingCallback::finish_glyph()
 {
-  if (this->outline.vertices.size() > 0) {
-    this->polygon->addOutline(this->outline);
-    this->outline.vertices.clear();
-  }
+  close_outline();
   if (this->polygon->outlines().size() == 0) {
     this->polygon = nullptr;
   }
@@ -81,9 +78,37 @@ void DrawingCallback::add_glyph_advance(double advance_x, double advance_y)
   advance += Vector2d(advance_x, advance_y);
 }
 
-void DrawingCallback::add_vertex(const Vector2d& v)
+void DrawingCallback::add_vertex(const Vector2d& v, EdgeDecl edge)
 {
   this->outline.vertices.push_back(size * (v + offset + advance));
+  this->arriving.push_back(edge);
+}
+
+/*! Hand the contour to the glyph, each edge named as what drew it: line_to()
+ * a straight segment, curve_to() a chord of the Bezier it recorded. Measuring
+ * that back afterwards - both ends inside some segment's control box - called
+ * a glyph's straight edges curved wherever they ran inside a neighbouring
+ * curve's box, and a curve's chords straight wherever Clipper's grid moved an
+ * end outside it. See EdgeIdentity.h. */
+void DrawingCallback::close_outline()
+{
+  const std::size_t n = this->outline.vertices.size();
+  if (n == 0) return;
+  if (this->polygon) {
+    const EdgeId first = reserveEdgeIds(n);
+    this->outline.edge_ids.resize(n);
+    for (std::size_t i = 0; i < n; i++) {
+      // edge i runs from vertex i to vertex i + 1, so it is what arrived there;
+      // the last one closes the contour, straight back to the first vertex
+      this->outline.edge_ids[i] = first + EdgeId(i);
+      this->polygon->edge_decls[first + EdgeId(i)] =
+        i + 1 < n ? this->arriving[i + 1] : EdgeDecl{EdgeKind::Line, -1};
+    }
+    this->polygon->addOutline(this->outline);
+  }
+  this->outline.vertices.clear();
+  this->outline.edge_ids.clear();
+  this->arriving.clear();
 }
 
 /*! Keep the curve, not only the points it was sampled at.
@@ -110,10 +135,7 @@ void DrawingCallback::add_bezier(const Vector2d *ctrl, int degree)
 
 void DrawingCallback::move_to(const Vector2d& to)
 {
-  if (this->outline.vertices.size() > 0) {
-    this->polygon->addOutline(this->outline);
-    this->outline.vertices.clear();
-  }
+  close_outline();
   add_vertex(to);
   pen = to;
 }
@@ -129,11 +151,12 @@ void DrawingCallback::curve_to(const Vector2d& c1, const Vector2d& to)
 {
   const Vector2d ctrl[3] = {pen, c1, to};
   add_bezier(ctrl, 2);
+  const EdgeDecl chord{EdgeKind::Bezier, this->polygon ? int(this->polygon->beziers.size()) - 1 : -1};
   // NOTE - this could be done better using a chord length iteration (uniform in space) to implement $fa
   // (lot of work, little gain)
   for (unsigned long idx = 1; idx <= fn; ++idx) {
     const double a = idx * (1.0 / (double)fn);
-    add_vertex(pen * pow(1 - a, 2) + c1 * 2 * pow(1 - a, 1) * a + to * pow(a, 2));
+    add_vertex(pen * pow(1 - a, 2) + c1 * 2 * pow(1 - a, 1) * a + to * pow(a, 2), chord);
   }
   pen = to;
 }
@@ -143,12 +166,14 @@ void DrawingCallback::curve_to(const Vector2d& c1, const Vector2d& c2, const Vec
 {
   const Vector2d ctrl[4] = {pen, c1, c2, to};
   add_bezier(ctrl, 3);
+  const EdgeDecl chord{EdgeKind::Bezier, this->polygon ? int(this->polygon->beziers.size()) - 1 : -1};
   // NOTE - this could be done better using a chord length iteration (uniform in space) to implement $fa
   // (lot of work, little gain)
   for (unsigned long idx = 1; idx <= fn; ++idx) {
     const double a = idx * (1.0 / (double)fn);
     add_vertex(pen * pow(1 - a, 3) + c1 * 3 * pow(1 - a, 2) * a + c2 * 3 * pow(1 - a, 1) * pow(a, 2) +
-               to * pow(a, 3));
+                 to * pow(a, 3),
+               chord);
   }
   pen = to;
 }
