@@ -33,16 +33,19 @@
 // cylinder whose two rims are the curve where it meets the taper, the case the
 // band model cannot express at all - and the four quadrants of wall around the
 // two mouths, which are cone and could not be band-written because a mouth is
-// not a plane section. Six faces: two for the bore, cut at its seam because a
-// face on an open rectangle cannot wrap, and one per mouth quadrant.
+// not a plane section. Five faces: the bore, and one per mouth quadrant. The
+// bore goes all the way round between its two mouths, and since 2026-09-25 it
+// is one face closed by a seam along a ruling of the cylinder, as a band is -
+// until then it was cut in two, an edge the model does not have (checklist D1).
 //
-// Six and not two is the whole of what declaring the cone bought here. Before
+// Five and not one is the whole of what declaring the cone bought here. Before
 // it, the wall's four quadrants had no declared cone to be measured against -
 // only the two rim circles, and a rim is what the bore takes away - so they
 // stayed as fifty-four planes.
-// APPROX: 6 trimmed quadrics written as one face each, replacing 52 facets
+// APPROX: 5 trimmed quadrics written as one face each, replacing 52 facets
+// APPROX: 1 face round its axis between two rims closed by a seam along a ruling
 // APPROX: approximation found nothing left to fit
-// ROUNDTRIP-APPROX: Cone=6 Cylinder=2 Plane=2
+// ROUNDTRIP-APPROX: Cone=6 Cylinder=1 Plane=2
 //
 // In the approximation tier the opening is neither chords nor plane sections: it
 // is the curve itself. A cone and a cylinder crossing meet in a quartic, which

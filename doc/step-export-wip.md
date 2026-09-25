@@ -4763,12 +4763,35 @@ not a cut. And an apex cone's base circle comes out as one arc per facet it
 bounded, where a band writes its rim as one CIRCLE - vertices on a circle the
 model has none on.
 
-**A full band the quadric pass writes is cut at the seam.** Now that a surface
-the band pass cannot write reaches the quadric pass whole - the elliptic
-cylinder - the cut is on every such wall: two faces and two generators where the
-model has one face (checklist D1). The seam it needs is the band writer's - a
-generator joining the two rims, each rim one closed curve - and the fix belongs
-to the quadric writer for every surface about an axis at once.
+**A full band the quadric pass writes was cut at the seam - closed 2026-09-25.**
+A face running round its axis between two rims is now one face closed by a seam
+along a ruling (recognition/Seam.h): a segment whose ends and middle are on the
+surface at machine precision, and which no other edge of either rim crosses in
+the surface's own angle and height. A rim that is one whole plane section is one
+closed curve from the seam back to it. lid10 approximation tier 48 to 40 quadric
+faces, the bayonet 17 to 12, seven fixtures; no D0 or error moved. The crossing
+test is not decoration: without it a seam on lid10's draft cone ran through the
+notch a helicoid lead-in cuts in its rim, and OCCT called the face unorientable.
+
+SOLIDWORKS, raw import, same session: the pre-seam and post-seam exports of
+lid10 (both tiers), the bayonet and step-declare-grid read *identical* faults -
+1/code 30, 5 faces/21+30, 13 faces/7+21, 1/code 17 - so the seams add none and
+fix none of those. The elliptic cylinder, the apex cone, the straight roof and
+the bored cylinder read clean. Two things about the instrument: a current export
+of `f02-band-fn032-analytic` reads clean (the frozen 2026-09-08 file, kept in the
+`solidworks-fault-code-17` worktree's `build/interop-control/`, is the control;
+step-declare-grid's code 17 was this run's), and SOLIDWORKS rebuilds the edges of
+a SURFACE_OF_LINEAR_EXTRUSION face: that surface moved 0.5 off its own rims still
+reads clean, with the moved surface's volume. It re-exports the extrusion as two
+rational cubic B-spline faces, volume 1.00026 of exact.
+
+**A crossing curve is written one mesh edge at a time.** Found on the seam's
+lid10 face: the draft cone's boundary with the helicoid lead-in sweep is 559
+separate B_SPLINE_CURVE edges - one per mesh edge of the cone/sweep intersection -
+where the model has one smooth curve per flank of the ramp; its rims are 60 and
+38 separate CIRCLE arcs. The author's note: the boundary should be a clean curve.
+A run of edges between the same two surfaces is one curve, as a run of a plane
+section already is.
 
 **Found on the way, not the exporter's.** `Polygon2d::stamp_color`, which every
 `offset()` calls, intersects every outline of the result with every outline of

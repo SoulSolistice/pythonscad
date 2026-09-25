@@ -53,18 +53,19 @@
 // With the approximation flag the trimmed-quadric path takes the rest. It
 // claims facets by distance to the axis rather than by walking rings, and
 // bounds the face with the mesh's own polyline - the same bound the faceted
-// faces around it already use, so the shell closes edge for edge. Eight
-// cylinder faces rather than two because a face written on an open rectangle
-// cannot wrap, so each surface is cut at its seam.
-// Six faces, not four. The bore cuts the wall into separate regions and a
+// faces around it already use, so the shell closes edge for edge. Seven
+// cylinder faces: the bore goes all the way round between its two mouths and
+// is one face closed by a seam along a ruling - until 2026-09-25 it was cut in
+// two at the seam, an edge the model does not have (checklist D1) - and the
+// wall, which the bore cuts into pieces, one face each.
+// Five faces, not three. The bore cuts the wall into separate regions and a
 // face cannot be in two places, so each region is its own face; the two the
 // count gained were being carried as inner bounds of the others, which is
-// what an inner bound is not for. ROUNDTRIP-APPROX does not move, because
-// OpenCASCADE was splitting them on read and counting eight all along - what
-// changed is that the file now says what the kernel was already making of it.
-// APPROX: 6 trimmed quadrics written as one face each, replacing 52 facets
+// what an inner bound is not for.
+// APPROX: 5 trimmed quadrics written as one face each, replacing 52 facets
+// APPROX: 1 face round its axis between two rims closed by a seam along a ruling
 // APPROX: approximation found nothing left to fit
-// ROUNDTRIP-APPROX: Cylinder=8 Plane=2
+// ROUNDTRIP-APPROX: Cylinder=7 Plane=2
 //
 // And in the approximation tier the opening is neither chords nor sections any
 // more: it is the curve itself. Once the corner placement has put the junction

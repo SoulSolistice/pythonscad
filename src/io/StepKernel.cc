@@ -30,6 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include "StepKernel.h"
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
+#include "geometry/recognition/Seam.h"
 #include "geometry/recognition/Pipeline.h"
 #include "geometry/recognition/Reports.h"
 #include "utils/printutils.h"
@@ -1300,6 +1301,9 @@ struct BoundaryCycle {
   std::vector<int> verts;
   std::vector<int> owner;  // per edge: the neighbouring planar loop, or -1
   std::vector<BoundarySection> sections;
+  /*! One of the two rims of a face that goes all the way round its axis, rolled
+   * to start where the seam that closes the face meets it. See sealWithSeam. */
+  bool seam = false;
 };
 
 bool surfaceAxis(const Surface *surface, Vector3d& axis)
@@ -1490,6 +1494,58 @@ std::map<std::size_t, BoundaryCycle> rawBoundaryCycles(const AnalyticFeatures::P
   return out;
 }
 
+/*! Close a face that goes all the way round its axis between two rims.
+ *
+ * The surface is periodic round the axis, so such a face is bounded in its own
+ * parameters by one loop: along one rim, up a seam to the other, along that one
+ * and back down the seam - the band writer's shape. The seam is a ruling that
+ * joins a vertex of one rim to a vertex of the other (recognition/Seam.h), and
+ * each rim is rolled to start there, so that a rim which is one whole plane
+ * section is one closed curve from the seam back to it. A seam no section runs
+ * across is the one taken; where there is none, false, and the face is written
+ * as it always was. */
+bool sealWithSeam(const AnalyticFeatures::Patch& patch, const std::vector<Vector3d>& vertices,
+                  const std::vector<CutPlane>& planes, const std::set<std::pair<int, int>>& spoken_for,
+                  bool bind_ends, std::map<std::size_t, BoundaryCycle>& cycles)
+{
+  const auto *axial = dynamic_cast<const AxialSurface *>(patch.surface.get());
+  if (axial == nullptr || cycles.size() != 2) return false;
+  auto it = cycles.begin();
+  BoundaryCycle& first = it->second;
+  BoundaryCycle& second = (++it)->second;
+  if (!recognition::windsRound(*axial, first.verts, vertices) ||
+      !recognition::windsRound(*axial, second.verts, vertices)) {
+    return false;
+  }
+  auto rolled = [](const BoundaryCycle& c, std::size_t at) {
+    BoundaryCycle out = c;
+    std::rotate(out.verts.begin(), out.verts.begin() + long(at), out.verts.end());
+    std::rotate(out.owner.begin(), out.owner.begin() + long(at), out.owner.end());
+    out.sections.clear();
+    out.seam = true;
+    return out;
+  };
+  // No section may run across the seam vertex: a run ends there or covers the
+  // whole rim, starting and ending there.
+  auto clear_of_seam = [](const BoundaryCycle& c) {
+    const std::size_t n = c.verts.size();
+    for (const auto& bs : c.sections) {
+      if (bs.start + bs.count > n && !(bs.start == 0 && bs.count == n + 1)) return false;
+    }
+    return true;
+  };
+  for (const auto& [i, j] : recognition::rulingSeams(*axial, first.verts, second.verts, vertices)) {
+    BoundaryCycle a = rolled(first, i), b = rolled(second, j);
+    findSections(patch.surface.get(), vertices, planes, a, spoken_for, bind_ends);
+    findSections(patch.surface.get(), vertices, planes, b, spoken_for, bind_ends);
+    if (!clear_of_seam(a) || !clear_of_seam(b)) continue;
+    first = std::move(a);
+    second = std::move(b);
+    return true;
+  }
+  return false;
+}
+
 std::map<std::size_t, BoundaryCycle> boundaryCycles(
   const AnalyticFeatures::Patch& patch, const std::vector<Vector3d>& vertices,
   const std::vector<std::vector<int>>& loops, const std::vector<char>& loop_valid,
@@ -1497,6 +1553,9 @@ std::map<std::size_t, BoundaryCycle> boundaryCycles(
   const std::set<std::pair<int, int>>& spoken_for, bool bind_ends = false)
 {
   std::map<std::size_t, BoundaryCycle> out = rawBoundaryCycles(patch, loops, loop_valid, taken);
+  // A face that goes round its axis between two rims is closed by a seam, and
+  // each rim starts where the seam meets it; its sections are found from there.
+  if (sealWithSeam(patch, vertices, planes, spoken_for, bind_ends, out)) return out;
   for (auto& entry : out) {
     BoundaryCycle& cycle = entry.second;
     findSections(patch.surface.get(), vertices, planes, cycle, spoken_for, bind_ends);
@@ -4861,6 +4920,7 @@ void StepKernel::build_tri_body(
   // where a planar loop no longer carries the run - see below.
   std::size_t section_unshared = 0;
   std::size_t apex_seams = 0;            // cone faces closed round their apex
+  std::size_t band_seams = 0;            // faces round their axis closed by a seam between two rims
   std::set<std::set<int>> section_subs;  // sections already handed to a planar face
   int sections_declared = 0, sections_fitted = 0;
   // Boundary sections refused because their plane was a facet of something
@@ -4966,6 +5026,7 @@ void StepKernel::build_tri_body(
 
     std::vector<FaceBound *> bounds;
     std::vector<EdgeCurve *> face_edges_here;
+    std::vector<std::pair<const BoundaryCycle *, std::vector<OrientedEdge *>>> seam_rims;
     for (const auto& entry : boundary) {
       const std::vector<int>& cycle = entry.second.verts;
       const std::size_t n = cycle.size();
@@ -4981,7 +5042,9 @@ void StepKernel::build_tri_body(
         // on the other side is not writing - see `section_curves`.
         std::set<int> key;
         for (std::size_t c = 0; c < bs.count; c++) key.insert(cycle[(bs.start + c) % n]);
-        if (bs.start + bs.count > n) continue;
+        // A whole rim, from the seam round to it again, is one closed curve.
+        const bool whole = bs.start == 0 && bs.count == n + 1;
+        if (bs.start + bs.count > n && !whole) continue;
         if (section_curves.find(key) == section_curves.end()) continue;
         starts_at[bs.start] = int(k);
       }
@@ -4989,9 +5052,9 @@ void StepKernel::build_tri_body(
       for (std::size_t i = 0; i < n;) {
         if (starts_at[i] >= 0) {
           const BoundarySection& bs = entry.second.sections[starts_at[i]];
-          const int a = cycle[bs.start], b = cycle[bs.start + bs.count - 1];
+          const int a = cycle[bs.start], b = cycle[(bs.start + bs.count - 1) % n];
           std::set<int> key;
-          for (std::size_t k = 0; k < bs.count; k++) key.insert(cycle[bs.start + k]);
+          for (std::size_t k = 0; k < bs.count; k++) key.insert(cycle[(bs.start + k) % n]);
           // Where the section is shared with a planar face, that face has to be
           // able to take this very edge, and it is handed it by finding this run
           // of vertices in its loop. That search can fail: a loop fanned into
@@ -5035,8 +5098,8 @@ void StepKernel::build_tri_body(
             for (std::size_t j = 0; j < m && !shared; j++) {
               bool fwd = true, rev = true;
               for (std::size_t c = 0; c <= span; c++) {
-                fwd = fwd && other[(j + c) % m] == cycle[bs.start + c];
-                rev = rev && other[(j + c) % m] == cycle[bs.start + span - c];
+                fwd = fwd && other[(j + c) % m] == cycle[(bs.start + c) % n];
+                rev = rev && other[(j + c) % m] == cycle[(bs.start + span - c) % n];
               }
               if (!fwd && !rev) continue;
               shared = true;
@@ -5083,9 +5146,12 @@ void StepKernel::build_tri_body(
               return d;
             };
             const double ta = param(vertices[a]), tb = param(vertices[b]);
-            if (bs.count > 2) {
+            if (a == b) {
+              // A whole rim: the way the rim is walked from its first vertex.
+              dir = ccw(ta, param(vertices[cycle[(bs.start + 1) % n]])) < M_PI;
+            } else if (bs.count > 2) {
               // A vertex of the section's own interior settles it exactly.
-              const double tm = param(vertices[cycle[bs.start + bs.count / 2]]);
+              const double tm = param(vertices[cycle[(bs.start + bs.count / 2) % n]]);
               dir = ccw(ta, tm) < ccw(ta, tb);
             } else {
               // A section of one edge has no interior vertex to ask, and asking
@@ -5163,7 +5229,9 @@ void StepKernel::build_tri_body(
         face_edges_here.push_back(edge);
         i++;
       }
-      if (loop.size() < 2) continue;
+      // A rim that is one whole section is one closed edge, which is a whole
+      // loop on its own.
+      if (loop.empty() || (loop.size() < 2 && !entry.second.seam)) continue;
       // A cone face bounded by one loop that goes once round the axis has the
       // apex inside it: the region is a disc, pinched to a point where the
       // surface is. The surface is periodic round the axis, so a face covering
@@ -5203,8 +5271,25 @@ void StepKernel::build_tri_body(
           apex_seams++;
         }
       }
+      if (entry.second.seam) {
+        seam_rims.emplace_back(&entry.second, std::move(loop));
+        continue;
+      }
       auto edge_loop = new EdgeLoop(entities, loop);
       bounds.push_back(new FaceBound(entities, edge_loop, true, entry.first == outer));
+    }
+    if (seam_rims.size() == 2) {
+      // One rim, up the seam, the other rim, and back down: each rim starts
+      // where the seam meets it (sealWithSeam), so the four close.
+      const int from = seam_rims[0].first->verts[0], to = seam_rims[1].first->verts[0];
+      EdgeCurve *seam = create_line_edge_curve(get_vertex(from), get_vertex(to), true);
+      std::vector<OrientedEdge *> joined = seam_rims[0].second;
+      joined.push_back(new OrientedEdge(entities, seam, true));
+      joined.insert(joined.end(), seam_rims[1].second.begin(), seam_rims[1].second.end());
+      joined.push_back(new OrientedEdge(entities, seam, false));
+      face_edges_here.push_back(seam);
+      bounds.push_back(new FaceBound(entities, new EdgeLoop(entities, joined), true, true));
+      band_seams++;
     }
     if (bounds.empty()) continue;
 
@@ -6130,6 +6215,12 @@ void StepKernel::build_tri_body(
       "plane - the wrong curve, kept because the chord it would fall back to is further off the "
       "face; the fix is upstream, in the claim",
       sections_on_facet, sections_on_facet == 1 ? " is" : "s are");
+  }
+  if (band_seams > 0) {
+    LOG(
+      "STEP export: %1$d face%2$s round %3$s axis between two rims closed by a seam along a ruling, not "
+      "cut in two",
+      int(band_seams), band_seams == 1 ? "" : "s", band_seams == 1 ? "its" : "their");
   }
   if (apex_seams > 0) {
     LOG("STEP export: %1$d cone face%2$s closed round %3$s apex by a seam up a generator",

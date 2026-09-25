@@ -35,7 +35,8 @@ derivations; they are not repeated.
 # EXPECT: a declared 60x4 cubic sweep claims 349 facets whole, 184 cut across it, within its tessellation band of 0.1290
 # EXPECT-NOT: declared sweeps written as one face each
 # APPROX: 2 declared sweeps written as one face each, replacing 299 facets
-# APPROX: 5 trimmed quadrics written as one face each, replacing 231 facets
+# APPROX: 1 trimmed quadric written as one face each, replacing 231 facets
+# APPROX: 1 face round its axis between two rims closed by a seam along a ruling
 #
 # The cap survives as one face. Written as an assertion of its own because the
 # failure is silent in every other measure this suite takes: the fanned export
@@ -75,7 +76,7 @@ derivations; they are not repeated.
 # 534 - 79 = 455 remain, and the seventy-four new faces are all bore, so all
 # cylinders.
 # ROUNDTRIP: Cylinder=74 Plane=455
-# ROUNDTRIP-APPROX: BSplineSurface=2 Cylinder=5 Plane=4
+# ROUNDTRIP-APPROX: BSplineSurface=2 Cylinder=1 Plane=4
 #
 # Known systemic defect: on the CGAL backend only, a planar face is written
 # with a bound that leaves its plane by more than the mesh's own coplanarity

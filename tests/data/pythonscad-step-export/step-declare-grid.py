@@ -107,12 +107,14 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # pinned because it is what a change to the fit would move. The figure
 # that matters is that it is below the band beside it.
 # EXPECT: the fitted sweep passes within 0.0660 of the middle of every facet it claims, against a tessellation band of 0.1290
-# The trimmed quadrics are five faces rather than two for the same reason the
-# sweep is two rather than one: the booleans leave a claim in pieces, and a
-# face cannot be in two places. ROUNDTRIP-APPROX is unchanged, because it was
-# already counting the faces OpenCASCADE split ours into.
+# The trimmed quadric is the wall, one face. It goes all the way round between
+# its two rims, and since 2026-09-25 it is closed by a seam along a ruling of the
+# cylinder, as a band is; until then the quadric pass cut it at the seam, and
+# the pieces the boolean left were five faces - edges the model does not have
+# (checklist D1).
 # the one facet the sweep refuses is on a declared cylinder too, so it is not lost - it is claimed here instead, which is why this is 231 and not 230.
-# APPROX: 5 trimmed quadrics written as one face each, replacing 231 facets
+# APPROX: 1 trimmed quadric written as one face each, replacing 231 facets
+# APPROX: 1 face round its axis between two rims closed by a seam along a ruling
 # EXPECT: its facets lie over 2 of the profile's 4 spans - the region is a strip, whose boundary stays inside the surface's rectangle
 #
 # What a kernel makes of each export: the declared sweep survives as a surface, not as the facets it claimed.
@@ -147,9 +149,8 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # trimmed-quadric path claims them by distance to the axis instead and bounds
 # them with the mesh's own polyline, which is what the faceted faces around
 # them close against. So the census below is the whole part rather than the
-# sweep alone - the several cylinder faces are one wall each side of the seam
-# it is cut at, since a face written on an open rectangle cannot wrap.
-# ROUNDTRIP-APPROX: BSplineSurface=2 Cylinder=5 Plane=4
+# sweep alone - the wall is one cylinder face, closed by its seam.
+# ROUNDTRIP-APPROX: BSplineSurface=2 Cylinder=1 Plane=4
 #
 # Known systemic defect: on the CGAL backend only, a planar face is written
 # with a bound that leaves its plane by more than the mesh's own coplanarity

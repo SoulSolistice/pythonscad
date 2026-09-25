@@ -5,6 +5,9 @@
 #include <catch2/catch_all.hpp>
 #include <cmath>
 #include <memory>
+#include <vector>
+
+#include "geometry/recognition/Seam.h"
 
 namespace {
 
@@ -82,4 +85,47 @@ TEST_CASE("elliptic cylinder: one surface whichever section declared it", "[surf
   CHECK(a.sameAs(b));
   const EllipticCylinderSurface wider(Vector3d::Zero(), d, Vector3d(4.5, 0., 0.), Vector3d(0., 2., 0.));
   CHECK_FALSE(a.sameAs(wider));
+}
+
+TEST_CASE("seam: a ruling joins two rims, and must not cross either", "[surface]")
+{
+  const CylinderSurface cyl(Vector3d::Zero(), Vector3d(0., 0., 1.), 10.);
+  std::vector<Vector3d> vertices;
+  std::vector<int> bottom, top;
+  const int n = 8;
+  for (int k = 0; k < n; k++) {
+    const double t = 2 * M_PI * k / n;
+    bottom.push_back(int(vertices.size()));
+    vertices.emplace_back(10. * cos(t), 10. * sin(t), 0.);
+  }
+  for (int k = 0; k < n; k++) {
+    const double t = 2 * M_PI * k / n;
+    top.push_back(int(vertices.size()));
+    vertices.emplace_back(10. * cos(t), 10. * sin(t), 5.);
+  }
+  CHECK(recognition::isRuling(cyl, vertices[bottom[0]], vertices[top[0]]));
+  CHECK_FALSE(recognition::isRuling(cyl, vertices[bottom[0]], vertices[top[1]]));  // a chord, inside
+  CHECK(recognition::windsRound(cyl, bottom, vertices));
+  CHECK(recognition::rulingSeams(cyl, bottom, top, vertices).size() == std::size_t(n));
+
+  // A ramp in the top rim, the way a lead-in leaves a wall: along at z = 5 to the
+  // third station, back under itself to half past the second at z = 3, and on
+  // at that height to the fourth. At the third station the rim is then crossed
+  // twice - at 5 by its own vertex and at 3 by the ramp - so the ruling up to 5
+  // there would leave the face and come back: it may not be the seam.
+  auto at = [&](double k, double z) {
+    const double t = 2 * M_PI * k / n;
+    vertices.emplace_back(10. * cos(t), 10. * sin(t), z);
+    return int(vertices.size()) - 1;
+  };
+  const std::vector<int> ramp{top[0], top[1], top[2], at(1.5, 3.), at(3., 3.),
+                              top[4], top[5], top[6], top[7]};
+  const auto seams = recognition::rulingSeams(cyl, bottom, ramp, vertices);
+  bool through_ramp = false, clear = false;
+  for (const auto& [i, j] : seams) {
+    through_ramp = through_ramp || (i == 2 && j == 2);
+    clear = clear || (i == 0 && j == 0);
+  }
+  CHECK_FALSE(through_ramp);
+  CHECK(clear);
 }

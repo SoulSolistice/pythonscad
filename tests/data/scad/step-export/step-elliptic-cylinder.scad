@@ -19,10 +19,13 @@
 // And the rims are the planes' sections of it, ellipses, written as such.
 // EXPECT: on a plane the model declared, 0 on one taken from the mesh
 //
-// No ROUNDTRIP: line yet. The wall is one surface and one face, but the quadric
-// pass cuts a region that goes all the way round in two at a seam - an edge the
-// model does not have (checklist D1, doc/step-export-wip.md) - so the file has
-// two; stating either count here would be wrong or would pin the defect.
+// And the wall is one face. It goes all the way round between its two rims, so
+// it is closed by a seam along a ruling, as a band is, and each rim is one whole
+// ELLIPSE from the seam back to it - two plane sections, and the one seam line.
+// EXPECT: 2 plane sections written as the conic it is - 2 on a plane the model declared
+// EXPECT: 1 face round its axis between two rims closed by a seam along a ruling
+// ROUNDTRIP: Plane=2 SurfaceOfExtrusion=1
+// EDGES: Ellipse=2 Line=1
 //
 // Derived: pi a b h = pi * 10 * 5 * 10.
 // VOLUME: 1570.7963268

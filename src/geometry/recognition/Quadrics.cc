@@ -23,6 +23,7 @@
 #include "geometry/Surface.h"
 #include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Internal.h"
+#include "geometry/recognition/Seam.h"
 #include "geometry/recognition/Ledger.h"
 
 namespace AnalyticFeatures {
@@ -558,11 +559,24 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
     // model does not have between two faces of one surface (checklist D1). A
     // band, which wraps without containing the apex, has two loops and keeps
     // the cut.
+    // Nor where it runs round between two rims that a ruling of the surface
+    // joins: the writer closes that face with the seam, as the band writer
+    // does, and a cut there is an edge the model does not have. Asked the way
+    // the writer asks it (recognition/Seam.h), so a face left whole is one the
+    // writer can close.
     if (wraps) {
       std::vector<std::size_t> facets;
       for (const Member& m : claimed) facets.push_back(m.facet);
       std::vector<std::vector<int>> cycles;
-      if (boundaryCycles(loops, facets, cycles) == nullptr && cycles.size() == 1) wraps = false;
+      if (boundaryCycles(loops, facets, cycles) == nullptr) {
+        if (cycles.size() == 1) {
+          wraps = false;
+        } else if (cycles.size() == 2 && recognition::windsRound(*axial, cycles[0], vertices) &&
+                   recognition::windsRound(*axial, cycles[1], vertices) &&
+                   !recognition::rulingSeams(*axial, cycles[0], cycles[1], vertices).empty()) {
+          wraps = false;
+        }
+      }
     }
 
     std::vector<std::vector<Member>> split;
