@@ -65,6 +65,16 @@ Vector3d evaluate(const CurveFit& fit, double t);
  * a vertex nothing else meets. */
 bool joinC0(const std::vector<CurveFit>& parts, CurveFit& out);
 
+/*! Where the crossing of `a` and `b` turns a corner between `p0` and `p1`, two
+ * points of it: where it passes a crease of a sweep - a line of the grid's own
+ * parameters at which it is only C0, which it states as a knot of full
+ * multiplicity. The corner is on the crease, which pins one parameter, and on
+ * the other surface, which one Newton on the remaining parameter solves: so it
+ * is on both. Ordered from `p0`; empty where no crease lies between the two, or
+ * where a corner cannot be solved or does not lie between them. */
+std::vector<Vector3d> creaseCorners(const Surface *a, const Surface *b, const Vector3d& p0,
+                                    const Vector3d& p1);
+
 /*! The curve `a` and `b` cross along, through `run` - vertices already on both,
  * consecutive along the curve - held to `tol` against each surface. False
  * where the points cannot be put on both surfaces, or where adding points of

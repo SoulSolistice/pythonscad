@@ -119,6 +119,7 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
   // edges the first time it was tried.
   for (const auto& patch : grid_faces) walk_into_along(patch);
   crossing_edges.clear();
+  crossing_corners.clear();
   double worst_arc = 0;
   for (const auto& entry : along) {
     if (entry.second.size() != 2) continue;
@@ -147,6 +148,34 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
     // The same 1e-7 the exact tier holds every other boundary to.
     ArcOutcome why;
     if (!intersectionArc(a, b, p0, p1, 1e-7, ctrl, &why)) {
+      // No polynomial follows the crossing where it turns a corner - a sweep's
+      // crease inside the edge, across its profile or along its path - but the
+      // corner itself is a point the crease and the other surface state between
+      // them, and either side of it the crossing is smooth. So such an edge is
+      // the curve too: fitted either side of its corner, and written as one
+      // curve with a corner in it. Whether a crease lies inside is asked of the
+      // sweep's declared knots, not of the fit (`straddles_crease` looks across
+      // the profile only).
+      {
+        const std::vector<Vector3d> corners = creaseCorners(a, b, p0, p1);
+        bool halves = !corners.empty();
+        double worst = 0;
+        Vector3d from = p0;
+        std::vector<Vector3d> half;
+        for (std::size_t k = 0; k <= corners.size() && halves; k++) {
+          const Vector3d& to = k < corners.size() ? corners[k] : p1;
+          halves = intersectionArc(a, b, from, to, 1e-7, half);
+          if (halves) worst = std::max(worst, intersectionArcError(a, b, half));
+          from = to;
+        }
+        if (halves) {
+          worst_arc = std::max(worst_arc, worst);
+          crossing_fit = std::max(crossing_fit, worst_arc);
+          crossing_edges.emplace(entry.first, std::make_pair(a, b));
+          crossing_corners.emplace(entry.first, corners);
+          continue;
+        }
+      }
       arc_refused++;
       if (why.degree == 0 || why.best_error == std::numeric_limits<double>::infinity()) {
         arc_no_fit++;  // no degree ever got as far as a curve to measure

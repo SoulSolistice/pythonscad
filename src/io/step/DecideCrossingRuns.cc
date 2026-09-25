@@ -102,9 +102,9 @@ void StepKernel::BodyBuild::decideCrossingRuns()
   // between creases its middle lies in. An edge of a crossing never straddles
   // one - the arc fitted to it would have to turn a corner, which no polynomial
   // does, and it is written as a chord instead - so this is the edge's own.
-  auto flank_of = [&](int u, int w, const Surface *a, const Surface *b) {
+  auto flank_of = [&](const Vector3d& from, const Vector3d& to, const Surface *a, const Surface *b) {
     std::vector<std::size_t> key;
-    const Vector3d mid = (vertices[u] + vertices[w]) * 0.5;
+    const Vector3d mid = (from + to) * 0.5;
     for (const Surface *s : {a, b}) {
       const auto *grid = dynamic_cast<const GridSurface *>(s);
       if (grid == nullptr) continue;
@@ -128,7 +128,17 @@ void StepKernel::BodyBuild::decideCrossingRuns()
     CrossingPiece piece;
     piece.a = a;
     piece.b = b;
-    if (run.size() == 2) {
+    // Where the crossing turns a crease corner inside a mesh edge, the corners,
+    // ordered along `run` - see creaseCorners.
+    auto corners_in = [&](int u, int w) {
+      std::vector<Vector3d> out;
+      const auto it = crossing_corners.find({std::min(u, w), std::max(u, w)});
+      if (it != crossing_corners.end()) out = it->second;
+      if (u > w) std::reverse(out.begin(), out.end());
+      return out;
+    };
+    const bool one_bezier = run.size() == 2 && corners_in(run[0], run[1]).empty();
+    if (one_bezier) {
       // One edge: the Bezier fitted between its two ends, as it always was.
       const std::pair<int, int> key{std::min(run[0], run[1]), std::max(run[0], run[1])};
       piece.verts = {key.first, key.second};
@@ -142,32 +152,55 @@ void StepKernel::BodyBuild::decideCrossingRuns()
       }
     } else {
       // Fitted flank by flank, and joined at the corners between them: one curve
-      // with its corners where the sweep has its creases.
+      // with its corners where the sweep has its creases - at a vertex where the
+      // edges either side lie on different flanks, or inside an edge.
       std::vector<CurveFit> parts;
       std::vector<Vector3d> points{vertices[run[0]]};
       bool fitted = true;
-      for (std::size_t k = 1; k < run.size() && fitted; k++) {
-        points.push_back(vertices[run[k]]);
-        const bool corner =
-          k + 1 < run.size() && flank_of(run[k - 1], run[k], a, b) != flank_of(run[k], run[k + 1], a, b);
-        if (k + 1 < run.size() && !corner) continue;
+      auto close_part = [&](const Vector3d& at) {
         parts.emplace_back();
-        fitted = fitCrossingRun(a, b, points, 1e-7, parts.back());
-        points = {vertices[run[k]]};
+        fitted = fitted && fitCrossingRun(a, b, points, 1e-7, parts.back());
+        points = {at};
+      };
+      Vector3d last = vertices[run[0]];  // where the current flank's last stretch began
+      for (std::size_t k = 1; k < run.size() && fitted; k++) {
+        for (const Vector3d& corner : corners_in(run[k - 1], run[k])) {
+          points.push_back(corner);
+          close_part(corner);
+          last = corner;
+        }
+        points.push_back(vertices[run[k]]);
+        if (k + 1 == run.size()) {
+          close_part(vertices[run[k]]);
+          break;
+        }
+        const std::vector<Vector3d> next = corners_in(run[k], run[k + 1]);
+        const Vector3d& onward = next.empty() ? vertices[run[k + 1]] : next.front();
+        if (flank_of(last, vertices[run[k]], a, b) != flank_of(vertices[run[k]], onward, a, b)) {
+          close_part(vertices[run[k]]);
+        }
+        last = vertices[run[k]];
       }
       if (!fitted || !joinC0(parts, piece.fit)) {
-        const std::size_t mid = run.size() / 2;
-        make_piece(std::vector<int>(run.begin(), run.begin() + long(mid) + 1), a, b);
-        make_piece(std::vector<int>(run.begin() + long(mid), run.end()), a, b);
-        return;
+        if (run.size() > 2) {
+          const std::size_t mid = run.size() / 2;
+          make_piece(std::vector<int>(run.begin(), run.begin() + long(mid) + 1), a, b);
+          make_piece(std::vector<int>(run.begin() + long(mid), run.end()), a, b);
+          return;
+        }
+        // One edge whose corner could not be fitted round: its chord, as before.
+        piece.verts = {std::min(run[0], run[1]), std::max(run[0], run[1])};
+        piece.fit = CurveFit();
+      } else {
+        piece.verts = run;
+        std::vector<Point *> cp;
+        cp.reserve(piece.fit.ctrl.size());
+        for (const auto& c : piece.fit.ctrl) cp.push_back(new Point(entities, c));
+        auto curve = new BSplineCurve(entities, "", cp);
+        curve->setKnots(CurveFit::degree, piece.fit.knots, piece.fit.mults);
+        piece.edge =
+          new EdgeCurve(entities, get_vertex(run.front()), get_vertex(run.back()), curve, true);
       }
-      piece.verts = run;
-      std::vector<Point *> cp;
-      cp.reserve(piece.fit.ctrl.size());
-      for (const auto& c : piece.fit.ctrl) cp.push_back(new Point(entities, c));
-      auto curve = new BSplineCurve(entities, "", cp);
-      curve->setKnots(CurveFit::degree, piece.fit.knots, piece.fit.mults);
-      piece.edge = new EdgeCurve(entities, get_vertex(run.front()), get_vertex(run.back()), curve, true);
     }
     const std::size_t index = crossing_pieces.size();
     for (std::size_t k = 0; k + 1 < piece.verts.size(); k++) {

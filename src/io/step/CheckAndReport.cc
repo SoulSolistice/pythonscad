@@ -66,6 +66,12 @@ void StepKernel::BodyBuild::checkAndReport()
     // next - see decideCrossingRuns.
     LOG("STEP export: those %1$d curve%2$s cover %3$d edge%4$s of the mesh", crossing_written,
         crossing_written == 1 ? "" : "s", int(crossing_mesh_edges), crossing_mesh_edges == 1 ? "" : "s");
+    if (!crossing_corners.empty()) {
+      LOG(
+        "STEP export: %1$d of those mesh edges cross a sweep's crease inside them, and the curve "
+        "keeps the corner there",
+        int(crossing_corners.size()));
+    }
   }
   if (crossing_unwalked > 0) {
     // Two faces on one piece that do not both carry it in order: the one that

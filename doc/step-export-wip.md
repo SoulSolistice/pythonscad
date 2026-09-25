@@ -4827,14 +4827,41 @@ parts on the build before, and passes on all 118 exports after. The fault census
 on lid10 is identical before and after - the change adds no fault and removes
 none.
 
-*What is left of the zig-zag* are the chords where the crossing turns a crease
-corner *inside* a mesh edge: the per-edge fit refuses those (`straddles_crease`),
-so they are not crossing edges and they end the run either side. On lid10 that is
-2 chords between the lead-in's two flank curves and 3 on the other side, the
-code-17 `line-on-bspl` and `line-on-cone` of the census. The corner is where the
-crease's iso-curve meets the other surface - one Newton on one parameter - and
-with it the run can go through that edge as well, the corner a C0 knot of the
-same curve. That is the next step.
+*A crease inside a mesh edge* - landed the same day. The per-edge fit refuses
+an edge whose crossing turns a crease corner inside it, and it used to end the
+run as a chord. Now `creaseCorners` asks the sweep's declared knots whether a
+crease lies between the edge's ends, in u or in v, and solves the corner: on the
+crease (one parameter pinned) and on the other surface (one Newton on the
+other). Fitted either side of it, the edge joins the run, the corner a C0 knot of
+the one curve. lid10 and the bayonet: 8 curves -> 7 over 604 mesh edges, one
+corner; f02 and the band family 15 -> 14, two; f04 17 -> 16, one.
+
+*Kernel volumes moved, the geometry did not.* SOLIDWORKS (raw, round trip,
+`build/sw-kit3`, control `zz-control-declare-grid-code17` reproduced its code 17)
+read identical faults before and after on lid10, the bayonet and f04, but
+volumes 224546.99 -> 224548.25, 235321.60 -> 235299.70 and 19511.78 -> 19511.02.
+OpenCASCADE's default `VolumeProperties` moved more (+205, +282, -36): its
+fixed-order Gauss rule integrates per edge, and one edge of 1160 knot spans is
+not 559 edges of one. Adaptive, to 1e-9, the moves shrink (lid10 -60, the bayonet
+-2.9, f04 -0.06), and on the bayonet per face only the draft cone's area differs,
+by -0.15 in 19292. Every new curve is within 1e-7 of both its surfaces by
+OpenCASCADE's own projection, and the pcurves are *more* accurate than the old
+(1.4e-7 on the sweep against 1.6e-5 - the old ones were straight lines in (u, v)
+per edge). Where a volume is derived, nothing moved: step-bored-cylinder,
+step-bored-cone and step-cap-meets-wall read the same before and after,
+adaptively. SOLIDWORKS's 21.9 on the bayonet stays unexplained - a reader's
+integration or trimming of a face bounded by long B-splines, not a change in the
+solid - and is recorded rather than argued away.
+
+*What is still a zig-zag* is at the start of the lead-in, where the ramp
+emerges from the cone at zero depth and the two surfaces run nearly tangent. On
+lid10: two chords of 8.33 (one sweep station apart, u 0 to 0.0135) with both
+ends on both surfaces, whose middle will not project onto both - Newton onto two
+surfaces is ill-conditioned where they are tangent, so no degree fits; and two
+short chords at u = 0 whose vertex the corner placement left 1.5e-3 and 2.2e-2
+off the sweep. The crossing there wants solving along the sweep's own stations -
+a point of it on each iso-u curve, one Newton in v - which stays conditioned as
+the surfaces go tangent; and the stray vertices are the corner placement's.
 
 **Found on the way, not the exporter's.** `Polygon2d::stamp_color`, which every
 `offset()` calls, intersects every outline of the result with every outline of

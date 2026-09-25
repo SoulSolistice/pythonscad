@@ -551,6 +551,9 @@ struct StepKernel::BodyBuild {
   // what the other did - which is what makes a curve taken from declarations
   // different in kind from one fitted to the mesh.
   std::map<std::pair<int, int>, std::pair<const Surface *, const Surface *>> crossing_edges;
+  // Of those, the ones whose crossing turns a sweep's crease corner inside the
+  // edge, and where: ordered from the edge's lower vertex. See creaseCorners.
+  std::map<std::pair<int, int>, std::vector<Vector3d>> crossing_corners;
   std::set<std::pair<int, int>> crossing_keys;  // the same, as the sections' skip set
   double crossing_fit = 0;                      // the worst any of those arcs leaves either surface
   // What the fitter knew and used to discard. A count of chorded edges cannot

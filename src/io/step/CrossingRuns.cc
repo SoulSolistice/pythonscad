@@ -220,6 +220,72 @@ bool joinC0(const std::vector<CurveFit>& parts, CurveFit& out)
   return true;
 }
 
+std::vector<Vector3d> creaseCorners(const Surface *a, const Surface *b, const Vector3d& p0,
+                                    const Vector3d& p1)
+{
+  const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
+  const double solve_tol = 1e-14 * scale;  // the precision the crossing's own points are solved to
+  const Vector3d chord = p1 - p0;
+  if (!(chord.squaredNorm() > 0)) return {};
+  std::vector<std::pair<double, Vector3d>> found;
+  for (const Surface *s : {a, b}) {
+    const auto *grid = dynamic_cast<const GridSurface *>(s);
+    if (grid == nullptr) continue;
+    const Surface *other = s == a ? b : a;
+    int du = 0, dv = 0, nr = 0, nc = 0;
+    std::vector<Vector3d> net;
+    std::vector<double> ku, kv;
+    std::vector<int> mu, mv;
+    double u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+    if (!grid->splineForm(du, dv, nr, nc, net, ku, mu, kv, mv)) continue;
+    if (!grid->project(p0, u0, v0) || !grid->project(p1, u1, v1)) return {};
+    // One pass for creases across v (a line of fixed v, u free), one for u.
+    for (const bool across_v : {true, false}) {
+      const auto& knots = across_v ? kv : ku;
+      const auto& mults = across_v ? mv : mu;
+      const int degree = across_v ? dv : du;
+      const double lo = across_v ? std::min(v0, v1) : std::min(u0, u1);
+      const double hi = across_v ? std::max(v0, v1) : std::max(u0, u1);
+      for (std::size_t k = 1; k + 1 < knots.size(); k++) {
+        if (mults[k] < degree || !(knots[k] > lo && knots[k] < hi)) continue;
+        const double fixed = knots[k];
+        const double frac =
+          (fixed - (across_v ? v0 : u0)) / ((across_v ? v1 : u1) - (across_v ? v0 : u0));
+        double t = across_v ? u0 + (u1 - u0) * frac : v0 + (v1 - v0) * frac;
+        auto at = [&](double free) {
+          return across_v ? grid->evaluate(free, fixed) : grid->evaluate(fixed, free);
+        };
+        // Newton on the free parameter, for where the crease meets `other`.
+        Vector3d p = at(t);
+        bool solved = false;
+        for (int step = 0; step < 50 && !solved; step++) {
+          double f = 0, d = 0;
+          Vector3d g;
+          if (!AnalyticFeatures::surfaceImplicit(other, p, f, g, &d) || g.norm() < 1e-12) return {};
+          if (d <= solve_tol) {
+            solved = true;
+            break;
+          }
+          const double h = 1e-7;
+          const Vector3d dp = (at(t + h) - at(t - h)) / (2 * h);
+          const double slope = g.dot(dp);
+          if (slope == 0) return {};
+          t -= f / slope;
+          p = at(t);
+        }
+        if (!solved) return {};
+        const double along = (p - p0).dot(chord) / chord.squaredNorm();
+        if (!(along > 0 && along < 1)) return {};
+        found.emplace_back(along, p);
+      }
+    }
+  }
+  std::sort(found.begin(), found.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
+  std::vector<Vector3d> out;
+  for (const auto& f : found) out.push_back(f.second);
+  return out;
+}
+
 bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector3d>& run, double tol,
                     CurveFit& out)
 {

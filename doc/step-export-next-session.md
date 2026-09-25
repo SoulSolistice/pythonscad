@@ -444,10 +444,11 @@ in `doc/step-export-wip.md`, *Inferred where a declaration was possible*:
 
 Next, in the survey's order, each its own landing:
 
-1. **The crossing through a crease inside a mesh edge** - the chords left of the
-   lead-in's zig-zag (wip, *A crossing curve is written one mesh edge at a time*):
-   the corner is where the crease's iso-curve meets the other surface, and the run
-   continues through it with a C0 knot.
+1. **The tangential start of the lead-in** - what is left of lid10's zig-zag
+   (wip, *A crossing curve is written one mesh edge at a time*): where the ramp
+   emerges from the cone the two surfaces run tangent, Newton onto both fails, and
+   two 8.33 chords remain; solve the crossing along the sweep's stations instead.
+   And the two vertices there the corner placement leaves off the sweep.
 2. **Plane sections of a cone that are not ellipses** - parabolas (step-roof-voronoi's
    KNOWN-EXPORT-ERROR) and hyperbolas. A writer gap exposed by a true declaration.
 3. **A rim as one CIRCLE**, not arc by arc - D5 for circles and conics, and an
