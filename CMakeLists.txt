@@ -1696,6 +1696,8 @@ set(CORE_SOURCES
   src/io/import_step.cc
   src/io/StepKernel.cc
   src/io/step/BodyBuild.cc
+  src/io/step/MeshLoops.cc
+  src/io/step/SurfaceCensus.cc
   src/io/step/BoundaryCycles.cc
   src/io/step/CrossingArc.cc
   src/io/step/CurveChecks.cc
