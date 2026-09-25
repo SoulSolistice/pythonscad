@@ -19,6 +19,7 @@
 #include "geometry/PolySetBuilder.h"
 #include "geometry/PolySetUtils.h"
 #include "geometry/Polygon2d.h"
+#include "geometry/Profile2d.h"
 #include "geometry/Barcode1d.h"
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
@@ -189,23 +190,16 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
   // *evidence* - rims the band pass identifies the cone by - and no facet lies
   // on them. Where one radius is both, the face wins (addSurfaceUnique merges
   // the roles). See Surface::witnesses.
-  // Whether an edge is a chord of one of the profile's recorded arcs: both ends
-  // on the same circle, at machine precision - the arc records are in the
-  // profile's own frame, so they take the offset the swept profile already has.
-  // Such an edge sweeps a piece of the arc's torus or sphere, declared below, and
-  // not a cone of its own.
-  auto chord_of_arc = [&](const Vector2d& a, const Vector2d& b) {
-    for (const auto& arc : arcs) {
-      const Vector2d c(arc.centre[0] + node.offset_x, arc.centre[1] + node.offset_y);
-      auto on = [&](const Vector2d& p) {
-        // |p - c| - r: 2 subtractions, 2 squares, a sum, a root, a difference
-        const double eps7 = 7 * std::numeric_limits<double>::epsilon();
-        return fabs((p - c).norm() - arc.r) <= eps7 / (1 - eps7) * (p.norm() + c.norm() + arc.r);
-      };
-      if (on(a) && on(b)) return true;
-    }
-    return false;
-  };
+  // What each edge is. The arc records are in the profile's own frame, so they
+  // take the offset the swept profile already has; then an edge that is a chord
+  // of one sweeps a piece of the arc's torus or sphere, declared below, and not a
+  // cone of its own. See Profile2d.h.
+  std::vector<Arc2d> swept_arcs;
+  for (const auto& arc : arcs) {
+    swept_arcs.push_back(
+      Arc2d{Vector2d(arc.centre[0] + node.offset_x, arc.centre[1] + node.offset_y), arc.r});
+  }
+  const Profile2d profile = classifyProfile(profiles, swept_arcs, {});
   std::vector<double> declared;
   auto declare = [&](const Vector2d& p, bool face) {
     auto record = std::make_shared<CylinderSurface>(Vector3d(0, 0, p[1]), Vector3d(0, 0, 1), p[0]);
@@ -220,11 +214,10 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
     addSurfaceUnique(polyset.surfaces, record);
   };
 
-  for (const auto& profile : profiles) {
-    const std::size_t n = profile.size();
-    for (std::size_t i = 0; i < n; i++) {
-      const Vector2d& a = profile[i];
-      const Vector2d& b = profile[(i + 1) % n];
+  for (const auto& loop : profile.loops) {
+    for (const ProfileEdge& edge : loop) {
+      const Vector2d& a = edge.a;
+      const Vector2d& b = edge.b;
       // An edge at one height sweeps a flat annulus, and one touching the axis
       // sweeps a disc or an apex. Neither is a wall - but the annulus is a
       // *plane*, exactly, at the height the profile puts it, and saying so is
@@ -247,7 +240,7 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
         // the profile carries Bezier records an edge may be a chord of one of
         // those, which this does not test - so it declares nothing it cannot
         // state, and the rims stay evidence only.
-        if (has_beziers || chord_of_arc(a, b)) continue;
+        if (has_beziers || edge.kind == EdgeKind::Arc) continue;
         // And the cone itself, which the two rims only witness. Until
         // 2026-09-24 a sloped edge declared its rims alone, so the cone it
         // sweeps was *recognised* from them and claimed under a rim's name: on

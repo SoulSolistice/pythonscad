@@ -1636,6 +1636,7 @@ set(CORE_SOURCES
   src/geometry/ClipperUtils.cc
   src/geometry/Geometry.cc
   src/geometry/GeometryCache.cc
+  src/geometry/Profile2d.cc
   src/geometry/GeometryEvaluator.cc
   src/geometry/GeometryUtils.cc
   src/geometry/PolySet.cc

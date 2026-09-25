@@ -17,6 +17,7 @@
 #include "geometry/Barcode1d.h"
 #include "geometry/PolySetBuilder.h"
 #include "geometry/PolySetUtils.h"
+#include "geometry/Profile2d.h"
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
 #include "glview/RenderSettings.h"
@@ -513,50 +514,19 @@ void declareExtrudedPlanes(const LinearExtrudeNode& node, const Polygon2d& profi
   if (node.twist != 0) return;
   const bool even_scale = node.scale_x == node.scale_y;
 
-  auto on_a_curve = [&](const Vector2d& p, const Vector2d& q) {
-    for (const auto& arc : profile.arcs) {
-      if (arc.r <= 0) continue;
-      // Loose on purpose. This asks whether two points are on a recorded circle,
-      // and a straight edge's ends are nowhere near one, so the discriminator is
-      // enormous and the tolerance is free. It has to be: a profile that has been
-      // through Clipper is snapped to its decimal grid, and at 1e-9 the arcs of
-      // an offset() matched nothing at all - so every chord of them was declared
-      // a straight wall, thirty planes for six faces.
-      const double tol = 1e-6 * std::max(1.0, arc.r);
-      if (fabs((p - Vector2d(arc.centre)).norm() - arc.r) > tol) continue;
-      if (fabs((q - Vector2d(arc.centre)).norm() - arc.r) > tol) continue;
-      return true;
-    }
-    for (const auto& bez : profile.beziers) {
-      Vector2d lo = Vector2d(bez.ctrl[0]), hi = lo;
-      for (int i = 1; i <= bez.degree; i++) {
-        lo = lo.cwiseMin(Vector2d(bez.ctrl[i]));
-        hi = hi.cwiseMax(Vector2d(bez.ctrl[i]));
-      }
-      const double tol = 1e-9 * std::max(1.0, (hi - lo).norm());
-      const Vector2d slack(tol, tol);
-      if ((p.array() >= (lo - slack).array()).all() && (p.array() <= (hi + slack).array()).all() &&
-          (q.array() >= (lo - slack).array()).all() && (q.array() <= (hi + slack).array()).all()) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  // Untransformed, because the arcs and Beziers this is tested against are: they
-  // are recorded in the profile's own 2D frame and the transform is applied
-  // below, where the wall is built. Comparing a transformed vertex against an
-  // untransformed centre finds no arc at all, and every chord of one is then
-  // declared a straight wall - which is how a rounded square came to declare
-  // thirty planes for six faces.
-  for (const auto& outline : profile.untransformedOutlines()) {
-    const std::size_t n = outline.vertices.size();
-    if (n < 2) continue;
-    for (std::size_t i = 0; i < n; i++) {
-      const Vector2d a = outline.vertices[i];
-      const Vector2d b = outline.vertices[(i + 1) % n];
+  // Untransformed, because the arcs and Beziers the edges are classified against
+  // are: they are recorded in the profile's own 2D frame and the transform is
+  // applied below, where the wall is built. Comparing a transformed vertex
+  // against an untransformed centre finds no arc at all, and every chord of one
+  // is then declared a straight wall - which is how a rounded square came to
+  // declare thirty planes for six faces. See Profile2d.h.
+  for (const auto& loop : classifyProfile(profile).loops) {
+    if (loop.size() < 2) continue;
+    for (const ProfileEdge& edge : loop) {
+      const Vector2d& a = edge.a;
+      const Vector2d& b = edge.b;
       if ((b - a).norm() < 1e-12) continue;
-      if (on_a_curve(a, b)) continue;
+      if (edge.kind != EdgeKind::Line) continue;
       // An uneven scale keeps only the edges it does not shear.
       if (!even_scale && fabs(b[0] - a[0]) > 1e-12 && fabs(b[1] - a[1]) > 1e-12) continue;
       const Vector3d p = tr * Vector3d(a[0], a[1], 0.) + base;
