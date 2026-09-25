@@ -14,6 +14,77 @@ using AnalyticFeatures::isQuadric;
 using AnalyticFeatures::projectOntoBoth;
 using AnalyticFeatures::surfaceImplicit;
 
+bool onCrossing(const Surface *a, const Surface *b, Vector3d& q, const Vector3d& p0, const Vector3d& p1,
+                double tol)
+{
+  Vector3d newton = q;
+  if (projectOntoBoth(a, b, newton, tol)) {
+    q = newton;
+    return true;
+  }
+  for (const Surface *s : {a, b}) {
+    const auto *grid = dynamic_cast<const GridSurface *>(s);
+    if (grid == nullptr) continue;
+    const Surface *other = s == a ? b : a;
+    double u = 0, v = 0, u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+    if (!grid->project(q, u, v) || !grid->project(p0, u0, v0) || !grid->project(p1, u1, v1)) continue;
+    int du = 0, dv = 0, nr = 0, nc = 0;
+    std::vector<Vector3d> net;
+    std::vector<double> ku, kv;
+    std::vector<int> mu, mv;
+    if (!grid->splineForm(du, dv, nr, nc, net, ku, mu, kv, mv)) continue;
+    // Which way the stretch advances over the sweep, by distance on it: the
+    // line through `q` is taken across that, so the crossing cuts it steeply.
+    const double along_u = (grid->evaluate(u1, v0) - grid->evaluate(u0, v0)).norm();
+    const double along_v = (grid->evaluate(u0, v1) - grid->evaluate(u0, v0)).norm();
+    const bool fix_u = along_u >= along_v;
+    auto at = [&](double t) { return fix_u ? grid->evaluate(u, t) : grid->evaluate(t, v); };
+    // The bracket: as far either side of `q` along that line as the stretch is
+    // long, in the line's own parameter - local, so it holds the crossing near
+    // the stretch and not one elsewhere on the sweep - and no further than the
+    // creases, knots where the sweep is only C0, either side of the stretch.
+    const double here = fix_u ? v : u;
+    const double h = 1e-6;
+    const double rate = (at(here + h) - at(here - h)).norm() / (2 * h);
+    if (!(rate > 0)) continue;
+    const double reach = (p1 - p0).norm() / rate;
+    const auto& knots = fix_u ? kv : ku;
+    const auto& mults = fix_u ? mv : mu;
+    const int degree = fix_u ? dv : du;
+    const double mid = fix_u ? 0.5 * (v0 + v1) : 0.5 * (u0 + u1);
+    double lo = std::max(knots.front(), here - reach), hi = std::min(knots.back(), here + reach);
+    for (std::size_t k = 1; k + 1 < knots.size(); k++) {
+      if (mults[k] < degree) continue;
+      if (knots[k] <= mid) lo = std::max(lo, knots[k]);
+      else hi = std::min(hi, knots[k]);
+    }
+    if (!(hi > lo)) continue;
+    auto side = [&](double t, double& f, double& d) {
+      Vector3d g;
+      return surfaceImplicit(other, at(t), f, g, &d);
+    };
+    double flo = 0, fhi = 0, dlo = 0, dhi = 0;
+    if (!side(lo, flo, dlo) || !side(hi, fhi, dhi)) continue;
+    if ((flo > 0) == (fhi > 0)) continue;  // not crossed on this flank
+    // Bisection: each step halves the bracket, so it ends at machine precision
+    // in the parameter whether or not `tol` is met first.
+    double t = 0.5 * (lo + hi);
+    for (int step = 0; step < 200; step++) {
+      t = 0.5 * (lo + hi);
+      double f = 0, d = 0;
+      if (!side(t, f, d)) break;
+      if (d <= tol || !(hi - lo > 0) || t == lo || t == hi) break;
+      if ((f > 0) == (flo > 0)) lo = t;
+      else hi = t;
+    }
+    double f = 0, d = 0;
+    if (!side(t, f, d) || d > tol) continue;
+    q = at(t);
+    return true;
+  }
+  return false;
+}
+
 bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, const Vector3d& p1,
                      double tol, std::vector<Vector3d>& ctrl, ArcOutcome *why)
 {
@@ -69,7 +140,7 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
     on_curve[degree] = p1;
     for (int i = 1; i < degree && ok; i++) {
       Vector3d q = p0 + (p1 - p0) * (double(i) / degree);
-      ok = projectOntoBoth(a, b, q, solve_tol);
+      ok = onCrossing(a, b, q, p0, p1, solve_tol);
       on_curve[i] = q;
     }
     // A degree whose samples will not project is not the end of the fit. The

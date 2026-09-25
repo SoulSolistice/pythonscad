@@ -50,6 +50,22 @@ struct ArcOutcome {
 bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, const Vector3d& p1,
                      double tol, std::vector<Vector3d>& ctrl, ArcOutcome *why = nullptr);
 
+/*! Put `q` on the curve `a` and `b` cross along, near the stretch of it from
+ * `p0` to `p1` (both on it already).
+ *
+ * Newton onto both surfaces first. It fails where the two run nearly tangent -
+ * the start of a sweep that fades into the surface it grows from, where the
+ * crossing's direction is barely defined - and there a sweep is asked along one
+ * of its own parameter lines instead: the line through `q` across the way the
+ * stretch advances, bounded by the sweep's declared creases either side of the
+ * stretch (its flank). The other surface is crossed once on a flank, so its
+ * implicit changes sign between the two creases and bisection finds the point
+ * - bracketed, it cannot wander, and near tangency is exactly where that
+ * matters. The point is on the sweep by construction and on the other surface
+ * to `tol`. False where neither way finds one. */
+bool onCrossing(const Surface *a, const Surface *b, Vector3d& q, const Vector3d& p0, const Vector3d& p1,
+                double tol);
+
 /*! How far a fitted arc leaves the two surfaces it is supposed to run along; and,
  * where asked, how much of that is against a surface stated algebraically
  * (`on_quadric`) and how much against one that answers by projecting

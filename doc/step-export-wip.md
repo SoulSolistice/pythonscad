@@ -4863,6 +4863,41 @@ off the sweep. The crossing there wants solving along the sweep's own stations -
 a point of it on each iso-u curve, one Newton in v - which stays conditioned as
 the surfaces go tangent; and the stray vertices are the corner placement's.
 
+*Measured on 2026-09-25, and what it showed.* The crossing near the start is a
+lens: tracing the written sweep along its u lines, the socket cone is crossed
+twice on each - v 0.478 and 0.559 at u = 0 - and the two converge on the crest
+crease, v = 0.5, near u = 0.015, past which the rib stands wholly proud of the
+cone. The chords run along the flank branch (v 0.478, 0.487, 0.496 at u 0,
+0.0067, 0.0135). Two general changes landed: `onCrossing`, which samples the
+crossing along a sweep's own parameter line, bracketed locally and between its
+declared creases, where Newton onto both surfaces fails near tangency; and
+admission that asks the refining fit when one Bezier of degree <= 9 cannot
+follow the curve. lid10: 12 chords -> 10, one more crease corner. SOLIDWORKS
+still reads the one fault it did, `swTopolNotG1Continuous` (code 30) on the
+small sweep face spanning the crest crease at the start.
+
+*The question the author asked: shouldn't these curves be closed-form?* They
+are, in the model's own parameter. At station t the rib's profile lies in the
+meridian half-plane at angle 360 turns t, its points at radius r(t) + dr f(t)
+and height z(t) + dz, with r, z and f linear in t on the lead-in; a flank is a
+segment in that half-plane and the socket cone is the line rho = R0 + slope z.
+So the crossing at each t is two lines meeting - rho and z rational in t, the
+angle linear in t - and the lens tip, where it reaches the crest crease, is a
+closed-form solve in t. It is *not algebraic*: angle linear against rational
+radius and height winds like a helix, which is transcendental, so no rational
+parametrisation holds it and no STEP entity writes it exactly. What STEP can do
+is approximate it - and today we approximate the wrong thing. `declare_grid`
+hands the exporter the stations only; between them the surface is our cubic
+interpolant (D1), and the curves above are exact crossings *of the
+interpolant*, not of the model's helicoid.
+
+The root fix is therefore upstream and general: **a declaration of the sweep's
+generating law** - axis, pitch, radius law, profile, scale law f(t) - so that
+the surface and every crossing on it are derived from the formula (in each
+meridian plane, lines meeting lines), and only the final STEP approximation is
+fitted, against the exact curve, to a stated tolerance. The run-in lens, its
+tip, and the cap's corners on the cone all become closed-form points there.
+
 **Found on the way, not the exporter's.** `Polygon2d::stamp_color`, which every
 `offset()` calls, intersects every outline of the result with every outline of
 its source through Clipper - 8.6 s of a 19 s 2D model (a 20 x 20 grid of circles

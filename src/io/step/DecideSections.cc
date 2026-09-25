@@ -156,16 +156,26 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
       // curve with a corner in it. Whether a crease lies inside is asked of the
       // sweep's declared knots, not of the fit (`straddles_crease` looks across
       // the profile only).
+      //
+      // And where one Bezier of degree 9 or less is not enough - the curve
+      // turning hard, as it does at the tip of the lens a sweep makes as it
+      // fades into the surface it grows from - the fit that refines where it
+      // misses is asked before the edge is given up as a chord.
       {
         const std::vector<Vector3d> corners = creaseCorners(a, b, p0, p1);
-        bool halves = !corners.empty();
+        bool halves = true;
         double worst = 0;
         Vector3d from = p0;
         std::vector<Vector3d> half;
         for (std::size_t k = 0; k <= corners.size() && halves; k++) {
           const Vector3d& to = k < corners.size() ? corners[k] : p1;
-          halves = intersectionArc(a, b, from, to, 1e-7, half);
-          if (halves) worst = std::max(worst, intersectionArcError(a, b, half));
+          if (intersectionArc(a, b, from, to, 1e-7, half)) {
+            worst = std::max(worst, intersectionArcError(a, b, half));
+          } else {
+            CurveFit refined;
+            halves = fitCrossingRun(a, b, {from, to}, 1e-7, refined);
+            if (halves) worst = std::max(worst, 1e-7);
+          }
           from = to;
         }
         if (halves) {

@@ -10,6 +10,7 @@
 #include <Eigen/SparseLU>
 
 #include "geometry/AnalyticFeatures.h"
+#include "io/step/CrossingArc.h"
 
 namespace step {
 
@@ -294,8 +295,9 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
   for (const auto& p : run) scale = std::max(scale, p.norm());
   // The same solve precision the per-edge arc holds its samples to.
   const double solve_tol = 1e-14 * scale;
-  auto on_both = [&](Vector3d q, std::vector<Vector3d>& into) {
-    if (!AnalyticFeatures::projectOntoBoth(a, b, q, solve_tol)) return false;
+  // A point of the crossing near `q`, on the stretch from `from` to `to`.
+  auto on_both = [&](Vector3d q, const Vector3d& from, const Vector3d& to, std::vector<Vector3d>& into) {
+    if (!onCrossing(a, b, q, from, to, solve_tol)) return false;
     into.push_back(q);
     return true;
   };
@@ -311,10 +313,10 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
   for (std::size_t k = 1; k < run.size(); k++) {
     for (int s = 1; s <= between; s++) {
       const double t = double(s) / (between + 1);
-      if (!on_both(run[k - 1] * (1 - t) + run[k] * t, points)) return false;
+      if (!on_both(run[k - 1] * (1 - t) + run[k] * t, run[k - 1], run[k], points)) return false;
     }
     if (k + 1 < run.size()) {
-      if (!on_both(run[k], points)) return false;
+      if (!on_both(run[k], run[k - 1], run[k + 1], points)) return false;
     } else {
       points.push_back(run.back());
     }
@@ -347,8 +349,8 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
     refined.reserve(count * 2);
     for (std::size_t i = 0; i + 1 < count; i++) {
       refined.push_back(points[i]);
-      if (worst[i] > tol &&
-          !on_both(evaluate(fit, (fit.params[i] + fit.params[i + 1]) * 0.5), refined)) {
+      if (worst[i] > tol && !on_both(evaluate(fit, (fit.params[i] + fit.params[i + 1]) * 0.5), points[i],
+                                     points[i + 1], refined)) {
         return false;
       }
     }

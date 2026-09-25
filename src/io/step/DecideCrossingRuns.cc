@@ -137,19 +137,20 @@ void StepKernel::BodyBuild::decideCrossingRuns()
       if (u > w) std::reverse(out.begin(), out.end());
       return out;
     };
-    const bool one_bezier = run.size() == 2 && corners_in(run[0], run[1]).empty();
+    // One edge the Bezier fits between its two ends is written as it always
+    // was; anything else - a longer run, a corner inside, a curve turning too
+    // hard for one Bezier - by the fit below.
+    std::vector<Vector3d> ctrl;
+    const std::pair<int, int> key{std::min(run[0], run[1]), std::max(run[0], run[1])};
+    const bool one_bezier = run.size() == 2 && corners_in(run[0], run[1]).empty() &&
+                            intersectionArc(a, b, vertices[key.first], vertices[key.second], 1e-7, ctrl);
     if (one_bezier) {
-      // One edge: the Bezier fitted between its two ends, as it always was.
-      const std::pair<int, int> key{std::min(run[0], run[1]), std::max(run[0], run[1])};
       piece.verts = {key.first, key.second};
-      std::vector<Vector3d> ctrl;
-      if (intersectionArc(a, b, vertices[key.first], vertices[key.second], 1e-7, ctrl)) {
-        std::vector<Point *> cp;
-        cp.reserve(ctrl.size());
-        for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
-        piece.edge = new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
-                                   new BSplineCurve(entities, "", cp), true);
-      }
+      std::vector<Point *> cp;
+      cp.reserve(ctrl.size());
+      for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
+      piece.edge = new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
+                                 new BSplineCurve(entities, "", cp), true);
     } else {
       // Fitted flank by flank, and joined at the corners between them: one curve
       // with its corners where the sweep has its creases - at a vertex where the
