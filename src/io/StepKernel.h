@@ -2053,6 +2053,9 @@ public:
   StepKernel::EdgeCurve *create_arc_edge_curve(StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
                                                bool dir);
 
+  /*! The work of build_tri_body, as an object - see io/step/BodyBuild.h. */
+  struct BodyBuild;
+
   void build_tri_body(const char *name, const std::vector<Vector3d>& vertices,
                       const std::vector<IndexedFace>& faces,
                       const std::vector<std::shared_ptr<Curve>>& curves,
