@@ -1695,6 +1695,11 @@ set(CORE_SOURCES
   src/io/import_stl.cc
   src/io/import_step.cc
   src/io/StepKernel.cc
+  src/io/step/BoundaryCycles.cc
+  src/io/step/CrossingArc.cc
+  src/io/step/CurveChecks.cc
+  src/io/step/LoopGeometry.cc
+  src/io/step/PlaneSections.cc
   src/io/import_svg.cc
   src/platform/PlatformUtils.cc
   src/utils/StackCheck.h
