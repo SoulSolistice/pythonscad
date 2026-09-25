@@ -4,6 +4,7 @@
 #include "core/enums.h"
 #include "core/progress.h"
 #include "geometry/Geometry.h"
+#include "geometry/HullOfRevolution.h"
 #include "geometry/PolySet.h"
 #include "geometry/Surface.h"
 #include "geometry/cgal/cgal.h"
@@ -176,12 +177,15 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
   // the Manifold backend's hull: they are a statement of intent which an
   // exporter only acts on after finding an exact fit in the resulting mesh.
   std::vector<std::shared_ptr<Surface>> surfaces;
+  // Each operand's records apart as well - see declareHullOfRevolution.
+  std::vector<std::vector<std::shared_ptr<Surface>>> per_operand;
 
   for (const auto& item : children) {
     auto& chgeom = item.second;
 #ifdef ENABLE_CGAL
     if (const auto *N = dynamic_cast<const CGALNefGeometry *>(chgeom.get())) {
       if (!N->isEmpty()) {
+        per_operand.push_back(N->surfaces);
         mergeSurfaces(surfaces, N->surfaces);
         addCapacity(N->p3->number_of_vertices());
         for (auto it = N->p3->vertices_begin(); it != N->p3->vertices_end(); ++it) {
@@ -191,6 +195,7 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
 #endif  // ENABLE_CGAL
 #ifdef ENABLE_MANIFOLD
     } else if (const auto *mani = dynamic_cast<const ManifoldGeometry *>(chgeom.get())) {
+      per_operand.push_back(mani->getSurfaces());
       mergeSurfaces(surfaces, mani->getSurfaces());
       addCapacity(mani->numVertices());
       mani->foreachVertexUntilTrue([&](auto& p) {
@@ -199,6 +204,7 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
       });
 #endif  // ENABLE_MANIFOLD
     } else if (const auto *ps = dynamic_cast<const PolySet *>(chgeom.get())) {
+      per_operand.push_back(ps->surfaces);
       mergeSurfaces(surfaces, ps->surfaces);
       addCapacity(ps->indices.size() * 3);
       for (const auto& p : ps->indices) {
@@ -208,6 +214,9 @@ std::unique_ptr<PolySet> applyHull3D(const Geometry::Geometries& children)
       }
     }
   }
+
+  // And what the hull makes of them, where its operands state it.
+  mergeSurfaces(surfaces, declareHullOfRevolution(per_operand));
 
   const auto& points = reindexer.getArray();
   if (points.size() <= 3) return nullptr;

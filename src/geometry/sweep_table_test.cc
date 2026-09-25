@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 
+#include "geometry/HullOfRevolution.h"
 #include "geometry/Surface.h"
 #include "geometry/SweptSurfaces.h"
 
@@ -182,4 +183,37 @@ TEST_CASE("extrude: a D-shaft's flat is a wall", "[sweep-table][!shouldfail]")
   sweep.height = Vector3d(0., 0., 7.);
   // two caps and the flat
   CHECK(ofKind<PlaneSurface>(extrude(classifyProfile({d}, {arc}, {}), sweep)).size() == 3);
+}
+
+namespace {
+
+/*! What cylinder(h, r) translated to `z0` declares: its wall and its two caps. */
+std::vector<std::shared_ptr<Surface>> cylinderRecords(double r, double z0, double h,
+                                                      const Vector3d& at = Vector3d::Zero())
+{
+  return {std::make_shared<CylinderSurface>(at + Vector3d(0., 0., z0), Vector3d(0., 0., 1.), r),
+          std::make_shared<PlaneSurface>(at + Vector3d(0., 0., z0), Vector3d(0., 0., 1.)),
+          std::make_shared<PlaneSurface>(at + Vector3d(0., 0., z0 + h), Vector3d(0., 0., 1.))};
+}
+
+}  // namespace
+
+TEST_CASE("hull of revolution: a chamfer is the cone between two rims", "[sweep-table]")
+{
+  // step-chamfered-cylinder.scad: hull() of an r = 10 wall on z = 2..20 and an
+  // r = 8 disc on z = 0..0.01. The hull's profile runs from (8, 0) to (10, 2).
+  const auto surfaces =
+    declareHullOfRevolution({cylinderRecords(10., 2., 18.), cylinderRecords(8., 0., 0.01)});
+  const auto cones = ofKind<ConeSurface>(surfaces);
+  REQUIRE(cones.size() == 1);
+  CHECK(cones[0]->r == 10.);
+  CHECK(cones[0]->slope == 1.);
+  CHECK(cones[0]->refpt == Vector3d(0., 0., 2.));
+}
+
+TEST_CASE("hull of revolution: operands on two axes state nothing", "[sweep-table]")
+{
+  const auto surfaces = declareHullOfRevolution(
+    {cylinderRecords(10., 2., 18.), cylinderRecords(8., 0., 0.01, Vector3d(1., 0., 0.))});
+  CHECK(surfaces.empty());
 }

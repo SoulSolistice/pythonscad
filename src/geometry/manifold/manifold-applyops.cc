@@ -14,6 +14,7 @@
 #include "core/node.h"
 #include "core/progress.h"
 #include "geometry/Geometry.h"
+#include "geometry/HullOfRevolution.h"
 #include "geometry/PolySet.h"
 #include "geometry/manifold/ManifoldGeometry.h"
 #include "geometry/manifold/manifoldutils.h"
@@ -42,10 +43,14 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     // uses one. Carrying them is what keeps the commonest chamfer idiom,
     // hull(cylinder(r=R), cylinder(r=R-c)), from costing the wall its identity.
     std::vector<std::shared_ptr<Surface>> surfaces;
+    // Each operand's records apart as well, because what the hull itself makes
+    // is stated by its operands one by one - see declareHullOfRevolution.
+    std::vector<std::vector<std::shared_ptr<Surface>>> per_operand;
     for (const auto& item : children) {
       if (!item.second) continue;
       auto& chgeom = item.second;
       if (const auto *mani = dynamic_cast<const ManifoldGeometry *>(chgeom.get())) {
+        per_operand.push_back(mani->getSurfaces());
         mergeSurfaces(surfaces, mani->getSurfaces());
         pts.reserve(pts.size() + mani->numVertices());
         mani->foreachVertexUntilTrue([&](auto& p) {
@@ -53,6 +58,7 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
           return false;
         });
       } else if (const auto *ps = dynamic_cast<const PolySet *>(chgeom.get())) {
+        per_operand.push_back(ps->surfaces);
         mergeSurfaces(surfaces, ps->surfaces);
         pts.reserve(pts.size() + ps->indices.size() * 3);
         for (const auto& p : ps->indices) {
@@ -64,6 +70,7 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       } else {
         auto chN = createManifoldFromGeometry(chgeom);
         if (chN && !chN->isEmpty()) {
+          per_operand.push_back(chN->getSurfaces());
           mergeSurfaces(surfaces, chN->getSurfaces());
           chN->foreachVertexUntilTrue([&](auto& p) {
             pts.push_back(p);
@@ -74,6 +81,8 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       if (item.first) item.first->progress_report();
     }
     if (pts.empty()) return nullptr;
+    // And what the hull makes of them, where its operands state it.
+    mergeSurfaces(surfaces, declareHullOfRevolution(per_operand));
     // A hull is one new original: whatever its operands' triangles carried, its
     // own carry the hull's id, so that id is who declared every record here.
     const auto hull = manifold::Manifold::Hull(pts);

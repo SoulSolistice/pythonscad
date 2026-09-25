@@ -30,8 +30,17 @@
 // Measured, and asserted by the driver: what the exporter has to report for
 // the above to have happened. A silently faceted export is still a valid one,
 // so validity alone cannot see a recogniser that has stopped recognising.
-// EXPECT: 2 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// The cone is the hull's own, declared since 2026-09-25 (declareHullOfRevolution,
+// see step-chamfered-cylinder); until then it was identified by its rims and
+// held on the r = 10 cylinder, which is why the count read 2.
+// EXPECT: 3 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 2 partial), 48 facets replaced
+//
+// Three quarters of step-chamfered-cylinder's 64: 24 wall facets on the r = 10
+// cylinder and 24 on the cone, each made by the hull, which declared both. The
+// cube's planes pass through vertices, not chords (above), so no corner is moved
+// off its surface by the cut, and every one of the 48 is decided by the model.
+// EXPECT: what decided each written facet: 48 D0, 0 D1, 0 D2, 0 D3, 0 D4
 //
 // The chamfered cylinder above with one quadrant cut away, so exactly three
 // quarters of 6165.8991814.

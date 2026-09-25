@@ -4108,6 +4108,21 @@ coaxial solids of revolution declaring its cones is the next landing. Found on
 the way, and recorded rather than fixed blind: `rotate_extrude`'s plane records
 add `offset_y` to a profile that already carries it.
 
+**Closed 2026-09-25.** The hull of coaxial solids of revolution states its own
+surfaces: each operand's declarations give its profile (one cylinder or cone and
+two cap planes across its axis), the hull of those profiles in the (radius,
+level) half-plane is a profile of straight edges, and the sweep table
+(`SweptSurfaces`) says what it makes turned - the same rows rotate_extrude
+answers from, so the cone row exists once (`declareHullOfRevolution`). lid10's
+exact tier: **909 D0, 0 D3** - every facet of the reference part decided by the
+model. The bayonet's `hoseCollar` is the same hull: 534 to 654 D0, 140 to 20 D3.
+The `offset_y` double add is fixed with the table, asserted by
+step-revolve-offset.
+
+What the bayonet's last 20 D3 are is open: facets at z = 90, r = 78.6, held by a
+band on the r = 79.5 cylinder (`original 36`) they are 1.5 off - not a hull, and
+there before this landing.
+
 ### 32. The fixture sanity test does not look for `EXPORT-ERROR`
 
 `tests/stepexportsanitytest.py` never checks the exporter's own error lines;
@@ -4722,7 +4737,7 @@ box, and neither asks the other.
 
 | # | where | inferred or refused |
 | --- | --- | --- |
-| 12 | `hull()` | coaxial solids of revolution first (landing 3 below); the tangent cone of two spheres and the tangent planes of non-coaxial cylinders are fixed by the operands' declarations too |
+| 12 | `hull()` | coaxial solids of revolution **done 2026-09-25** (item 36); the tangent cone of two spheres and the tangent planes of non-coaxial cylinders are fixed by the operands' declarations too |
 | 13 | `minkowski()` | drops every record on purpose; a convex solid with a sphere is offset planes, edge cylinders and vertex spheres, all implied by the operands |
 | 14 | ownership of a GeometryList export or a Nef result | no identity is minted, so ownership falls back to presence - open item 34's gap |
 | 15 | `projection(cut = true)` through a declared cylinder | the cut is a declared circle and no `Arc2d` is recorded. Low |
