@@ -1696,6 +1696,12 @@ set(CORE_SOURCES
   src/io/import_step.cc
   src/io/StepKernel.cc
   src/io/step/BodyBuild.cc
+  src/io/step/WriteShells.cc
+  src/io/step/CheckAndReport.cc
+  src/io/step/PromoteCurves.cc
+  src/io/step/AssembleFaces.cc
+  src/io/step/EmitCornerFans.cc
+  src/io/step/EmitPlanarFaces.cc
   src/io/step/CrossingPcurves.cc
   src/io/step/EmitQuadricFaces.cc
   src/io/step/EmitSweepFaces.cc

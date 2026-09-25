@@ -199,6 +199,58 @@ struct StepKernel::BodyBuild {
    * onto a quadric and decide for itself is told the answer instead. */
   void writeCrossingPcurves();
 
+  /*! Every facet loop no analytic face took, as a planar bound with its edges
+   * and its carrier PLANE - a declared plane wherever one agrees - with the arcs
+   * and conics the analytic faces handed it spliced in. Then the declaration
+   * census, which is complete once the last face that can stand on a
+   * declaration has been written. */
+  void emitPlanarFaces();
+
+  /*! The fans for the polygons the corner placement bent.
+   *
+   * Each triangle takes its boundary edges from the same map every other face
+   * uses, so the shell still stitches along them; the diagonals are new and
+   * used by exactly the two triangles that share them. Each triangle carries
+   * the plane its own three corners lie on, which is the point of the fan -
+   * the polygon's plane is the one they no longer all sit on. */
+  void emitCornerFans();
+
+  /*! Combine every outer loop with the loops of its holes into one ADVANCED_FACE.
+   * Then the analytic faces the emitters wrote, which are faces of the same
+   * shell. */
+  void assembleFaces();
+
+  /*! Every edge bounding a recovered curved face was still a straight line: the
+   * exporter drops a cylinder behind the mesh's polyline boundary, so the edge
+   * is the chord where the surface is the arc, and the gap between them is the
+   * sagitta. Measured on the band family, 366 of 388 line-on-cylinder edges lay
+   * off the cylinder they bounded, by up to 0.17mm - doc/step-export-development.md
+   * has the tables. Every kernel that reads such a file has to widen its
+   * tolerance to swallow that; two do it silently and one declines, and none of
+   * them is wrong to object.
+   *
+   * The 22 edges that were already exact say what the fix is. A ruling lies on a
+   * cylinder by construction, so the segments running up and down the axis need
+   * nothing, and it is the ones running around it - at constant height, chords
+   * of a circle - that should be written as arcs of that circle instead.
+   *
+   * An edge belongs to two faces, so promoting it is only sound when both can
+   * contain the arc. A plane can when its normal is the axis, which is what a
+   * flat top or an annulus is; anything else declines, and the edge stays the
+   * line it was. That is what keeps this from ever moving an edge off a face
+   * that was exact already, which would trade one kernel's complaint for
+   * everyone's. */
+  void promoteCurves();
+
+  /*! Every edge against its own two vertices - SOLIDWORKS fault code 7, asked
+   * of our own file - and the report lines for what the emitters counted. */
+  void checkAndReport();
+
+  /*! The faces as closed shells - one per connected component, since a
+   * CLOSED_SHELL has to be connected - each a MANIFOLD_SOLID_BREP, and the
+   * product structure and contexts around them. */
+  void writeShells();
+
   // ---- what the phases hand each other
 
   // A working copy, because the corner placement moves junction corners onto
@@ -400,6 +452,21 @@ struct StepKernel::BodyBuild {
   /*! The placement of a conic at `origin`, its plane's normal `dir`, its
    * reference direction `towards`. */
   Axis2Placement *conic_placement(const Vector3d& origin, const Vector3d& dir, const Vector3d& towards);
+
+  // Each facet loop's bound, its carrier plane and its edges; see emitPlanarFaces.
+  std::vector<FaceBound *> face_bounds = std::vector<FaceBound *>(face_cnt, nullptr);
+  std::vector<Plane *> planes = std::vector<Plane *>(face_cnt, nullptr);
+  std::vector<std::vector<EdgeCurve *>> loop_edges = std::vector<std::vector<EdgeCurve *>>(face_cnt);
+  // Planar faces asserting a plane one of their bounds is not in, and by how much.
+  std::size_t planes_off_plane = 0;
+  double worst_plane_off = 0;
+  // What the mesher was entitled to call coplanar, by its own rule - see
+  // coplanarTolerance in GeometryEvaluator.cc, which this has to agree with.
+  double mesh_coplanar_tol = 1e-9;
+
+  // Every face of the shell, and the edges bounding each; see assembleFaces.
+  std::vector<Face *> sfaces;
+  std::vector<std::vector<EdgeCurve *>> face_edges;
 
   // ---- the kernel methods the phases call
   EdgeCurve *create_line_edge_curve(Vertex *vert1, Vertex *vert2, bool dir)
