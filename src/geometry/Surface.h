@@ -98,7 +98,22 @@ public:
   /*! Whether this surface is a quadric: it states where it is algebraically, and
    * its implicit form is global. */
   [[nodiscard]] virtual bool isQuadric() const { return false; }
+  /*! The quadric as (X - origin)' M (X - origin) = constant, where it is one a
+   * plane section is taken of - see planeSectionConic in io/StepKernel.cc. */
+  virtual bool quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const { return false; }
+
+  /*! This surface moved with the geometry it describes - possibly a different
+   * kind of surface, where the map takes it to one (a cylinder under an uneven
+   * scale is elliptic) - or null where the result cannot be represented. The
+   * declarers travel with it. */
+  [[nodiscard]] virtual std::shared_ptr<Surface> transformed(const Transform3d& mat) const;
 };
+
+/*! Every record of `list` moved by `mat` - see Surface::transformed - and those
+ * that cannot be represented afterwards dropped rather than kept wrong. Copies:
+ * a record may still be shared with another geometry. */
+[[nodiscard]] std::vector<std::shared_ptr<Surface>> transformedSurfaces(
+  const std::vector<std::shared_ptr<Surface>>& list, const Transform3d& mat);
 
 /*! Whether two records describe one geometric surface - `sameAs`, plus a
  * cylinder or cone declared from two points along its own axis. Two records of
@@ -314,6 +329,8 @@ public:
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
 
+  [[nodiscard]] std::shared_ptr<Surface> transformed(const Transform3d& mat) const override;
+
 private:
   int operator==(const Surface& other) override { return 0; }
 };
@@ -339,8 +356,13 @@ public:
   /*! The direction angles round the axis are measured from, and the one a
    * quarter turn on. */
   virtual void frame(Vector3d& ref, Vector3d& ref2) const;
-  /*! The surface's own angle round the axis at `p`, in [0, 2 pi). */
-  [[nodiscard]] double angle(const Vector3d& p) const;
+  /*! The surface's own angle round the axis at `p`, in [0, 2 pi): the parameter
+   * a turn is counted in. */
+  [[nodiscard]] virtual double angle(const Vector3d& p) const;
+  /*! Whether a plane across the axis cuts it in a circle - a cylinder's and a
+   * cone's sections are, and a writer reads that off the surface as an arc;
+   * any other section is the conic it is. */
+  [[nodiscard]] virtual bool circularSections() const { return true; }
   /*! What a report calls it, and the radius it names it by. */
   [[nodiscard]] virtual const char *noun() const = 0;
   [[nodiscard]] virtual double size() const = 0;
@@ -370,6 +392,9 @@ public:
   [[nodiscard]] double offset(const Vector3d& p) const override;
   [[nodiscard]] const char *noun() const override { return "cylinder"; }
   [[nodiscard]] double size() const override { return r; }
+
+  bool quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const override;
+  [[nodiscard]] std::shared_ptr<Surface> transformed(const Transform3d& mat) const override;
 
 private:
   virtual int operator==(const Surface& other) { return 0; }
@@ -425,8 +450,63 @@ public:
   [[nodiscard]] const char *noun() const override { return "cone"; }
   [[nodiscard]] double size() const override { return r; }
 
+  bool quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const override;
+
 private:
   virtual int operator==(const Surface& other) { return 0; }
+};
+
+/*! An ellipse swept along a straight line.
+ *
+ * What a circular cylinder becomes under any affine map that is not a
+ * similarity - an uneven scale, a shear - and what a circle sweeps extruded along
+ * a direction that is not its plane's normal. One surface, and a quadric:
+ * (X - O)' M (X - O) = 1 with M = e1 e1' / a^2 + e2 e2' / b^2.
+ *
+ * Held canonically, so that two records of one surface are one whichever section
+ * declared them: `refpt` a point of the axis, `normdir` the sweep direction, and
+ * `major`, `minor` the principal semi-axes of the section *across* the sweep,
+ * |major| >= |minor|, with normdir x major along minor. A circular section, a
+ * = b, is a circular cylinder, and says so where it matters (sameAs).
+ *
+ * Written as the SURFACE_OF_LINEAR_EXTRUSION of that section's ELLIPSE. */
+class EllipticCylinderSurface : public AxialSurface
+{
+public:
+  /*! From any section: its `centre` and two conjugate semi-diameters `u` and `v`
+   * - the section is centre + u cos t + v sin t - in any plane the sweep
+   * `direction` crosses. */
+  EllipticCylinderSurface(const Vector3d& centre, const Vector3d& direction, const Vector3d& u,
+                          const Vector3d& v);
+
+  [[nodiscard]] std::shared_ptr<Surface> clone() const override;
+  bool transform(const Transform3d& mat) override;
+  [[nodiscard]] bool sameAs(const Surface& other) const override;
+
+  [[nodiscard]] bool usable() const override;
+  [[nodiscard]] double lean() const override { return 0.0; }
+  [[nodiscard]] double offset(const Vector3d& p) const override;
+  void frame(Vector3d& ref, Vector3d& ref2) const override;
+  [[nodiscard]] double angle(const Vector3d& p) const override;
+  [[nodiscard]] bool circularSections() const override { return false; }
+  [[nodiscard]] const char *noun() const override { return "elliptic cylinder"; }
+  [[nodiscard]] double size() const override { return a(); }
+
+  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  bool normalAt(const Vector3d& p, Vector3d& out) const override;
+  bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
+  [[nodiscard]] bool isQuadric() const override { return true; }
+  bool quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const override;
+
+  [[nodiscard]] double a() const { return major.norm(); }
+  [[nodiscard]] double b() const { return minor.norm(); }
+
+  Vector3d major, minor;
+
+private:
+  /*! Where `p` is in the section across the sweep, in the principal frame. */
+  void section(const Vector3d& p, double& x, double& y) const;
+  int operator==(const Surface& other) override { return 0; }
 };
 
 /*! An ordered grid of points a generator swept, declared by that generator.

@@ -4723,7 +4723,7 @@ box, and neither asks the other.
 | --- | --- | --- | --- |
 | 1 | a straight profile edge, both extruders | "a line, because it is not a chord of any recorded arc" - two different tests, one a threshold (C2, F6) | the generator: `square`, `polygon`, `offset(delta)` and a glyph's line segments make lines, `circle` and a round join make arcs |
 | 2 | arcs and Beziers through a 2D boolean or `offset` - **identity landed 2026-09-25**, for what `circle()`, `square()`, an unrounded `polygon()` and `text()` make, and for `offset`'s joins and offset edges; `import()`, a rounded `polygon()` and the 2D hull still make unnamed edges, which are measured | `ClipperUtils` keeps the operands' records as hints, re-tested by position; `placeOnArcs` restores a vertex by its distance from the arc | identity: Clipper2's per-vertex `Z` (`USINGZ`, not enabled here) carries which segment a vertex came from - the 2D `mintOriginals`. Measurement cannot tell the two cases a D-shaft makes: a boolean's cut puts the flat's ends on the polygon's chord, not the circle, so the two cut chords beside it read as straight walls; and a flat drawn with both ends on the circle reads as a chord and loses its wall (`sweep_table_test.cc`, marked `[!shouldfail]`) |
-| 3 | a 2D transform that is not a similarity - **half landed 2026-09-25**: the chords keep their name as curved with the record lost, so they no longer declare 32 planes (step-extrude-refusals); the ellipse record itself is still missing | `Polygon2d::transform` drops the arcs (behind an `isApprox(1e-12)`) | the transform states the ellipse exactly; needs an ellipse record. The same gap in 3D: `CylinderSurface::transform` refuses a non-uniform scale |
+| 3 | a 2D transform that is not a similarity - **in 3D, landed 2026-09-25**: a cylinder under an uneven scale or a shear is an `EllipticCylinderSurface`, written as SURFACE_OF_LINEAR_EXTRUSION, and a plane survives every affine map (step-elliptic-cylinder); the 2D record is next. In 2D, half landed: the chords keep their name as curved with the record lost, so they no longer declare 32 planes (step-extrude-refusals); the ellipse record itself is still missing | `Polygon2d::transform` drops the arcs (behind an `isApprox(1e-12)`) | the transform states the ellipse exactly; needs an ellipse record. The same gap in 3D: `CylinderSurface::transform` refuses a non-uniform scale |
 
 **The sweeps - consumers of the channel.**
 
@@ -4762,6 +4762,13 @@ two rims the quadric pass still cuts between; its fix is the band writer's seam,
 not a cut. And an apex cone's base circle comes out as one arc per facet it
 bounded, where a band writes its rim as one CIRCLE - vertices on a circle the
 model has none on.
+
+**A full band the quadric pass writes is cut at the seam.** Now that a surface
+the band pass cannot write reaches the quadric pass whole - the elliptic
+cylinder - the cut is on every such wall: two faces and two generators where the
+model has one face (checklist D1). The seam it needs is the band writer's - a
+generator joining the two rims, each rim one closed curve - and the fix belongs
+to the quadric writer for every surface about an axis at once.
 
 **Found on the way, not the exporter's.** `Polygon2d::stamp_color`, which every
 `offset()` calls, intersects every outline of the result with every outline of

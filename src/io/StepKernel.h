@@ -1966,6 +1966,45 @@ public:
     AdvancesBrepRepresentation *adv_brep;
   };
 
+  /*! A curve swept along a straight line: ISO 10303-42's
+   * SURFACE_OF_LINEAR_EXTRUSION. Written for an elliptic cylinder, whose swept
+   * curve is the ELLIPSE across it. */
+  class SurfaceOfLinearExtrusion : public SurfaceType
+  {
+  public:
+    SurfaceOfLinearExtrusion(std::vector<Entity *>& ent_list) : SurfaceType(ent_list) {}
+    SurfaceOfLinearExtrusion(std::vector<Entity *>& ent_list, std::string name_in, Entity *curve_in,
+                             Vector *sweep_in)
+      : SurfaceType(ent_list)
+    {
+      name = name_in;
+      curve = curve_in;
+      sweep = sweep_in;
+    }
+    virtual ~SurfaceOfLinearExtrusion() {}
+
+    virtual void serialize(std::ostream& stream_in)
+    {
+      stream_in << "#" << id << " = SURFACE_OF_LINEAR_EXTRUSION('" << label << "',#" << curve->id << ",#"
+                << sweep->id << ");\n";
+    }
+    virtual void parse_args(std::map<int, Entity *>& ent_map, std::string args)
+    {
+      auto st = args.find_first_of(',');
+      auto arg_str = args.substr(st + 1);
+      std::replace(arg_str.begin(), arg_str.end(), ',', ' ');
+      std::replace(arg_str.begin(), arg_str.end(), '#', ' ');
+      std::stringstream ss(arg_str);
+      int c_id = 0, v_id = 0;
+      ss >> c_id >> v_id;
+      curve = ent_map[c_id];
+      sweep = dynamic_cast<Vector *>(ent_map[v_id]);
+    }
+    std::string name;
+    Entity *curve = nullptr;
+    Vector *sweep = nullptr;
+  };
+
   class Line : public RoundType
   {
   public:

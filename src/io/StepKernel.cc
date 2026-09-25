@@ -1050,6 +1050,14 @@ struct SectionEllipse {
   double a = 0, b = 0;
 };
 
+struct SectionConic {
+  enum Kind { ELLIPSE, HYPERBOLA, PARABOLA } kind = ELLIPSE;
+  Vector3d centre, major, normal;
+  double a = 0, b = 0;  // semi-axes; for a parabola `a` is the focal distance
+};
+bool planeSectionConic(const Surface *surface, const Vector3d& normal_in, const Vector3d& on_plane,
+                       SectionConic& out);
+
 bool planeSectionEllipse(const Surface *surface, const Vector3d& normal, const Vector3d& on_plane,
                          SectionEllipse& out)
 {
@@ -1066,7 +1074,21 @@ bool planeSectionEllipse(const Surface *surface, const Vector3d& normal, const V
     return true;
   }
   const auto *cone = dynamic_cast<const ConeSurface *>(surface);
-  if (cone == nullptr || fabs(cone->slope) < 1e-12) return false;
+  if (cone == nullptr) {
+    // Any other quadric about an axis: the closed section is the one its form
+    // gives (planeSectionConic), where that is an ellipse.
+    if (dynamic_cast<const AxialSurface *>(surface) == nullptr) return false;
+    SectionConic conic;
+    if (!planeSectionConic(surface, normal, on_plane, conic) || conic.kind != SectionConic::ELLIPSE) {
+      return false;
+    }
+    out.centre = conic.centre;
+    out.major = conic.major;
+    out.a = conic.a;
+    out.b = conic.b;
+    return true;
+  }
+  if (fabs(cone->slope) < 1e-12) return false;
   const Vector3d axis = cone->normdir.normalized();
   const Vector3d apex = cone->refpt + axis * (-cone->r / cone->slope);
   const double cos_a = 1.0 / sqrt(1.0 + cone->slope * cone->slope);
@@ -1121,34 +1143,20 @@ bool planeSectionEllipse(const Surface *surface, const Vector3d& normal, const V
  * conic in (u, v); the sign of the determinant of its quadratic part names it,
  * its centre solves the linear part, and its eigenvectors are the axes.
  */
-struct SectionConic {
-  enum Kind { ELLIPSE, HYPERBOLA, PARABOLA } kind = ELLIPSE;
-  Vector3d centre, major, normal;
-  double a = 0, b = 0;  // semi-axes; for a parabola `a` is the focal distance
-};
-
 bool planeSectionConic(const Surface *surface, const Vector3d& normal_in, const Vector3d& on_plane,
                        SectionConic& out)
 {
   const Vector3d n = normal_in.normalized();
   if (!(n.norm() > 0)) return false;
 
+  // The surface states itself as a quadric form (Surface::quadricForm) - a
+  // cylinder, a cone, an elliptic cylinder - and the section follows from that
+  // alone.
   Eigen::Matrix3d M;
   Vector3d origin;      // the quadric's own reference point
   double constant = 0;  // the quadric's form equals this
-  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(surface)) {
-    const Vector3d ax = cyl->normdir.normalized();
-    M = Eigen::Matrix3d::Identity() - ax * ax.transpose();
-    origin = cyl->refpt;
-    constant = cyl->r * cyl->r;
-  } else if (const auto *cone = dynamic_cast<const ConeSurface *>(surface)) {
-    if (fabs(cone->slope) < 1e-12) return false;
-    const Vector3d ax = cone->normdir.normalized();
-    const double cos_a = 1.0 / sqrt(1.0 + cone->slope * cone->slope);
-    M = ax * ax.transpose() - cos_a * cos_a * Eigen::Matrix3d::Identity();
-    origin = cone->refpt + ax * (-cone->r / cone->slope);  // the apex
-    constant = 0;
-  } else {
+  if (surface == nullptr || dynamic_cast<const SphereSurface *>(surface) != nullptr ||
+      !surface->quadricForm(M, origin, constant)) {
     return false;
   }
 
@@ -1240,9 +1248,8 @@ double sectionTiltFloor(const Surface *surface)
 {
   // A cylinder's rulings are parallel, so every plane but one along them closes;
   // a cone's meet, and past the half angle the section runs away to infinity.
-  if (const auto *cone = dynamic_cast<const ConeSurface *>(surface)) {
-    return fabs(cone->slope) / sqrt(1.0 + cone->slope * cone->slope);
-  }
+  const auto *axial = dynamic_cast<const AxialSurface *>(surface);
+  if (axial != nullptr && axial->lean() > 0) return axial->lean();
   return 1e-6;
 }
 
@@ -1297,15 +1304,10 @@ struct BoundaryCycle {
 
 bool surfaceAxis(const Surface *surface, Vector3d& axis)
 {
-  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(surface)) {
-    axis = cyl->normdir.normalized();
-    return true;
-  }
-  if (const auto *cone = dynamic_cast<const ConeSurface *>(surface)) {
-    axis = cone->normdir.normalized();
-    return true;
-  }
-  return false;
+  const auto *axial = dynamic_cast<const AxialSurface *>(surface);
+  if (axial == nullptr) return false;
+  axis = axial->axis();
+  return true;
 }
 
 void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
@@ -1369,13 +1371,15 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
   };
 
   // Which of the surface's cutting planes each boundary edge lies in. A plane is
-  // only usable if it makes a closed section: perpendicular to the axis it makes
-  // a circle, which the arc pass writes, and past the floor a cone's section
-  // runs away to infinity.
+  // only usable if it makes a closed section: perpendicular to the axis of a
+  // surface whose sections there are circles it makes one, which the arc pass
+  // writes, and past the floor a cone's section runs away to infinity.
+  const auto *axial = dynamic_cast<const AxialSurface *>(surface);
+  const bool circles_across = axial == nullptr || axial->circularSections();
   std::vector<double> scale(planes.size(), 0);
   for (std::size_t p = 0; p < planes.size(); p++) {
     const double cos_tilt = fabs(planes[p].normal.dot(axis));
-    if (cos_tilt < floor_tilt || cos_tilt > 1 - 1e-9) continue;
+    if (cos_tilt < floor_tilt || (circles_across && cos_tilt > 1 - 1e-9)) continue;
     SectionEllipse sec;
     if (!planeSectionEllipse(surface, planes[p].normal, planes[p].on_plane, sec)) continue;
     scale[p] = sec.a;
@@ -1590,7 +1594,8 @@ void StepKernel::build_tri_body(
   // out - which is a feature nobody has asked for yet.
   (void)curves;
   if (!surfaces.empty()) {
-    int cylinders = 0, spheres = 0, tori = 0, patches = 0, grids = 0, cones = 0, planes = 0;
+    int cylinders = 0, spheres = 0, tori = 0, patches = 0, grids = 0, cones = 0, planes = 0,
+        elliptic = 0;
     for (const auto& surface : surfaces) {
       if (dynamic_cast<const PlaneSurface *>(surface.get()) != nullptr) planes++;
       else if (dynamic_cast<const CylinderSurface *>(surface.get()) != nullptr) cylinders++;
@@ -1599,6 +1604,7 @@ void StepKernel::build_tri_body(
       else if (dynamic_cast<const BezierPatchSurface *>(surface.get()) != nullptr) patches++;
       else if (dynamic_cast<const GridSurface *>(surface.get()) != nullptr) grids++;
       else if (dynamic_cast<const ConeSurface *>(surface.get()) != nullptr) cones++;
+      else if (dynamic_cast<const EllipticCylinderSurface *>(surface.get()) != nullptr) elliptic++;
     }
     // Swept grids are named only when there are some. Every other kind is listed
     // unconditionally because a zero there is informative - a model that meant
@@ -1611,6 +1617,8 @@ void StepKernel::build_tri_body(
     // the same terms: only when there is one. Listing it always would say
     // nothing and would rewrite the EXPECT line of every fixture here.
     if (cones > 0) extra += ", " + std::to_string(cones) + " conical";
+    // And an elliptic cylinder, on the same terms.
+    if (elliptic > 0) extra += ", " + std::to_string(elliptic) + " elliptic";
     char pn[64] = "";
     if (planes > 0) {
       snprintf(pn, sizeof(pn), ", and %d declared plane%s", planes, planes == 1 ? "" : "s");
@@ -2042,19 +2050,23 @@ void StepKernel::build_tri_body(
     // through recognition::Writability and decides what to do with the answer.
     auto boundary_lies_on_surface = [&](const AnalyticFeatures::Patch& patch,
                                         const std::set<std::set<int>>& agreed) {
-      Vector3d axis, origin;
+      const auto *axial = dynamic_cast<const AxialSurface *>(patch.surface.get());
+      if (axial == nullptr) return false;
+      const Vector3d axis = axial->axis();
+      const Vector3d origin = axial->refpt;
       double radius = 0, slope = 0;
+      // A cylinder's and a cone's rims round the axis are written as circles by
+      // the arc post-pass, which reads CYLINDRICAL_SURFACE and CONICAL_SURFACE
+      // and nothing else; any other surface's rim is written as the section it
+      // is, or not exact at all.
+      bool circular = true;
       if (const auto *cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get())) {
-        axis = cyl->normdir.normalized();
-        origin = cyl->refpt;
         radius = cyl->r;
       } else if (const auto *con = dynamic_cast<const ConeSurface *>(patch.surface.get())) {
-        axis = con->normdir.normalized();
-        origin = con->refpt;
         radius = con->r;
         slope = con->slope;
       } else {
-        return false;
+        circular = false;
       }
       for (const auto& entry : boundaryCycles(patch, vertices, loops, loop_valid, taken,
                                               section_planes[patch.surface.get()], crossing_keys)) {
@@ -2075,6 +2087,7 @@ void StepKernel::build_tri_body(
         // How far a point is off the surface, radially. A cone's radius is a
         // function of height, which is the whole of the difference.
         auto off_surface = [&](const Vector3d& p) {
+          if (!circular) return axial->offset(p);
           const Vector3d rel = p - origin;
           const double along = rel.dot(axis);
           const double want = radius + slope * along;
@@ -2100,7 +2113,7 @@ void StepKernel::build_tri_body(
           // chords refused four regions of step-cut-cone for edges that were
           // exactly on the cone all along.
           const Vector3d mid = origin + (a + b) * 0.5;
-          if (rise > 1e-7 && off_surface(mid) > 1e-7) return false;
+          if ((rise > 1e-7 || !circular) && off_surface(mid) > 1e-7) return false;
         }
       }
       return true;
@@ -4858,11 +4871,13 @@ void StepKernel::build_tri_body(
                               new Point(entities, origin));
   };
   for (const auto& patch : quadric_faces) {
+    const auto *axial = dynamic_cast<const AxialSurface *>(patch.surface.get());
+    if (axial == nullptr) continue;
     const auto *cyl = dynamic_cast<const CylinderSurface *>(patch.surface.get());
     const auto *cone = dynamic_cast<const ConeSurface *>(patch.surface.get());
-    if (cyl == nullptr && cone == nullptr) continue;
-    const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
-    const Vector3d base = cyl != nullptr ? cyl->refpt : cone->refpt;
+    const auto *elliptic = dynamic_cast<const EllipticCylinderSurface *>(patch.surface.get());
+    const Vector3d axis = axial->axis();
+    const Vector3d base = axial->refpt;
 
     // The endpoint invariant binds *here* and not where the sections were
     // decided. The decision runs before the corner placement, on vertices the
@@ -4899,7 +4914,19 @@ void StepKernel::build_tri_body(
     auto point = new Point(entities, base);
     auto dir_ref = new Direction(entities, ref);
     SurfaceType *surface = nullptr;
-    if (cyl != nullptr) {
+    if (elliptic != nullptr) {
+      // The section across the sweep, swept: its ELLIPSE in its own principal
+      // frame, and the sweep as a unit vector.
+      Vector3d e1, e2;
+      elliptic->frame(e1, e2);
+      auto ellipse =
+        new Ellipse(entities, "",
+                    new Axis2Placement(entities, new Direction(entities, axis),
+                                       new Direction(entities, e1), new Point(entities, base)),
+                    elliptic->a(), elliptic->b());
+      surface = new SurfaceOfLinearExtrusion(entities, "", ellipse,
+                                             new Vector(entities, new Direction(entities, axis), 1.0));
+    } else if (cyl != nullptr) {
       auto dir_axis = new Direction(entities, axis);
       surface = new CylindricalSurface(entities, "",
                                        new Axis2Placement(entities, dir_axis, dir_ref, point), cyl->r);
@@ -4923,7 +4950,7 @@ void StepKernel::build_tri_body(
         const Vector3d rel = vertices[v] - base;
         double t = atan2(rel.dot(ref2), rel.dot(ref));
         if (t < 0) t += 2 * M_PI;
-        uv.emplace_back(t * (cyl != nullptr ? cyl->r : cone->r), axis.dot(rel));
+        uv.emplace_back(t * axial->size(), axis.dot(rel));
       }
       double twice = 0.0;
       for (std::size_t i = 0; i < uv.size(); i++) {
@@ -5116,9 +5143,10 @@ void StepKernel::build_tri_body(
               dir = edge->vert1 == get_vertex(a);
             }
           }
-          if (edge != nullptr) {
+          if (edge != nullptr && (cyl != nullptr || cone != nullptr)) {
             // What this face's parameters mean, kept until the other face has
-            // written its own and both pcurves can be built.
+            // written its own and both pcurves can be built. Only a cylinder or a
+            // cone: the pcurve is written from their parameters.
             CrossingSide side;
             side.surface = surface;
             side.base = base;
@@ -5188,9 +5216,16 @@ void StepKernel::build_tri_body(
       Vector3d centroid = Vector3d::Zero();
       for (const int v : facet) centroid += vertices[v];
       centroid /= double(facet.size());
-      const Vector3d rel = centroid - base;
-      const Vector3d radial = (rel - axis * axis.dot(rel)).normalized();
-      outward = radial.dot(loop_normals[patch.facets.front()]) > 0;
+      Vector3d away;
+      if (elliptic != nullptr) {
+        // the surface's own normal, which for an ellipse is not the radius
+        outward =
+          !elliptic->normalAt(centroid, away) || away.dot(loop_normals[patch.facets.front()]) > 0;
+      } else {
+        const Vector3d rel = centroid - base;
+        const Vector3d radial = (rel - axis * axis.dot(rel)).normalized();
+        outward = radial.dot(loop_normals[patch.facets.front()]) > 0;
+      }
     }
 
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));

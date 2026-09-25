@@ -387,15 +387,10 @@ void ManifoldGeometry::transform(const Transform3d& mat)
 
   // The surfaces are recorded in world coordinates, so they move with the
   // geometry. Copy before transforming: the same surface may still be
-  // referenced by another geometry. Anything a similarity cannot carry (a non
-  // uniform scale turns a cylinder into an ellipse) is dropped rather than
-  // kept wrong.
-  std::vector<std::shared_ptr<Surface>> moved;
-  for (const auto& surface : surfaces_) {
-    auto copy = surface->clone();
-    if (copy->transform(mat)) moved.push_back(copy);
-  }
-  surfaces_ = std::move(moved);
+  // referenced by another geometry. A record may change kind - a cylinder under
+  // an uneven scale is elliptic - and one that cannot be represented afterwards
+  // is dropped rather than kept wrong. See Surface::transformed.
+  surfaces_ = transformedSurfaces(surfaces_, mat);
 }
 
 void ManifoldGeometry::setColor(const Color4f& c)

@@ -11,6 +11,8 @@
 #include "geometry/linalg.h"
 #include "geometry/Surface.h"
 
+#include <Eigen/SVD>
+
 // Tolerances in this file, and how they relate to the ones next door.
 //
 // AnalyticFeatures.cc scales its tolerances to the geometry - `1e-9 *
@@ -1815,4 +1817,229 @@ double ConeSurface::offset(const Vector3d& p) const
   const double want = radiusAt(p);
   if (want < 0) return std::numeric_limits<double>::max();  // past the apex
   return fabs(distanceFromAxis(p, refpt, axis()) - want) / sqrt(1 + slope * slope);
+}
+
+// ---------------------------------------------------------------------------
+// Moving a record with its geometry - see Surface::transformed.
+// ---------------------------------------------------------------------------
+
+std::shared_ptr<Surface> Surface::transformed(const Transform3d& mat) const
+{
+  auto copy = clone();
+  return copy->transform(mat) ? copy : nullptr;
+}
+
+namespace {
+
+/*! `into` carrying the declarers `from` had: owners, witnesses, and the role. */
+std::shared_ptr<Surface> withDeclarersOfRecord(std::shared_ptr<Surface> into, const Surface& from)
+{
+  into->owners = from.owners;
+  into->witnesses = from.witnesses;
+  into->evidence_only = from.evidence_only;
+  return into;
+}
+
+}  // namespace
+
+std::shared_ptr<Surface> CylinderSurface::transformed(const Transform3d& mat) const
+{
+  if (auto moved = Surface::transformed(mat)) return moved;  // a similarity: still circular
+  // Any other affine map takes the circle across the axis to an ellipse, and the
+  // cylinder to the elliptic one through it: the images of the axis and of two
+  // perpendicular radii are its sweep and two conjugate semi-diameters.
+  Vector3d ref, ref2;
+  frame(ref, ref2);
+  const Matrix3d L = mat.linear();
+  auto moved =
+    std::make_shared<EllipticCylinderSurface>(mat * refpt, L * axis(), L * (ref * r), L * (ref2 * r));
+  if (!moved->usable()) return nullptr;
+  return withDeclarersOfRecord(moved, *this);
+}
+
+std::shared_ptr<Surface> PlaneSurface::transformed(const Transform3d& mat) const
+{
+  // A plane is a plane under any affine map: its points move by the map and its
+  // normal by the inverse transpose of the linear part. Only a singular map,
+  // which flattens space, has no plane to give.
+  const Matrix3d L = mat.linear();
+  if (!(fabs(L.determinant()) > 0)) return nullptr;
+  const Vector3d n = L.inverse().transpose() * normdir;
+  if (!(n.norm() > 0)) return nullptr;
+  auto moved = std::make_shared<PlaneSurface>(mat * refpt, n.normalized());
+  return withDeclarersOfRecord(moved, *this);
+}
+
+std::vector<std::shared_ptr<Surface>> transformedSurfaces(
+  const std::vector<std::shared_ptr<Surface>>& list, const Transform3d& mat)
+{
+  std::vector<std::shared_ptr<Surface>> out;
+  out.reserve(list.size());
+  for (const auto& surface : list) {
+    if (auto moved = surface->transformed(mat)) out.push_back(std::move(moved));
+  }
+  return out;
+}
+
+bool CylinderSurface::quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const
+{
+  const Vector3d ax = axis();
+  M = Matrix3d::Identity() - ax * ax.transpose();
+  origin = refpt;
+  constant = r * r;
+  return true;
+}
+
+bool ConeSurface::quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const
+{
+  if (fabs(slope) < 1e-12) return false;
+  const Vector3d ax = axis();
+  const double cos_a = 1.0 / sqrt(1.0 + slope * slope);
+  M = ax * ax.transpose() - cos_a * cos_a * Matrix3d::Identity();
+  origin = refpt + ax * (-r / slope);  // the apex
+  constant = 0;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// The elliptic cylinder - see Surface.h.
+// ---------------------------------------------------------------------------
+
+EllipticCylinderSurface::EllipticCylinderSurface(const Vector3d& centre, const Vector3d& direction,
+                                                 const Vector3d& u, const Vector3d& v)
+{
+  refpt = centre;
+  normdir = direction.normalized();
+  // Slide the section along the generators onto the plane across the sweep:
+  // every point keeps its line, so the surface is unchanged, and the semi-
+  // diameters stay conjugate.
+  const Vector3d d = normdir;
+  const Vector3d uu = u - d * u.dot(d), vv = v - d * v.dot(d);
+  // The principal semi-axes of centre + uu cos t + vv sin t are the singular
+  // vectors of [uu vv], scaled by the singular values.
+  Eigen::Matrix<double, 3, 2> m;
+  m.col(0) = uu;
+  m.col(1) = vv;
+  const Eigen::JacobiSVD<Eigen::Matrix<double, 3, 2>> svd(m, Eigen::ComputeThinU);
+  const Eigen::Vector2d sigma = svd.singularValues();
+  major = svd.matrixU().col(0) * sigma(0);
+  Vector3d across = d.cross(svd.matrixU().col(0));
+  minor = across.normalized() * sigma(1);
+}
+
+std::shared_ptr<Surface> EllipticCylinderSurface::clone() const
+{
+  return std::make_shared<EllipticCylinderSurface>(*this);
+}
+
+bool EllipticCylinderSurface::usable() const
+{
+  return std::isfinite(a()) && std::isfinite(b()) && b() > 0 && normdir.norm() > 0;
+}
+
+bool EllipticCylinderSurface::transform(const Transform3d& mat)
+{
+  // Any affine map keeps it one: the images of the axis and of the two principal
+  // semi-axes are the sweep and two conjugate semi-diameters of a section.
+  const Matrix3d L = mat.linear();
+  const EllipticCylinderSurface moved(mat * refpt, L * normdir, L * major, L * minor);
+  if (!moved.usable()) return false;
+  refpt = moved.refpt;
+  normdir = moved.normdir;
+  major = moved.major;
+  minor = moved.minor;
+  return true;
+}
+
+bool EllipticCylinderSurface::sameAs(const Surface& other) const
+{
+  const auto *o = dynamic_cast<const EllipticCylinderSurface *>(&other);
+  if (o == nullptr) return false;
+  if (fabs(fabs(normdir.dot(o->normdir)) - 1.0) > 1e-9) return false;
+  const Vector3d gap = o->refpt - refpt;
+  if ((gap - normdir * gap.dot(normdir)).norm() > 1e-9) return false;  // one axis line
+  if (fabs(a() - o->a()) > 1e-9 || fabs(b() - o->b()) > 1e-9) return false;
+  // a circular section has no major direction to agree on
+  if (fabs(a() - b()) <= 1e-9) return true;
+  return fabs(fabs(major.normalized().dot(o->major.normalized())) - 1.0) <= 1e-9;
+}
+
+void EllipticCylinderSurface::frame(Vector3d& ref, Vector3d& ref2) const
+{
+  ref = major.normalized();
+  ref2 = minor.normalized();
+}
+
+void EllipticCylinderSurface::section(const Vector3d& p, double& x, double& y) const
+{
+  const Vector3d q = p - refpt;
+  const Vector3d across = q - normdir * q.dot(normdir);
+  x = across.dot(major.normalized());
+  y = across.dot(minor.normalized());
+}
+
+double EllipticCylinderSurface::angle(const Vector3d& p) const
+{
+  // The eccentric anomaly: the ellipse's own parameter, in which equal steps are
+  // what the affine image of a regular polygon takes.
+  double x = 0, y = 0;
+  section(p, x, y);
+  double t = atan2(y / b(), x / a());
+  if (t < 0) t += 2 * M_PI;
+  return t;
+}
+
+double EllipticCylinderSurface::offset(const Vector3d& p) const
+{
+  // |F| / |grad F| for F = (x/a)^2 + (y/b)^2 - 1: the distance to first order,
+  // and for a circle (|q|^2 - r^2) / 2|q|, the radius difference to first order.
+  double x = 0, y = 0;
+  section(p, x, y);
+  const double A = a(), B = b();
+  const double F = (x / A) * (x / A) + (y / B) * (y / B) - 1;
+  const double g = 2 * hypot(x / (A * A), y / (B * B));
+  return g > 0 ? fabs(F) / g : std::numeric_limits<double>::max();
+}
+
+recognition::Residual EllipticCylinderSurface::residual(const Vector3d& p) const
+{
+  // The distance above, and its operations: the unit sweep (9), q (3), along it
+  // (5), off it (6), the two unit semi-axes (18) and the coordinates on them
+  // (10), each over its semi-axis and squared (8, with the two norms, 12), the
+  // sum less one (2), the gradient's length (8) and the quotient (1) - 82. The
+  // coordinates are divided by the semi-axes, so the error in what is measured
+  // is magnified by up to a / b before the gradient scales it back: the bound
+  // carries that conditioning, which is the ellipse's and not a choice.
+  recognition::Residual out;
+  out.value = offset(p);
+  out.bound = recognition::forwardError(82, (p.norm() + refpt.norm() + a()) * a() / b());
+  return out;
+}
+
+bool EllipticCylinderSurface::normalAt(const Vector3d& p, Vector3d& out) const
+{
+  double f = 0;
+  Vector3d grad;
+  if (!implicitAt(p, f, grad) || !(grad.norm() > 0)) return false;
+  out = grad.normalized();
+  return true;
+}
+
+bool EllipticCylinderSurface::implicitAt(const Vector3d& p, double& f, Vector3d& grad) const
+{
+  double x = 0, y = 0;
+  section(p, x, y);
+  const double A = a(), B = b();
+  f = (x / A) * (x / A) + (y / B) * (y / B) - 1;
+  grad = major.normalized() * (2 * x / (A * A)) + minor.normalized() * (2 * y / (B * B));
+  return true;
+}
+
+bool EllipticCylinderSurface::quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const
+{
+  const Vector3d e1 = major.normalized(), e2 = minor.normalized();
+  M = e1 * e1.transpose() / (a() * a()) + e2 * e2.transpose() / (b() * b());
+  origin = refpt;
+  constant = 1;
+  return true;
 }

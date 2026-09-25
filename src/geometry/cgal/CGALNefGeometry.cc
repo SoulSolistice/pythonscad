@@ -130,14 +130,9 @@ void CGALNefGeometry::transform(const Transform3d& matrix)
       CGALUtils::transform(*N, matrix);
       this->p3 = N;
       // Records are held in world coordinates, so they move with the geometry.
-      // A surface which cannot be represented after the transform - a cylinder
-      // under a non uniform scale - is dropped rather than left wrong.
-      std::vector<std::shared_ptr<Surface>> moved;
-      for (const auto& surface : this->surfaces) {
-        auto copy = surface->clone();
-        if (copy->transform(matrix)) moved.push_back(copy);
-      }
-      this->surfaces = std::move(moved);
+      // A record may change kind, and one which cannot be represented after
+      // the transform is dropped rather than left wrong. See Surface::transformed.
+      this->surfaces = transformedSurfaces(this->surfaces, matrix);
     }
   }
 }

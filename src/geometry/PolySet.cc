@@ -126,12 +126,7 @@ void PolySet::transform(const Transform3d& mat)
   }
   this->curves = std::move(moved_curves);
 
-  std::vector<std::shared_ptr<Surface>> moved_surfaces;
-  for (const auto& surface : this->surfaces) {
-    auto copy = surface->clone();
-    if (copy->transform(mat)) moved_surfaces.push_back(copy);
-  }
-  this->surfaces = std::move(moved_surfaces);
+  this->surfaces = transformedSurfaces(this->surfaces, mat);
 
   bbox_.setNull();
 }
