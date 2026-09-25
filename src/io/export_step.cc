@@ -100,39 +100,8 @@ using AnalyticFeatures::closestOnSurface;
  * the way the surface does there; a cap crosses it at a right angle. */
 bool surfaceNormal(const Surface *s, const Vector3d& p, Vector3d& out)
 {
-  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(s)) {
-    const Vector3d axis = cyl->normdir.normalized();
-    const Vector3d rel = p - cyl->refpt;
-    const Vector3d radial = rel - axis * rel.dot(axis);
-    if (radial.norm() < 1e-12) return false;
-    out = radial.normalized();
-    return true;
-  }
-  if (const auto *cone = dynamic_cast<const ConeSurface *>(s)) {
-    const Vector3d axis = cone->normdir.normalized();
-    const Vector3d rel = p - cone->refpt;
-    const Vector3d radial = rel - axis * rel.dot(axis);
-    if (radial.norm() < 1e-12) return false;
-    // grad of |radial| - (r + slope * h)
-    out = (radial.normalized() - axis * cone->slope).normalized();
-    return true;
-  }
-  if (const auto *sph = dynamic_cast<const SphereSurface *>(s)) {
-    const Vector3d rel = p - sph->refpt;
-    if (rel.norm() < 1e-12) return false;
-    out = rel.normalized();
-    return true;
-  }
-  if (const auto *tor = dynamic_cast<const TorusSurface *>(s)) {
-    const Vector3d axis = tor->normdir.normalized();
-    const Vector3d rel = p - tor->refpt;
-    const Vector3d radial = rel - axis * rel.dot(axis);
-    if (radial.norm() < 1e-12) return false;
-    const Vector3d ring = tor->refpt + radial.normalized() * tor->r_major;
-    if ((p - ring).norm() < 1e-12) return false;
-    out = (p - ring).normalized();
-    return true;
-  }
+  if (s == nullptr) return false;
+  if (s->normalAt(p, out)) return true;
   if (const auto *grid = dynamic_cast<const GridSurface *>(s)) {
     double u = 0, v = 0;
     if (!grid->project(p, u, v)) return false;

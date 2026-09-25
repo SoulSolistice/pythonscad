@@ -7,6 +7,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include "geometry/MachinePrecision.h"
 #include "geometry/linalg.h"
 
 class Surface
@@ -77,6 +78,25 @@ public:
    * that compared equal would lose one, so the dynamic type is checked before
    * anything else. */
   [[nodiscard]] virtual bool sameAs(const Surface& other) const;
+
+  // What a surface says about a point. Each kind answers for itself, in closed
+  // form where it has one; a consumer asks, and never switches on the kind. The
+  // defaults are the answer of a surface that has no closed form to give.
+
+  /*! How far `p` is from this surface, and the bound machine precision puts on
+   * computing that (MachinePrecision.h) - what D0 membership asks. Infinite for
+   * a surface with no closed-form residual. */
+  [[nodiscard]] virtual recognition::Residual residual(const Vector3d& p) const;
+  /*! The point of this surface nearest `p`, or false where there is none to give. */
+  virtual bool closestPoint(const Vector3d& p, Vector3d& out) const;
+  /*! The unit normal where this surface passes nearest `p`, or false. */
+  virtual bool normalAt(const Vector3d& p, Vector3d& out) const;
+  /*! An implicit form: `f` zero on the surface, and its gradient - algebraic for
+   * a plane or a quadric. False for a surface with none. */
+  virtual bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const;
+  /*! Whether this surface is a quadric: it states where it is algebraically, and
+   * its implicit form is global. */
+  [[nodiscard]] virtual bool isQuadric() const { return false; }
 };
 
 /*! Whether two records describe one geometric surface - `sameAs`, plus a
@@ -148,6 +168,12 @@ public:
 
   double r;
 
+  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  bool closestPoint(const Vector3d& p, Vector3d& out) const override;
+  bool normalAt(const Vector3d& p, Vector3d& out) const override;
+  bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
+  [[nodiscard]] bool isQuadric() const override { return true; }
+
 private:
   int operator==(const Surface& other) override { return 0; }
 };
@@ -170,6 +196,9 @@ public:
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   double r_major, r_minor;
+
+  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  bool normalAt(const Vector3d& p, Vector3d& out) const override;
 
 private:
   int operator==(const Surface& other) override { return 0; }
@@ -280,6 +309,10 @@ public:
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
+  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  bool closestPoint(const Vector3d& p, Vector3d& out) const override;
+  bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
+
 private:
   int operator==(const Surface& other) override { return 0; }
 };
@@ -296,6 +329,12 @@ public:
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   double r;
+
+  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  bool closestPoint(const Vector3d& p, Vector3d& out) const override;
+  bool normalAt(const Vector3d& p, Vector3d& out) const override;
+  bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
+  [[nodiscard]] bool isQuadric() const override { return true; }
 
 private:
   virtual int operator==(const Surface& other) { return 0; }
@@ -338,6 +377,12 @@ public:
   [[nodiscard]] double radiusAt(const Vector3d& pt) const;
 
   double r, slope;
+
+  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  bool closestPoint(const Vector3d& p, Vector3d& out) const override;
+  bool normalAt(const Vector3d& p, Vector3d& out) const override;
+  bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
+  [[nodiscard]] bool isQuadric() const override { return true; }
 
 private:
   virtual int operator==(const Surface& other) { return 0; }

@@ -37,36 +37,8 @@ const char *pointOriginName(PointOrigin origin)
 
 bool closestOnSurface(const Surface *s, const Vector3d& p, Vector3d& out)
 {
-  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(s)) {
-    const Vector3d axis = cyl->normdir.normalized();
-    const Vector3d rel = p - cyl->refpt;
-    const Vector3d radial = rel - axis * rel.dot(axis);
-    if (radial.norm() < 1e-12) return false;
-    out = cyl->refpt + axis * rel.dot(axis) + radial.normalized() * cyl->r;
-    return true;
-  }
-  if (const auto *cone = dynamic_cast<const ConeSurface *>(s)) {
-    const Vector3d axis = cone->normdir.normalized();
-    const Vector3d rel = p - cone->refpt;
-    const double h = rel.dot(axis);
-    const Vector3d radial = rel - axis * h;
-    if (radial.norm() < 1e-12) return false;
-    const double want = cone->r + h * cone->slope;
-    if (want <= 0) return false;
-    out = cone->refpt + axis * h + radial.normalized() * want;
-    return true;
-  }
-  if (const auto *pl = dynamic_cast<const PlaneSurface *>(s)) {
-    const Vector3d n = pl->normdir.normalized();
-    out = p - n * n.dot(p - pl->refpt);
-    return true;
-  }
-  if (const auto *sph = dynamic_cast<const SphereSurface *>(s)) {
-    const Vector3d rel = p - sph->refpt;
-    if (rel.norm() < 1e-12) return false;
-    out = sph->refpt + rel.normalized() * sph->r;
-    return true;
-  }
+  if (s == nullptr) return false;
+  if (s->closestPoint(p, out)) return true;
   if (const auto *grid = dynamic_cast<const GridSurface *>(s)) {
     double u = 0, v = 0;
     if (!grid->project(p, u, v)) return false;
@@ -178,24 +150,7 @@ std::string format(const char *fmt, ...)
  */
 bool quadricImplicit(const Surface *surface, const Vector3d& p, double& f, Vector3d& grad)
 {
-  if (const auto *sph = dynamic_cast<const SphereSurface *>(surface)) {
-    const Vector3d rel = p - sph->refpt;
-    f = rel.squaredNorm() - sph->r * sph->r;
-    grad = 2 * rel;
-    return true;
-  }
-  const auto *cyl = dynamic_cast<const CylinderSurface *>(surface);
-  const auto *cone = dynamic_cast<const ConeSurface *>(surface);
-  if (cyl == nullptr && cone == nullptr) return false;
-  const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
-  const Vector3d rel = p - (cyl != nullptr ? cyl->refpt : cone->refpt);
-  const double along = rel.dot(axis);
-  const Vector3d perp = rel - axis * along;
-  const double slope = cone != nullptr ? cone->slope : 0.0;
-  const double want = (cyl != nullptr ? cyl->r : cone->r) + slope * along;
-  f = perp.squaredNorm() - want * want;
-  grad = 2 * perp - 2 * want * slope * axis;
-  return true;
+  return surface != nullptr && surface->isQuadric() && surface->implicitAt(p, f, grad);
 }
 
 /*! A foot-point implicit for a surface that has no algebraic one.
@@ -271,11 +226,8 @@ bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vecto
   // here rather than in `quadricImplicit` because a plane is not a quadric and
   // `isQuadric` decides other things - which pass writes a boundary, and whether
   // a planar crossing is a conic something else will write exactly.
-  if (const auto *pl = dynamic_cast<const PlaneSurface *>(surface)) {
-    const Vector3d n = pl->normdir.normalized();
-    if (!(n.norm() > 0)) return false;
-    f = n.dot(p - pl->refpt);
-    grad = n;
+  if (dynamic_cast<const PlaneSurface *>(surface) != nullptr) {
+    if (!surface->implicitAt(p, f, grad)) return false;
     if (true_distance != nullptr) *true_distance = fabs(f);
     return true;
   }
@@ -316,9 +268,7 @@ bool surfaceImplicit(const Surface *surface, const Vector3d& p, double& f, Vecto
 /*! Whether this surface states where it is algebraically. */
 bool isQuadric(const Surface *surface)
 {
-  return dynamic_cast<const SphereSurface *>(surface) != nullptr ||
-         dynamic_cast<const CylinderSurface *>(surface) != nullptr ||
-         dynamic_cast<const ConeSurface *>(surface) != nullptr;
+  return surface != nullptr && surface->isQuadric();
 }
 
 double declaredBand(const Surface *surface)

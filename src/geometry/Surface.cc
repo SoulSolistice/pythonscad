@@ -1559,3 +1559,214 @@ bool SweepSurface::sameAs(const Surface& other) const
   }
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// What each surface says about a point - see Surface.h. The bodies are the
+// branches of the switches that used to ask this in recognition/Exact.h,
+// AnalyticFeatures.cc and export_step.cc, moved here unchanged, operation
+// counts included.
+// ---------------------------------------------------------------------------
+
+using recognition::forwardError;
+using recognition::Residual;
+
+Residual Surface::residual(const Vector3d&) const
+{
+  return Residual{};
+}
+bool Surface::closestPoint(const Vector3d&, Vector3d&) const
+{
+  return false;
+}
+bool Surface::normalAt(const Vector3d&, Vector3d&) const
+{
+  return false;
+}
+bool Surface::implicitAt(const Vector3d&, double&, Vector3d&) const
+{
+  return false;
+}
+
+Residual CylinderSurface::residual(const Vector3d& p) const
+{
+  // axis: 3 mul, 2 add, sqrt, 3 div (9); rel: 3 (12); rel.axis: 3 mul, 2 add
+  // (17); axis * t: 3 (20); rel - axis t: 3 (23); norm: 3 mul, 2 add, sqrt
+  // (29); minus r (30).
+  const Vector3d rel = p - refpt;
+  const Vector3d axis = normdir.normalized();
+  Residual out;
+  out.value = fabs((rel - axis * rel.dot(axis)).norm() - r);
+  out.bound = forwardError(30, p.norm() + refpt.norm() + fabs(r));
+  return out;
+}
+
+Residual ConeSurface::residual(const Vector3d& p) const
+{
+  // The cylinder's 29 to the radial distance; radiusAt: its own axis (9),
+  // rel (3), dot (5), times slope (1), plus r (1) = 19; the difference (1).
+  const Vector3d rel = p - refpt;
+  const Vector3d axis = normdir.normalized();
+  const double want = radiusAt(p);
+  Residual out;
+  out.value = fabs((rel - axis * rel.dot(axis)).norm() - want);
+  out.bound = forwardError(49, p.norm() + refpt.norm() + fabs(r) + fabs(want));
+  return out;
+}
+
+Residual SphereSurface::residual(const Vector3d& p) const
+{
+  // rel: 3; norm: 6; minus r: 1.
+  Residual out;
+  out.value = fabs((p - refpt).norm() - r);
+  out.bound = forwardError(10, p.norm() + refpt.norm() + fabs(r));
+  return out;
+}
+
+Residual PlaneSurface::residual(const Vector3d& p) const
+{
+  // normal: 9; rel: 3; dot: 5 - the distance along the normal.
+  Residual out;
+  out.value = fabs((p - refpt).dot(normdir.normalized()));
+  out.bound = forwardError(17, p.norm() + refpt.norm());
+  return out;
+}
+
+Residual TorusSurface::residual(const Vector3d& p) const
+{
+  // axis 9, rel 3, along 5, radial: 3 + 3 + 6 (26); radial - R: 1; hypot: 2
+  // mul, 1 add, sqrt (4); minus r: 1 - 32 in all.
+  const Vector3d rel = p - refpt;
+  const Vector3d axis = normdir.normalized();
+  const double along = rel.dot(axis);
+  const double radial = (rel - axis * along).norm();
+  Residual out;
+  out.value = fabs(hypot(radial - r_major, along) - r_minor);
+  out.bound = forwardError(32, p.norm() + refpt.norm() + fabs(r_major) + fabs(r_minor));
+  return out;
+}
+
+bool CylinderSurface::closestPoint(const Vector3d& p, Vector3d& out) const
+{
+  const Vector3d axis = normdir.normalized();
+  const Vector3d rel = p - refpt;
+  const Vector3d radial = rel - axis * rel.dot(axis);
+  if (radial.norm() < 1e-12) return false;
+  out = refpt + axis * rel.dot(axis) + radial.normalized() * r;
+  return true;
+}
+
+bool ConeSurface::closestPoint(const Vector3d& p, Vector3d& out) const
+{
+  const Vector3d axis = normdir.normalized();
+  const Vector3d rel = p - refpt;
+  const double h = rel.dot(axis);
+  const Vector3d radial = rel - axis * h;
+  if (radial.norm() < 1e-12) return false;
+  const double want = r + h * slope;
+  if (want <= 0) return false;
+  out = refpt + axis * h + radial.normalized() * want;
+  return true;
+}
+
+bool PlaneSurface::closestPoint(const Vector3d& p, Vector3d& out) const
+{
+  const Vector3d n = normdir.normalized();
+  out = p - n * n.dot(p - refpt);
+  return true;
+}
+
+bool SphereSurface::closestPoint(const Vector3d& p, Vector3d& out) const
+{
+  const Vector3d rel = p - refpt;
+  if (rel.norm() < 1e-12) return false;
+  out = refpt + rel.normalized() * r;
+  return true;
+}
+
+bool CylinderSurface::normalAt(const Vector3d& p, Vector3d& out) const
+{
+  const Vector3d axis = normdir.normalized();
+  const Vector3d rel = p - refpt;
+  const Vector3d radial = rel - axis * rel.dot(axis);
+  if (radial.norm() < 1e-12) return false;
+  out = radial.normalized();
+  return true;
+}
+
+bool ConeSurface::normalAt(const Vector3d& p, Vector3d& out) const
+{
+  const Vector3d axis = normdir.normalized();
+  const Vector3d rel = p - refpt;
+  const Vector3d radial = rel - axis * rel.dot(axis);
+  if (radial.norm() < 1e-12) return false;
+  // grad of |radial| - (r + slope * h)
+  out = (radial.normalized() - axis * slope).normalized();
+  return true;
+}
+
+bool SphereSurface::normalAt(const Vector3d& p, Vector3d& out) const
+{
+  const Vector3d rel = p - refpt;
+  if (rel.norm() < 1e-12) return false;
+  out = rel.normalized();
+  return true;
+}
+
+bool TorusSurface::normalAt(const Vector3d& p, Vector3d& out) const
+{
+  const Vector3d axis = normdir.normalized();
+  const Vector3d rel = p - refpt;
+  const Vector3d radial = rel - axis * rel.dot(axis);
+  if (radial.norm() < 1e-12) return false;
+  const Vector3d ring = refpt + radial.normalized() * r_major;
+  if ((p - ring).norm() < 1e-12) return false;
+  out = (p - ring).normalized();
+  return true;
+}
+
+bool SphereSurface::implicitAt(const Vector3d& p, double& f, Vector3d& grad) const
+{
+  const Vector3d rel = p - refpt;
+  f = rel.squaredNorm() - r * r;
+  grad = 2 * rel;
+  return true;
+}
+
+namespace {
+
+/*! |perp|^2 - want^2 about an axis, the radius `want` growing by `slope`: the
+ * implicit form a cylinder (slope 0) and a cone share. */
+void axialImplicit(const Surface& s, double r, double slope, const Vector3d& p, double& f,
+                   Vector3d& grad)
+{
+  const Vector3d axis = s.normdir.normalized();
+  const Vector3d rel = p - s.refpt;
+  const double along = rel.dot(axis);
+  const Vector3d perp = rel - axis * along;
+  const double want = r + slope * along;
+  f = perp.squaredNorm() - want * want;
+  grad = 2 * perp - 2 * want * slope * axis;
+}
+
+}  // namespace
+
+bool CylinderSurface::implicitAt(const Vector3d& p, double& f, Vector3d& grad) const
+{
+  axialImplicit(*this, r, 0.0, p, f, grad);
+  return true;
+}
+
+bool ConeSurface::implicitAt(const Vector3d& p, double& f, Vector3d& grad) const
+{
+  axialImplicit(*this, r, slope, p, f, grad);
+  return true;
+}
+
+bool PlaneSurface::implicitAt(const Vector3d& p, double& f, Vector3d& grad) const
+{
+  const Vector3d n = normdir.normalized();
+  if (!(n.norm() > 0)) return false;
+  f = n.dot(p - refpt);
+  grad = n;
+  return true;
+}

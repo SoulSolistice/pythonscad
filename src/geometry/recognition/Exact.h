@@ -47,80 +47,18 @@
  * membership is then a D4 question - the tessellation band - and is labelled so.
  */
 
-#include <cfloat>
-#include <cmath>
-#include <limits>
-
+#include "geometry/MachinePrecision.h"
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
 
 namespace recognition {
 
-/*! A residual and the machine-precision bound on computing it. */
-struct Residual {
-  double value = std::numeric_limits<double>::infinity();
-  double bound = 0;
-  /*! On the surface, as exactly as the arithmetic can say. */
-  [[nodiscard]] bool exact() const { return value <= bound; }
-};
-
-/*! gamma_n x scale: the forward error of n rounded operations. */
-inline double forwardError(int n, double scale)
-{
-  const double ne = n * DBL_EPSILON;
-  return ne / (1 - ne) * scale;
-}
-
-/*! How far `p` is from a declared plane, cylinder, cone, sphere or torus, and the
- * bound the arithmetic puts on that figure. Any other kind of surface answers
- * with an infinite residual: it has no closed-form residual here. */
+/*! How far `p` is from a declared surface, and the bound the arithmetic puts on
+ * that figure - each surface states its own (Surface::residual), with its own
+ * count of operations. One with no closed-form residual answers infinity. */
 inline Residual residualOf(const Surface *s, const Vector3d& p)
 {
-  Residual out;
-  if (s == nullptr) return out;
-  const Vector3d rel = p - s->refpt;
-  const double base = p.norm() + s->refpt.norm();
-  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(s)) {
-    // axis: 3 mul, 2 add, sqrt, 3 div (9); rel: 3 (12); rel.axis: 3 mul, 2 add
-    // (17); axis * t: 3 (20); rel - axis t: 3 (23); norm: 3 mul, 2 add, sqrt
-    // (29); minus r (30).
-    const Vector3d axis = cyl->normdir.normalized();
-    out.value = fabs((rel - axis * rel.dot(axis)).norm() - cyl->r);
-    out.bound = forwardError(30, base + fabs(cyl->r));
-    return out;
-  }
-  if (const auto *cone = dynamic_cast<const ConeSurface *>(s)) {
-    // The cylinder's 29 to the radial distance; radiusAt: its own axis (9),
-    // rel (3), dot (5), times slope (1), plus r (1) = 19; the difference (1).
-    const Vector3d axis = cone->normdir.normalized();
-    const double want = cone->radiusAt(p);
-    out.value = fabs((rel - axis * rel.dot(axis)).norm() - want);
-    out.bound = forwardError(49, base + fabs(cone->r) + fabs(want));
-    return out;
-  }
-  if (const auto *sph = dynamic_cast<const SphereSurface *>(s)) {
-    // rel: 3; norm: 6; minus r: 1.
-    out.value = fabs(rel.norm() - sph->r);
-    out.bound = forwardError(10, base + fabs(sph->r));
-    return out;
-  }
-  if (dynamic_cast<const PlaneSurface *>(s) != nullptr) {
-    // normal: 9; rel: 3; dot: 5 - the distance along the normal.
-    out.value = fabs(rel.dot(s->normdir.normalized()));
-    out.bound = forwardError(17, base);
-    return out;
-  }
-  if (const auto *tor = dynamic_cast<const TorusSurface *>(s)) {
-    // axis 9, rel 3, along 5, radial: 3 + 3 + 6 (26); radial - R: 1; hypot: 2
-    // mul, 1 add, sqrt (4); minus r: 1 - 32 in all.
-    const Vector3d axis = tor->normdir.normalized();
-    const double along = rel.dot(axis);
-    const double radial = (rel - axis * along).norm();
-    out.value = fabs(hypot(radial - tor->r_major, along) - tor->r_minor);
-    out.bound = forwardError(32, base + fabs(tor->r_major) + fabs(tor->r_minor));
-    return out;
-  }
-  return out;
+  return s == nullptr ? Residual{} : s->residual(p);
 }
 
 /*! Whether `p` is on `s` at D0 - see the file comment. */
