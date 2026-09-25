@@ -937,6 +937,66 @@ def _bezier(points, t):
     return out
 
 
+def _knot_problem(mult, knots, degree, count):
+    """Whether a clamped knot vector describes `count` control points at `degree`:
+    the contract every B-spline this exporter writes keeps, curve or surface."""
+    if degree < 1:
+        return "degree %d is below 1" % degree
+    if len(mult) != len(knots):
+        return "%d multiplicities for %d knots" % (len(mult), len(knots))
+    if sum(mult) != count + degree + 1:
+        return ("multiplicities sum to %d, but %d control points at degree %d need %d"
+                % (sum(mult), count, degree, count + degree + 1))
+    if mult[0] != degree + 1 or mult[-1] != degree + 1:
+        return "not clamped: ends have multiplicity %d and %d, not %d" % (mult[0], mult[-1], degree + 1)
+    if any(m < 1 for m in mult):
+        return "a multiplicity below 1"
+    if any(knots[i] <= knots[i - 1] for i in range(1, len(knots))):
+        return "knots do not increase"
+    return None
+
+
+def _curve_knots(curve):
+    """(degree, multiplicities, knots) of a B_SPLINE_CURVE_WITH_KNOTS, plain or
+    rational, or None where they cannot be read."""
+    if curve.has("RATIONAL_B_SPLINE_CURVE"):
+        m = re.match(r"\s*(\d+)", curve.part("B_SPLINE_CURVE"))
+        tail = curve.part("B_SPLINE_CURVE_WITH_KNOTS")
+    else:
+        m = re.match(r"\s*'[^']*'\s*,\s*(\d+)", curve.args)
+        # past the control points and the three flags
+        tail = curve.args.split(".F.")[-1] if ".F." in curve.args else curve.args
+    lists = re.findall(r"\(([^()]*)\)", tail)
+    if m is None or len(lists) < 2:
+        return None
+    try:
+        mult = [int(x) for x in lists[0].replace(" ", "").split(",") if x]
+        knots = [float(x) for x in lists[1].replace(" ", "").split(",") if x]
+    except ValueError:
+        return None
+    return int(m.group(1)), mult, knots
+
+
+def _bspline(points, degree, mult, knots, t):
+    """A clamped B-spline of any dimension at t, by de Boor. A Bezier is the case
+    of one span."""
+    full = [k for k, m in zip(knots, mult) for _ in range(m)]
+    n = len(points) - 1
+    span = n
+    if t < full[n + 1]:
+        span = degree
+        while span < n and full[span + 1] <= t:
+            span += 1
+    d = [list(points[j + span - degree]) for j in range(degree + 1)]
+    for r in range(1, degree + 1):
+        for j in range(degree, r - 1, -1):
+            i = j + span - degree
+            denom = full[i + degree - r + 1] - full[i]
+            a = 0.0 if denom == 0 else (t - full[i]) / denom
+            d[j] = [(1 - a) * d[j - 1][k] + a * d[j][k] for k in range(len(d[j]))]
+    return d[degree]
+
+
 def check_surface_curves(entities, problems):
     """A SURFACE_CURVE's pcurves must be the same curve as its 3D one.
 
@@ -986,6 +1046,17 @@ def check_surface_curves(entities, problems):
                     % (pcurve.id, len(flat), len(space))
                 )
                 continue
+            # The pcurve is the 3D curve's parametrisation carried over, so it
+            # has the same degree and knots, and they are compared at the same
+            # parameter.
+            knots3 = _curve_knots(curve)
+            knots2 = _curve_knots(flat_curve)
+            if knots3 is None or knots2 is None or knots3 != knots2:
+                problems.append(
+                    "#%d: PCURVE's degree and knots are not its 3D curve's" % pcurve.id
+                )
+                continue
+            degree, mult, knots = knots3
             placement = _placement(entities, surface.refs()[0]) if surface.refs() else None
             numbers = surface.floats()
             if placement is None or not numbers:
@@ -1001,15 +1072,16 @@ def check_surface_curves(entities, problems):
             if surface.name not in ("CYLINDRICAL_SURFACE", "CONICAL_SURFACE"):
                 continue  # only the two this exporter writes a fitted pcurve on
             worst = 0.0
-            for k in range(1, 8):
-                t = k / 8.0
-                u, v = _bezier(flat, t)
+            samples = [knots[i] + (knots[i + 1] - knots[i]) * k / 8.0
+                       for i in range(len(knots) - 1) for k in range(1, 8)]
+            for t in samples:
+                u, v = _bspline(flat, degree, mult, knots, t)
                 at = radius + v * math.tan(half)
                 mapped = [
                     origin[i] + at * (math.cos(u) * ref[i] + math.sin(u) * other[i]) + v * axis[i]
                     for i in range(3)
                 ]
-                spot = _bezier(space, t)
+                spot = _bspline(space, degree, mult, knots, t)
                 worst = max(
                     worst, math.sqrt(sum((mapped[i] - spot[i]) ** 2 for i in range(3)))
                 )
@@ -1649,12 +1721,6 @@ def check_bspline_faces(entities, problems):
             out.append(tuple(f[:3]))
         return out
 
-    def knots_ok_text(text, degree, count):
-        mult = re.findall(r"\((\d+(?:,\d+)*)\)", text)
-        return degree >= 1 and count == degree + 1 and any(
-            m == "%d,%d" % (degree + 1, degree + 1) for m in mult
-        )
-
     def surface_knot_problem(ent, du, dv, rows, cols):
         """Whether the four lists describe the net that is actually written."""
         if du < 1 or dv < 1:
@@ -1665,18 +1731,9 @@ def check_bspline_faces(entities, problems):
         mu, mv, ku, kv = lists
         for name, mult, knots, degree, count in (("u", mu, ku, du, rows),
                                                  ("v", mv, kv, dv, cols)):
-            if len(mult) != len(knots):
-                return "%s has %d multiplicities for %d knots" % (name, len(mult), len(knots))
-            if sum(mult) != count + degree + 1:
-                return ("%s multiplicities sum to %d, but %d control points at degree %d need %d"
-                        % (name, sum(mult), count, degree, count + degree + 1))
-            if mult[0] != degree + 1 or mult[-1] != degree + 1:
-                return "%s is not clamped: ends have multiplicity %d and %d, not %d" % (
-                    name, mult[0], mult[-1], degree + 1)
-            if any(m < 1 for m in mult):
-                return "%s has a multiplicity below 1" % name
-            if any(knots[i] <= knots[i - 1] for i in range(1, len(knots))):
-                return "%s knots do not increase" % name
+            problem = _knot_problem(mult, knots, degree, count)
+            if problem is not None:
+                return "%s: %s" % (name, problem)
         return None
 
     def weights_of(text):
@@ -1687,16 +1744,11 @@ def check_bspline_faces(entities, problems):
             continue
         n = len(curve.refs())
         rational = curve.has("RATIONAL_B_SPLINE_CURVE")
-        if rational:
-            m = re.match(r"\s*(\d+)", curve.part("B_SPLINE_CURVE"))
-        else:
-            m = re.match(r"\s*'[^']*'\s*,\s*(\d+)", curve.args)
-        degree = int(m.group(1)) if m else -1
-        knot_text = curve.part("B_SPLINE_CURVE_WITH_KNOTS") if rational else curve.args
-        if not knots_ok_text(knot_text, degree, n):
+        read = _curve_knots(curve)
+        problem = "its knots cannot be read" if read is None else _knot_problem(read[1], read[2], read[0], n)
+        if problem is not None:
             problems.append(
-                "#%d: B_SPLINE_CURVE_WITH_KNOTS of degree %d has %d control points and knots that "
-                "are not a Bezier's" % (curve.id, degree, n)
+                "#%d: B_SPLINE_CURVE_WITH_KNOTS with %d control points: %s" % (curve.id, n, problem)
             )
         if rational:
             weights = weights_of(curve.part("RATIONAL_B_SPLINE_CURVE"))

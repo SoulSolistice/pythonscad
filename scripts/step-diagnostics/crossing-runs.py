@@ -6,9 +6,12 @@ surfaces cross, that is their intersection. A file may write it as one edge or
 as many; what matters is whether the many still follow one curve or turn at
 every vertex, which is what a CAD view draws as a zig-zag. For each pair of
 faces sharing more than one edge this reports the chains of edges between them,
-the vertices inside a chain that no third face uses (which a single edge could
-take), the turn of the tangent at each such vertex, and how far each sits from
-the two surfaces.
+the vertices inside a chain where no third edge of the file meets it (which a
+single edge could take), the turn of the tangent at each such vertex, and how
+far each sits from the two surfaces.
+
+A third *edge*, not a third face: a seam closing a face round its axis meets
+the rim at a vertex only two faces use, and the rim's curve has to end there.
 
     crossing-runs.py <file.stp> [--min-edges N] [--kinds cone,bspl]
 """
@@ -48,8 +51,10 @@ faces = TopTools_IndexedMapOfShape()
 TE.MapShapes_s(sh, TopAbs_FACE, faces)
 edge_faces = TopTools_IndexedDataMapOfShapeListOfShape()
 TE.MapShapesAndAncestors_s(sh, TopAbs_EDGE, TopAbs_FACE, edge_faces)
-vert_faces = TopTools_IndexedDataMapOfShapeListOfShape()
-TE.MapShapesAndAncestors_s(sh, TopAbs_VERTEX, TopAbs_FACE, vert_faces)
+vert_edges = TopTools_IndexedDataMapOfShapeListOfShape()
+TE.MapShapesAndAncestors_s(sh, TopAbs_VERTEX, TopAbs_EDGE, vert_edges)
+edges_all = TopTools_IndexedMapOfShape()
+TE.MapShapes_s(sh, TopAbs_EDGE, edges_all)
 verts = TopTools_IndexedMapOfShape()
 TE.MapShapes_s(sh, TopAbs_VERTEX, verts)
 
@@ -142,8 +147,8 @@ for (fa, fb), eds in pairs.items():
         for v, ks in vs.items():
             if len(ks) != 2:
                 continue
-            owners = set(face_id(f) for f in vert_faces.FindFromKey(verts.FindKey(v)))
-            if owners != {fa, fb}:
+            meeting = set(edges_all.FindIndex(e) for e in vert_edges.FindFromKey(verts.FindKey(v)))
+            if len(meeting) != 2:
                 continue
             t1 = tangent_at(eds[ks[0]], v)
             t2 = tangent_at(eds[ks[1]], v)
@@ -161,7 +166,7 @@ for (fa, fb), eds in pairs.items():
 report.sort(key=lambda r_: -r_[4])
 total_edges = sum(r_[4] for r_ in report)
 total_inner = sum(len(r_[6]) for r_ in report)
-print("%d chains of %d edges between two faces; %d vertices inside a chain that no third face uses"
+print("%d chains of %d edges between two faces; %d vertices inside a chain that no third edge meets"
       % (len(report), total_edges, total_inner))
 for fa, fb, ka, kb, n, curves, inner in report[: args.list]:
     turns = sorted(t[0] for t in inner)
