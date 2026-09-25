@@ -4686,6 +4686,67 @@ question from the one `minkowski()`'s deliberate record-dropping answers, and it
 does not reopen it: implying a surface from operands is not the same as carrying
 a record through an operation that invalidated it.
 
+### Inferred where a declaration was possible: surveyed 2026-09-25
+
+The survey above asked what declares nothing. This one asks the sharper
+question: **where does the code infer something its maker knew?** An inference
+there is not a rung - it is a missing declaration wearing a test, and checklist
+E1 says what to do with it. Found while wiring the hull of solids of revolution,
+which was about to become the *third* private copy of "a sloped profile edge
+sweeps a cone": `rotate_extrude` decides what a profile edge is with an exact
+chord test at 7 ε, `linear_extrude` with a 1e-6 tolerance and a Bezier bounding
+box, and neither asks the other.
+
+**The 2D channel - the root.** Everything under it answers from it.
+
+| # | where | inferred today | what declares it |
+| --- | --- | --- | --- |
+| 1 | a straight profile edge, both extruders | "a line, because it is not a chord of any recorded arc" - two different tests, one a threshold (C2, F6) | the generator: `square`, `polygon`, `offset(delta)` and a glyph's line segments make lines, `circle` and a round join make arcs |
+| 2 | arcs and Beziers through a 2D boolean or `offset` | `ClipperUtils` keeps the operands' records as hints, re-tested by position; `placeOnArcs` restores a vertex by its distance from the arc | identity: Clipper2's per-vertex `Z` (`USINGZ`, not enabled here) carries which segment a vertex came from - the 2D `mintOriginals` |
+| 3 | a 2D transform that is not a similarity | `Polygon2d::transform` drops the arcs (behind an `isApprox(1e-12)`) | the transform states the ellipse exactly; needs an ellipse record. The same gap in 3D: `CylinderSurface::transform` refuses a non-uniform scale |
+
+**The sweeps - consumers of the channel.**
+
+| # | where | inferred or refused |
+| --- | --- | --- |
+| 4 | `rotate_extrude`, a sloped edge touching the axis | declares nothing: the apex cone, above. (The zero-area facets at the axis are a separate, mesh-side defect.) |
+| 5 | `rotate_extrude`, any Bezier in the profile | every sloped edge's cone is withheld, not only the Beziers' chords; the Bezier edges themselves declare nothing, though a revolved Bezier is exact |
+| 6 | `rotate_extrude`, frames | the plane records add `offset_y`, the cylinders and cones do not - one of the two is in the wrong frame |
+| 7 | `linear_extrude`, uneven scale | a sheared straight wall declares nothing; it is exactly the bilinear patch between AB and A'B', a (1,1) Bezier the exporter already writes. An arc under it is a rational (2,1) patch |
+| 8 | `linear_extrude(twist)`, `rotate_extrude` with `v` or twist | the sweep is known in closed form; written D1, since a helicoid has no rational form (above) |
+| 9 | `path_extrude`, `skin` | as above |
+| 10 | `roof(method = "straight")` | every roof face is the plane through one profile edge at the roof's slope - closed form from the 2D edge, declares nothing |
+| 11 | `wrap` | bends onto a cylinder of known radius; a flat face becomes a cylinder in closed form, declares nothing |
+
+**Operations on solids.**
+
+| # | where | inferred or refused |
+| --- | --- | --- |
+| 12 | `hull()` | coaxial solids of revolution first (landing 3 below); the tangent cone of two spheres and the tangent planes of non-coaxial cylinders are fixed by the operands' declarations too |
+| 13 | `minkowski()` | drops every record on purpose; a convex solid with a sphere is offset planes, edge cylinders and vertex spheres, all implied by the operands |
+| 14 | ownership of a GeometryList export or a Nef result | no identity is minted, so ownership falls back to presence - open item 34's gap |
+| 15 | `projection(cut = true)` through a declared cylinder | the cut is a declared circle and no `Arc2d` is recorded. Low |
+
+Not gaps, and staying that way (checklist E5): `polyhedron()`, `import()`,
+`surface()` - no intent reaches them.
+
+**The order it lands in.** Each is its own landing, walked against the
+checklist:
+
+1. **A classified profile.** `Profile2d`: every edge of an outline tagged `Line`,
+   `Arc k` or `Bezier k`, by one classifier at machine precision after
+   `placeOnArcs` - replacing both extruders' chord tests. Census changes only
+   where the 1e-6 test and machine precision disagreed, each explained.
+2. **One sweep table**, (edge kind x sweep) -> surface, which both extruders call.
+   Then items 4, 5 and 6 as rows, one landing each.
+3. **The hull of solids of revolution**: its operands' declarations give their
+   profiles, the hull of those is a classified profile of lines, and the table
+   says what it sweeps - no cone of its own.
+4. **Identity through Clipper** (item 2): the classifier and `placeOnArcs` stop
+   measuring and read the vertex's segment.
+5. **New rows**: bilinear walls (7) and roof planes (10) first, needing no new
+   surface type; then the ellipse, the sweeps, minkowski and the general hull.
+
 ### A wall split by a Nef boolean
 
 On `--backend=CGAL` a boolean leaves the wall of a ring it never touched cut into
