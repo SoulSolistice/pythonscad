@@ -907,8 +907,15 @@ if(ENABLE_PYTHON)
           OUTPUT_VARIABLE PYTHON_VERSION_OUTPUT
           OUTPUT_STRIP_TRAILING_WHITESPACE
         )
-        string(REGEX MATCH "Python ([0-9]+\\.[0-9]+\\.[0-9]+)" _ ${PYTHON_VERSION_OUTPUT})
-        SET(PYTHON_FULL_VERSION ${CMAKE_MATCH_1})
+        # Quoted: a `python` that prints nothing - not on PATH, or a stub, as in
+        # the environment ninja re-runs cmake from - would otherwise leave
+        # string() two arguments short and fail the whole configure.
+        string(REGEX MATCH "Python ([0-9]+\\.[0-9]+\\.[0-9]+)" _ "${PYTHON_VERSION_OUTPUT}")
+        SET(PYTHON_FULL_VERSION "${CMAKE_MATCH_1}")
+        if(NOT PYTHON_FULL_VERSION)
+          message(WARNING "Could not read the full Python version from `python --version`; "
+                          "set PYTHON_FULL_VERSION in the environment")
+        endif()
         message(STATUS "Auto-detected full Python version: ${PYTHON_FULL_VERSION}")
       endif()
     endif()
