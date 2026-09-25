@@ -147,6 +147,58 @@ struct StepKernel::BodyBuild {
    * the arcs use. */
   void emitBezierFaces();
 
+  /*! decideSections asked again, now that the corner placement has moved what
+   * it is going to move. The faces are settled; what is re-decided is only
+   * which sections both of their faces can still see, on the geometry about to
+   * be written rather than the geometry it was chosen from.
+   *
+   * After placeCorners and before *either* emitter of crossing curves. It used
+   * to run after the sweep faces were written, which meant the sweep emitter
+   * read a set that had not been decided yet and the quadric emitter read one
+   * that had: the same edge then got a crossing curve from one face and a chord
+   * from the other, and the shell came apart on twice the number of crossings -
+   * 1278 edges used once, on the band family at $fn 32. */
+  void redecideSections();
+
+  /*! One face per claimed region, on the B-spline the declaration describes,
+   * bounded by the mesh's own straight edges.
+   *
+   * That last part is the whole design and it is not a compromise. The obvious
+   * move is to fit a curve along each boundary run, the way a fillet's rails
+   * become arcs - but a fillet's rail lies in the flat face beside it, and a
+   * trimmed sweep's boundary does not. Its neighbours here are the planar
+   * facets the boolean left, so a curve on the sweep lies in none of them, and
+   * a shared edge between the two can only be the chord it already is. Taking
+   * the edges from the same map every other face uses is therefore both the
+   * simplest thing and the only one that keeps the shell closed: the neighbour
+   * is not asked to give anything up. */
+  void emitSweepFaces();
+
+  /*! A trimmed quadric, bounded by the mesh's own boundary rather than by
+   * circles. The band pass writes a cylinder between two circular rims and
+   * writes it better - a CIRCLE is a curve a kernel can offset and pattern
+   * along - so this only ever sees what that pass could not take: a face whose
+   * trim is not a plane section and has no conic to bound it with.
+   *
+   * The bound is the polyline the neighbouring faceted faces already use, for
+   * the same reason a declared sweep's is: those faces have to close against
+   * this one edge for edge, and a curve of our own devising there would open
+   * the shell. The surface is exact; only its boundary is the mesh's.
+   * One curve per plane section, shared by the two faces that meet along it -
+   * the same rule the band pass follows for a shared rim. Without it each face
+   * would write its own ellipse and the shell would come apart along them. */
+  void emitQuadricFaces();
+
+  /*! Say where each crossing curve runs across the two surfaces it lies on, now
+   * that both faces have been written and their placements are known.
+   *
+   * The 3D curve stays definitive - .CURVE_3D., as it is everywhere else here -
+   * so a reader that ignores the pcurves sees the file it saw before. What they
+   * add is that a curve on two surfaces is *said* to be on them: STEP calls that
+   * a SURFACE_CURVE, and a kernel that would otherwise re-project a B-spline
+   * onto a quadric and decide for itself is told the answer instead. */
+  void writeCrossingPcurves();
+
   // ---- what the phases hand each other
 
   // A working copy, because the corner placement moves junction corners onto
@@ -298,6 +350,56 @@ struct StepKernel::BodyBuild {
   // triangles and cannot be handed the arc. See the band writer below.
   std::size_t rim_unshared = 0;
   std::map<std::set<int>, EdgeCurve *> shared_rim_edges;  // rim vertices -> circle
+
+  // The crossing curves the emitters build, keyed by their edge.
+  // One neighbour is not a planar facet, and it is the exception that sentence
+  // does not cover: where the sweep meets a *declared* surface, the two cross
+  // along a curve both of them can derive from their own declarations, and
+  // `crossing_edges` holds exactly those edges. Such an edge has to be taken
+  // from `crossing_curves` by the sweep emitter for the same reason the quadric one takes it - it is
+  // one edge, and the two faces on it must name one geometry. Whichever emitter
+  // reaches it first builds it and the other reuses the object, which is why
+  // that map belongs to neither of them.
+  std::map<std::pair<int, int>, EdgeCurve *> crossing_curves;
+  /*! One face's view of a crossing edge: the surface entity it wrote and the
+   *  placement that entity carries, which is what a PCURVE's parameters mean.
+   *
+   * Recorded per face rather than per surface because the reference direction is
+   * chosen from each face's own boundary, so two faces on one cylinder do not
+   * share a parameter origin and a pcurve written against the wrong one is off
+   * by a rotation.
+   */
+  struct CrossingSide {
+    SurfaceType *surface = nullptr;
+    Vector3d base, axis, ref;
+    double slope = 0;  // a cone's, in its written direction; zero for a cylinder
+  };
+  std::map<std::pair<int, int>, std::vector<CrossingSide>> crossing_sides;
+  int crossing_written = 0;
+
+  // One per file - nothing about a 2D parametric context varies.
+  ParametricContext *param_context = nullptr;
+
+  // The plane sections written, and what the quadric emitter counted.
+  // Sweep faces whose seam was moved to a column their boundary does not cross.
+  std::size_t reseamed = 0, reseam_full = 0;
+  std::map<std::set<int>, EdgeCurve *> section_edges;
+  // What binding the written sections' ends to the surface cost - see SectionStats.
+  step::SectionStats section_stats;
+  // Sections the far face could not be handed, and which are therefore
+  // written as chords by both rather than as a conic by one. Reached only
+  // where a planar loop no longer carries the run - see below.
+  std::size_t section_unshared = 0;
+  std::size_t apex_seams = 0;            // cone faces closed round their apex
+  std::size_t band_seams = 0;            // faces round their axis closed by a seam between two rims
+  std::set<std::set<int>> section_subs;  // sections already handed to a planar face
+  int sections_declared = 0, sections_fitted = 0;
+  // Boundary sections refused because their plane was a facet of something
+  // curved rather than a plane. See open item 26.
+  int sections_on_facet = 0;
+  /*! The placement of a conic at `origin`, its plane's normal `dir`, its
+   * reference direction `towards`. */
+  Axis2Placement *conic_placement(const Vector3d& origin, const Vector3d& dir, const Vector3d& towards);
 
   // ---- the kernel methods the phases call
   EdgeCurve *create_line_edge_curve(Vertex *vert1, Vertex *vert2, bool dir)

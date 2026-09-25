@@ -14,6 +14,7 @@
 #include "geometry/AnalyticFeatures.h"
 #include "io/step/BoundaryCycles.h"
 #include "io/step/CrossingArc.h"
+#include "utils/printutils.h"
 
 using namespace step;
 using AnalyticFeatures::declaredBand;
@@ -282,4 +283,65 @@ bool StepKernel::BodyBuild::boundaryLiesOnSurface(const AnalyticFeatures::Patch&
     }
   }
   return true;
+}
+
+void StepKernel::BodyBuild::redecideSections()
+{
+  if (!analytic) return;
+  const std::set<std::set<int>> agreed_before = section_curves;
+  std::vector<const AnalyticFeatures::Patch *> live;
+  live.reserve(quadric_faces.size());
+  for (const auto& patch : quadric_faces) live.push_back(&patch);
+  decideSections(live);
+  std::size_t lost = 0;
+  for (const auto& key : agreed_before) {
+    if (section_curves.find(key) == section_curves.end()) lost++;
+  }
+  if (lost > 0) {
+    // Say so rather than let it pass: this is the one place the two meshes can
+    // disagree, and in the exact tier it means a face was called exact partly
+    // because a section covered chords which are now written as chords after
+    // all. A plane fitted to mesh facets is what does not survive: the
+    // placement moves a corner onto the surface the model declared, which is
+    // exactly off the facet plane it happened to share with a neighbour. A
+    // declared plane survives, because that is what the corner was moved onto.
+    // An error in the **exact** tier and a warning in the approximation tier,
+    // which is the difference between the two meanings this condition has.
+    //
+    // Under the approximation flag, losing a section's agreement now costs
+    // exactness and nothing else: both faces keep the chords they agree on,
+    // because a section the far face cannot be handed is no longer written by
+    // the near one either. That is a worse boundary and a correct file.
+    //
+    // In the exact tier it is a correctness fault, because a face was called
+    // exact partly on the strength of a section covering chords which are then
+    // written as chords after all - the face asserts something its boundary no
+    // longer supports.
+    //
+    // It was made an error outright earlier on 2026-09-10, when the far face
+    // could still be left holding chords while the near one wrote a conic; the
+    // fan fix below removed that, and with it the reason for the stronger
+    // reading in the approximation tier. Measured after: f04 under a relaxed
+    // corner placement reaches this and its file is valid.
+    //
+    // Unreachable on every coupon measured either way:
+    // the band family at $fn 24, 32, 48, 64 and 96 and both reference parts
+    // all report zero. It became reachable exactly once, when the corner
+    // placement was relaxed on 2026-09-10, and what it produced was a file
+    // whose shell was open - one boundary written as an ELLIPSE by a cylinder
+    // and as a LINE by the plane beside it, two edges where there is one.
+    //
+    // So reaching this is not a degradation to be reported and lived with. It
+    // is two faces contradicting each other about one edge, and the file is
+    // wrong. `tests/step-flagship-check.py` fails on any EXPORT-ERROR, which
+    // is what makes that enforceable rather than merely stated. See open item
+    // 11: the fix is to decide an edge's geometry once, keyed by the edge, the
+    // way `crossing_curves` already does.
+    LOG(approximate ? message_group::Export_Warning : message_group::Export_Error,
+        "STEP export: %1$d plane section%2$s agreed before the corners were placed and %3$s not "
+        "after, so %4$s boundary is written as chords%5$s",
+        int(lost), lost == 1 ? "" : "s", lost == 1 ? "does" : "do",
+        lost == 1 ? "that much of a" : "that much of the",
+        approximate ? "" : " under a face called exact");
+  }
 }
