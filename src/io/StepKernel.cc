@@ -29,6 +29,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <limits>
 #include "StepKernel.h"
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Pipeline.h"
 #include "geometry/recognition/Reports.h"
 #include "utils/printutils.h"
@@ -5143,9 +5144,17 @@ void StepKernel::build_tri_body(
       // edge. Without one the face is not bounded in its own parameters, and a
       // reader has to invent the seam; OCCT did, which is not the same as the
       // file being right.
-      if (cone != nullptr && boundary.size() == 1) {
+      if (cone != nullptr && boundary.size() == 1 && cone->slope != 0) {
+        const Vector3d apex = base - axis * (cone->r / cone->slope);
+        // A loop through the apex bounds the face there itself, and the apex is
+        // then a vertex the faces beside it share - a Voronoi roof's reflex
+        // corner. Only a loop that stays off it can wind round it.
+        bool through_apex = false;
         double turn = 0.0;
-        for (std::size_t k = 0; k < n; k++) {
+        for (std::size_t k = 0; k < n && !through_apex; k++) {
+          const Vector3d off = vertices[cycle[k]] - apex;
+          through_apex = (off - axis * axis.dot(off)).norm() <=
+                         recognition::forwardError(12, off.norm() + apex.norm());
           auto angle = [&](int v) {
             const Vector3d rel = vertices[v] - base;
             return atan2(rel.dot(ref2), rel.dot(ref));
@@ -5156,8 +5165,7 @@ void StepKernel::build_tri_body(
           turn += d;
         }
         // A winding number, so it is an integer: round the axis once, or not.
-        if (fabs(turn) > M_PI && cone->slope != 0) {
-          const Vector3d apex = base - axis * (cone->r / cone->slope);
+        if (!through_apex && fabs(turn) > M_PI) {
           Vertex *start = get_vertex(cycle[0]);
           auto tip = new Vertex(entities, new Point(entities, apex));
           EdgeCurve *seam = create_line_edge_curve(start, tip, true);
