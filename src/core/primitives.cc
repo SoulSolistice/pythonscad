@@ -334,8 +334,15 @@ std::unique_ptr<const Geometry> SphereNode::createGeometry() const
     }
     if (seen) continue;
     declared.push_back(radius);
-    polyset->surfaces.push_back(std::make_shared<CylinderSurface>(Vector3d(0, 0, r * cos_degrees(phi)),
-                                                                  Vector3d(0, 0, 1), radius));
+    // Evidence, not a face: the ring is how a band of the zone is identified,
+    // and the sphere is what the facets are on. Declared as a face until
+    // 2026-09-24, which made every facet between the two equatorial rings - all
+    // four corners at one radius - D0 on the sphere *and* on a cylinder nothing
+    // meant, and made the sphere's maker "own" seven cylinders.
+    auto ring =
+      std::make_shared<CylinderSurface>(Vector3d(0, 0, r * cos_degrees(phi)), Vector3d(0, 0, 1), radius);
+    ring->evidence_only = true;
+    polyset->surfaces.push_back(ring);
   }
 
   return polyset;

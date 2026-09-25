@@ -234,6 +234,27 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
     return std::size_t(-1);
   };
 
+  // A run merged into a zone is one face on the zone's surface, so its walls
+  // are claimed for that surface - not for the ring each band happened to be
+  // matched by, which is a cylinder or a cone the facets are not on, and often
+  // only a witness. Until 2026-09-24 the merge rewrote the band and left its
+  // claims naming the rings: the file wrote a torus and the ledger said
+  // sixteen cylinders, which the D0 regions report caught the day the fixtures
+  // had identity to ask with. The claims are withdrawn and made again on the
+  // zone; `skip` are the caps, claimed apart below.
+  auto claim_for_zone = [&](const std::vector<std::size_t>& zone_walls,
+                            const std::shared_ptr<Surface>& zone, const std::set<std::size_t>& skip) {
+    const std::size_t zone_index = index_of(zone);
+    for (const std::size_t f : zone_walls) {
+      if (skip.count(f) != 0) continue;
+      result.ledger.release(f);
+      recognition::recordClaim(result.ledger, recognition::kBandWall, f, zone, zone_index,
+                               declared_count, ClaimFate::Honoured,
+                               "the band was merged into the zone its rings are on",
+                               decided(zone_index, f, recognition::EvidenceClass::D3));
+    }
+  };
+
   // What this pass would have claimed and refused, keyed by (facet, surface).
   //
   // A band decides which facets it takes by what a band can *express*, and until
@@ -1270,6 +1291,8 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         merged.outward = outward;
         merged.zone = surface;
         merged.pole_closed = pole_closed;
+        claim_for_zone(walls, surface,
+                       pole_closed ? std::set<std::size_t>{cap_low, cap_high} : std::set<std::size_t>{});
         // The caps are the face's now, so they stop being faces of their own.
         // Their rims go with them: the closed sphere has no rim at all, and the
         // circles that used to bound the run's ends are not written.
@@ -1403,6 +1426,7 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         merged.seam_top = corner;
         merged.outward = outward;
         merged.zone = surface;
+        claim_for_zone(walls, surface, {});
         for (const std::size_t bi : run) {
           if (bi == seed) continue;
           bands[bi].alive = false;

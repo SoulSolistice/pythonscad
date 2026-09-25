@@ -14,7 +14,8 @@
 //
 //   (8,0)-(10,0)    at one height          a flat annulus, declares nothing
 //   (10,0)-(10,6)   parallel to the axis   a cylinder, r=10
-//   (10,6)-(12,10)  tilted                 a frustum, rims r=10 and r=12
+//   (10,6)-(12,10)  tilted                 a frustum: its cone, declared as a face,
+//                                          and rims r=10 and r=12 as evidence
 //   (12,10)-(12,16) parallel to the axis   a cylinder, r=12
 //   (12,16)-(8,16)  at one height          a flat annulus, declares nothing
 //   (8,16)-(8,0)    parallel to the axis   the bore, r=8
@@ -32,7 +33,10 @@
 // Measured, and asserted by the driver: what the exporter has to report for
 // the above to have happened. A silently faceted export is still a valid one,
 // so validity alone cannot see a recogniser that has stopped recognising.
-// EXPECT: 3 analytic surfaces available (3 cylindrical, 0 spherical, 0 toroidal, 0 Bezier)
+// Declared: the three cylinders r=8, 10 and 12 - both rim radii are walls as
+// well, so neither is evidence only - and the cone. Until 2026-09-24 a tilted
+// segment declared its rims and not its cone, and this read 3.
+// EXPECT: 4 analytic surfaces available (3 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 // EXPECT: 4 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 128 facets replaced
 //
 // pi times the integral of (r_out^2 - 64) dz over the profile: 216 for the

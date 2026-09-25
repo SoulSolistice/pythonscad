@@ -39,6 +39,9 @@
 #include <src/geometry/Surface.h>
 #include <src/geometry/AnalyticFeatures.h>
 #include <src/geometry/recognition/Exact.h>
+#ifdef ENABLE_MANIFOLD
+#include <src/geometry/manifold/manifoldutils.h>
+#endif
 #include <set>
 #include <limits>
 #include <climits>
@@ -968,6 +971,20 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
 
   auto ps = PolySetUtils::getGeometryAsPolySet(geom);
   if (ps == nullptr) return;
+#ifdef ENABLE_MANIFOLD
+  // Identity for a geometry that never went through a boolean. A plain PolySet
+  // reaching the exporter is one generator's output - a primitive, an
+  // extrusion, a hull, which is a generator of its own blend - because every
+  // combination of makers on this backend goes through Manifold, which mints
+  // ids, and on CGAL comes back as a Nef polyhedron, which carries none and is
+  // left silent. So it is given the identity Manifold would have given it, by
+  // the same rule (ManifoldUtils::mintOriginals). A GeometryList - several
+  // top-level objects, concatenated - is several makers and stays silent: that
+  // wants identity per member, not one for all. See open item 35.
+  if (ps->original_ids.empty() && std::dynamic_pointer_cast<const PolySet>(geom) != nullptr) {
+    ps = ManifoldUtils::mintOriginals(*ps);
+  }
+#endif
 
   //	printf("export curves: %zu\n",ps->curves.size());
   //	printf("export surfaces: %zu\n",ps->surfaces.size());

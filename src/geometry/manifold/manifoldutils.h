@@ -11,6 +11,15 @@
 
 namespace ManifoldUtils {
 
+/*! The identity a PolySet would have been given had it passed through a
+ * boolean: one original id per colour group, minted from Manifold's own
+ * allocator, carried on every face, and stamped on the surfaces it declares -
+ * faces as owners, evidence as witnesses. The same rule createManifoldFrom*
+ * mints by, for a geometry that never went through one: a lone generator's
+ * output is one maker, and without this it had no identity at all
+ * (doc/step-export-wip.md, open item 35). */
+std::shared_ptr<PolySet> mintOriginals(const PolySet& ps);
+
 const char *statusToString(manifold::Manifold::Error status);
 
 std::shared_ptr<ManifoldGeometry> createManifoldFromPolySet(const PolySet& ps);

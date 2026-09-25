@@ -34,6 +34,23 @@ using Error = manifold::Manifold::Error;
 
 namespace {
 
+/*! A PolySet's faces by colour - one original per group, which is the rule by
+ * which an original id is minted (see mintOriginals). Shared by the two places
+ * that mint, so they cannot disagree about what one original is. */
+std::map<std::optional<Color4f>, std::vector<size_t>> colourGroups(const PolySet& ps)
+{
+  std::map<std::optional<Color4f>, std::vector<size_t>> groups;
+  for (size_t i = 0, n = ps.indices.size(); i < n; i++) {
+    auto color_index = i < ps.color_indices.size() ? ps.color_indices[i] : -1;
+    std::optional<Color4f> color;
+    if (color_index >= 0) {
+      color = ps.colors[color_index];
+    }
+    groups[color].push_back(i);
+  }
+  return groups;
+}
+
 std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const PolySet& ps)
 {
   assert(ps.isTriangular());
@@ -53,15 +70,7 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   std::set<uint32_t> originalIDs;
   std::map<uint32_t, Color4f> originalIDToColor;
 
-  std::map<std::optional<Color4f>, std::vector<size_t>> colorToFaceIndices;
-  for (size_t i = 0, n = ps.indices.size(); i < n; i++) {
-    auto color_index = i < ps.color_indices.size() ? ps.color_indices[i] : -1;
-    std::optional<Color4f> color;
-    if (color_index >= 0) {
-      color = ps.colors[color_index];
-    }
-    colorToFaceIndices[color].push_back(i);
-  }
+  const std::map<std::optional<Color4f>, std::vector<size_t>> colorToFaceIndices = colourGroups(ps);
   auto next_id = manifold::Manifold::ReserveIDs(colorToFaceIndices.size());
   for (const auto& [color, faceIndices] : colorToFaceIndices) {
     auto id = next_id++;
@@ -112,6 +121,22 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
 }  // namespace
 
 namespace ManifoldUtils {
+
+std::shared_ptr<PolySet> mintOriginals(const PolySet& ps)
+{
+  auto out = std::make_shared<PolySet>(ps);
+  const std::map<std::optional<Color4f>, std::vector<size_t>> groups = colourGroups(ps);
+  out->original_ids.assign(ps.indices.size(), -1);
+  std::set<uint32_t> ids;
+  auto next_id = manifold::Manifold::ReserveIDs(groups.size());
+  for (const auto& group : groups) {
+    const auto id = next_id++;
+    ids.insert(id);
+    for (const size_t face : group.second) out->original_ids[face] = static_cast<int32_t>(id);
+  }
+  out->surfaces = stampOwners(ps.surfaces, ids);
+  return out;
+}
 
 const char *statusToString(Error status)
 {

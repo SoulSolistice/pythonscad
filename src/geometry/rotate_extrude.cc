@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory>
 #include <utility>
@@ -150,9 +151,10 @@ VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double s
  * quads is equally the mesh of an N sided prism and nothing in the geometry
  * says which was meant.
  *
- * A tilted segment declares the circle at each of its ends, which is how a cone
- * states its intent everywhere else in this codebase: an exporter accepts one
- * when both of its rims match a declared cylinder.
+ * A tilted segment declares the cone it sweeps, as a face, and the circle at
+ * each of its ends as evidence - rims the band pass can identify it by. Until
+ * 2026-09-24 it declared the rims alone, and the cone was recognised from them
+ * and named after one.
  *
  * An *arc* in the profile sweeps a torus, or a sphere where its centre sits on
  * the axis, and those come from the profile's Arc2d records rather than from its
@@ -167,7 +169,8 @@ VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double s
  */
 static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
                                         const std::vector<VectorOfVector2d>& profiles,
-                                        const std::vector<Arc2d>& arcs, PolySet& polyset)
+                                        const std::vector<Arc2d>& arcs, bool has_beziers,
+                                        PolySet& polyset)
 {
   if (node.v.norm() != 0 || node.twist != 0) return;
 #ifdef ENABLE_PYTHON
@@ -186,6 +189,23 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
   // *evidence* - rims the band pass identifies the cone by - and no facet lies
   // on them. Where one radius is both, the face wins (addSurfaceUnique merges
   // the roles). See Surface::witnesses.
+  // Whether an edge is a chord of one of the profile's recorded arcs: both ends
+  // on the same circle, at machine precision - the arc records are in the
+  // profile's own frame, so they take the offset the swept profile already has.
+  // Such an edge sweeps a piece of the arc's torus or sphere, declared below, and
+  // not a cone of its own.
+  auto chord_of_arc = [&](const Vector2d& a, const Vector2d& b) {
+    for (const auto& arc : arcs) {
+      const Vector2d c(arc.centre[0] + node.offset_x, arc.centre[1] + node.offset_y);
+      auto on = [&](const Vector2d& p) {
+        // |p - c| - r: 2 subtractions, 2 squares, a sum, a root, a difference
+        const double eps7 = 7 * std::numeric_limits<double>::epsilon();
+        return fabs((p - c).norm() - arc.r) <= eps7 / (1 - eps7) * (p.norm() + c.norm() + arc.r);
+      };
+      if (on(a) && on(b)) return true;
+    }
+    return false;
+  };
   std::vector<double> declared;
   auto declare = [&](const Vector2d& p, bool face) {
     auto record = std::make_shared<CylinderSurface>(Vector3d(0, 0, p[1]), Vector3d(0, 0, 1), p[0]);
@@ -221,7 +241,26 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node,
       if (a[0] <= eps || b[0] <= eps) continue;
       const bool wall = fabs(a[0] - b[0]) <= eps;
       declare(a, wall);
-      if (!wall) declare(b, false);
+      if (!wall) {
+        declare(b, false);
+        // A chord of a recorded arc is the arc's surface, not a cone; and where
+        // the profile carries Bezier records an edge may be a chord of one of
+        // those, which this does not test - so it declares nothing it cannot
+        // state, and the rims stay evidence only.
+        if (has_beziers || chord_of_arc(a, b)) continue;
+        // And the cone itself, which the two rims only witness. Until
+        // 2026-09-24 a sloped edge declared its rims alone, so the cone it
+        // sweeps was *recognised* from them and claimed under a rim's name: on
+        // lid10 the seal bead's two flanks - 120 facets - were held on
+        // cylinders no facet lies on, and no identity could make them D0.
+        // Declarations are the foundation of D0; the edge states its cone
+        // exactly, so it says so - anchored at the wider rim, as cylinder(r1,
+        // r2) anchors its own (primitives.cc).
+        const Vector2d& wide = a[0] >= b[0] ? a : b;
+        addSurfaceUnique(polyset.surfaces,
+                         std::make_shared<ConeSurface>(Vector3d(0, 0, wide[1]), Vector3d(0, 0, 1),
+                                                       wide[0], (b[0] - a[0]) / (b[1] - a[1])));
+      }
     }
   }
 
@@ -423,7 +462,9 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   // case for this.
   auto result = assemblePolySetForManifold(poly, vertices, indices, colors, color_indices, closed,
                                            node.convexity, slice_stride * num_sections, flip_faces);
-  if (result != nullptr) declareSurfacesOfRevolution(node, first_ring, poly.arcs, *result);
+  if (result != nullptr) {
+    declareSurfacesOfRevolution(node, first_ring, poly.arcs, !poly.beziers.empty(), *result);
+  }
   return result;
 }
 

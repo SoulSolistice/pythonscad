@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Exact.h"
 #include "utils/printutils.h"
 
 namespace recognition {
@@ -69,7 +70,34 @@ void dumpLedger(const ReportInputs& in)
                                                                        : "surface";
     };
     out << "facet\torigin\tconsumed_by\tby\tsurface\tkind\tdeclared\tprecision\tevidence\tfate\t"
-           "maker_owns\tmaker_declared\tx\ty\tz\twhy\n";
+           "maker_owns\tmaker_declared\tx\ty\tz\twhy\td0\n";
+    // Why a facet is, or is not, D0 on the surface its claim names - the same
+    // three conditions recognition::d0Regions asks, reported one at a time so a
+    // claim outside every region says which one it failed: its maker does not
+    // own the surface, it lies on a declared plane, or a corner is off the
+    // surface - with the worst residual against the machine-precision bound, so
+    // "how far off, and is that arithmetic or geometry" is read, not guessed.
+    const std::vector<char> planar = onDeclaredPlane(FacetGraph(in.mesh), surfaces, surfaces.size());
+    auto d0_reason = [&](const Claim& c) -> std::string {
+      if (c.surface_index >= surfaces.size() || surfaces[c.surface_index] == nullptr) return "fitted";
+      if (!prov.owns(c.facet, c.surface_index)) return "maker does not own";
+      if (c.facet < planar.size() && planar[c.facet]) return "on a declared plane";
+      if (c.facet >= loops.size()) return "-";
+      double worst = 0, bound = 0;
+      bool exact = true;
+      for (const int v : loops[c.facet]) {
+        const Residual res = residualOf(surfaces[c.surface_index].get(), vertices[v]);
+        if (!res.exact()) exact = false;
+        if (res.value > worst) {
+          worst = res.value;
+          bound = res.bound;
+        }
+      }
+      if (exact) return "D0";
+      char buf[96];
+      snprintf(buf, sizeof(buf), "off by %.3e > %.3e", worst, bound);
+      return buf;
+    };
     // And the surfaces the rows name, with their parameters and who declared
     // them - so "which part of the model is this" is a lookup, not a hunt.
     {
@@ -138,7 +166,7 @@ void dumpLedger(const ReportInputs& in)
         centre /= double(loops[c.facet].size());
       }
       out << centre[0] << '\t' << centre[1] << '\t' << centre[2] << '\t'
-          << (c.why != nullptr ? c.why : "-") << '\n';
+          << (c.why != nullptr ? c.why : "-") << '\t' << d0_reason(c) << '\n';
     }
     LOG("STEP export: the claim ledger - %1$d claims - written to %2$s",
         int(features.ledger.all().size()), ledger_path);
@@ -156,6 +184,9 @@ void reportRegions(const ReportInputs& in)
     const Holding h = holdingOf(ledger, f, surface);
     if (h.kind == Holding::Tessellation) return "the tessellation";
     if (h.kind == Holding::Other) return std::string(h.by) + " on another surface";
+    // A zone's polar caps are part of the zone's one face, not a second kind of
+    // face beside it: a band's cap on its own surface is the band.
+    if (std::string(h.by) == kBandCap.by) return kBandWall.by;
     return h.by;
   };
   std::set<std::size_t> surfaces_seen;
