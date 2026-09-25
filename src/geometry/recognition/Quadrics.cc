@@ -59,12 +59,11 @@ public:
       edge_loops_(edge_loops),
       surface_(surface),
       smooth_angle_(smooth_angle),
-      cyl_(dynamic_cast<const CylinderSurface *>(surface)),
-      cone_(dynamic_cast<const ConeSurface *>(surface))
+      axial_(dynamic_cast<const AxialSurface *>(surface))
   {
     if (!valid()) return;
-    axis_ = (cyl_ != nullptr ? cyl_->normdir : cone_->normdir).normalized();
-    base_ = cyl_ != nullptr ? cyl_->refpt : cone_->refpt;
+    axis_ = axial_->axis();
+    base_ = axial_->refpt;
     // A cone's normal is not perpendicular to its axis - it leans by the half
     // angle - so what a facet has to agree with is that lean, not zero.
     //
@@ -88,25 +87,17 @@ public:
     // The declaration is right and the bounding is not. That fixture's
     // VOLUME-APPROX is the assertion that says so; the surface census does not,
     // it improves while the solid gets worse.
-    lean_ = cyl_ != nullptr ? 0.0 : fabs(cone_->slope) / sqrt(1 + cone_->slope * cone_->slope);
-    ref_ = perpendicular(axis_);
-    ref2_ = axis_.cross(ref_);
+    lean_ = axial_->lean();
   }
 
-  /*! A quadric this can be asked about at all: a cylinder of positive radius,
-   * or a cone. */
-  [[nodiscard]] bool valid() const { return (cyl_ != nullptr && cyl_->r > 0) || cone_ != nullptr; }
+  /*! A surface this can be asked about at all: one about an axis that
+   * describes a surface (AxialSurface::usable). */
+  [[nodiscard]] bool valid() const { return axial_ != nullptr && axial_->usable(); }
 
   /*! How far a point is off the quadric, as a distance rather than as a radius
    * difference - on a cone those differ by the cosine of the half angle, and it
    * is the perpendicular distance the tessellation band is a bound on. */
-  [[nodiscard]] double offsetAt(const Vector3d& p) const
-  {
-    if (cyl_ != nullptr) return fabs(distanceToAxis(p, cyl_->refpt, axis_) - cyl_->r);
-    const double want = cone_->radiusAt(p);
-    if (want < 0) return std::numeric_limits<double>::max();  // past the apex
-    return fabs(distanceToAxis(p, cone_->refpt, axis_) - want) / sqrt(1 + cone_->slope * cone_->slope);
-  }
+  [[nodiscard]] double offsetAt(const Vector3d& p) const { return axial_->offset(p); }
 
   /*! How far a facet reaches around the axis. The widest gap between
    * consecutive angles is the part the facet does *not* cover, so the span is
@@ -116,12 +107,7 @@ public:
   {
     const std::vector<Vector3d>& vertices = *mesh_.vertices;
     std::vector<double> t;
-    for (const int v : (*mesh_.loops)[f]) {
-      const Vector3d rel = vertices[v] - base_;
-      double a = atan2(rel.dot(ref2_), rel.dot(ref_));
-      if (a < 0) a += 2 * M_PI;
-      t.push_back(a);
-    }
+    for (const int v : (*mesh_.loops)[f]) t.push_back(axial_->angle(vertices[v]));
     std::sort(t.begin(), t.end());
     double gap = t.front() + 2 * M_PI - t.back();
     for (std::size_t i = 0; i + 1 < t.size(); i++) gap = std::max(gap, t[i + 1] - t[i]);
@@ -190,10 +176,9 @@ public:
     // reaching a face: a facet of a polygonal frustum is a chord plane, so it
     // leans by a little more than the true cone does, by a factor of cos(pi/n),
     // and the rest is left to the distances below.
+    // One rule: a cylinder's lean is zero, and min(0.99, 1e-6) is its old 1e-6.
     const double lean_of_f = fabs(normals[f].normalized().dot(axis_));
-    if (cyl_ != nullptr ? lean_of_f > 1e-6 : lean_of_f > std::min(0.99, lean_ * 1.05 + 1e-6)) {
-      return false;
-    }
+    if (lean_of_f > std::min(0.99, lean_ * 1.05 + 1e-6)) return false;
     double off = 0;
     bool exact = true;
     for (const int v : loops[f]) {
@@ -237,9 +222,8 @@ private:
   const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops_;
   const Surface *surface_ = nullptr;
   double smooth_angle_ = 0;
-  const CylinderSurface *cyl_ = nullptr;
-  const ConeSurface *cone_ = nullptr;
-  Vector3d axis_{0, 0, 1}, base_{0, 0, 0}, ref_{1, 0, 0}, ref2_{0, 1, 0};
+  const AxialSurface *axial_ = nullptr;
+  Vector3d axis_{0, 0, 1}, base_{0, 0, 0};
   double lean_ = 0;
 };
 
@@ -264,10 +248,8 @@ std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& grap
   std::vector<QuadricProposal> out;
   for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
     const auto& surface = surfaces[surface_index];
-    const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
-    const auto *cone = dynamic_cast<const ConeSurface *>(surface.get());
-    if (cyl == nullptr && cone == nullptr) continue;
-    if (cyl != nullptr && !(cyl->r > 0)) continue;
+    const auto *axial = dynamic_cast<const AxialSurface *>(surface.get());
+    if (axial == nullptr || !axial->usable()) continue;
     // How far a facet may sit off the surface and still be on it is the
     // facet's *own* tessellation band, not a fraction of the radius. A
     // fraction cannot be right for both: on a bore of r=4 it has to admit the
@@ -378,14 +360,8 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
 
   for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
     const auto& surface = surfaces[surface_index];
-    const auto *cyl = dynamic_cast<const CylinderSurface *>(surface.get());
-    const auto *cone = dynamic_cast<const ConeSurface *>(surface.get());
-    if (cyl == nullptr && cone == nullptr) continue;
-    if (cyl != nullptr && !(cyl->r > 0)) continue;
-    const Vector3d axis = (cyl != nullptr ? cyl->normdir : cone->normdir).normalized();
-
-    const Vector3d ref = perpendicular(axis);
-    const Vector3d ref2 = axis.cross(ref);
+    const auto *axial = dynamic_cast<const AxialSurface *>(surface.get());
+    if (axial == nullptr || !axial->usable()) continue;
 
     // Every facet this pass covers gets exactly one claim, recorded where its
     // fate is decided: here for the rules below, at the writer for a region it
@@ -512,8 +488,7 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
           report.push_back(
             format("%d facets reach further round the declared %s r=%g than four times the %.1f "
                    "degrees this claim's facets typically do, and are left faceted",
-                   int(reached), cyl != nullptr ? "cylinder" : "cone", cyl != nullptr ? cyl->r : cone->r,
-                   typical * 180 / M_PI));
+                   int(reached), axial->noun(), axial->size(), typical * 180 / M_PI));
         }
         claimed = std::move(kept);
       }
@@ -550,16 +525,15 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
           report.push_back(format(
             "a region of %d facets on the declared %s r=%g is not written: its boundary strays %.4f "
             "from the surface where the tessellation allows %.4f",
-            int(claimed.size()), cyl != nullptr ? "cylinder" : "cone", cyl != nullptr ? cyl->r : cone->r,
-            worst, band));
+            int(claimed.size()), axial->noun(), axial->size(), worst, band));
           continue;
         }
         report.push_back(format(
           "a region of %d facets on the declared %s r=%g is written without the %d the tessellation "
           "band admitted: their worst corner strays %.4f from the surface where the region's band "
           "allows %.4f, and the rest are on it by declaration",
-          int(kept.size()), cyl != nullptr ? "cylinder" : "cone", cyl != nullptr ? cyl->r : cone->r,
-          int(claimed.size() - kept.size()), worst, band));
+          int(kept.size()), axial->noun(), axial->size(), int(claimed.size() - kept.size()), worst,
+          band));
         claimed = std::move(kept);
       }
     }
@@ -567,16 +541,13 @@ std::vector<Patch> formQuadricPatches(const recognition::FacetGraph& graph,
     // Does the claim close around the axis? A face that wraps needs a seam, and
     // the simpler answer - the one a declared sweep already takes when it
     // closes around its profile - is to cut it so that no face wraps at all.
-    const Vector3d base = cyl != nullptr ? cyl->refpt : cone->refpt;
     std::vector<char> quadrant(4, 0);
     std::vector<double> theta(claimed.size());
     for (std::size_t i = 0; i < claimed.size(); i++) {
       Vector3d c(0, 0, 0);
       for (const int v : loops[claimed[i].facet]) c += vertices[v];
       c /= double(loops[claimed[i].facet].size());
-      const Vector3d rel = c - base;
-      double t = atan2(rel.dot(ref2), rel.dot(ref));
-      if (t < 0) t += 2 * M_PI;
+      const double t = axial->angle(c);
       theta[i] = t;
       quadrant[std::min(3, int(t / (M_PI / 2)))] = 1;
     }

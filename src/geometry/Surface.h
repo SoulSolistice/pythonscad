@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -317,7 +318,35 @@ private:
   int operator==(const Surface& other) override { return 0; }
 };
 
-class CylinderSurface : public Surface
+/*! A surface about an axis: a cylinder, a cone - a surface every plane across
+ * its axis cuts in one closed curve round it. The family the trimmed-quadric
+ * pass claims on, and each member states what that pass asks of it, so the
+ * pass never switches on which member it has. */
+class AxialSurface : public Surface
+{
+public:
+  [[nodiscard]] Vector3d axis() const { return normdir.normalized(); }
+  /*! Whether this record describes a surface at all - a cylinder of no radius
+   * does not. */
+  [[nodiscard]] virtual bool usable() const = 0;
+  /*! How far the surface leans along its axis: |n . axis| for its unit normal n
+   * - zero for a cylinder, the sine of the half angle for a cone. */
+  [[nodiscard]] virtual double lean() const = 0;
+  /*! The perpendicular distance from `p` to the surface - on a cone that is the
+   * radius difference times the cosine of the half angle, and it is the
+   * perpendicular distance a tessellation band bounds. */
+  [[nodiscard]] virtual double offset(const Vector3d& p) const = 0;
+  /*! The direction angles round the axis are measured from, and the one a
+   * quarter turn on. */
+  virtual void frame(Vector3d& ref, Vector3d& ref2) const;
+  /*! The surface's own angle round the axis at `p`, in [0, 2 pi). */
+  [[nodiscard]] double angle(const Vector3d& p) const;
+  /*! What a report calls it, and the radius it names it by. */
+  [[nodiscard]] virtual const char *noun() const = 0;
+  [[nodiscard]] virtual double size() const = 0;
+};
+
+class CylinderSurface : public AxialSurface
 {
 public:
   CylinderSurface(Vector3d center, Vector3d normdir, double r);
@@ -335,6 +364,12 @@ public:
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
   [[nodiscard]] bool isQuadric() const override { return true; }
+
+  [[nodiscard]] bool usable() const override { return r > 0; }
+  [[nodiscard]] double lean() const override { return 0.0; }
+  [[nodiscard]] double offset(const Vector3d& p) const override;
+  [[nodiscard]] const char *noun() const override { return "cylinder"; }
+  [[nodiscard]] double size() const override { return r; }
 
 private:
   virtual int operator==(const Surface& other) { return 0; }
@@ -362,7 +397,7 @@ private:
  * moves - and reversing the axis negates it, because the radius now grows the
  * other way. A slope of zero is a cylinder and is refused: CylinderSurface
  * already says that, and a cone of no taper has no apex to place. */
-class ConeSurface : public Surface
+class ConeSurface : public AxialSurface
 {
 public:
   ConeSurface(Vector3d refpt, Vector3d normdir, double r, double slope);
@@ -383,6 +418,12 @@ public:
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
   [[nodiscard]] bool isQuadric() const override { return true; }
+
+  [[nodiscard]] bool usable() const override { return true; }
+  [[nodiscard]] double lean() const override { return fabs(slope) / sqrt(1 + slope * slope); }
+  [[nodiscard]] double offset(const Vector3d& p) const override;
+  [[nodiscard]] const char *noun() const override { return "cone"; }
+  [[nodiscard]] double size() const override { return r; }
 
 private:
   virtual int operator==(const Surface& other) { return 0; }

@@ -207,8 +207,7 @@ void reportRegions(const ReportInputs& in)
       // tests - the lean or the interior - which are the tessellation's.
       const Surface *s =
         region.surface_index < in.surfaces.size() ? in.surfaces[region.surface_index].get() : nullptr;
-      if (dynamic_cast<const CylinderSurface *>(s) != nullptr ||
-          dynamic_cast<const ConeSurface *>(s) != nullptr) {
+      if (dynamic_cast<const AxialSurface *>(s) != nullptr) {
         bool proposed = false;
         for (const Claim *c : ledger.claimants(f)) {
           if (c->by != nullptr && std::string(c->by) == kQuadricFace.by &&

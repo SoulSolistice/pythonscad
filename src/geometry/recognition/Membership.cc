@@ -64,8 +64,7 @@ std::vector<Region> d0Regions(const FacetGraph& graph,
   std::vector<Region> out;
   for (std::size_t j = 0; j < surfaces.size() && j < declared; j++) {
     const Surface *s = surfaces[j].get();
-    if (dynamic_cast<const CylinderSurface *>(s) == nullptr &&
-        dynamic_cast<const ConeSurface *>(s) == nullptr &&
+    if (dynamic_cast<const AxialSurface *>(s) == nullptr &&
         dynamic_cast<const SphereSurface *>(s) == nullptr &&
         dynamic_cast<const TorusSurface *>(s) == nullptr) {
       continue;

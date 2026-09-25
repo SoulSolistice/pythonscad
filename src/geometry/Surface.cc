@@ -1770,3 +1770,49 @@ bool PlaneSurface::implicitAt(const Vector3d& p, double& f, Vector3d& grad) cons
   grad = n;
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// The axial family - see AxialSurface in Surface.h.
+// ---------------------------------------------------------------------------
+
+void AxialSurface::frame(Vector3d& ref, Vector3d& ref2) const
+{
+  // AnalyticFeatures::perpendicular, which every consumer measured from before
+  // the family answered for itself; the same formula, so the same angles.
+  const Vector3d a = axis();
+  const Vector3d other = fabs(a[0]) < 0.9 ? Vector3d(1, 0, 0) : Vector3d(0, 1, 0);
+  ref = a.cross(other).normalized();
+  ref2 = a.cross(ref);
+}
+
+double AxialSurface::angle(const Vector3d& p) const
+{
+  Vector3d ref, ref2;
+  frame(ref, ref2);
+  const Vector3d rel = p - refpt;
+  double t = atan2(rel.dot(ref2), rel.dot(ref));
+  if (t < 0) t += 2 * M_PI;
+  return t;
+}
+
+namespace {
+
+double distanceFromAxis(const Vector3d& p, const Vector3d& base, const Vector3d& axis)
+{
+  const Vector3d rel = p - base;
+  return (rel - axis * axis.dot(rel)).norm();
+}
+
+}  // namespace
+
+double CylinderSurface::offset(const Vector3d& p) const
+{
+  return fabs(distanceFromAxis(p, refpt, axis()) - r);
+}
+
+double ConeSurface::offset(const Vector3d& p) const
+{
+  const double want = radiusAt(p);
+  if (want < 0) return std::numeric_limits<double>::max();  // past the apex
+  return fabs(distanceFromAxis(p, refpt, axis()) - want) / sqrt(1 + slope * slope);
+}

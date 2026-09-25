@@ -119,13 +119,12 @@ bool tiltedRing(const Mesh& mesh, const std::vector<std::shared_ptr<Surface>>& s
 }
 
 /*! Whether one patch forms over the whole region - and why not where it does
- * not. Only a cylinder or a cone has a trimmed face in this writer. */
+ * not. Only a surface about an axis has a trimmed face in this writer. */
 void patchOf(const FacetGraph& graph, const std::shared_ptr<Surface>& surface,
              const std::vector<std::size_t>& facets, RegionRepresentation& rep)
 {
   const Surface *s = surface.get();
-  if (dynamic_cast<const CylinderSurface *>(s) == nullptr &&
-      dynamic_cast<const ConeSurface *>(s) == nullptr) {
+  if (dynamic_cast<const AxialSurface *>(s) == nullptr) {
     rep.not_patch = "no trimmed face of this kind of surface is written";
     rep.kind = RegionRepresentation::None;
     return;
