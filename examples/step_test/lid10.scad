@@ -757,6 +757,11 @@ module hoseSocket(radius0, slope, taperLength, socketDepth, wall, boreRadius,
 // the socket while keeping the pitch exactly as measured.  It follows the socket
 // through both the tapered and the parallel section, so the hose stays engaged
 // right up to the seat.
+// A list of numbers in increasing order.
+function sorted(v) = len(v) <= 1 ? v
+	: let (p = v[0], rest = [ for (i = [1 : len(v) - 1]) v[i] ])
+	  concat(sorted([ for (x = rest) if (x < p) x ]), [p], sorted([ for (x = rest) if (x >= p) x ]));
+
 module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
                  crestWidth, rootWidth, back) {
 	zStart  = rootWidth/2;
@@ -771,15 +776,28 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 	assert(span > 0,
 	       "hose socket is shallower than one thread root: raise _hoseThreadTurns");
 
+	// Where the laws below turn a corner: the run-in reaching full depth, the
+	// taper stopping, the run-out starting. The rib's surface is creased across
+	// its whole profile at each, so each is a station of the mesh as well as a
+	// key of the laws - otherwise the facets there straddle the crease, and a
+	// face of the exported sweep has a crease of its own surface inside it,
+	// which SOLIDWORKS lists as faulty. The uniform stations stay; the corners
+	// are added among them.
+	tTaper  = (taperLength - zStart)/span;
+	corners = sorted([ for (c = [leadIn, tTaper, 1 - leadOut]) if (c > 0 && c < 1) c ]);
+	ts = [ for (i = [0 : steps])
+	         each concat([ for (c = corners) if (i > 0 && c > (i - 1)/steps && c < i/steps) c ],
+	                     [i/steps]) ];
+	n = len(ts) - 1;
+
 	// Built one row per station rather than as one flat list, so the sweep can
 	// hand the exporter the order it generated in. That ordering is the one
 	// thing a mesh loses and no measurement recovers, and it is what lets the
 	// thread go out as a surface instead of as a thousand facets. `points` is
 	// the same list it always was, flattened back out of the rows.
 	rows = [
-		for (i = [0 : steps])
-		let (t = i/steps,
-		     a = 360*turns*t,
+		for (t = ts)
+		let (a = 360*turns*t,
 		     z = zStart + span*t,
 		     r = radius0 + slope*min(z, taperLength),
 		     f = max(0, min(1, t/leadIn, (1 - t)/leadOut)))
@@ -790,14 +808,14 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 	points = [ for (row = rows) for (p = row) p ];
 
 	faces = concat(
-		[ for (i = [0 : steps - 1]) for (j = [0 : np - 1]) for (k = [0, 1])
+		[ for (i = [0 : n - 1]) for (j = [0 : np - 1]) for (k = [0, 1])
 			let (a0 = i*np + j,
 			     b0 = i*np + (j + 1)%np,
 			     c0 = (i + 1)*np + (j + 1)%np,
 			     d0 = (i + 1)*np + j)
 			k == 0 ? [a0, c0, b0] : [a0, d0, c0] ],
 		[ [0, 1, 2, 3] ],
-		[ [steps*np + 3, steps*np + 2, steps*np + 1, steps*np] ]
+		[ [n*np + 3, n*np + 2, n*np + 1, n*np] ]
 	);
 
 	// The same rib, stated as the shape it is rather than as its stations: the
@@ -808,14 +826,13 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 	profileAt = function (f) [[back, -rootWidth/2], [-ridgeDepth*f, -crestWidth/2],
 	                          [-ridgeDepth*f, crestWidth/2], [back, rootWidth/2]];
 	rAt = function (t) radius0 + slope*min(zStart + span*t, taperLength);
-	tTaper = (taperLength - zStart)/span;
 	declare_sweep(profile = [[0, profileAt(0)], [leadIn, profileAt(1)],
 	                         [1 - leadOut, profileAt(1)], [1, profileAt(0)]],
 	              radius = tTaper > 0 && tTaper < 1
 	                ? [[0, rAt(0)], [tTaper, rAt(tTaper)], [1, rAt(1)]]
 	                : [[0, rAt(0)], [1, rAt(1)]],
 	              pitch = pitch, turns = turns, origin = [0, 0, zStart],
-	              stations = steps + 1)  // the rows above: what the mesh was cut from
+	              stations = n + 1)  // the rows above: what the mesh was cut from
 	polyhedron(points = points, faces = faces, convexity = 8);
 }
 
