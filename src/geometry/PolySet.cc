@@ -127,6 +127,7 @@ void PolySet::transform(const Transform3d& mat)
   this->curves = std::move(moved_curves);
 
   this->surfaces = transformedSurfaces(this->surfaces, mat);
+  if (this->solid_tree) this->solid_tree = this->solid_tree->transformed(mat);
 
   bbox_.setNull();
 }

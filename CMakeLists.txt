@@ -1654,6 +1654,7 @@ set(CORE_SOURCES
   src/geometry/PolySetBuilder.cc
   src/geometry/Curve.cc
   src/geometry/Surface.cc
+  src/geometry/SolidTree.cc
   src/geometry/PolySetUtils.cc
   src/geometry/Polygon2d.cc
   src/geometry/Barcode1d.cc

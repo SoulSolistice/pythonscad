@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "geometry/Geometry.h"
+#include "geometry/SolidTree.h"
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
 
@@ -32,7 +33,8 @@ public:
   ManifoldGeometry(manifold::Manifold object, const std::set<uint32_t>& originalIDs = {},
                    const std::map<uint32_t, Color4f>& originalIDToColor = {},
                    const std::set<uint32_t>& subtractedIDs = {},
-                   const std::vector<std::shared_ptr<Surface>>& surfaces = {});
+                   const std::vector<std::shared_ptr<Surface>>& surfaces = {},
+                   std::shared_ptr<const SolidTree> solidTree = nullptr);
   ManifoldGeometry(const ManifoldGeometry& other) = default;
 
   [[nodiscard]] bool isEmpty() const override;
@@ -78,6 +80,8 @@ public:
 
   /*! The analytic surfaces this geometry carries. See surfaces_ below. */
   [[nodiscard]] const std::vector<std::shared_ptr<Surface>>& getSurfaces() const { return surfaces_; }
+  /*! The boolean this solid was built by - see solid_tree_ below. */
+  [[nodiscard]] const std::shared_ptr<const SolidTree>& getSolidTree() const { return solid_tree_; }
   void addSurface(const std::shared_ptr<Surface>& surface) override;
 
 private:
@@ -96,4 +100,10 @@ private:
    * STEP exporter tell the difference. They are a statement of intent, not
    * geometry: nothing reads them for rendering or measurement. */
   std::vector<std::shared_ptr<Surface>> surfaces_;
+  /*! The boolean this solid was built by, over the solids its generators
+   * declared: a leaf where a PolySet became a Manifold, a node for every
+   * boolean since. Null stands for an opaque leaf - a geometry that states
+   * nothing about its solid. Like the records, a statement and not geometry:
+   * nothing here reads it. See SolidTree.h. */
+  std::shared_ptr<const SolidTree> solid_tree_;
 };

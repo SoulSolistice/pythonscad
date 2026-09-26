@@ -599,6 +599,211 @@ Underdetermined? A more precise rung may not build on a less precise one unless
 that has been thoroughly validated. Since step 1 the ledger answers the first
 three per facet; see below.
 
+## Existence is a D0 question too - design, 2026-09-26
+
+**Status: design, not built.** Every step below is to be proven the way the
+migration plan asks; nothing here is measured beyond what the first subsection
+reports.
+
+### What exposed it
+
+Identity provenance (`Surface::tags`, carried as a Manifold vertex property into
+`PolySet::surface_tags`) made a cut facet a member of the surface it was made on
+(B7), and with R0's grant a region is written whole. On lid10 that left **405
+corners off the faces written on them, by up to 0.109**, and at the
+approximation tier a shell OCCT reads as no solid. Classified by the surfaces
+the corner arbiter had at each:
+
+| corners | constraints at the corner | what they are |
+| --- | --- | --- |
+| 154 | cylinder 15 only | the wall meeting the channel polyhedron's roof, which declares nothing |
+| 116 | cylinder 12 only | cut corners of the socket; what meets them there is not yet traced |
+| 76 | cylinders 12 and 17 (owner hint 15) | two coaxial cylinders, r 78.3073 and 78.2073, which never meet |
+| 50 | refused as folding | |
+
+The third row has no answer at all, at any precision. The cutters are made
+`socket - eps` with `eps = 0.1`, so the exact model's inner cutter wall lies
+wholly in the bore's air and has no face. But the booleans ran on chords: the
+socket's chords sag 0.107 at `$fn` 60, more than `eps`, and slivers of cylinder
+17 survive in the mesh at every chord midpoint. A corner shared by a facet made
+on 12 and one made on 17 must lie on both, and no point does.
+
+### The root cause, and it is this design's own
+
+Identity answers *which surface a facet was made on*, at D0. It does not answer
+*whether the exact solid has a face of that surface there*, and neither does
+anything else: that has been read off the mesh boolean, whose answer is exact
+only where every operand's tessellation error is smaller than the model's
+features. `eps` below a sagitta is the ordinary case, not a pathology - 0.1 and
+0.01 are what models use.
+
+So "made on S" was taken for "S has a face here", and only the first is D0.
+Existence has a closed description too: a point of S bounds the exact solid
+where the model's boolean, evaluated on its exact primitives, has S's half-space
+on one side and nothing on the other. The exporter cannot ask that, because it
+carries every primitive's *surfaces* but neither its *solid* nor the boolean it
+took part in. The same shape is behind the first two rows: a polyhedron's faces
+are the model's exact planes, and nothing says so (E1, E5).
+
+Refuted on the way, so they are not tried again:
+
+- *Fix the specimen* (raise `eps`). It removes the symptom on one part and
+  leaves every model with `eps` below a sagitta exported wrong.
+- *Choose between dropping the slivers and falling back to planes.* That was
+  framed as a policy; it is a fact of the model once existence is asked at D0.
+- *Gate the corners or the regions.* F7, and the D0 precedence rule.
+
+### The design of existence
+
+**1. The boolean structure travels with the geometry.** A `SolidTree`
+(`src/geometry/SolidTree.h`) - n-ary `union`, `intersection`, `difference` nodes
+over leaves - built where the booleans are: `ManifoldGeometry::binOp` makes
+`op(lhs, rhs)`, a union or an intersection absorbing operands of its own kind and
+a difference its left operand only, since `(a - b) - c` is `a - b - c` and
+`a - (b - c)` is not. The tree is immutable and shared; it rides on the geometry
+as `PolySet::solid_tree` and `ManifoldGeometry`'s own, is moved by every
+transform, and reaches the exporter through `toPolySet`. Nothing in the
+evaluator reads it.
+
+A leaf is a **solid**, not an original. Classification asks what is where, not
+which facet came from which maker, so a leaf needs no ids - and a PolySet that
+went through a Manifold and comes back into one (the CGAL minkowski path) keeps
+the tree it carries rather than becoming a leaf of its own.
+
+`subtractedIDs_` is not this and cannot become it: it is a flat set kept for
+preview colour, and `A - (B - C)`, where C puts material back, has no flat
+answer.
+
+**2. Each generator declares its solid, as it declares its surfaces.**
+Declaration first, never inference. A leaf is one of:
+
+- **declared** (`DeclaredSolid`): the intersection of the insides of its
+  `bounds`, and an **interior point** the generator states. The inside of a
+  bound is the connected part of space, that surface taken out, in which the
+  interior lies - not "where its implicit has the interior's sign": a cone's
+  surface parts space in three, and a cone to an apex capped at its base would
+  otherwise take in the far nappe too. So the side of every bound is read off one
+  stated point, and survives what a record's orientation does not - `cube()`
+  declares both planes of an axis with the same normal. The bounds are the
+  solid's own records, independent of the geometry's list, so deduplicating that
+  list never changes a solid, and a transform that cannot carry a bound (a sphere
+  under an uneven scale) turns the leaf opaque rather than wrong; one that can (a
+  cylinder under a shear, which is an elliptic cylinder) keeps it declared.
+  Declared today by `cube()` (its six planes), `sphere()` (its sphere) and
+  `cylinder()` (its wall and caps; a slice of up to half a turn its two flat
+  sides as well, which enter the solid only - as records they would be faces the
+  exporter was never told of; a larger slice is not an intersection and states
+  nothing).
+- **opaque**: everything that states no solid - `polyhedron()`, `import()`,
+  `surface()`, text, extrusions (until the 2D region they sweep is carried with
+  its named edges, E6), `roof`, fillets, a slice beyond half a turn. Opaque is an
+  answer, not a failure: classification through it is *unknown*.
+
+**3. Hull and minkowski are leaves of their own**, opaque: the hull of exact
+solids is not a boolean of them, so nothing beneath answers for it. A hull is
+convex, so it can become a declared leaf once it declares every face it has.
+The CGAL backend carries no tree, and an export from it says once that
+existence was the mesh's.
+
+**4. Classification is exact and three-valued.** A `recognition/Classify` unit,
+STEP-agnostic and pure (A1): a point against a convex leaf is *in*, *out* or *on*
+by each bounding record's residual against the forward error of computing it
+(`MachinePrecision.h`, C2) - no tolerance anywhere; against an opaque leaf it is
+*unknown*. Up the tree it is Kleene logic, and *on* carries its neighbourhood -
+the half-space the leaf keeps there - so two operands meeting on one plane, the
+`eps = 0` case, combine exactly (Requicha's neighbourhood classification). A
+difference whose subtracted operand is *in* is *out* whatever the rest says:
+lid10's phantom is decided by the socket leaf alone, and the opaque channel never
+has to answer.
+
+**5. What consumes it.**
+
+- **Membership.** A facet made on S whose point on S does not bound the exact
+  solid is no member of S's region: the ledger records it as a *phantom* - made
+  on S, and the model has no face of S there - and the census counts them. Where
+  classification is *unknown* the mesh answers, as today, and the count says how
+  much of the export rested on that.
+- **Corner constraints.** A corner is constrained by the surfaces whose faces
+  exist at it, not by every facet that touches it; a set of surfaces with no
+  common point is then a defect of the mesh, and it is detected exactly - no two
+  coaxial cylinders of different radius, no parallel planes - as an
+  `EXPORT-ERROR` naming the surfaces.
+- **Pinched regions and cut corners** land only after both, because until then
+  they write faces whose corners have nowhere to go. The region walk that passes
+  a vertex twice (`Regions.cc`, `boundaryCycles`) is written: with it lid10's
+  approximation tier writes all 22 D0 regions whole and OCCT rejects 52 faces;
+  without it the shell is a solid and 199 D0 facets are planes.
+
+**What the writer does with a phantom facet is not decided here.** It is a facet
+of the mesh; the shell must close over it. The expectation to be measured, not
+assumed: once its neighbours' corners are placed on the surfaces that exist,
+the sliver collapses to no area and the existing degenerate-face path removes it,
+and the part's volume moves by the slivers' volume towards the model's. If it
+does not collapse, it is written as the plane it is and named.
+
+### Migration, each step proven
+
+1. **Carry the tree and the declared solids, used by nothing.** Neutral:
+   `measure` and `compare`, 0 differences, both tiers. Unit tests on the tree's
+   shape (`solid_tree_test.cc`) - a chain of differences and a nested one, unions
+   absorbed, an opaque operand, a transform moving every solid, an uneven scale
+   turning a sphere opaque and a shear keeping a cube declared, and the tree
+   carried through Manifold and back. *(Done 2026-09-27: `compare` 0
+   differences over 120 exports against the run before; the tests fail with a
+   difference absorbing its right operand and with a transform leaving the
+   tree behind.)*
+2. **`Classify`, alone.** Unit tests whose expectations are derived by hand:
+   points in, out and on a cylinder minus a bore, two cubes sharing a face, a
+   cone near its apex, a point beyond an opaque leaf that the tree decides anyway.
+3. **A fixture first**: a coupon cut with `eps` below its sagitta - a bore at
+   r 15, `$fn` 24 (sagitta 0.128), cut by a slot whose inner wall is at
+   `15 - 0.1` - with its volume **derived from the exact model**. It fails
+   before step 4, and names why.
+4. **Membership consumes existence.** Behavioural; the fixture flips.
+5. **Corner constraints from existence**, and the contradiction as an
+   `EXPORT-ERROR`.
+6. **`polyhedron()` declares its faces' planes** (E1) - a separate landing,
+   since it adds records to every polyhedron model; a user's `declare_*` over the
+   same facets keeps precedence, which the tag's "exactly one record" rule
+   (`ManifoldUtils::triangleTag`) has to be taught.
+7. **The pinch walk and cut corners land**, and lid10 is measured on both tiers
+   against the numbers in the first subsection.
+
+### Held against the checklist
+
+| rule | answer |
+| --- | --- |
+| A1 propose is pure | holds - classification reads the tree, the records and the point; no claim |
+| A7 order is not policy | holds - existence is a function of the model, not of any pass |
+| A9 one concept per unit | holds - tree (geometry), leaf solid (generator), classification (recognition), each its own unit |
+| A10 derive, don't enumerate | holds - one rule for every leaf kind, the side read off the interior point rather than a table of orientations |
+| B2 region first | strengthened - a region is identity *and* existence, both pure |
+| B3 / D1 no manufactured boundary | holds - the boundaries it adds are the exact solid's, never a representation's |
+| B6 D0 not left to the tessellation | the point of it - D0 ground stops being unwritable because of facets the model never had |
+| B7 cut facets | enables it - a cut corner gets the surfaces that really meet there |
+| C2 machine precision in D0 | holds - residual against forward error, no threshold |
+| C3 no D4 input to D0 | holds - the mesh is consulted only where classification is *unknown*, and that is counted |
+| C8 determinacy | holds - a corner's constraints are exactly the surfaces that exist there |
+| E1 declarations are the foundation | holds - solids are stated by the generators, polyhedron planes declared at the primitive |
+| E5 no intent is a boundary | holds - an opaque leaf is *unknown*, never guessed |
+| F1 derived expectations | holds - step 3's volume and step 2's cases are derived from the model |
+| F6 no magic numbers | holds - none introduced |
+| F7 root cause | holds - this is the cause the corners' symptom traced to |
+| F9 deterministic | to watch - the tree must not be ordered by pointer |
+
+### Open questions, named
+
+- **Which leaves beyond the three convex primitives declare a solid first?**
+  `linear_extrude` of a profile with named edges is the common one; it is not
+  convex, so it needs a 2D region test, not an intersection of insides.
+  `polyhedron()` is exact as it stands, and a point test against its own faces
+  is D0 - the mesh is the model's statement there.
+- **Memory and time**: one node per boolean, one leaf per primitive; lid10 has
+  17 originals. Measure on the largest fixture before assuming it is free.
+- *Answered by building it:* colour groups do not matter, since a leaf is a
+  solid and carries no ids; caching does not, since a tree is immutable and a
+  transform makes a moved copy.
+
 ## Step 1, finished - 2026-09-23
 
 **Every pass now records every claim it would make, once, at the point its fate

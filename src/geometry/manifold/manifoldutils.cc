@@ -139,8 +139,13 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   // above are the originals this geometry's triangles will carry from now on,
   // so they are who declared these records - stamped here, where it is known,
   // rather than inferred from positions downstream. See Surface::owners.
+  //
+  // And the solid: the tree this PolySet already carries where it came back
+  // from a Manifold, the one its generator declared, or an opaque leaf where
+  // nothing states it - which is an answer, not a guess. See SolidTree.h.
   return std::make_shared<ManifoldGeometry>(mani, originalIDs, originalIDToColor, std::set<uint32_t>{},
-                                            stampOwners(tagged, originalIDs));
+                                            stampOwners(tagged, originalIDs),
+                                            ps.solid_tree ? ps.solid_tree : SolidTree::opaque());
 }
 
 }  // namespace

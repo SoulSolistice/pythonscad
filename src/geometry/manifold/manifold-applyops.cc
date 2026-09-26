@@ -91,8 +91,11 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     std::vector<std::shared_ptr<Surface>> stamped = stampOwners(surfaces, hull_ids);
     // The hull's own faces, made on what its operands state it makes.
     const auto tagged = ManifoldUtils::withSurfaceTags(hull, stamped);
-    return std::make_shared<ManifoldGeometry>(
-      tagged, std::set<uint32_t>{}, std::map<uint32_t, Color4f>{}, std::set<uint32_t>{}, stamped);
+    // Its solid is a leaf of its own, opaque: the hull of exact solids is not a
+    // boolean of them, so nothing beneath it answers for it. See SolidTree.h.
+    return std::make_shared<ManifoldGeometry>(tagged, std::set<uint32_t>{},
+                                              std::map<uint32_t, Color4f>{}, std::set<uint32_t>{},
+                                              stamped, SolidTree::opaque());
   }
 
   std::shared_ptr<ManifoldGeometry> geom;

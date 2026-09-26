@@ -49,6 +49,7 @@
 #include "core/node.h"
 #include "geometry/Geometry.h"
 #include "geometry/PolySet.h"
+#include "geometry/SolidTree.h"
 #include "geometry/Polygon2d.h"
 #include "geometry/linalg.h"
 #include "utils/calc.h"
@@ -161,6 +162,15 @@ std::unique_ptr<const Geometry> CubeNode::createGeometry() const
     ps->surfaces.push_back(std::make_shared<PlaneSurface>(lo, n));
     ps->surfaces.push_back(std::make_shared<PlaneSurface>(hi, n));
   }
+
+  // And the solid those six planes bound, which is exactly the box: what says
+  // whether a face of it is there after a boolean, where the mesh cannot. See
+  // SolidTree.h.
+  auto solid = std::make_shared<DeclaredSolid>();
+  solid->bounds = ps->surfaces;
+  solid->interior =
+    Vector3d((coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2, (coord1[2] + coord2[2]) / 2);
+  ps->solid_tree = SolidTree::declared(solid);
 
   return ps;
 }
@@ -303,7 +313,15 @@ std::unique_ptr<const Geometry> SphereNode::createGeometry() const
   // are what collapses a sphere which has been cut about so that no complete
   // zone of it survives - a hemisphere still has rings even when it no longer
   // has a sphere an exporter can bound.
-  polyset->surfaces.push_back(std::make_shared<SphereSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), r));
+  auto sphere = std::make_shared<SphereSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), r);
+  polyset->surfaces.push_back(sphere);
+  // And the ball it bounds, the solid itself. See SolidTree.h.
+  {
+    auto solid = std::make_shared<DeclaredSolid>();
+    solid->bounds.push_back(sphere);
+    solid->interior = Vector3d(0, 0, 0);
+    polyset->solid_tree = SolidTree::declared(solid);
+  }
 
   // Record the circle at each ring, which is what makes a sphere collapse.
   //
@@ -512,6 +530,31 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
     polyset->surfaces.push_back(std::make_shared<ConeSurface>(Vector3d(0, 0, at_bottom ? z1 : z2),
                                                               Vector3d(0, 0, 1), at_bottom ? r1 : r2,
                                                               (r2 - r1) / (z2 - z1)));
+  }
+
+  // And the solid: the inside of the wall between the caps - the records just
+  // declared as faces, the rims being evidence and no bound. A slice of up to
+  // half a turn is convex and is bounded by its two flat sides as well, which
+  // are declared here and nowhere else: as records they would be new faces the
+  // exporter has never been told about. A larger slice is not the intersection
+  // of anything, and states no solid. See SolidTree.h.
+  if (this->angle <= 180 || this->angle == 360) {
+    auto solid = std::make_shared<DeclaredSolid>();
+    for (const auto& record : polyset->surfaces) {
+      if (!record->evidence_only) solid->bounds.push_back(record);
+    }
+    const double mid = (z1 + z2) / 2;
+    if (this->angle == 360) {
+      solid->interior = Vector3d(0, 0, mid);
+    } else {
+      solid->bounds.push_back(std::make_shared<PlaneSurface>(Vector3d(0, 0, 0), Vector3d(0, 1, 0)));
+      solid->bounds.push_back(std::make_shared<PlaneSurface>(
+        Vector3d(0, 0, 0), Vector3d(-sin_degrees(this->angle), cos_degrees(this->angle), 0)));
+      const double reach = (this->r1 + this->r2) / 4;  // half the radius at mid height
+      solid->interior =
+        Vector3d(reach * cos_degrees(this->angle / 2), reach * sin_degrees(this->angle / 2), mid);
+    }
+    polyset->solid_tree = SolidTree::declared(solid);
   }
 
   return polyset;

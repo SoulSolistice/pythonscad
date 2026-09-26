@@ -13,6 +13,7 @@
 #include "geometry/Polygon2d.h"
 #include "geometry/linalg.h"
 #include "geometry/Curve.h"
+#include "geometry/SolidTree.h"
 #include "geometry/Surface.h"
 #include "utils/boost-utils.h"
 
@@ -65,6 +66,12 @@ public:
     curves;  // defines vertex connections(edges) which are not straight lines
   std::vector<std::shared_ptr<Surface>>
     surfaces;  // defines vertex connections(edges) which are not straight lines
+  /*! The boolean this solid was built by, over the solids its generators
+   * declared - set by a generator that knows its solid exactly, carried
+   * through Manifold and back. Null where nothing declared one. What decides
+   * whether a surface has a face at a point, where the mesh boolean over chords
+   * cannot. See SolidTree.h. */
+  std::shared_ptr<const SolidTree> solid_tree;
 
   PolySet(unsigned int dim, boost::tribool convex = unknown);
 

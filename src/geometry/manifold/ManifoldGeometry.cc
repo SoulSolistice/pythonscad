@@ -46,12 +46,14 @@ ManifoldGeometry::ManifoldGeometry() : manifold_(manifold::Manifold())
 ManifoldGeometry::ManifoldGeometry(manifold::Manifold mani, const std::set<uint32_t>& originalIDs,
                                    const std::map<uint32_t, Color4f>& originalIDToColor,
                                    const std::set<uint32_t>& subtractedIDs,
-                                   const std::vector<std::shared_ptr<Surface>>& surfaces)
+                                   const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                   std::shared_ptr<const SolidTree> solidTree)
   : manifold_(std::move(mani)),
     originalIDs_(originalIDs),
     originalIDToColor_(originalIDToColor),
     subtractedIDs_(subtractedIDs),
-    surfaces_(surfaces)
+    surfaces_(surfaces),
+    solid_tree_(std::move(solidTree))
 {
 }
 
@@ -240,6 +242,7 @@ std::shared_ptr<PolySet> ManifoldGeometry::toPolySet() const
   // Hand the analytic surfaces on to whoever consumes the PolySet; the STEP
   // exporter uses them to tell a faceted cylinder from a prism.
   ps->surfaces = surfaces_;
+  ps->solid_tree = solid_tree_;
 
   return ps;
 }
@@ -327,7 +330,14 @@ ManifoldGeometry ManifoldGeometry::binOp(const ManifoldGeometry& lhs, const Mani
   auto surfaces = lhs.surfaces_;
   mergeSurfaces(surfaces, rhs.surfaces_);
 
-  return {mani, originalIDs, originalIDToColor, subtractedIDs, surfaces};
+  // And the boolean itself, over the solids the operands declared: what says
+  // whether a surface has a face here when the chords the mesh was cut with
+  // disagree with the model. See SolidTree.h.
+  const SolidTree::Op op = opType == manifold::OpType::Add        ? SolidTree::Op::Union
+                           : opType == manifold::OpType::Subtract ? SolidTree::Op::Difference
+                                                                  : SolidTree::Op::Intersection;
+  return {mani,          originalIDs, originalIDToColor,
+          subtractedIDs, surfaces,    SolidTree::combine(op, lhs.solid_tree_, rhs.solid_tree_)};
 }
 
 std::shared_ptr<ManifoldGeometry> minkowskiOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs)
@@ -415,6 +425,7 @@ void ManifoldGeometry::transform(const Transform3d& mat)
   // an uneven scale is elliptic - and one that cannot be represented afterwards
   // is dropped rather than kept wrong. See Surface::transformed.
   surfaces_ = transformedSurfaces(surfaces_, mat);
+  if (solid_tree_) solid_tree_ = solid_tree_->transformed(mat);
 }
 
 void ManifoldGeometry::addSurface(const std::shared_ptr<Surface>& surface)
