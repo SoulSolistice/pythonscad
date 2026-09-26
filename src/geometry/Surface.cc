@@ -1835,9 +1835,15 @@ bool SweepSurface::sameAs(const Surface& other) const
 using recognition::forwardError;
 using recognition::Residual;
 
-Residual Surface::residual(const Vector3d&) const
+Residual Surface::signedResidual(const Vector3d&) const
 {
   return Residual{};
+}
+Residual Surface::residual(const Vector3d& p) const
+{
+  Residual out = signedResidual(p);
+  out.value = std::fabs(out.value);
+  return out;
 }
 bool Surface::closestPoint(const Vector3d&, Vector3d&) const
 {
@@ -1852,7 +1858,7 @@ bool Surface::implicitAt(const Vector3d&, double&, Vector3d&) const
   return false;
 }
 
-Residual CylinderSurface::residual(const Vector3d& p) const
+Residual CylinderSurface::signedResidual(const Vector3d& p) const
 {
   // axis: 3 mul, 2 add, sqrt, 3 div (9); rel: 3 (12); rel.axis: 3 mul, 2 add
   // (17); axis * t: 3 (20); rel - axis t: 3 (23); norm: 3 mul, 2 add, sqrt
@@ -1860,12 +1866,12 @@ Residual CylinderSurface::residual(const Vector3d& p) const
   const Vector3d rel = p - refpt;
   const Vector3d axis = normdir.normalized();
   Residual out;
-  out.value = fabs((rel - axis * rel.dot(axis)).norm() - r);
+  out.value = (rel - axis * rel.dot(axis)).norm() - r;
   out.bound = forwardError(30, p.norm() + refpt.norm() + fabs(r));
   return out;
 }
 
-Residual ConeSurface::residual(const Vector3d& p) const
+Residual ConeSurface::signedResidual(const Vector3d& p) const
 {
   // The cylinder's 29 to the radial distance; radiusAt: its own axis (9),
   // rel (3), dot (5), times slope (1), plus r (1) = 19; the difference (1).
@@ -1873,30 +1879,30 @@ Residual ConeSurface::residual(const Vector3d& p) const
   const Vector3d axis = normdir.normalized();
   const double want = radiusAt(p);
   Residual out;
-  out.value = fabs((rel - axis * rel.dot(axis)).norm() - want);
+  out.value = (rel - axis * rel.dot(axis)).norm() - want;
   out.bound = forwardError(49, p.norm() + refpt.norm() + fabs(r) + fabs(want));
   return out;
 }
 
-Residual SphereSurface::residual(const Vector3d& p) const
+Residual SphereSurface::signedResidual(const Vector3d& p) const
 {
   // rel: 3; norm: 6; minus r: 1.
   Residual out;
-  out.value = fabs((p - refpt).norm() - r);
+  out.value = (p - refpt).norm() - r;
   out.bound = forwardError(10, p.norm() + refpt.norm() + fabs(r));
   return out;
 }
 
-Residual PlaneSurface::residual(const Vector3d& p) const
+Residual PlaneSurface::signedResidual(const Vector3d& p) const
 {
   // normal: 9; rel: 3; dot: 5 - the distance along the normal.
   Residual out;
-  out.value = fabs((p - refpt).dot(normdir.normalized()));
+  out.value = (p - refpt).dot(normdir.normalized());
   out.bound = forwardError(17, p.norm() + refpt.norm());
   return out;
 }
 
-Residual TorusSurface::residual(const Vector3d& p) const
+Residual TorusSurface::signedResidual(const Vector3d& p) const
 {
   // axis 9, rel 3, along 5, radial: 3 + 3 + 6 (26); radial - R: 1; hypot: 2
   // mul, 1 add, sqrt (4); minus r: 1 - 32 in all.
@@ -1905,7 +1911,7 @@ Residual TorusSurface::residual(const Vector3d& p) const
   const double along = rel.dot(axis);
   const double radial = (rel - axis * along).norm();
   Residual out;
-  out.value = fabs(hypot(radial - r_major, along) - r_minor);
+  out.value = hypot(radial - r_major, along) - r_minor;
   out.bound = forwardError(32, p.norm() + refpt.norm() + fabs(r_major) + fabs(r_minor));
   return out;
 }
@@ -2253,19 +2259,27 @@ double EllipticCylinderSurface::angle(const Vector3d& p) const
   return t;
 }
 
-double EllipticCylinderSurface::offset(const Vector3d& p) const
+double EllipticCylinderSurface::signedOffset(const Vector3d& p) const
 {
-  // |F| / |grad F| for F = (x/a)^2 + (y/b)^2 - 1: the distance to first order,
-  // and for a circle (|q|^2 - r^2) / 2|q|, the radius difference to first order.
+  // F / |grad F| for F = (x/a)^2 + (y/b)^2 - 1: the distance to first order,
+  // and for a circle (|q|^2 - r^2) / 2|q|, the radius difference to first order;
+  // negative inside.
   double x = 0, y = 0;
   section(p, x, y);
   const double A = a(), B = b();
   const double F = (x / A) * (x / A) + (y / B) * (y / B) - 1;
   const double g = 2 * hypot(x / (A * A), y / (B * B));
-  return g > 0 ? fabs(F) / g : std::numeric_limits<double>::max();
+  // On the axis the gradient vanishes: as far as a double goes, and inside.
+  if (!(g > 0)) return F < 0 ? -std::numeric_limits<double>::max() : std::numeric_limits<double>::max();
+  return F / g;
 }
 
-recognition::Residual EllipticCylinderSurface::residual(const Vector3d& p) const
+double EllipticCylinderSurface::offset(const Vector3d& p) const
+{
+  return fabs(signedOffset(p));
+}
+
+recognition::Residual EllipticCylinderSurface::signedResidual(const Vector3d& p) const
 {
   // The distance above, and its operations: the unit sweep (9), q (3), along it
   // (5), off it (6), the two unit semi-axes (18) and the coordinates on them
@@ -2275,7 +2289,7 @@ recognition::Residual EllipticCylinderSurface::residual(const Vector3d& p) const
   // is magnified by up to a / b before the gradient scales it back: the bound
   // carries that conditioning, which is the ellipse's and not a choice.
   recognition::Residual out;
-  out.value = offset(p);
+  out.value = signedOffset(p);
   out.bound = recognition::forwardError(82, (p.norm() + refpt.norm() + a()) * a() / b());
   return out;
 }

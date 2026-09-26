@@ -94,10 +94,19 @@ public:
   // form where it has one; a consumer asks, and never switches on the kind. The
   // defaults are the answer of a surface that has no closed form to give.
 
-  /*! How far `p` is from this surface, and the bound machine precision puts on
-   * computing that (MachinePrecision.h) - what D0 membership asks. Infinite for
-   * a surface with no closed-form residual. */
-  [[nodiscard]] virtual recognition::Residual residual(const Vector3d& p) const;
+  /*! How far `p` is from this surface, signed, and the bound machine precision
+   * puts on computing it (MachinePrecision.h). Infinite for a surface with no
+   * closed-form residual. The sign is the surface's own parting of space: two
+   * points off the surface are in the same part of space, with the surface
+   * taken out, exactly when their residuals have one sign. So a point is on the
+   * side of a bound its solid's interior is on where the signs agree - which is
+   * what existence asks (recognition/Classify.h) - and each kind answers for
+   * itself: a cone is one nappe, whose inside is one part and all else the
+   * other. For exactness take the size: residual(). */
+  [[nodiscard]] virtual recognition::Residual signedResidual(const Vector3d& p) const;
+  /*! How far `p` is from this surface - the size of signedResidual - and the
+   * same bound: what D0 membership asks. */
+  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const;
   /*! The point of this surface nearest `p`, or false where there is none to give. */
   virtual bool closestPoint(const Vector3d& p, Vector3d& out) const;
   /*! The unit normal where this surface passes nearest `p`, or false. */
@@ -201,7 +210,7 @@ public:
 
   double r;
 
-  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
@@ -230,7 +239,7 @@ public:
 
   double r_major, r_minor;
 
-  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
 
 private:
@@ -342,7 +351,7 @@ public:
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
-  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
 
@@ -398,7 +407,7 @@ public:
 
   double r;
 
-  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
@@ -455,7 +464,7 @@ public:
 
   double r, slope;
 
-  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
@@ -502,6 +511,8 @@ public:
 
   [[nodiscard]] bool usable() const override;
   [[nodiscard]] double lean() const override { return 0.0; }
+  /*! offset(), signed: negative inside. */
+  [[nodiscard]] double signedOffset(const Vector3d& p) const;
   [[nodiscard]] double offset(const Vector3d& p) const override;
   void frame(Vector3d& ref, Vector3d& ref2) const override;
   [[nodiscard]] double angle(const Vector3d& p) const override;
@@ -509,7 +520,7 @@ public:
   [[nodiscard]] const char *noun() const override { return "elliptic cylinder"; }
   [[nodiscard]] double size() const override { return a(); }
 
-  [[nodiscard]] recognition::Residual residual(const Vector3d& p) const override;
+  [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
   [[nodiscard]] bool isQuadric() const override { return true; }
