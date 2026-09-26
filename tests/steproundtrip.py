@@ -380,7 +380,15 @@ def roundtripSTEP(filename, expect_solids=1, expect_surfaces=None, expect_canoni
 
     if solids:
         props = GProp_GProps()
-        BRepGProp.VolumeProperties_s(shape, props)
+        # Adaptively, to a stated relative error, not by the default rule. The
+        # default is a fixed-order Gauss rule per edge, and a face bounded by a
+        # few long B-spline edges - one crossing curve of a thousand knot spans
+        # where there were once hundreds of chords - is integrated too coarsely
+        # to hold the 1e-6 a VOLUME: line asks: on step-sweep-law-corners it
+        # read 19509.907 against a derived 19509.347, where the adaptive rule
+        # reads 19509.419. The error bound is far inside that window, so the
+        # window is about the solid and not about the quadrature.
+        BRepGProp.VolumeProperties_s(shape, props, 1e-9, False, False)
         volume = props.Mass()
         lines.append("OCCT volume %.6f" % volume)
         if volume <= 0:
