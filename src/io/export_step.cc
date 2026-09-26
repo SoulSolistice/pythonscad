@@ -39,6 +39,7 @@
 #include <src/geometry/Surface.h>
 #include <src/geometry/AnalyticFeatures.h>
 #include <src/geometry/recognition/Exact.h>
+#include "io/step/Meridian.h"
 #ifdef ENABLE_MANIFOLD
 #include <src/geometry/manifold/manifoldutils.h>
 #endif
@@ -656,7 +657,15 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       const double solve_tol = 1e-11;
       // Its answer is `p`, whether or not it met `solve_tol`: the test below is
       // what decides, and it is the same test either way.
-      AnalyticFeatures::projectOntoBoth(a, b, p, solve_tol);
+      // A declared sweep and a coaxial surface of revolution cross in closed
+      // form, and the corner keeps its station on it - see Meridian::place.
+      step::Meridian meridian;
+      Vector3d exact;
+      if (step::Meridian::of(a, b, meridian) && meridian.place(p, exact)) {
+        p = exact;
+      } else {
+        AnalyticFeatures::projectOntoBoth(a, b, p, solve_tol);
+      }
       // Which of the two is exact and which is a fit, because they are not
       // worth the same. A declared quadric states where the surface is; a
       // GridSurface was interpolated through the model's own stations and says

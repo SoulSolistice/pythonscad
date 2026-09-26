@@ -18,6 +18,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
+#include "geometry/MachinePrecision.h"
 #include "geometry/Surface.h"
 #include "geometry/recognition/Internal.h"
 #include "geometry/recognition/Ledger.h"
@@ -162,6 +163,9 @@ std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
   double claim_band = 0.0;                    // the allowance it was measured against
   double worst_at_u = 0.0;                    // and where along the sweep it happened
   std::size_t cut_into = 0;                   // faces a wrapping claim had to be cut into
+  std::size_t split_at_crease = 0;            // faces a claim became, split where its surface turns
+  std::size_t straddling = 0;                 // facets across such a crease, with no station on it
+  std::set<double> straddled;                 // the creases they cross
   double worst_miss = 0, missed_against = 0;  // how far off, and what was allowed
 
   // Which faces sit on either side of every edge of the mesh. Needed before the
@@ -316,11 +320,71 @@ std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
     //
     // One per connected component, because a claim is not necessarily in one
     // piece and a face cannot be in two - see connectedComponents above.
-    auto buildPatches = [&](const std::vector<std::size_t>& fs) {
-      std::vector<Patch> out;
-      for (const auto& piece : connectedComponents(loops, edge_loops, fs)) {
-        out.push_back(patchFromFacets(loops, edge_loops, surface, piece));
+    //
+    // And one per stretch between the corners the surface turns along the
+    // sweep: where a law of a declared sweep turns, its surface is only C0
+    // across the whole profile - a knot of full multiplicity in u, which it
+    // states - and a face spanning that crease is a face whose own surface is
+    // not G1. SOLIDWORKS lists every such face as faulty ("general geometry
+    // problem", with the rest of the sweep "unsimplified geometry"); split at
+    // the crease it lists none - build/sw-kit9, 2026-09-26, the same file
+    // before and after, through the same writer. The crease is the
+    // declaration's, so the cut is not a boundary made up here: it runs along
+    // the mesh's station at the corner, which is exact on the surface, since a
+    // profile at one station is a polygon. A facet straddling the crease - no
+    // station there - is reported below and grouped by its middle.
+    std::vector<double> u_creases;
+    {
+      int du = 0, dv = 0, nr = 0, nc = 0;
+      std::vector<Vector3d> net;
+      std::vector<double> ku, kv;
+      std::vector<int> mu, mv;
+      if (grid->splineForm(du, dv, nr, nc, net, ku, mu, kv, mv)) {
+        for (std::size_t k = 1; k + 1 < ku.size(); k++) {
+          if (mu[k] >= du) u_creases.push_back(ku[k]);
+        }
       }
+    }
+    std::map<std::size_t, std::size_t> lane_of;  // facet -> stretch between creases
+    if (!u_creases.empty()) {
+      // A corner on the crease is on it to the rounding of its station.
+      const double on_crease = recognition::forwardError(16, 1.0);
+      for (const std::size_t f : claimed) {
+        Vector3d centroid = Vector3d::Zero();
+        double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+        for (const int v : loops[f]) {
+          centroid += vertices[v];
+          double pu = 0, pv = 0;
+          if (!grid->project(vertices[v], pu, pv)) continue;
+          lo = std::min(lo, pu);
+          hi = std::max(hi, pu);
+        }
+        centroid /= double(loops[f].size());
+        double pu = 0, pv = 0;
+        if (!grid->project(centroid, pu, pv)) continue;
+        lane_of[f] =
+          std::size_t(std::upper_bound(u_creases.begin(), u_creases.end(), pu) - u_creases.begin());
+        for (const double c : u_creases) {
+          if (lo < c - on_crease && hi > c + on_crease) {
+            straddling++;
+            straddled.insert(c);
+          }
+        }
+      }
+    }
+    auto buildPatches = [&](const std::vector<std::size_t>& fs) {
+      std::map<std::size_t, std::vector<std::size_t>> lanes;
+      for (const std::size_t f : fs) {
+        const auto it = lane_of.find(f);
+        lanes[it == lane_of.end() ? 0 : it->second].push_back(f);
+      }
+      std::vector<Patch> out;
+      for (const auto& lane : lanes) {
+        for (const auto& piece : connectedComponents(loops, edge_loops, lane.second)) {
+          out.push_back(patchFromFacets(loops, edge_loops, surface, piece));
+        }
+      }
+      if (lanes.size() > 1) split_at_crease += out.size();
       return out;
     };
 
@@ -462,6 +526,25 @@ std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
       format("a sweep closing around its profile was cut into %d faces, so that "
              "no face crosses the surface's seam",
              int(cut_into)));
+  }
+  if (split_at_crease > 0) {
+    report.push_back(
+      format("a declared sweep turning a corner along its length was split there into %d "
+             "faces, so that no face's surface is only C0 inside it",
+             int(split_at_crease)));
+  }
+  if (straddling > 0) {
+    // The model can fix this and the exporter cannot: a face split where no
+    // edge of the mesh runs would be a boundary made up here. The generator
+    // puts a station at each corner of its laws, and the crease is an edge.
+    std::string at;
+    for (const double c : straddled) at += (at.empty() ? "" : ", ") + format("%.6g", c);
+    report.push_back(
+      format("EXPORT-WARNING: %d facets of a declared sweep lie across a corner of its laws, "
+             "at t = %s, where its mesh has no station - so the face there spans a crease "
+             "of its own surface, which SOLIDWORKS lists as faulty; put a station of the "
+             "mesh at each corner of the laws",
+             int(straddling), at.c_str()));
   }
   if (!patches.empty()) {
     // Where the fitted surface actually is, rather than where it is on average.

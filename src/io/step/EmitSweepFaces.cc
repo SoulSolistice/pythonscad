@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/MachinePrecision.h"
 #include "io/step/CrossingArc.h"
 #include "io/step/CrossingRuns.h"
 
@@ -85,6 +86,72 @@ void StepKernel::BodyBuild::emitSweepFaces()
     std::vector<int> mults_u, mults_v;
     if (!grid->splineForm(du, dv, nu, nv, ctrl, knots_u, mults_u, knots_v, mults_v, seam_column)) {
       continue;
+    }
+
+    // Only the stretch of the surface this face lies on, between the corners
+    // it turns along the sweep. The face was split there (formGridPatches) so
+    // that no face spans one; the surface it is written on need not carry the
+    // others either, and a whole rendered sweep copied onto every face made
+    // the file twice the size for nothing. Exact, not a refit: an interior knot
+    // of multiplicity `du` is where two clamped B-splines meet at a shared
+    // control row, so the stretch is those rows with its end knots clamped,
+    // and its parameters are the whole surface's - every pcurve holds as is.
+    {
+      std::vector<std::size_t> crease;  // indices into knots_u of full multiplicity
+      for (std::size_t k = 1; k + 1 < knots_u.size(); k++) {
+        if (mults_u[k] >= du) crease.push_back(k);
+      }
+      if (!crease.empty() && !patch.facets.empty()) {
+        Vector3d centroid = Vector3d::Zero();
+        for (const int v : loops[patch.facets.front()]) centroid += vertices[v];
+        centroid /= double(loops[patch.facets.front()].size());
+        double pu = 0, pv = 0;
+        if (grid->project(centroid, pu, pv)) {
+          std::size_t lo = 0, hi = knots_u.size() - 1;  // the stretch's end knots
+          for (const std::size_t k : crease) {
+            if (knots_u[k] <= pu) lo = k;
+            else if (hi == knots_u.size() - 1) hi = k;
+          }
+          // Where each knot's run of the full vector starts.
+          std::vector<int> first(knots_u.size(), 0);
+          for (std::size_t k = 1; k < knots_u.size(); k++) first[k] = first[k - 1] + mults_u[k - 1];
+          // The row an end knot interpolates: the first of its run less one, and
+          // the ends of a clamped vector their own first and last rows.
+          const int row0 = lo == 0 ? 0 : first[lo] - 1;
+          const int row1 = hi == knots_u.size() - 1 ? nu - 1 : first[hi] - 1;
+          std::vector<double> ku{knots_u[lo]};
+          std::vector<int> mu{du + 1};
+          for (std::size_t k = lo + 1; k < hi; k++) {
+            ku.push_back(knots_u[k]);
+            mu.push_back(mults_u[k]);
+          }
+          ku.push_back(knots_u[hi]);
+          mu.push_back(du + 1);
+          const int rows = row1 - row0 + 1;
+          int total = 0;
+          for (const int m : mu) total += m;
+          // Only if the face stays on it. Where the mesh has no station at a
+          // corner its facets straddle the crease - reported as they are
+          // grouped - and a face reaching past the stretch keeps the whole
+          // surface under it.
+          const double on_crease = recognition::forwardError(16, 1.0);
+          bool inside = true;
+          for (const std::size_t f : patch.facets) {
+            for (const int v : loops[f]) {
+              double vu = 0, vv = 0;
+              if (!grid->project(vertices[v], vu, vv)) continue;
+              inside = inside && vu >= knots_u[lo] - on_crease && vu <= knots_u[hi] + on_crease;
+            }
+          }
+          if (inside && rows > du && total == rows + du + 1) {
+            ctrl =
+              std::vector<Vector3d>(ctrl.begin() + long(row0) * nv, ctrl.begin() + long(row1 + 1) * nv);
+            nu = rows;
+            knots_u = std::move(ku);
+            mults_u = std::move(mu);
+          }
+        }
+      }
     }
 
     std::vector<std::vector<Point *>> net;

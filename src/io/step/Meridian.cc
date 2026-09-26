@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "geometry/MachinePrecision.h"
 
@@ -91,6 +92,24 @@ bool Meridian::crossingOnEdge(double t, std::size_t i, Vector3d& out) const
   if (!(s >= 0.0 && s <= 1.0)) return false;
   out = sweep->evaluate(t, (double(i) + s) / double(n));
   return true;
+}
+
+bool Meridian::place(const Vector3d& p, Vector3d& out) const
+{
+  const double t = station(p);
+  bool found = false;
+  double best = std::numeric_limits<double>::infinity();
+  for (const std::size_t e : edgesOf(p)) {
+    Vector3d at;
+    if (!crossingOnEdge(t, e, at)) continue;
+    const double d = (at - p).norm();
+    if (d < best) {
+      best = d;
+      out = at;
+      found = true;
+    }
+  }
+  return found;
 }
 
 std::vector<Vector3d> Meridian::corners(const Vector3d& p0, const Vector3d& p1) const

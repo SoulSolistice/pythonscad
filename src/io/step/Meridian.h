@@ -50,6 +50,16 @@ struct Meridian {
   /*! The sweep's station of `p`. */
   [[nodiscard]] double station(const Vector3d& p) const;
 
+  /*! Where a corner at `p` belongs on the crossing: at `p`'s own station, on
+   * the profile edge it lies on - the nearest, where it is at a vertex of the
+   * profile and so on two. Keeping the station is what keeps a corner the mesh
+   * put on a crease of the sweep - a corner of its laws, where the surface is
+   * only C0 - on that crease; the nearest point of the crossing moves it off,
+   * 1.7e-5 along the sweep on the crease coupon, and the face it bounds then
+   * reaches past the crease it was split at. False where no edge there meets
+   * the other surface. */
+  bool place(const Vector3d& p, Vector3d& out) const;
+
 private:
   /*! rho - r0 - slope h for profile point `q` at station `t`: zero on the other surface. */
   [[nodiscard]] double residual(double t, const Vector2d& q) const;

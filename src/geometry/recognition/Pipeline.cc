@@ -650,7 +650,15 @@ void runGrids(Context& ctx)
   const std::vector<AnalyticFeatures::Patch> grid_patches =
     AnalyticFeatures::formGridPatches(graph, effective, ctx.arbiter.held(), grid_report,
                                       &features.ledger, surfaces.size(), ctx.grid_proposals);
-  for (const auto& line : grid_report) LOG("STEP export: %1$s", line);
+  for (const auto& line : grid_report) {
+    // A line the pass marks as a warning is one, not a line that says so.
+    static const std::string kWarning = "EXPORT-WARNING: ";
+    if (line.compare(0, kWarning.size(), kWarning) == 0) {
+      LOG(message_group::Export_Warning, "STEP export: %1$s", line.substr(kWarning.size()));
+    } else {
+      LOG("STEP export: %1$s", line);
+    }
+  }
 
   // Where the claimed region sits on the sweep, which is the question a face
   // has to answer and a count of facets does not. A sweep whose profile is

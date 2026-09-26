@@ -15,6 +15,7 @@
 #include "io/step/BoundaryCycles.h"
 #include "io/step/CornerLadder.h"
 #include "io/step/LoopGeometry.h"
+#include "io/step/Meridian.h"
 #include "io/step/PlaneSections.h"
 #include "utils/printutils.h"
 
@@ -354,7 +355,16 @@ void StepKernel::BodyBuild::placeOnFileFaces()
       for (std::size_t a = 0; a < n_all; a++) {
         for (std::size_t b = a + 1; b < n_all; b++) {
           Vector3d p = vertices[v];
-          AnalyticFeatures::projectOntoBoth(constraints[a].surface, constraints[b].surface, p, 1e-11);
+          // A declared sweep and a coaxial surface of revolution cross in closed
+          // form, and the corner keeps its station on it - see Meridian::place.
+          step::Meridian meridian;
+          Vector3d exact;
+          if (step::Meridian::of(constraints[a].surface, constraints[b].surface, meridian) &&
+              meridian.place(p, exact)) {
+            p = exact;
+          } else {
+            AnalyticFeatures::projectOntoBoth(constraints[a].surface, constraints[b].surface, p, 1e-11);
+          }
           if (p.allFinite()) candidates.push_back({p, CornerRung::FileFaces});
           for (std::size_t c = b + 1; c < n_all; c++) {
             const Surface *tri[3] = {constraints[a].surface, constraints[b].surface,
