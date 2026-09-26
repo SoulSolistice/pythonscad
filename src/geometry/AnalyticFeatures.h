@@ -123,6 +123,14 @@ struct Band {
   [[nodiscard]] bool isCone() const;
 };
 
+/*! Where each closed band's seam runs: `seam_bottom` and `seam_top`, the two
+ * ends of one ruling. Bands sharing a rim share its vertex - the circle
+ * between them is one edge - so the bands joined through shared rims are
+ * settled as one chain, each deriving its seam from the rim it shares with one
+ * already settled. A band whose rims have no ruling in common is dropped.
+ * Bands.cc. */
+void settleSeams(std::vector<Band>& bands, const std::vector<Vector3d>& vertices);
+
 /*! What lies on the other side of one rim of a band.
  *
  * A rim can only be collapsed into a circle when everything using its edges

@@ -214,6 +214,49 @@ TEST_CASE("the seam's two ends are on one ruling across atan2's branch cut", "[a
   }
 }
 
+TEST_CASE("bands stacked on shared rims seam through each rim's one vertex, whatever their order",
+          "[analytic][seam]")
+{
+  // A circle two bands share is one edge with one vertex, so both bands' seams
+  // have to run through it. Settled in index order, a band can find both of its
+  // rims already settled by the bands either side - each of which chose for
+  // itself - and derive its seam from one of them, a ruling away from the
+  // other. On lid10 that opened a loop once the order of its base's three bands
+  // changed. Here the middle band comes last and the top rim lists its vertices
+  // from another angle, which is what the top band would choose on its own.
+  const int n = 8;
+  std::vector<Vector3d> vertices;
+  std::vector<std::vector<int>> rims(4);
+  for (int level = 0; level < 4; level++) {
+    for (int k = 0; k < n; k++) {
+      const int j = level == 2 ? (k + 3) % n : k;  // the third rim starts elsewhere
+      const double a = 2 * M_PI * j / n;
+      rims[level].push_back(int(vertices.size()));
+      vertices.emplace_back(10 * std::cos(a), 10 * std::sin(a), double(level));
+    }
+  }
+  auto band = [&](int bottom) {
+    Band b;
+    b.axis = Vector3d(0, 0, 1);
+    b.base = Vector3d(0, 0, bottom);
+    b.r_bottom = b.r_top = 10;
+    b.height = 1;
+    b.closed = true;
+    b.bottom_set = rims[bottom];
+    b.top_set = rims[bottom + 1];
+    return b;
+  };
+  std::vector<Band> bands = {band(0), band(2), band(1)};  // bottom, top, then the middle
+  settleSeams(bands, vertices);
+
+  for (const Band& b : bands) REQUIRE(b.alive);
+  CHECK(bands[0].seam_top == bands[2].seam_bottom);
+  CHECK(bands[2].seam_top == bands[1].seam_bottom);
+  for (const Band& b : bands) {
+    CHECK(ruling(vertices, b.seam_bottom) == Catch::Approx(ruling(vertices, b.seam_top)).margin(1e-12));
+  }
+}
+
 TEST_CASE("an undeclared cylinder stays faceted, because it is also a prism", "[analytic][intent]")
 {
   // A ring of N quads is exactly the mesh of an N-sided prism, and a cube's four

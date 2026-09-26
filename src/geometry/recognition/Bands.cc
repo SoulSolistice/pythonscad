@@ -31,6 +31,100 @@ bool Band::isCone() const
   return fabs(r_bottom - r_top) > 1e-9 * std::max(r_bottom, r_top);
 }
 
+void settleSeams(std::vector<Band>& bands, const std::vector<Vector3d>& vertices)
+{
+  // A periodic face needs a seam, and the seam has to be a ruling: both of
+  // its ends on the same radial direction, or the line would cut through the
+  // surface instead of lying on it.
+  //
+  // Picking each end independently by angle does not work, however obvious it
+  // looks. atan2 has its branch cut at pi, a polygon with an even number of
+  // facets has a vertex sitting exactly there, and which side of the cut it
+  // lands on is decided by the sign of a y coordinate which is zero to
+  // fifteen digits. Two rims of one wall disagreed on that sign, their seams
+  // came out on different rulings, and a cylinder that was otherwise perfect
+  // was dropped.
+  //
+  // So only one end is chosen, and the other is *derived* from it. Where two
+  // bands share a rim they have to use the same vertex - the circle between
+  // them is one edge - so the bands joined through shared rims are settled as
+  // one chain: its first band chooses, and every other derives from the rim it
+  // shares with one already settled, walking the chain outwards.
+  //
+  // Not in index order. A band taken in index order may find both of its rims
+  // already settled - by the bands on either side of it, each of which chose
+  // for itself - and a seam derived from one of them then misses the other.
+  // lid10's base, a cone, a cylinder and a cone, wrote the middle face's seam a
+  // ruling away from the circle above it once the order of its bands changed,
+  // and the loop did not close.
+  auto rim_key = [](const std::vector<int>& level) { return std::set<int>(level.begin(), level.end()); };
+  std::map<std::set<int>, std::vector<std::size_t>> bands_on_rim;
+  for (std::size_t i = 0; i < bands.size(); i++) {
+    if (!bands[i].alive || !bands[i].closed) continue;
+    bands_on_rim[rim_key(bands[i].bottom_set)].push_back(i);
+    bands_on_rim[rim_key(bands[i].top_set)].push_back(i);
+  }
+  std::vector<std::size_t> order;
+  std::vector<char> queued(bands.size(), 0);
+  for (std::size_t first = 0; first < bands.size(); first++) {
+    if (!bands[first].alive || !bands[first].closed || queued[first]) continue;
+    queued[first] = 1;
+    std::size_t k = order.size();
+    order.push_back(first);
+    for (; k < order.size(); k++) {
+      const Band& b = bands[order[k]];
+      for (const auto *level : {&b.bottom_set, &b.top_set}) {
+        for (const std::size_t j : bands_on_rim[rim_key(*level)]) {
+          if (queued[j]) continue;
+          queued[j] = 1;
+          order.push_back(j);
+        }
+      }
+    }
+  }
+
+  auto vertex_on_ruling = [&](int from, const std::vector<int>& level, const Vector3d& axis,
+                              const Vector3d& centre) {
+    const Vector3d a = vertices[from] - centre;
+    const Vector3d ra = (a - axis * axis.dot(a)).normalized();
+    for (const int v : level) {
+      const Vector3d b = vertices[v] - centre;
+      const Vector3d rb = (b - axis * axis.dot(b)).normalized();
+      if ((ra - rb).norm() < 1e-6) return v;
+    }
+    return -1;
+  };
+
+  std::map<std::set<int>, int> rim_seam;
+  for (const std::size_t i : order) {
+    Band& band = bands[i];
+    const std::set<int> bottom_key = rim_key(band.bottom_set);
+    const std::set<int> top_key = rim_key(band.top_set);
+    const Vector3d top_centre = band.base + band.axis * band.height;
+
+    const auto settled_bottom = rim_seam.find(bottom_key);
+    const auto settled_top = rim_seam.find(top_key);
+    if (settled_bottom != rim_seam.end()) {
+      band.seam_bottom = settled_bottom->second;
+      band.seam_top = vertex_on_ruling(band.seam_bottom, band.top_set, band.axis, band.base);
+    } else if (settled_top != rim_seam.end()) {
+      band.seam_top = settled_top->second;
+      band.seam_bottom = vertex_on_ruling(band.seam_top, band.bottom_set, band.axis, top_centre);
+    } else {
+      band.seam_bottom = band.bottom_set.front();
+      band.seam_top = vertex_on_ruling(band.seam_bottom, band.top_set, band.axis, band.base);
+    }
+
+    if (band.seam_bottom == -1 || band.seam_top == -1) {
+      band.alive = false;
+      band.dropped = "the two rims have no ruling in common to run a seam along";
+      continue;
+    }
+    rim_seam[bottom_key] = band.seam_bottom;
+    rim_seam[top_key] = band.seam_top;
+  }
+}
+
 Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
                                      std::size_t declared_count, const recognition::D0Membership *d0)
@@ -985,65 +1079,7 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
     }
   }
 
-  // A periodic face needs a seam, and the seam has to be a ruling: both of
-  // its ends on the same radial direction, or the line would cut through the
-  // surface instead of lying on it.
-  //
-  // Picking each end independently by angle does not work, however obvious it
-  // looks. atan2 has its branch cut at pi, a polygon with an even number of
-  // facets has a vertex sitting exactly there, and which side of the cut it
-  // lands on is decided by the sign of a y coordinate which is zero to
-  // fifteen digits. Two rims of one wall disagreed on that sign, their seams
-  // came out on different rulings, and a cylinder that was otherwise perfect
-  // was dropped.
-  //
-  // So only one end is chosen, and the other is *derived* from it. Where two
-  // bands share a rim they have to use the same vertex - the circle between
-  // them is one edge - so a band takes whichever of its rims is already
-  // settled and derives the other; a single pass suffices, because a band
-  // which finds neither settled settles both.
-  std::map<std::set<int>, int> rim_seam;
-
-  auto vertex_on_ruling = [&](int from, const std::vector<int>& level, const Vector3d& axis,
-                              const Vector3d& centre) {
-    const Vector3d a = vertices[from] - centre;
-    const Vector3d ra = (a - axis * axis.dot(a)).normalized();
-    for (const int v : level) {
-      const Vector3d b = vertices[v] - centre;
-      const Vector3d rb = (b - axis * axis.dot(b)).normalized();
-      if ((ra - rb).norm() < 1e-6) return v;
-    }
-    return -1;
-  };
-
-  for (std::size_t i = 0; i < bands.size(); i++) {
-    Band& band = bands[i];
-    if (!band.alive || !band.closed) continue;
-    const std::set<int> bottom_key(band.bottom_set.begin(), band.bottom_set.end());
-    const std::set<int> top_key(band.top_set.begin(), band.top_set.end());
-    const Vector3d top_centre = band.base + band.axis * band.height;
-
-    const auto settled_bottom = rim_seam.find(bottom_key);
-    const auto settled_top = rim_seam.find(top_key);
-    if (settled_bottom != rim_seam.end()) {
-      band.seam_bottom = settled_bottom->second;
-      band.seam_top = vertex_on_ruling(band.seam_bottom, band.top_set, band.axis, band.base);
-    } else if (settled_top != rim_seam.end()) {
-      band.seam_top = settled_top->second;
-      band.seam_bottom = vertex_on_ruling(band.seam_top, band.bottom_set, band.axis, top_centre);
-    } else {
-      band.seam_bottom = band.bottom_set.front();
-      band.seam_top = vertex_on_ruling(band.seam_bottom, band.top_set, band.axis, band.base);
-    }
-
-    if (band.seam_bottom == -1 || band.seam_top == -1) {
-      band.alive = false;
-      band.dropped = "the two rims have no ruling in common to run a seam along";
-      continue;
-    }
-    rim_seam[bottom_key] = band.seam_bottom;
-    rim_seam[top_key] = band.seam_top;
-  }
+  settleSeams(bands, vertices);
 
   // dropping a band puts its facets back
   for (std::size_t i = 0; i < bands.size(); i++) {
