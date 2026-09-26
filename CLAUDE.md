@@ -259,6 +259,11 @@ measure to trust: its fault *lists* and the Import Diagnostics dialog's do not
 agree with each other, and neither contains the other. See
 `doc/step-export-development.md`, *Fault codes*.
 
+Add `-Dialog <tsv>` to read the Import Diagnostics dialog itself - its
+faulty-face count and list, which no API returns and which flags faults every
+API check passes (a face spanning a crease of its own surface). Driven through
+UI Automation, so leave SOLIDWORKS alone while it runs.
+
 SOLIDWORKS must already be running, and **every run has to be labelled with its
 import settings** — its verdict depends on Tools > Options > Import, so a result
 recorded without them cannot be compared with another one. Fusion has no

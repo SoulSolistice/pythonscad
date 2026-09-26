@@ -1386,6 +1386,29 @@ them rather than folded in.
 and the Import Diagnostics dialog are different analyses and neither contains the
 other (see *Fault codes* above).
 
+**6. The dialog can be read, and now is.** `step-interop-solidworks.ps1 -Dialog
+<tsv>` opens Import Diagnostics on every file with the command the menu runs
+(`RunCommand(70)`), reads its "Faulty faces [n]" label and the list under it
+through UI Automation, and cancels the page. A leading `*` on an item is the
+dialog's own mark of its second kind - "unsimplified geometry" where the plain
+kind is "general geometry problem" (the tooltips the operator sees). It reads
+only the page it opened: an operator's own open document may be showing one too.
+It is what found that a face spanning a crease of its own surface is faulty to
+SOLIDWORKS while every API check passes it:
+
+| file, 2026-09-26, operator's import settings | API faulty faces | dialog faulty faces |
+| --- | --- | --- |
+| sweep with law corners inside one face | 0 | 3 |
+| the same, split at the corners | 0 | **0** |
+| control, no law corners | 0 | 0 |
+| lid10, declared sweep, before / after | 6 / 6 | 14 / **5** |
+| code-17 positive control | 1 | 64 |
+
+It does not yet say *which* face an item is: selecting an item through UI
+Automation does not reach the model's selection manager. `-DialogLocate` tries,
+and is off by default - a run with it on left SOLIDWORKS spinning and not
+responding until it was ended by hand.
+
 - **So measure the repair, not the report** - `step-interop-solidworks.ps1
   -Heal`. It runs `ImportDiagnosis` and records what changed: face count, volume
   and area before and after, with the document closed unsaved either way. A body

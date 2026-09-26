@@ -208,7 +208,31 @@ param(
     # every geometric measure available on our side of the file orders three
     # variants of the bayonet the *opposite* way to SOLIDWORKS' verdict, so the
     # only way left to find the mechanism was to ask which faces it objects to.
-    [string]$FaultDetail
+    [string]$FaultDetail,
+    # Open the Import Diagnostics dialog on every file and write down what *it*
+    # lists, one row per faulty face, to this TSV.
+    #
+    # The dialog's per-face analysis is not IFace2::Check. On 2026-09-26 a
+    # declared sweep with law corners (build/sw-kit7/b-crease-law) read clean
+    # to every API check above - Check, Check2, Check3, IFace2::Check and
+    # IEdge::Check on each entity - while the dialog listed three faulty faces,
+    # one "general geometry problem" and two "unsimplified geometry", the
+    # second kind starred. Nothing in the API returns that list: ImportDiagnosis
+    # repairs rather than reports. So the dialog itself is opened, with the
+    # command the menu runs, and read through UI Automation - its "Faulty faces
+    # [n]" label and the tree under it - and each listed face is selected there
+    # so the selection manager can say which face of the body it is.
+    #
+    # Only the page this run opened is read. Any document the operator already
+    # had open may be showing its own Import Diagnostics page, and on the day
+    # this was written one was.
+    [string]$Dialog,
+    # With -Dialog, also select each face the dialog lists, so the selection
+    # manager can say which face it is. Off by default: on 2026-09-26 it never
+    # localised a face - the dialog does not pass a UI Automation selection on
+    # to the model - and a run with it on left SOLIDWORKS spinning on two cores
+    # and not responding until it was ended by hand.
+    [switch]$DialogLocate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -238,11 +262,17 @@ $onResolve = [System.ResolveEventHandler] {
 [Reflection.Assembly]::LoadFrom($sldworks) | Out-Null
 [Reflection.Assembly]::LoadFrom($swconst)  | Out-Null
 
-Add-Type -ReferencedAssemblies $sldworks, $swconst -TypeDefinition @"
+# UI Automation, for -Dialog: the WPF assemblies every .NET Framework 4 install has.
+$wpf = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\WPF"
+$uia = @((Join-Path $wpf "UIAutomationClient.dll"), (Join-Path $wpf "UIAutomationTypes.dll"), "WindowsBase")
+
+Add-Type -ReferencedAssemblies (@($sldworks, $swconst) + $uia) -TypeDefinition @"
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Windows.Automation;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 
@@ -320,6 +350,7 @@ public class SwKitRunner
     public static bool SaveBack;
     public static bool Heal;
     public static bool Raw;
+    public static bool DialogLocate;
     static int _wasKnit, _wasRepair;
     static bool _wasDiag, _wasAnalytic, _saved;
 
@@ -734,6 +765,135 @@ public class SwKitRunner
         return sb.ToString();
     }
 
+    // Every "Faulty faces [n]" label on screen, by runtime id, so the one a
+    // run opens can be told from any the operator already had open.
+    static Dictionary<string, AutomationElement> FaultyLabels(AutomationElement root)
+    {
+        var found = new Dictionary<string, AutomationElement>();
+        var texts = root.FindAll(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text));
+        foreach (AutomationElement e in texts)
+        {
+            string n = "";
+            try { n = e.Current.Name ?? ""; } catch { continue; }
+            if (!n.StartsWith("Faulty faces")) continue;
+            found[string.Join(".", Array.ConvertAll(e.GetRuntimeId(), x => x.ToString()))] = e;
+        }
+        return found;
+    }
+
+    static int Bracketed(string label)
+    {
+        int a = label.IndexOf('['), b = label.IndexOf(']');
+        int n = -1;
+        if (a >= 0 && b > a) int.TryParse(label.Substring(a + 1, b - a - 1), out n);
+        return n;
+    }
+
+    // What the Import Diagnostics dialog lists for one file: a summary row,
+    // "dialog <faces> <gaps>", then one row per faulty face - its name in the
+    // dialog (a leading * is the dialog's own mark of the second kind), and
+    // the face's kind, area and centre as the selection manager reports it
+    // once the dialog's item is selected.
+    public static string DialogCheck(string path)
+    {
+        var sb = new System.Text.StringBuilder();
+        string stem = System.IO.Path.GetFileNameWithoutExtension(path);
+        var c = CultureInfo.InvariantCulture;
+        int errors = 0;
+        IModelDoc2 doc = null;
+        try
+        {
+            object importData = null;
+            try { importData = _sw.GetImportFileData(path); } catch { }
+            doc = (IModelDoc2)_sw.LoadFile4(path, "r", importData, ref errors);
+            if (doc == null) return stem + "\tdialog\t\tnot opened\t\t\terrors=" + errors + "\n";
+            Process[] procs = Process.GetProcessesByName("SLDWORKS");
+            if (procs.Length == 0) return stem + "\tdialog\t\tno SLDWORKS process\t\t\t\n";
+            // Asked of Windows, not of SOLIDWORKS, so it answers even when
+            // SOLIDWORKS cannot: every UI Automation query below goes through
+            // its UI thread.
+            if (!procs[0].Responding) return stem + "\tdialog\t\tSOLIDWORKS not responding\t\t\t\n";
+            AutomationElement root = AutomationElement.FromHandle(procs[0].MainWindowHandle);
+            var before = FaultyLabels(root);
+            if (!_sw.RunCommand(70, "")) return stem + "\tdialog\t\tcommand refused\t\t\t\n";
+
+            // The analysis runs before the page shows; a large body takes a while.
+            AutomationElement label = null;
+            DateTime until = DateTime.Now.AddSeconds(300);
+            while (label == null && DateTime.Now < until)
+            {
+                foreach (var kv in FaultyLabels(root))
+                {
+                    if (!before.ContainsKey(kv.Key)) { label = kv.Value; break; }
+                }
+                // Each look walks SOLIDWORKS's whole window through its UI
+                // thread, which is busy analysing; not too often.
+                if (label == null) System.Threading.Thread.Sleep(2000);
+            }
+            if (label == null) return stem + "\tdialog\t\tno page appeared\t\t\t\n";
+
+            // The page's two trees follow the two labels: faces, then gaps.
+            AutomationElement page = TreeWalker.ControlViewWalker.GetParent(label);
+            var trees = page.FindAll(TreeScope.Children,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Tree));
+            int faces = Bracketed(label.Current.Name), gaps = -1;
+            var texts = page.FindAll(TreeScope.Children,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text));
+            foreach (AutomationElement t in texts)
+            {
+                string n = t.Current.Name ?? "";
+                if (n.StartsWith("Gaps between faces")) gaps = Bracketed(n);
+            }
+            sb.AppendLine(string.Join("\t", new string[] {
+                stem, "dialog", "", "summary", "", "", "faces=" + faces + " gaps=" + gaps }));
+            if (trees.Count == 0) return sb.ToString();
+
+            ISelectionMgr sel = (ISelectionMgr)doc.SelectionManager;
+            var items = trees[0].FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TreeItem));
+            int index = 0;
+            foreach (AutomationElement item in items)
+            {
+                string name = item.Current.Name ?? "";
+                string kind = "?", area = "", centre = "";
+                try
+                {
+                    object pattern;
+                    if (DialogLocate && item.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern))
+                    {
+                        ((SelectionItemPattern)pattern).Select();
+                        System.Threading.Thread.Sleep(200);
+                        Face2 face = sel.GetSelectedObject6(1, -1) as Face2;
+                        if (face != null)
+                        {
+                            try { kind = SurfaceName(((Surface)face.GetSurface()).Identity()); } catch { }
+                            try { area = (1e6 * face.GetArea()).ToString("F6", c); } catch { }
+                            double[] box = null;
+                            try { box = face.GetBox() as double[]; } catch { }
+                            if (box != null && box.Length >= 6)
+                                centre = string.Format(c, "{0:F4};{1:F4};{2:F4}",
+                                    1000 * (box[0] + box[3]) / 2, 1000 * (box[1] + box[4]) / 2,
+                                    1000 * (box[2] + box[5]) / 2);
+                        }
+                    }
+                }
+                catch { }
+                sb.AppendLine(string.Join("\t", new string[] {
+                    stem, "dialog-face", index.ToString(c), kind, area, centre, name }));
+                index++;
+            }
+        }
+        catch (Exception ex) { sb.AppendLine(stem + "\tdialog\t\tERROR " + ex.Message.Replace("\t", " ") + "\t\t\t"); }
+        finally
+        {
+            // Cancel the page, then close the document: nothing was repaired.
+            try { _sw.RunCommand(-1, ""); } catch { }
+            if (doc != null) { try { _sw.CloseDoc(doc.GetTitle()); } catch { } }
+        }
+        return sb.ToString();
+    }
+
     static string Join(string path, string opened, int errors, int warnings, string bodyType,
                        int nSolid, int nSheet, int faces, double volume, double area, string note)
     {
@@ -771,6 +931,7 @@ Write-Host ("import options as labelled: " + $ImportSettings)
 [SwKitRunner]::SaveBack = [bool]$RoundTrip
 [SwKitRunner]::Heal = [bool]$Heal
 [SwKitRunner]::Raw = [bool]$Raw
+[SwKitRunner]::DialogLocate = [bool]$DialogLocate
 [SwKitRunner]::MaxWalkFaces = $MaxWalkFaces
 if ($RoundTrip) {
     Write-Host "round trip: each coupon will be saved back as <coupon>_SW.STEP"
@@ -807,6 +968,23 @@ foreach ($f in $files) {
     } else {
         Write-Host ("{0} - {1}" -f $row.opened, $row.note)
     }
+}
+
+# Before the options are restored, so the dialog reads the same import as the
+# rows above.
+if ($Dialog) {
+    $dlg = @("file`tentity`tindex`tkind`tarea_mm2`tcentre_mm`tdialog")
+    Write-Host ""
+    foreach ($f in $files) {
+        $d = [SwKitRunner]::DialogCheck($f.FullName)
+        if (-not $d) { continue }
+        $lines = $d.TrimEnd("`r", "`n") -split "`r?`n"
+        $dlg += $lines
+        $summary = ($lines | Where-Object { ($_ -split "`t")[1] -eq 'dialog' } | Select-Object -First 1)
+        Write-Host ("  {0,-34} dialog: {1}" -f $f.Name, (($summary -split "`t")[3..6] -join ' ').Trim())
+    }
+    $dlg | Set-Content -Path $Dialog -Encoding utf8
+    Write-Host ("dialog detail: {0} ({1} rows)" -f $Dialog, ($dlg.Count - 1))
 }
 
 [SwKitRunner]::Restore()
