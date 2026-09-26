@@ -755,6 +755,10 @@ does not collapse, it is written as the plane it is and named.
 2. **`Classify`, alone.** Unit tests whose expectations are derived by hand:
    points in, out and on a cylinder minus a bore, two cubes sharing a face, a
    cone near its apex, a point beyond an opaque leaf that the tree decides anyway.
+   *(Done 2026-09-27: `recognition/Classify.h`, on `Surface::signedResidual` -
+   every kind's residual, signed by its own parting of space, `residual()` its
+   size. `classify_test.cc` fails without the subtracted-operand rule, with a
+   cone taken as both nappes, and with unsigned residuals; `compare` 0.)*
 3. **A fixture first**: a coupon cut with `eps` below its sagitta - a bore at
    r 15, `$fn` 24 (sagitta 0.128), cut by a slot whose inner wall is at
    `15 - 0.1` - with its volume **derived from the exact model**. It fails
