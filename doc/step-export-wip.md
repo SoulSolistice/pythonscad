@@ -4124,6 +4124,41 @@ What the bayonet's last 20 D3 are is open: facets at z = 90, r = 78.6, held by a
 band on the r = 79.5 cylinder (`original 36`) they are 1.5 off - not a hull, and
 there before this landing.
 
+### 37. The file depends on how the mesh happens to be numbered
+
+**Found 2026-09-26**, proving the identity tags neutral. The tags ride on every
+Manifold as a fourth vertex property, and Manifold then orders a few triangles,
+and the corners inside them, differently - same triangles, same positions, other
+numbers. Against the run before, with original ids compared by rank
+(`step-dev.sh compare --relabel-originals`): all 120 exports have the same entity
+census, every report line agrees but one tally (step-cut-cone: 21 corners an
+earlier rung had placed were overruled, not 25; the same 34 end on every face),
+and the ledgers agree up to facet numbers and the last printed digit of a
+centroid. The *files* do not: every point matched to 1e-9 on 93 exports, and on
+27 not - on the exact tier a seam turned to another vertex of the same ring (at
+most ten points an export), on the approximation tier thousands of B-spline
+control points (the bayonet 8525, lid10 2059, f04 342, step-sweep-law-corners
+370), because a fit samples from where its boundary starts.
+
+So arbitrary choices follow the vertex numbering, and nothing about the model -
+at least these three: a closed band's seam is `bottom_set.front()`
+(`settleSeams`), a boundary cycle starts at its lowest vertex id
+(`boundaryCycles`), and a fit samples from where its cycle starts. And the solid
+moves with them. OCCT's volumes of the 27 exports, before and after: the exact
+tier identical to the last digit on all but step-extrude-refusals, 2.8e-7
+relative, where the seam of a face turned to another vertex of its rim; the
+approximation tier's fits by up to 5.5e-5 (the bayonet, 13 mm3; lid10 9e-6,
+f04 7e-6, whose round trip went from failing to passing). A change that only
+renumbers the mesh cannot be told from one that changes a fit (A7: order is not
+policy; F9: deterministic, which is run to run and says nothing of this).
+
+**The fix is to make each choice a function of the model**: the seam through a
+ring's canonical vertex - one fixed by position alone, the same whatever the
+numbering - and a cycle started there too, so a fit samples from the same point.
+A test that exports one model with its vertices permuted and asserts the same
+file, point for point, is the assertion that holds it. Not done yet; recorded so
+the next neutral step does not rediscover it.
+
 ### 32. The fixture sanity test does not look for `EXPORT-ERROR`
 
 `tests/stepexportsanitytest.py` never checks the exporter's own error lines;

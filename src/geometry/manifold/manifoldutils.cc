@@ -3,6 +3,7 @@
 
 #include <manifold/polygon.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,8 @@
 #include "geometry/PolySetUtils.h"
 #include "geometry/linalg.h"
 #include "geometry/manifold/ManifoldGeometry.h"
+#include "geometry/recognition/Exact.h"
+#include "geometry/Surface.h"
 #include "utils/printutils.h"
 #ifdef ENABLE_CGAL
 #include "geometry/cgal/cgalutils.h"
@@ -92,6 +95,28 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   }
   mesh.runIndex.push_back(mesh.triVerts.size());
 
+  // Which declared surface each triangle was made on - identity, carried from
+  // here through every boolean as a vertex property. See PolySet::surface_tags
+  // and Surface::tags. A triangle this geometry already names keeps its name;
+  // any other is its generator's own, and names the one surface it lies on
+  // wholly at machine precision (checklist E3: a generator's points are on its
+  // own declaration), or none - where it lies on none, or on several, identity
+  // is what is missing, and nothing is guessed.
+  const std::vector<std::shared_ptr<Surface>> tagged = stampTags(ps.surfaces);
+  const bool carried = ps.surface_tags.size() == ps.indices.size();
+  auto tag_of = [&](size_t face) -> uint32_t {
+    if (carried) return ps.surface_tags[face];
+    const auto& tri = ps.indices[face];
+    return ManifoldUtils::triangleTag(ps.vertices[tri[0]], ps.vertices[tri[1]], ps.vertices[tri[2]],
+                                      tagged);
+  };
+  std::vector<uint32_t> tri_tag;
+  tri_tag.reserve(ps.indices.size());
+  for (const auto& group : colorToFaceIndices) {
+    for (const size_t face : group.second) tri_tag.push_back(tag_of(face));
+  }
+  mesh = ManifoldUtils::withTagProperty(mesh, tri_tag);
+
   auto mani = manifold::Manifold(mesh);
 
   if (mani.Status() != Error::NoError) {
@@ -115,7 +140,7 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   // so they are who declared these records - stamped here, where it is known,
   // rather than inferred from positions downstream. See Surface::owners.
   return std::make_shared<ManifoldGeometry>(mani, originalIDs, originalIDToColor, std::set<uint32_t>{},
-                                            stampOwners(ps.surfaces, originalIDs));
+                                            stampOwners(tagged, originalIDs));
 }
 
 }  // namespace
@@ -135,6 +160,138 @@ std::shared_ptr<PolySet> mintOriginals(const PolySet& ps)
     for (const size_t face : group.second) out->original_ids[face] = static_cast<int32_t>(id);
   }
   out->surfaces = stampOwners(ps.surfaces, ids);
+  return out;
+}
+
+manifold::MeshGL64 withTagProperty(const manifold::MeshGL64& topology,
+                                   const std::vector<uint32_t>& tri_tag)
+{
+  if (!std::any_of(tri_tag.begin(), tri_tag.end(), [](uint32_t t) { return t != 0; })) return topology;
+  // A fourth property per vertex, and a copy of a vertex for each further tag
+  // the triangles meeting there carry, merged back to it - so the topology is
+  // the mesh's own and only the property has a seam, along the edges where two
+  // surfaces meet. Every vertex keeps its own index and the copies go after
+  // them, so the numbering Manifold works from is the one it would have had
+  // without the tags; built in the order triangles were visited instead, every
+  // vertex was renumbered, and what follows from the order - which facets
+  // merge first, which corner a bound is taken at - moved with it.
+  manifold::MeshGL64 mesh = topology;
+  const size_t nv = topology.NumVert();
+  std::vector<double> props;
+  props.reserve(4 * nv);
+  for (size_t v = 0; v < nv; v++) {
+    for (int c = 0; c < 3; c++) props.push_back(topology.vertProperties[topology.numProp * v + c]);
+    props.push_back(0);
+  }
+  std::vector<char> assigned(nv, 0);
+  std::map<std::pair<uint64_t, uint32_t>, uint64_t> copy;
+  std::vector<uint64_t> tris;
+  tris.reserve(topology.triVerts.size());
+  mesh.mergeFromVert.clear();
+  mesh.mergeToVert.clear();
+  for (size_t t = 0; t < tri_tag.size() && 3 * t + 2 < topology.triVerts.size(); t++) {
+    const uint32_t tag = tri_tag[t];
+    for (int k = 0; k < 3; k++) {
+      const uint64_t v = topology.triVerts[3 * t + k];
+      if (!assigned[v]) {
+        assigned[v] = 1;
+        props[4 * v + 3] = static_cast<double>(tag);
+      }
+      if (props[4 * v + 3] == static_cast<double>(tag)) {
+        tris.push_back(v);
+        continue;
+      }
+      auto it = copy.find({v, tag});
+      if (it == copy.end()) {
+        const uint64_t index = props.size() / 4;
+        for (int c = 0; c < 3; c++) props.push_back(topology.vertProperties[topology.numProp * v + c]);
+        props.push_back(static_cast<double>(tag));
+        mesh.mergeFromVert.push_back(index);
+        mesh.mergeToVert.push_back(v);
+        it = copy.emplace(std::make_pair(v, tag), index).first;
+      }
+      tris.push_back(it->second);
+    }
+  }
+  mesh.numProp = 4;
+  mesh.vertProperties = std::move(props);
+  mesh.triVerts = std::move(tris);
+  return mesh;
+}
+
+uint32_t triangleTag(const Vector3d& a, const Vector3d& b, const Vector3d& c,
+                     const std::vector<std::shared_ptr<Surface>>& surfaces)
+{
+  uint32_t found = 0;
+  int matches = 0;
+  for (const auto& s : surfaces) {
+    if (s == nullptr || s->tags.empty() || !s->declaresFace()) continue;
+    if (recognition::onExactly(s.get(), a) && recognition::onExactly(s.get(), b) &&
+        recognition::onExactly(s.get(), c)) {
+      found = s->tags.back();
+      matches++;
+    }
+  }
+  return matches == 1 ? found : 0;
+}
+
+manifold::Manifold withSurfaceTags(const manifold::Manifold& mani,
+                                   std::vector<std::shared_ptr<Surface>>& surfaces)
+{
+  surfaces = stampTags(surfaces);
+  const manifold::MeshGL64 full = mani.GetMeshGL64();
+  const manifold::MeshGL64 topology = topologyMesh(full);
+  std::vector<uint32_t> tri_tag(topology.NumTri(), 0);
+  bool added = false;
+  for (size_t t = 0; t < tri_tag.size(); t++) {
+    if (full.numProp > 3) {
+      tri_tag[t] =
+        static_cast<uint32_t>(full.vertProperties[full.triVerts[3 * t] * full.numProp + 3] + 0.5);
+    }
+    if (tri_tag[t] != 0) continue;
+    auto at = [&](int k) {
+      const uint64_t v = topology.triVerts[3 * t + k];
+      return Vector3d(topology.vertProperties[3 * v], topology.vertProperties[3 * v + 1],
+                      topology.vertProperties[3 * v + 2]);
+    };
+    tri_tag[t] = triangleTag(at(0), at(1), at(2), surfaces);
+    added = added || tri_tag[t] != 0;
+  }
+  if (!added) return mani;
+  manifold::Manifold out(withTagProperty(topology, tri_tag));
+  return out.Status() == Error::NoError ? out : mani;
+}
+
+std::vector<size_t> canonicalVertices(const manifold::MeshGL64& mesh)
+{
+  std::vector<size_t> to(mesh.NumVert());
+  for (size_t v = 0; v < to.size(); v++) to[v] = v;
+  for (size_t i = 0; i < mesh.mergeFromVert.size() && i < mesh.mergeToVert.size(); i++) {
+    to[mesh.mergeFromVert[i]] = mesh.mergeToVert[i];
+  }
+  return to;
+}
+
+manifold::MeshGL64 topologyMesh(const manifold::MeshGL64& mesh)
+{
+  if (mesh.numProp <= 3 && mesh.mergeFromVert.empty()) return mesh;
+  const std::vector<size_t> to = canonicalVertices(mesh);
+  std::vector<uint64_t> index(to.size(), uint64_t(-1));
+  manifold::MeshGL64 out;
+  out.numProp = 3;
+  for (size_t v = 0; v < to.size(); v++) {
+    if (to[v] != v) continue;
+    index[v] = out.vertProperties.size() / 3;
+    for (int k = 0; k < 3; k++) out.vertProperties.push_back(mesh.vertProperties[v * mesh.numProp + k]);
+  }
+  out.triVerts.reserve(mesh.triVerts.size());
+  for (const auto v : mesh.triVerts) out.triVerts.push_back(index[to[v]]);
+  out.runIndex = mesh.runIndex;
+  out.runOriginalID = mesh.runOriginalID;
+  out.runTransform = mesh.runTransform;
+  out.runFlags = mesh.runFlags;
+  out.faceID = mesh.faceID;
+  out.tolerance = mesh.tolerance;
   return out;
 }
 
@@ -354,7 +511,7 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromSurfaceMesh(const SurfaceMes
 template <class SurfaceMesh>
 std::shared_ptr<SurfaceMesh> createSurfaceMeshFromManifold(const manifold::Manifold& mani)
 {
-  const auto meshgl = mani.GetMeshGL64();
+  const auto meshgl = topologyMesh(mani.GetMeshGL64());
   auto mesh = std::make_shared<SurfaceMesh>();
   mesh->reserve(meshgl.NumVert(), meshgl.NumTri() * 3, meshgl.NumTri());
   for (size_t i = 0; i < meshgl.NumVert(); i++) {

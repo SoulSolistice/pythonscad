@@ -40,6 +40,7 @@
 #include <src/geometry/AnalyticFeatures.h>
 #include <src/geometry/recognition/Exact.h>
 #include "io/step/Meridian.h"
+#include "geometry/recognition/Provenance.h"
 #ifdef ENABLE_MANIFOLD
 #include <src/geometry/manifold/manifoldutils.h>
 #endif
@@ -1017,6 +1018,45 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
     }
   }
 
+  // Which declared surface each merged face was made on: the tag its triangles
+  // carry (PolySet::surface_tags), voted over its boundary exactly as the
+  // original is above, and named by the record in ps->surfaces that holds the
+  // tag. kUnknown where no tags were carried; kNone where carried and untagged.
+  std::vector<int32_t> faceSurface(indicesNew.size(), recognition::Provenance::kUnknown);
+  if (ps->surface_tags.size() == ps->indices.size()) {
+    std::map<uint32_t, int32_t> surface_of_tag;
+    for (std::size_t si = 0; si < ps->surfaces.size(); si++) {
+      if (ps->surfaces[si] == nullptr) continue;
+      for (const uint32_t tag : ps->surfaces[si]->tags)
+        surface_of_tag.emplace(tag, static_cast<int32_t>(si));
+    }
+    std::map<std::pair<int, int>, uint32_t> edge_tag;
+    for (std::size_t t = 0; t < ps->indices.size(); t++) {
+      const IndexedFace& tri = ps->indices[t];
+      for (std::size_t i = 0; i < tri.size(); i++)
+        edge_tag[{tri[i], tri[(i + 1) % tri.size()]}] = ps->surface_tags[t];
+    }
+    for (std::size_t f = 0; f < indicesNew.size(); f++) {
+      std::map<uint32_t, int> votes;
+      const IndexedFace& poly = indicesNew[f];
+      for (std::size_t i = 0; i < poly.size(); i++) {
+        const auto it = edge_tag.find({poly[i], poly[(i + 1) % poly.size()]});
+        if (it != edge_tag.end()) votes[it->second]++;
+      }
+      int best = 0;
+      uint32_t tag = 0;
+      for (const auto& v : votes) {
+        if (v.second > best) {
+          best = v.second;
+          tag = v.first;
+        }
+      }
+      const auto it = surface_of_tag.find(tag);
+      faceSurface[f] =
+        tag != 0 && it != surface_of_tag.end() ? it->second : recognition::Provenance::kNone;
+    }
+  }
+
   StepKernel sk;
 
   // newNormals holds the outward normal of each merged face; without it the
@@ -1038,8 +1078,8 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceOrigin, corner_moves, single_owner, owner_split, owned, faceParents, newNormals,
-                    1e-5, analytic, approximate, corner_owners);
+                    faceOrigin, faceSurface, corner_moves, single_owner, owner_split, owned, faceParents,
+                    newNormals, 1e-5, analytic, approximate, corner_owners);
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;

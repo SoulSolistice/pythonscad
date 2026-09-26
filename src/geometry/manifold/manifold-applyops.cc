@@ -88,8 +88,11 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     const auto hull = manifold::Manifold::Hull(pts);
     std::set<uint32_t> hull_ids;
     if (hull.OriginalID() >= 0) hull_ids.insert(uint32_t(hull.OriginalID()));
-    return std::make_shared<ManifoldGeometry>(hull, std::set<uint32_t>{}, std::map<uint32_t, Color4f>{},
-                                              std::set<uint32_t>{}, stampOwners(surfaces, hull_ids));
+    std::vector<std::shared_ptr<Surface>> stamped = stampOwners(surfaces, hull_ids);
+    // The hull's own faces, made on what its operands state it makes.
+    const auto tagged = ManifoldUtils::withSurfaceTags(hull, stamped);
+    return std::make_shared<ManifoldGeometry>(
+      tagged, std::set<uint32_t>{}, std::map<uint32_t, Color4f>{}, std::set<uint32_t>{}, stamped);
   }
 
   std::shared_ptr<ManifoldGeometry> geom;

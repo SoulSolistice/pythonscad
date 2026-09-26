@@ -45,6 +45,16 @@ public:
    * to. Where two records of one surface are merged the face wins, because a
    * surface some original is made of is a face whoever else points at it. */
   bool evidence_only = false;
+  /*! The identity a facet made on this surface carries: minted for each record
+   * a generator declares as a face, where its geometry becomes a Manifold
+   * (stampTags), and written into every triangle of that geometry lying wholly
+   * on the surface, as a vertex property Manifold carries through every
+   * boolean. A piece of such a triangle that a boolean cut keeps it, whatever
+   * its cut corners - so "which surface was this facet made on" is answered by
+   * identity rather than by where its corners are (doc/step-design-checklist.md,
+   * B7). Copied by clone() and so by every transform; unioned wherever two
+   * records are deduplicated into one. Empty for evidence and until stamped. */
+  std::vector<uint32_t> tags;
   /*! Whether this record declares a face: after stamping, whether any original
    * owns it; before, whether its generator did not mark it as evidence. */
   [[nodiscard]] bool declaresFace() const
@@ -156,6 +166,13 @@ void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
  * "declared by nobody". */
 [[nodiscard]] std::vector<std::shared_ptr<Surface>> stampOwners(
   const std::vector<std::shared_ptr<Surface>>& list, const std::set<uint32_t>& ids);
+
+/*! The records of `list`, each face a generator declared given an identity tag
+ * of its own - see Surface::tags. Copies rather than mutates, as stampOwners.
+ * Called where the geometry that carries them becomes a Manifold, the moment
+ * its facets are still the generator's own. */
+[[nodiscard]] std::vector<std::shared_ptr<Surface>> stampTags(
+  const std::vector<std::shared_ptr<Surface>>& list);
 
 /*! `kept` carrying the declarers of `twin` as well - owners, witnesses, and the
  * face winning over evidence - itself when nothing is new, a copy otherwise.

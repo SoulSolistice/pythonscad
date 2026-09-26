@@ -19,7 +19,8 @@ point and sometimes a trap — see *Kernel agreement is not proof* in
 | `scripts/step-dev.sh export lid10\|bayonet\|f02\|f04\|<file.scad>` | export with both feature flags and the right customizer set, into `build/step-dev/` |
 | `scripts/step-dev.sh census <file.stp>…` | the fault census, with the OCP-capable interpreter |
 | `scripts/step-dev.sh measure <name>` | every reference part and fixture, both tiers, ledgers dumped, into `build/measure/<name>/` |
-| `scripts/step-dev.sh compare <a> <b>` | the behaviour-neutral oracle: `measure-compare.py` - report less timings, entity census, sorted ledger and surfaces, per export. Self-compares to 0 and catches a one-field mutation |
+| `scripts/step-dev.sh compare <a> <b>` | the behaviour-neutral oracle: `measure-compare.py` - report less timings and cache size, entity census, sorted ledger and surfaces, per export. Self-compares to 0 and catches a one-field mutation |
+| `scripts/step-dev.sh compare <a> <b> --relabel-originals` | the same with original ids compared by rank: for a change that mints Manifold ids differently - one Manifold built more on the way - and so relabels every later original without changing what any original is or owns |
 | `scripts/step-dev.ps1 <same>` | the same from PowerShell, with MSYS2 set up and arguments passed untouched |
 
 Use these rather than inline commands. A command passed from PowerShell to bash

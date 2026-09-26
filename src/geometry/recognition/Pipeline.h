@@ -22,8 +22,9 @@ namespace recognition {
 /*! What recognition reads. Nothing here is written by recognition. */
 struct Inputs {
   Mesh mesh;
-  const std::vector<std::shared_ptr<Surface>> *surfaces = nullptr;     // the model's declarations
-  const std::vector<int32_t> *face_origin = nullptr;                   // provenance: facet -> original
+  const std::vector<std::shared_ptr<Surface>> *surfaces = nullptr;  // the model's declarations
+  const std::vector<int32_t> *face_origin = nullptr;                // provenance: facet -> original
+  const std::vector<int32_t> *face_surface = nullptr;  // provenance: facet -> the surface it was made on
   const std::map<int32_t, std::vector<std::size_t>> *owned = nullptr;  // original -> surfaces
   double model_tol = 0;
   bool approximate = false;  // step-approximate-surfaces: spend the tessellation band

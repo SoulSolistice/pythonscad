@@ -43,7 +43,27 @@ namespace recognition {
 struct Provenance {
   const std::vector<int32_t> *face_origin = nullptr;
   const std::map<int32_t, std::vector<std::size_t>> *owned = nullptr;
+  /*! Per facet, the declared surface it was made on - carried from where its
+   * maker became a Manifold through every boolean (PolySet::surface_tags) - or
+   * -1 where that is not known. */
+  const std::vector<int32_t> *face_surface = nullptr;
   std::size_t declared = 0;  // surfaces[0, declared) are the model's own
+
+  /*! What identity says of `facet` and `surface`: 1 it was made on it, 0 it
+   * was made on another or on none that was declared, -1 nothing is known -
+   * the facet came by a path that does not carry it, and a consumer keeps
+   * what it did before. */
+  [[nodiscard]] int madeOn(std::size_t facet, std::size_t surface) const
+  {
+    if (face_surface == nullptr || facet >= face_surface->size()) return -1;
+    const int32_t made = (*face_surface)[facet];
+    if (made == kUnknown) return -1;
+    return made == static_cast<int32_t>(surface) ? 1 : 0;
+  }
+  /*! In `face_surface`: carried, and made on no declared surface. */
+  static constexpr int32_t kNone = -1;
+  /*! In `face_surface`: not carried. */
+  static constexpr int32_t kUnknown = -2;
 
   /*! Whether the maker of `facet` is known not to own `surface`. */
   [[nodiscard]] bool excludes(std::size_t facet, std::size_t surface) const

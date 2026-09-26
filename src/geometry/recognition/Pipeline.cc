@@ -70,6 +70,7 @@ struct Context {
       arbiter(result.features, inputs.surfaces->size())
   {
     provenance.face_origin = inputs.face_origin;
+    provenance.face_surface = inputs.face_surface;
     provenance.owned = inputs.owned;
     provenance.declared = inputs.surfaces->size();
   }

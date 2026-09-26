@@ -25,12 +25,15 @@
 #   scripts/step-dev.sh measure <name>     every reference part and every fixture, both
 #                                          tiers, with the claim ledger dumped, into
 #                                          build/measure/<name>/
-#   scripts/step-dev.sh compare <a> <b>    two measure runs by content: the report less
+#   scripts/step-dev.sh compare <a> <b> [--relabel-originals]
+#                                          two measure runs by content: the report less
 #                                          timings, the entity census, and the ledger
 #                                          sorted row by row. The oracle for a change
 #                                          that claims to change no behaviour - the
 #                                          exporter is not byte-deterministic, so files
-#                                          are never diffed.
+#                                          are never diffed. --relabel-originals compares
+#                                          original ids by rank, for a change that mints
+#                                          Manifold ids differently and nothing else.
 #   scripts/step-dev.sh python             print the interpreter ctest uses (has OCP)
 #
 # From PowerShell, go through scripts/step-dev.ps1, which sets up MSYS2 correctly.
@@ -132,7 +135,9 @@ measure_all() {
 # `diff` once made this compare nothing and report nothing.
 compare_runs() {
   local py; py="$(ocp_python)"
-  "${py:-python}" "$ROOT/scripts/step-diagnostics/measure-compare.py"     "$ROOT/build/measure/$1" "$ROOT/build/measure/$2"
+  local a="$1" b="$2"
+  shift 2
+  "${py:-python}" "$ROOT/scripts/step-diagnostics/measure-compare.py"     "$ROOT/build/measure/$a" "$ROOT/build/measure/$b" "$@"
 }
 
 case "${1:-}" in
@@ -166,7 +171,8 @@ case "${1:-}" in
     ;;
   compare)
     [ $# -ge 3 ] || { echo "compare <a> <b>" >&2; exit 2; }
-    compare_runs "$2" "$3"
+    shift
+    compare_runs "$@"
     ;;
   *)
     sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'

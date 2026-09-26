@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstddef>
@@ -215,13 +216,19 @@ std::shared_ptr<Surface> withDeclarersOf(const std::shared_ptr<Surface>& kept, c
   };
   std::vector<int32_t> owners = unite(kept->owners, twin.owners);
   std::vector<int32_t> witnesses = unite(kept->witnesses, twin.witnesses);
+  std::vector<uint32_t> tags = kept->tags;
+  tags.insert(tags.end(), twin.tags.begin(), twin.tags.end());
+  std::sort(tags.begin(), tags.end());
+  tags.erase(std::unique(tags.begin(), tags.end()), tags.end());
   const bool evidence_only = kept->evidence_only && twin.evidence_only;
-  if (owners == kept->owners && witnesses == kept->witnesses && evidence_only == kept->evidence_only) {
+  if (owners == kept->owners && witnesses == kept->witnesses && evidence_only == kept->evidence_only &&
+      tags == kept->tags) {
     return kept;
   }
   auto copy = kept->clone();
   copy->owners = std::move(owners);
   copy->witnesses = std::move(witnesses);
+  copy->tags = std::move(tags);
   copy->evidence_only = evidence_only;
   return copy;
 }
@@ -244,6 +251,26 @@ std::vector<std::shared_ptr<Surface>> stampOwners(const std::vector<std::shared_
       copy->owners.clear();
       copy->witnesses = owners;
     }
+    out.push_back(copy);
+  }
+  return out;
+}
+
+std::vector<std::shared_ptr<Surface>> stampTags(const std::vector<std::shared_ptr<Surface>>& list)
+{
+  // One counter for the process: a tag is compared only with tags, within one
+  // evaluation, and never written anywhere.
+  static std::atomic<uint32_t> next{1};
+  std::vector<std::shared_ptr<Surface>> out;
+  out.reserve(list.size());
+  for (const auto& surface : list) {
+    if (surface == nullptr) continue;
+    if (!surface->declaresFace()) {
+      out.push_back(surface);
+      continue;
+    }
+    auto copy = surface->clone();
+    copy->tags.push_back(next++);
     out.push_back(copy);
   }
   return out;
@@ -2072,6 +2099,7 @@ std::shared_ptr<Surface> withDeclarersOfRecord(std::shared_ptr<Surface> into, co
 {
   into->owners = from.owners;
   into->witnesses = from.witnesses;
+  into->tags = from.tags;
   into->evidence_only = from.evidence_only;
   return into;
 }

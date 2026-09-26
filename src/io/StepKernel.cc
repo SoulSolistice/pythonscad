@@ -77,14 +77,16 @@ void StepKernel::build_tri_body(
   const char *name, const std::vector<Vector3d>& mesh_vertices, const std::vector<IndexedFace>& faces,
   const std::vector<std::shared_ptr<Curve>>& curves,
   const std::vector<std::shared_ptr<Surface>>& surfaces, const std::vector<int32_t>& faceOrigin,
-  const std::map<int, Vector3d>& cornerMoves, const std::map<int, std::size_t>& singleOwner,
+  const std::vector<int32_t>& faceSurface, const std::map<int, Vector3d>& cornerMoves,
+  const std::map<int, std::size_t>& singleOwner,
   const std::map<int, std::pair<std::size_t, std::size_t>>& ownerSplit,
   const std::map<int32_t, std::vector<std::size_t>>& owned, const std::vector<int>& faceParents,
   const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate,
   const std::map<int, std::vector<std::size_t>>& cornerOwners)
 {
-  BodyBuild(*this, name, mesh_vertices, faces, curves, surfaces, faceOrigin, cornerMoves, singleOwner,
-            ownerSplit, owned, faceParents, faceNormals, tol, analytic, approximate, cornerOwners)
+  BodyBuild(*this, name, mesh_vertices, faces, curves, surfaces, faceOrigin, faceSurface, cornerMoves,
+            singleOwner, ownerSplit, owned, faceParents, faceNormals, tol, analytic, approximate,
+            cornerOwners)
     .run();
 }
 

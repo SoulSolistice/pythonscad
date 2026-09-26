@@ -49,6 +49,17 @@ public:
    * A consumer therefore checks `size() == indices.size()` and keeps whatever
    * it did before as the fallback. */
   std::vector<int32_t> original_ids;
+  /*! Which declared surface each polygon was made on, as the tag of that record
+   * (Surface::tags), or 0 where it was made on none.
+   *
+   * The same question as `original_ids` one level down: not which solid a
+   * facet came from but which of its maker's faces. Written where a geometry
+   * becomes a Manifold - its facets still the generator's own, each tagged with
+   * the declared surface it lies on wholly - and carried by Manifold through
+   * every boolean, so a facet a boolean cut still names the surface it is a
+   * piece of, whatever its cut corners do. Empty wherever that path was not
+   * taken, and then a consumer keeps what it did before. */
+  std::vector<uint32_t> surface_tags;
   std::vector<Color4f> colors;
   std::vector<std::shared_ptr<Curve>>
     curves;  // defines vertex connections(edges) which are not straight lines

@@ -35,6 +35,7 @@ void StepKernel::BodyBuild::recognise()
     inputs.mesh.normals = &loop_normals;
     inputs.surfaces = &surfaces;
     inputs.face_origin = &faceOrigin;
+    inputs.face_surface = &faceSurface;
     inputs.owned = &owned;
     inputs.model_tol = model_tol;
     inputs.approximate = approximate;

@@ -112,7 +112,7 @@ std::string ManifoldGeometry::dump() const
 {
   std::ostringstream out;
   auto& manifold = getManifold();
-  auto meshgl = manifold.GetMeshGL64();
+  auto meshgl = ManifoldUtils::topologyMesh(manifold.GetMeshGL64());
   out << "Manifold:" << "\n status: " << ManifoldUtils::statusToString(manifold.Status())
       << "\n genus: " << manifold.Genus() << "\n num vertices: " << meshgl.NumVert()
       << "\n num polygons: " << meshgl.NumTri() << "\n polygons data:";
@@ -138,10 +138,27 @@ std::shared_ptr<PolySet> ManifoldGeometry::toPolySet() const
   ps->setConvexity(convexity);
   ps->setManifold(true);
 
-  // first 3 channels are xyz coordinate
-  for (size_t i = 0; i < mesh.vertProperties.size(); i += mesh.numProp)
-    ps->vertices.emplace_back(mesh.vertProperties[i], mesh.vertProperties[i + 1],
-                              mesh.vertProperties[i + 2]);
+  // First 3 channels are xyz coordinate; a fourth, where there is one, is the
+  // surface tag each triangle carries (PolySet::surface_tags). Manifold keeps a
+  // copy of a vertex per tag meeting there, merged through its own lists; one
+  // vertex per position here, or the topology would be torn along every seam.
+  const bool tagged = mesh.numProp > 3;
+  std::vector<size_t> vertex_of(mesh.NumVert());
+  {
+    const std::vector<size_t> to =
+      tagged ? ManifoldUtils::canonicalVertices(mesh) : std::vector<size_t>{};
+    for (size_t v = 0; v < vertex_of.size(); v++) {
+      if (tagged && to[v] != v) continue;
+      vertex_of[v] = ps->vertices.size();
+      const size_t i = v * mesh.numProp;
+      ps->vertices.emplace_back(mesh.vertProperties[i], mesh.vertProperties[i + 1],
+                                mesh.vertProperties[i + 2]);
+    }
+    if (tagged) {
+      for (size_t v = 0; v < vertex_of.size(); v++) vertex_of[v] = vertex_of[to[v]];
+    }
+  }
+  if (tagged) ps->surface_tags.reserve(mesh.NumTri());
 
   ps->colors.reserve(originalIDToColor_.size());
   ps->color_indices.reserve(ps->indices.size());
@@ -203,8 +220,15 @@ std::shared_ptr<PolySet> ManifoldGeometry::toPolySet() const
 
     auto colorIndex = getColorIndex(id);
     for (size_t i = start; i < end; i += 3) {
-      ps->indices.push_back({static_cast<int>(mesh.triVerts[i]), static_cast<int>(mesh.triVerts[i + 1]),
-                             static_cast<int>(mesh.triVerts[i + 2])});
+      ps->indices.push_back({static_cast<int>(vertex_of[mesh.triVerts[i]]),
+                             static_cast<int>(vertex_of[mesh.triVerts[i + 1]]),
+                             static_cast<int>(vertex_of[mesh.triVerts[i + 2]])});
+      // Every corner of a triangle carries its tag - it was written per
+      // triangle and a cut interpolates within one - so the first says it.
+      if (tagged) {
+        ps->surface_tags.push_back(
+          static_cast<uint32_t>(mesh.vertProperties[mesh.triVerts[i] * mesh.numProp + 3] + 0.5));
+      }
       ps->color_indices.push_back(colorIndex);
       // The same id the colour is derived from, kept as itself. See
       // PolySet::original_ids for why a downstream gate wants it.
@@ -258,7 +282,7 @@ std::shared_ptr<Polyhedron> ManifoldGeometry::toPolyhedron() const
 {
   auto p = std::make_shared<Polyhedron>();
   try {
-    auto meshgl = getManifold().GetMeshGL64();
+    auto meshgl = ManifoldUtils::topologyMesh(getManifold().GetMeshGL64());
     CGALPolyhedronBuilderFromManifold<Polyhedron> builder(meshgl);
     p->delegate(builder);
   } catch (const CGAL::Assertion_exception& e) {
@@ -391,6 +415,20 @@ void ManifoldGeometry::transform(const Transform3d& mat)
   // an uneven scale is elliptic - and one that cannot be represented afterwards
   // is dropped rather than kept wrong. See Surface::transformed.
   surfaces_ = transformedSurfaces(surfaces_, mat);
+}
+
+void ManifoldGeometry::addSurface(const std::shared_ptr<Surface>& surface)
+{
+  // A declaration on a subtree that is already a Manifold is declared by the
+  // originals that subtree carries - stamped here, or it has no owner at all,
+  // which is what `declare_cone` over a boolean result came out as. A hull
+  // keeps its id on the Manifold rather than in originalIDs_.
+  std::set<uint32_t> ids = originalIDs_;
+  if (ids.empty() && manifold_.OriginalID() >= 0) ids.insert(uint32_t(manifold_.OriginalID()));
+  mergeSurfaces(surfaces_, stampOwners({surface}, ids));
+  // And the triangles made on it say so: identity at the declaration, as
+  // where a geometry becomes a Manifold (PolySet::surface_tags).
+  manifold_ = ManifoldUtils::withSurfaceTags(manifold_, surfaces_);
 }
 
 void ManifoldGeometry::setColor(const Color4f& c)
