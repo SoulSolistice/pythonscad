@@ -607,8 +607,12 @@ struct StepKernel::BodyBuild {
   struct CrossingPiece {
     std::vector<int> verts;  // along the curve; front() == back() for a closed one
     const Surface *a = nullptr, *b = nullptr;
-    EdgeCurve *edge = nullptr;  // verts.front() to verts.back(); null: written as chords
-    step::CurveFit fit;         // empty for a piece of one edge, which is one Bezier
+    /*! The file's edges along it, in order from verts.front() to verts.back():
+     * one, and one more for every corner the curve turns inside a mesh edge,
+     * where a vertex of the file stands - a kernel wants each edge's curve G1.
+     * Empty: written as chords. */
+    std::vector<EdgeCurve *> edges;
+    std::vector<step::CurveFit> fits;  // parallel to `edges`; empty for one Bezier
   };
   std::vector<CrossingPiece> crossing_pieces;
   std::map<std::pair<int, int>, std::size_t> piece_of_edge;  // mesh edge (lo, hi) -> piece

@@ -207,58 +207,6 @@ std::size_t intervalsTurningBack(const CurveFit& fit)
   return backward;
 }
 
-bool joinC0(const std::vector<CurveFit>& parts, CurveFit& out)
-{
-  if (parts.empty()) return false;
-  if (parts.size() == 1) {
-    out = parts.front();
-    return true;
-  }
-  // Each part's share of the parameter, by the length of the points it runs
-  // through - the same measure its own parameters were spread by.
-  std::vector<double> length(parts.size(), 0.0);
-  double total = 0.0;
-  for (std::size_t j = 0; j < parts.size(); j++) {
-    const auto& pts = parts[j].points;
-    if (pts.size() < 2 || parts[j].ctrl.empty()) return false;
-    for (std::size_t k = 1; k < pts.size(); k++) length[j] += (pts[k] - pts[k - 1]).norm();
-    total += length[j];
-  }
-  if (!(total > 0)) return false;
-  CurveFit joined;
-  joined.knots.push_back(0.0);
-  joined.mults.push_back(kDegree + 1);
-  double from = 0.0;
-  for (std::size_t j = 0; j < parts.size(); j++) {
-    const CurveFit& part = parts[j];
-    const double to = j + 1 == parts.size() ? 1.0 : from + length[j] / total;
-    auto map = [&](double t) { return from + (to - from) * t; };
-    // Its interior knots, where it lies in the whole; then, unless it is the
-    // last, the corner it ends on, at multiplicity `degree`.
-    for (std::size_t k = 1; k + 1 < part.knots.size(); k++) {
-      joined.knots.push_back(map(part.knots[k]));
-      joined.mults.push_back(part.mults[k]);
-    }
-    if (j + 1 < parts.size()) {
-      joined.knots.push_back(to);
-      joined.mults.push_back(kDegree);
-    }
-    // Its control points, and the points it interpolates at their parameters;
-    // the first of each after the first is the corner the one before ended on.
-    const std::size_t skip = j == 0 ? 0 : 1;
-    joined.ctrl.insert(joined.ctrl.end(), part.ctrl.begin() + long(skip), part.ctrl.end());
-    for (std::size_t k = skip; k < part.points.size(); k++) {
-      joined.points.push_back(part.points[k]);
-      joined.params.push_back(map(part.params[k]));
-    }
-    from = to;
-  }
-  joined.knots.push_back(1.0);
-  joined.mults.push_back(kDegree + 1);
-  out = std::move(joined);
-  return true;
-}
-
 std::vector<Vector3d> creaseCorners(const Surface *a, const Surface *b, const Vector3d& p0,
                                     const Vector3d& p1)
 {

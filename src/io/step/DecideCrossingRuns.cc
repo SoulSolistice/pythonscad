@@ -62,20 +62,6 @@ void StepKernel::BodyBuild::decideCrossingRuns()
     const auto& ab = crossing_edges.at(e);
     return std::minmax(ab.first, ab.second);
   };
-  // A vertex a run passes through, rather than ends at.
-  auto interior = [&](int v) {
-    if (anchors.count(v) != 0) return false;
-    const auto& edges = at[v];
-    if (edges.size() != 2 || surfaces_of(edges[0]) != surfaces_of(edges[1])) return false;
-    const auto& regions = round[v];
-    return regions.size() == 2 && regions.count(nullptr) == 0;
-  };
-  auto other_end = [](const std::pair<int, int>& e, int v) { return e.first == v ? e.second : e.first; };
-  auto other_edge = [&](int v, const std::pair<int, int>& e) {
-    const auto& edges = at[v];
-    return edges[0] == e ? edges[1] : edges[0];
-  };
-
   // Where a sweep is only C0, which it states: the knots of its spline form of
   // multiplicity at least the degree, in u and in v. A curve crossing one there
   // turns a corner on it.
@@ -122,6 +108,36 @@ void StepKernel::BodyBuild::decideCrossingRuns()
     return key;
   };
 
+  // A vertex a run passes through, rather than ends at. Not one where the
+  // crossing turns a corner: the edges either side of it run over different
+  // flanks of a sweep - a crease of its profile, or a corner of its laws, lies
+  // at the vertex - and there the curve is only C0. A kernel wants every edge's
+  // curve G1, and SOLIDWORKS lists a face bounded by a C0 curve as faulty,
+  // where a vertex at the corner is simply a vertex; so the run ends there.
+  auto near_end = [&](const std::pair<int, int>& e, int v) {
+    const auto it = crossing_corners.find(e);
+    if (it != crossing_corners.end() && !it->second.empty()) {
+      // Ordered from the edge's first vertex to its second.
+      return v == e.first ? it->second.front() : it->second.back();
+    }
+    return vertices[e.first == v ? e.second : e.first];
+  };
+  auto interior = [&](int v) {
+    if (anchors.count(v) != 0) return false;
+    const auto& edges = at[v];
+    if (edges.size() != 2 || surfaces_of(edges[0]) != surfaces_of(edges[1])) return false;
+    const auto& regions = round[v];
+    if (!(regions.size() == 2 && regions.count(nullptr) == 0)) return false;
+    const auto& ab = crossing_edges.at(edges[0]);
+    return flank_of(near_end(edges[0], v), vertices[v], ab.first, ab.second) ==
+           flank_of(vertices[v], near_end(edges[1], v), ab.first, ab.second);
+  };
+  auto other_end = [](const std::pair<int, int>& e, int v) { return e.first == v ? e.second : e.first; };
+  auto other_edge = [&](int v, const std::pair<int, int>& e) {
+    const auto& edges = at[v];
+    return edges[0] == e ? edges[1] : edges[0];
+  };
+
   // One piece: a curve through `run`, or two pieces where the fit is refused.
   std::function<void(const std::vector<int>&, const Surface *, const Surface *)> make_piece;
   make_piece = [&](const std::vector<int>& run, const Surface *a, const Surface *b) {
@@ -149,12 +165,14 @@ void StepKernel::BodyBuild::decideCrossingRuns()
       std::vector<Point *> cp;
       cp.reserve(ctrl.size());
       for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
-      piece.edge = new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
-                                 new BSplineCurve(entities, "", cp), true);
+      piece.edges = {new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
+                                   new BSplineCurve(entities, "", cp), true)};
+      piece.fits = {CurveFit()};
     } else {
-      // Fitted flank by flank, and joined at the corners between them: one curve
-      // with its corners where the sweep has its creases - at a vertex where the
-      // edges either side lie on different flanks, or inside an edge.
+      // Fitted flank by flank, and an edge of the file each: where the sweep has
+      // a crease inside a mesh edge the curve turns a corner there, and a vertex
+      // of the file stands at it - a kernel wants every edge's curve G1. A corner
+      // at a mesh vertex has already ended the run - see `interior`.
       std::vector<CurveFit> parts;
       std::vector<Vector3d> points{vertices[run[0]]};
       bool fitted = true;
@@ -163,26 +181,15 @@ void StepKernel::BodyBuild::decideCrossingRuns()
         fitted = fitted && fitCrossingRun(a, b, points, 1e-7, parts.back());
         points = {at};
       };
-      Vector3d last = vertices[run[0]];  // where the current flank's last stretch began
       for (std::size_t k = 1; k < run.size() && fitted; k++) {
         for (const Vector3d& corner : corners_in(run[k - 1], run[k])) {
           points.push_back(corner);
           close_part(corner);
-          last = corner;
         }
         points.push_back(vertices[run[k]]);
-        if (k + 1 == run.size()) {
-          close_part(vertices[run[k]]);
-          break;
-        }
-        const std::vector<Vector3d> next = corners_in(run[k], run[k + 1]);
-        const Vector3d& onward = next.empty() ? vertices[run[k + 1]] : next.front();
-        if (flank_of(last, vertices[run[k]], a, b) != flank_of(vertices[run[k]], onward, a, b)) {
-          close_part(vertices[run[k]]);
-        }
-        last = vertices[run[k]];
+        if (k + 1 == run.size()) close_part(vertices[run[k]]);
       }
-      if (!fitted || !joinC0(parts, piece.fit)) {
+      if (!fitted) {
         if (run.size() > 2) {
           const std::size_t mid = run.size() / 2;
           make_piece(std::vector<int>(run.begin(), run.begin() + long(mid) + 1), a, b);
@@ -191,16 +198,23 @@ void StepKernel::BodyBuild::decideCrossingRuns()
         }
         // One edge whose corner could not be fitted round: its chord, as before.
         piece.verts = {std::min(run[0], run[1]), std::max(run[0], run[1])};
-        piece.fit = CurveFit();
       } else {
         piece.verts = run;
-        std::vector<Point *> cp;
-        cp.reserve(piece.fit.ctrl.size());
-        for (const auto& c : piece.fit.ctrl) cp.push_back(new Point(entities, c));
-        auto curve = new BSplineCurve(entities, "", cp);
-        curve->setKnots(CurveFit::degree, piece.fit.knots, piece.fit.mults);
-        piece.edge =
-          new EdgeCurve(entities, get_vertex(run.front()), get_vertex(run.back()), curve, true);
+        Vertex *from = get_vertex(run.front());
+        for (std::size_t k = 0; k < parts.size(); k++) {
+          const CurveFit& part = parts[k];
+          Vertex *to = k + 1 < parts.size()
+                         ? new Vertex(entities, new Point(entities, part.points.back()))
+                         : get_vertex(run.back());
+          std::vector<Point *> cp;
+          cp.reserve(part.ctrl.size());
+          for (const auto& c : part.ctrl) cp.push_back(new Point(entities, c));
+          auto curve = new BSplineCurve(entities, "", cp);
+          curve->setKnots(CurveFit::degree, part.knots, part.mults);
+          piece.edges.push_back(new EdgeCurve(entities, from, to, curve, true));
+          piece.fits.push_back(part);
+          from = to;
+        }
       }
     }
     const std::size_t index = crossing_pieces.size();
@@ -208,8 +222,8 @@ void StepKernel::BodyBuild::decideCrossingRuns()
       const int u = piece.verts[k], w = piece.verts[k + 1];
       piece_of_edge[{std::min(u, w), std::max(u, w)}] = index;
     }
-    if (piece.edge != nullptr) {
-      crossing_written++;
+    if (!piece.edges.empty()) {
+      crossing_written += int(piece.edges.size());
       crossing_mesh_edges += piece.verts.size() - 1;
     }
     crossing_pieces.push_back(std::move(piece));

@@ -67,14 +67,6 @@ Vector3d evaluate(const CurveFit& fit, double t);
  * not a tolerance: zero for a fit that runs along its points. */
 std::size_t intervalsTurningBack(const CurveFit& fit);
 
-/*! Curves fitted one after another, each ending where the next begins, as one
- * curve: C0 where they meet - a knot of multiplicity `degree` there - and each
- * part exactly itself in between, over a share of [0, 1] in proportion to its
- * length. Where two declared surfaces cross, a sweep's crease is a corner of
- * the curve; this is how the curve keeps it without being cut into two edges at
- * a vertex nothing else meets. */
-bool joinC0(const std::vector<CurveFit>& parts, CurveFit& out);
-
 /*! Where the crossing of `a` and `b` turns a corner between `p0` and `p1`, two
  * points of it: where it passes a crease of a sweep - a line of the grid's own
  * parameters at which it is only C0, which it states as a knot of full

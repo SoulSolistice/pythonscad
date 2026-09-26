@@ -146,94 +146,103 @@ void StepKernel::BodyBuild::emitSweepFaces()
       for (std::size_t step = 0; step < n;) {
         const std::size_t i = (start + step) % n;
         const int a = cycle[i], b = cycle[(i + 1) % n];
-        bool dir = true;
-        EdgeCurve *edge = nullptr;
-        std::size_t spans = 1;  // mesh edges this one edge of the file covers
-        // The one edge a sweep shares with something that can give it a curve:
-        // the piece of the crossing it belongs to, decided once for both faces.
+        // The edges of the file this stretch is: the chain of the crossing
+        // piece it belongs to, decided once for both faces, or one mesh edge.
+        struct Link {
+          EdgeCurve *edge;
+          bool dir;
+          const CurveFit *fit;  // the curve's own fit, or null for a chord or one Bezier
+        };
+        std::vector<Link> links;
+        std::size_t spans = 1;  // mesh edges these edges of the file cover
         const CrossingPiece *piece = pieceOf(a, b);
-        if (piece != nullptr && piece->edge != nullptr) {
+        if (piece != nullptr && !piece->edges.empty()) {
           bool ok = false;
           const bool forward = walksForward(*piece, cycle, i, ok);
           if (ok) {
-            edge = piece->edge;
-            dir = piece->verts.size() == 2 ? edge->vert1 == get_vertex(a) : forward;
+            for (std::size_t k = 0; k < piece->edges.size(); k++) {
+              const std::size_t at = forward ? k : piece->edges.size() - 1 - k;
+              const CurveFit *fit = piece->fits[at].ctrl.empty() ? nullptr : &piece->fits[at];
+              links.push_back({piece->edges[at], forward, fit});
+            }
             spans = piece->verts.size() - 1;
           } else {
             crossing_unwalked++;
           }
         }
-        if (edge == nullptr) {
-          edge = get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+        if (links.empty()) {
+          bool dir = true;
+          EdgeCurve *edge =
+            get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+          links.push_back({edge, dir, nullptr});
         }
-        loop.push_back(new OrientedEdge(entities, edge, dir));
-        face_edges_here.push_back(edge);
         step += spans;
-        if (spans > 1) {
-          // A piece of several edges is one curve across the surface, and its
-          // pcurve is that curve's own interpolation carried into the sweep's
-          // parameters: the same points, parameters and knots, so the two agree
-          // at every interpolated point. A straight line in (u, v), which is what
-          // one mesh edge is given below, is no description of a whole flank.
-          std::vector<Eigen::Vector2d> uv;
-          for (const auto& p : piece->fit.points) {
-            double pu = 0, pv = 0;
-            if (!parameters(p, pu, pv)) break;
-            uv.emplace_back(pu, pv);
-          }
-          const std::vector<Eigen::Vector2d> ctrl2 = uv.size() == piece->fit.points.size()
-                                                       ? interpolateLike(piece->fit, uv)
-                                                       : std::vector<Eigen::Vector2d>{};
-          if (!ctrl2.empty()) {
-            std::vector<Point2d *> cp;
-            for (const auto& c : ctrl2) cp.push_back(new Point2d(entities, c.x(), c.y()));
-            auto flat = new BSplineCurve2d(entities, cp);
-            flat->setKnots(CurveFit::degree, piece->fit.knots, piece->fit.mults);
-            if (param_context == nullptr) param_context = new ParametricContext(entities);
-            auto pcurve = new PCurve(entities, surface,
-                                     new DefinitionalRepresentation(entities, flat, param_context));
+        for (const Link& link : links) {
+          EdgeCurve *edge = link.edge;
+          loop.push_back(new OrientedEdge(entities, edge, link.dir));
+          face_edges_here.push_back(edge);
+          auto attach = [&](PCurve *pcurve) {
+            // An edge between two sweep faces is on both of them, and STEP
+            // allows a SURFACE_CURVE to say so.
             if (auto *already = dynamic_cast<SurfaceCurve *>(edge->round)) {
               if (already->on.size() < 2) already->on.push_back(pcurve);
             } else {
               edge->round = new SurfaceCurve(entities, edge->round, {pcurve});
             }
+          };
+          if (link.fit != nullptr) {
+            // A fitted curve across the surface, and its pcurve is that curve's
+            // own interpolation carried into the sweep's parameters: the same
+            // points, parameters and knots, so the two agree at every
+            // interpolated point. A straight line in (u, v), which is what one
+            // mesh edge is given below, is no description of a flank.
+            std::vector<Eigen::Vector2d> uv;
+            for (const auto& p : link.fit->points) {
+              double pu = 0, pv = 0;
+              if (!parameters(p, pu, pv)) break;
+              uv.emplace_back(pu, pv);
+            }
+            const std::vector<Eigen::Vector2d> ctrl2 = uv.size() == link.fit->points.size()
+                                                         ? interpolateLike(*link.fit, uv)
+                                                         : std::vector<Eigen::Vector2d>{};
+            if (!ctrl2.empty()) {
+              std::vector<Point2d *> cp;
+              for (const auto& c : ctrl2) cp.push_back(new Point2d(entities, c.x(), c.y()));
+              auto flat = new BSplineCurve2d(entities, cp);
+              flat->setKnots(CurveFit::degree, link.fit->knots, link.fit->mults);
+              if (param_context == nullptr) param_context = new ParametricContext(entities);
+              attach(new PCurve(entities, surface,
+                                new DefinitionalRepresentation(entities, flat, param_context)));
+            }
+            continue;
           }
-          continue;
-        }
-        // Where this edge runs across the surface, written down rather than
-        // left to be guessed. A swept surface cannot be projected onto
-        // reliably - see the PCURVE classes in StepKernel.h - and this is the
-        // one face shape in this exporter that is trimmed by a polyline on
-        // such a surface.
-        //
-        // Taken from the edge's own two vertices, not from a and b: an edge
-        // already in the map may run the other way, and a pcurve that
-        // disagrees with the direction of the curve it belongs to is worse
-        // than none.
-        [&]() {
+          // Where this edge runs across the surface, written down rather than
+          // left to be guessed. A swept surface cannot be projected onto
+          // reliably - see the PCURVE classes in StepKernel.h - and this is the
+          // one face shape in this exporter that is trimmed by a polyline on
+          // such a surface.
+          //
+          // Taken from the edge's own two vertices, not from a and b: an edge
+          // already in the map may run the other way, and a pcurve that
+          // disagrees with the direction of the curve it belongs to is worse
+          // than none.
           double ua = 0, va = 0, ub = 0, vb = 0;
-          if (!parameters(edge->vert1->point->pt, ua, va)) return;
-          if (!parameters(edge->vert2->point->pt, ub, vb)) return;
+          if (!parameters(edge->vert1->point->pt, ua, va)) continue;
+          if (!parameters(edge->vert2->point->pt, ub, vb)) continue;
           const double su = ub - ua, sv = vb - va;
           const double plen = sqrt(su * su + sv * sv);
           // A DIRECTION has to have a magnitude, and an edge whose ends land on
           // the same parameters says nothing about where it runs anyway.
-          if (plen < 1e-12) return;
+          if (plen < 1e-12) continue;
           if (param_context == nullptr) param_context = new ParametricContext(entities);
-          auto rep = new DefinitionalRepresentation(
-            entities,
-            new Line2d(entities, new Point2d(entities, ua, va),
-                       new Vector2d(entities, new Direction2d(entities, su / plen, sv / plen), plen)),
-            param_context);
-          auto pcurve = new PCurve(entities, surface, rep);
-          // An edge between two sweep faces is on both of them, and STEP allows
-          // a SURFACE_CURVE to say so.
-          if (auto *already = dynamic_cast<SurfaceCurve *>(edge->round)) {
-            if (already->on.size() < 2) already->on.push_back(pcurve);
-          } else {
-            edge->round = new SurfaceCurve(entities, edge->round, {pcurve});
-          }
-        }();
+          attach(new PCurve(
+            entities, surface,
+            new DefinitionalRepresentation(
+              entities,
+              new Line2d(entities, new Point2d(entities, ua, va),
+                         new Vector2d(entities, new Direction2d(entities, su / plen, sv / plen), plen)),
+              param_context)));
+        }
       }
       auto edge_loop = new EdgeLoop(entities, loop);
       bounds.push_back(new FaceBound(entities, edge_loop, true, entry.first == outer));

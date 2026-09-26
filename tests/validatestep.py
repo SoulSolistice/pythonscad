@@ -1105,7 +1105,18 @@ def check_curve_runs(entities, problems):
     Lines are exempt, as the tessellation's own polylines, and rational
     B-splines too, which are the runs of a Bezier patch's net. Circles and
     conics would be the same finding and are not asked yet - a rim written
-    arc by arc is its own open item."""
+    arc by arc is its own open item.
+
+    A vertex where the curve turns a corner is not a piece of one curve, and
+    the file must have one there: a kernel wants every edge's curve G1, and
+    SOLIDWORKS lists a face bounded by a curve with a C0 knot inside it as
+    faulty. The curve turns a corner exactly where it crosses a crease of one of
+    the two surfaces - a knot line of full multiplicity, which the surface
+    states - so that is what exempts the vertex: its parameters on a face's
+    B-spline surface, read from an edge's pcurve there, lie on such a line, to
+    the rounding of the 17 digits they are written with. Not an angle between
+    the two curves: two fits of one smooth curve meet at an angle too, only a
+    small one, and where small ends would be a number nobody can derive."""
     edge_faces = {}
     for face in entities.values():
         if face.name != "ADVANCED_FACE":
@@ -1132,6 +1143,78 @@ def check_curve_runs(entities, problems):
         return (geometry is not None and geometry.name == "B_SPLINE_CURVE_WITH_KNOTS"
                 and not geometry.has("RATIONAL_B_SPLINE_CURVE"))
 
+    face_surface = {}
+    for face in entities.values():
+        if face.name == "ADVANCED_FACE" and face.refs():
+            face_surface[face.id] = face.refs()[-1]
+
+    def creases(surface_id):
+        """The knot lines a B-spline surface is only C0 along, in u and in v."""
+        surface = entities.get(surface_id)
+        if surface is None or not surface.has("B_SPLINE_SURFACE_WITH_KNOTS"):
+            return None
+        text = surface.part("B_SPLINE_SURFACE") or surface.args
+        degrees = re.findall(r"(\d+)\s*,\s*(\d+)\s*,\s*\(", text)
+        lists = _surface_knot_lists(surface)
+        if not degrees or lists is None:
+            return None
+        du, dv = int(degrees[0][0]), int(degrees[0][1])
+        umult, vmult, uknots, vknots = lists
+        return ([k for k, m in list(zip(uknots, umult))[1:-1] if m >= du],
+                [k for k, m in list(zip(vknots, vmult))[1:-1] if m >= dv])
+
+    def end_on(ec_id, surface_id, vertex):
+        """Where edge `ec_id`'s pcurve on `surface_id` is at `vertex`, or None."""
+        ec = entities[ec_id]
+        geometry = entities.get(ec.refs()[2])
+        if geometry is None or geometry.name != "SURFACE_CURVE":
+            return None
+        first, last = ec.refs()[0], ec.refs()[1]
+        if ".F." in ec.args:
+            first, last = last, first
+        for pid in geometry.refs()[1:]:
+            pcurve = entities.get(pid)
+            if pcurve is None or pcurve.name != "PCURVE" or len(pcurve.refs()) < 2:
+                continue
+            if pcurve.refs()[0] != surface_id:
+                continue
+            rep = entities.get(pcurve.refs()[1])
+            flat = entities.get(rep.refs()[0]) if rep is not None and rep.refs() else None
+            if flat is None:
+                return None
+            if flat.name == "B_SPLINE_CURVE_WITH_KNOTS":
+                ends = [entities[r].floats() for r in (flat.refs()[0], flat.refs()[-1])]
+            elif flat.name == "LINE" and len(flat.refs()) == 2:
+                # From the curve's first vertex, its VECTOR's length to the
+                # second: the one mesh edge a pcurve of this form describes.
+                start = entities[flat.refs()[0]].floats()
+                vector = entities.get(flat.refs()[1])
+                if vector is None or vector.name != "VECTOR" or not vector.refs():
+                    return None
+                direction = entities[vector.refs()[0]].floats()
+                length = vector.floats()
+                if len(start) != 2 or len(direction) != 2 or len(length) != 1:
+                    return None
+                ends = [start, [start[k] + direction[k] * length[0] for k in range(2)]]
+            else:
+                return None
+            return ends[0] if vertex == first else ends[1] if vertex == last else None
+        return None
+
+    def on_a_crease(vertex, edges, faces):
+        for face in faces:
+            lines = creases(face_surface.get(face))
+            if lines is None:
+                continue
+            for ec_id in edges:
+                uv = end_on(ec_id, face_surface[face], vertex)
+                if uv is None or len(uv) != 2:
+                    continue
+                for value, knots in zip(uv, lines):
+                    if any(abs(value - k) <= 64 * sys.float_info.epsilon * max(1.0, abs(k)) for k in knots):
+                        return True
+        return False
+
     pieces = []
     for v, edges in sorted(vertex_edges.items()):
         if len(edges) != 2:
@@ -1140,6 +1223,8 @@ def check_curve_runs(entities, problems):
         if not (polynomial_spline(a) and polynomial_spline(b)):
             continue
         if len(edge_faces.get(a, ())) != 2 or edge_faces.get(a) != edge_faces.get(b):
+            continue
+        if on_a_crease(v, (a, b), edge_faces[a]):
             continue
         pieces.append(v)
     if pieces:
@@ -1709,6 +1794,37 @@ def _weights_agree(a, b, rel=1e-9):
     return all(abs(x * k - y) <= rel * max(1.0, abs(y)) for x, y in zip(a, b))
 
 
+def _surface_knot_lists(ent):
+    """The four lists of a surface, in the order ISO 10303-42 gives them.
+
+    b_spline_surface_with_knots is (u_multiplicities, v_multiplicities,
+    u_knots, v_knots) - all the multiplicities, then all the knots. Reading
+    them positionally is the point: the rational branch of the exporter
+    wrote them interleaved, (u_mult, u_knots, v_mult, v_knots), for as long
+    as it had existed. Every list was individually correct, the degrees and
+    the net were right, validatestep.py passed it, and OpenCASCADE read
+    (0.,1.) where the schema puts v_multiplicities, failed to build the
+    surface, and dropped the face - so a filleted body imported as loose
+    surfaces with no error anywhere in this suite."""
+    text = (ent.part("B_SPLINE_SURFACE_WITH_KNOTS") if ent.has("RATIONAL_B_SPLINE_SURFACE")
+            else ent.args)
+    # The net has been consumed by then in the plain case, where the tail
+    # follows the .F.,.F.,.F. flags; in the complex case the part holds only
+    # the tail already.
+    tail = text.split(".F.")[-1] if ".F." in text else text
+    lists = re.findall(r"\(([^()]*)\)", tail)
+    if len(lists) < 4:
+        return None
+    out = []
+    for i, raw in enumerate(lists[:4]):
+        items = [x for x in raw.replace(" ", "").split(",") if x]
+        try:
+            out.append([int(x) for x in items] if i < 2 else [float(x) for x in items])
+        except ValueError:
+            return None
+    return out
+
+
 def check_bspline_faces(entities, problems):
     """A B-spline patch and the curves bounding it must come off one control net.
 
@@ -1728,35 +1844,7 @@ def check_bspline_faces(entities, problems):
     binds the four lists instead: the multiplicities sum to control points plus
     degree plus one, both ends are clamped, and the values increase."""
 
-    def knot_lists(ent):
-        """The four lists of a surface, in the order ISO 10303-42 gives them.
-
-        b_spline_surface_with_knots is (u_multiplicities, v_multiplicities,
-        u_knots, v_knots) - all the multiplicities, then all the knots. Reading
-        them positionally is the point: the rational branch of the exporter
-        wrote them interleaved, (u_mult, u_knots, v_mult, v_knots), for as long
-        as it had existed. Every list was individually correct, the degrees and
-        the net were right, validatestep.py passed it, and OpenCASCADE read
-        (0.,1.) where the schema puts v_multiplicities, failed to build the
-        surface, and dropped the face - so a filleted body imported as loose
-        surfaces with no error anywhere in this suite."""
-        text = (ent.part("B_SPLINE_SURFACE_WITH_KNOTS") if ent.has("RATIONAL_B_SPLINE_SURFACE")
-                else ent.args)
-        # The net has been consumed by then in the plain case, where the tail
-        # follows the .F.,.F.,.F. flags; in the complex case the part holds only
-        # the tail already.
-        tail = text.split(".F.")[-1] if ".F." in text else text
-        lists = re.findall(r"\(([^()]*)\)", tail)
-        if len(lists) < 4:
-            return None
-        out = []
-        for i, raw in enumerate(lists[:4]):
-            items = [x for x in raw.replace(" ", "").split(",") if x]
-            try:
-                out.append([int(x) for x in items] if i < 2 else [float(x) for x in items])
-            except ValueError:
-                return None
-        return out
+    knot_lists = _surface_knot_lists
 
     def net_of(surface):
         # A rational surface keeps its degrees and its net in the

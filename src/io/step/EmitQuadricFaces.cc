@@ -279,24 +279,24 @@ void StepKernel::BodyBuild::emitQuadricFaces()
           continue;
         }
         const int a = cycle[i], b = cycle[(i + 1) % n];
-        bool dir = true;
-        EdgeCurve *edge = nullptr;
-        std::size_t spans = 1;  // mesh edges this one edge of the file covers
+        std::size_t spans = 1;                            // mesh edges these edges of the file cover
+        std::vector<std::pair<EdgeCurve *, bool>> chain;  // the edges, and which way each is used
         // The piece of a crossing this edge belongs to, decided once for both
         // faces - see decideCrossingRuns.
         const CrossingPiece *piece = pieceOf(a, b);
-        if (piece != nullptr && piece->edge != nullptr) {
+        if (piece != nullptr && !piece->edges.empty()) {
           bool ok = false;
           const bool forward = walksForward(*piece, cycle, i, ok);
           if (ok) {
-            edge = piece->edge;
-            dir = piece->verts.size() == 2 ? edge->vert1 == get_vertex(a) : forward;
+            for (std::size_t k = 0; k < piece->edges.size(); k++) {
+              chain.emplace_back(piece->edges[forward ? k : piece->edges.size() - 1 - k], forward);
+            }
             spans = piece->verts.size() - 1;
             closed_piece = closed_piece || piece->verts.front() == piece->verts.back();
           } else {
             crossing_unwalked++;
           }
-          if (edge != nullptr && (cyl != nullptr || cone != nullptr)) {
+          if (!chain.empty() && (cyl != nullptr || cone != nullptr)) {
             // What this face's parameters mean, kept until the other face has
             // written its own and both pcurves can be built. Only a cylinder or a
             // cone: the pcurve is written from their parameters.
@@ -309,11 +309,15 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             crossing_sides[std::size_t(piece - crossing_pieces.data())].push_back(side);
           }
         }
-        if (edge == nullptr) {
-          edge = get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+        if (chain.empty()) {
+          bool dir = true;
+          chain.emplace_back(
+            get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt), dir);
         }
-        loop.push_back(new OrientedEdge(entities, edge, dir));
-        face_edges_here.push_back(edge);
+        for (const auto& link : chain) {
+          loop.push_back(new OrientedEdge(entities, link.first, link.second));
+          face_edges_here.push_back(link.first);
+        }
         step += spans;
       }
       // A rim that is one whole section, or one whole crossing, is one closed
