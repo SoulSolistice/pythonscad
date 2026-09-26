@@ -40,12 +40,12 @@ int findSpan(int n, double u, const std::vector<double>& U)
   return mid;
 }
 
-/*! The degree+1 basis functions not zero at `u` in span `i`: A2.2. */
-void basisFuns(int i, double u, const std::vector<double>& U, double *N)
+/*! The degree+1 basis functions of `degree` not zero at `u` in span `i`: A2.2. */
+void basisFuns(int degree, int i, double u, const std::vector<double>& U, double *N)
 {
   double left[kDegree + 1], right[kDegree + 1];
   N[0] = 1.0;
-  for (int j = 1; j <= kDegree; j++) {
+  for (int j = 1; j <= degree; j++) {
     left[j] = u - U[i + 1 - j];
     right[j] = U[i + j] - u;
     double saved = 0.0;
@@ -69,7 +69,7 @@ bool solveInterpolation(const CurveFit& fit, const Eigen::MatrixXd& rhs, Eigen::
   double N[kDegree + 1];
   for (int k = 0; k < count; k++) {
     const int span = findSpan(count - 1, fit.params[k], U);
-    basisFuns(span, fit.params[k], U, N);
+    basisFuns(kDegree, span, fit.params[k], U, N);
     for (int j = 0; j <= kDegree; j++) {
       if (N[j] != 0.0) entries.emplace_back(k, span - kDegree + j, N[j]);
     }
@@ -164,10 +164,47 @@ Vector3d evaluate(const CurveFit& fit, double t)
   const int count = int(fit.ctrl.size());
   const int span = findSpan(count - 1, t, U);
   double N[kDegree + 1];
-  basisFuns(span, t, U, N);
+  basisFuns(kDegree, span, t, U, N);
   Vector3d p = Vector3d::Zero();
   for (int j = 0; j <= kDegree; j++) p += fit.ctrl[span - kDegree + j] * N[j];
   return p;
+}
+
+namespace {
+
+/*! The derivative of `fit` at `t`, exactly: the degree-2 spline on the same
+ * knots whose control points are the differences of `fit`'s (A3.3). */
+Vector3d tangent(const CurveFit& fit, double t)
+{
+  const std::vector<double> U = fullKnots(fit);
+  const int count = int(fit.ctrl.size());
+  const int span = findSpan(count - 1, t, U);
+  double N[kDegree + 1];
+  basisFuns(kDegree - 1, span, t, U, N);
+  Vector3d d = Vector3d::Zero();
+  for (int j = 0; j < kDegree; j++) {
+    const int i = span - kDegree + j;
+    const double width = U[i + kDegree + 1] - U[i + 1];
+    if (width > 0) d += (fit.ctrl[i + 1] - fit.ctrl[i]) * (kDegree / width) * N[j];
+  }
+  return d;
+}
+
+}  // namespace
+
+std::size_t intervalsTurningBack(const CurveFit& fit)
+{
+  std::size_t backward = 0;
+  for (std::size_t i = 0; i + 1 < fit.points.size() && i + 1 < fit.params.size(); i++) {
+    const Vector3d chord = fit.points[i + 1] - fit.points[i];
+    bool turns_back = false;
+    for (const double s : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+      const double t = fit.params[i] + (fit.params[i + 1] - fit.params[i]) * s;
+      turns_back = turns_back || !(tangent(fit, t).dot(chord) > 0.0);
+    }
+    backward += turns_back ? 1 : 0;
+  }
+  return backward;
 }
 
 bool joinC0(const std::vector<CurveFit>& parts, CurveFit& out)
@@ -315,55 +352,81 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
     return true;
   };
 
-  // The run's end vertices as they are - the curve ends on them - and every
-  // point between them put on both surfaces: the interior vertices, and points
-  // of the curve between each two, found from the chord. One between each two
-  // unless that leaves fewer than a cubic needs - a run of one edge - and then
-  // two, at the chord's thirds.
-  const int between = run.size() == 2 ? 2 : 1;
+  // The run's end vertices as they are - the curve ends on them - and between
+  // them points of the curve evenly spaced along the run, each put on both
+  // surfaces from the chord it falls on. Evenly spaced and not the run's own
+  // vertices: those are wherever the mesh's two tessellations happened to cross
+  // each other, a bore's facets and a sweep's stations interleaving, and gaps a
+  // hundred times apart make an interpolating cubic ring between them. The fit
+  // then stalls above what it asks for however many points it adds, and the run
+  // is cut into pieces nothing meets. The inner vertices need not be
+  // interpolated - they are not vertices of the file, the run being one edge -
+  // only passed within the tolerance, which the fit is held to everywhere.
+  std::vector<double> along(run.size(), 0.0);
+  for (std::size_t k = 1; k < run.size(); k++) along[k] = along[k - 1] + (run[k] - run[k - 1]).norm();
+  const double length = along.back();
+  if (!(length > 0)) return false;
+  // Two points between each two vertices, as there were, and three at least,
+  // which is what a cubic needs.
+  const std::size_t intervals = std::max<std::size_t>(3, 2 * (run.size() - 1));
   std::vector<Vector3d> points;
   points.push_back(run.front());
-  for (std::size_t k = 1; k < run.size(); k++) {
-    for (int s = 1; s <= between; s++) {
-      const double t = double(s) / (between + 1);
-      if (!on_both(run[k - 1] * (1 - t) + run[k] * t, run[k - 1], run[k], points)) return false;
-    }
-    if (k + 1 < run.size()) {
-      if (!on_both(run[k], run[k - 1], run[k + 1], points)) return false;
-    } else {
-      points.push_back(run.back());
-    }
+  std::size_t k = 1;
+  for (std::size_t i = 1; i < intervals; i++) {
+    const double s = length * double(i) / double(intervals);
+    while (k + 1 < run.size() && along[k] < s) k++;
+    const double step = along[k] - along[k - 1];
+    const double t = step > 0 ? (s - along[k - 1]) / step : 0.5;
+    if (!on_both(run[k - 1] * (1 - t) + run[k] * t, run[k - 1], run[k], points)) return false;
   }
+  points.push_back(run.back());
 
   double previous = std::numeric_limits<double>::infinity();
+  std::size_t previous_backward = std::numeric_limits<std::size_t>::max();
   for (;;) {
     CurveFit fit;
     if (!interpolateCubic(points, fit)) return false;
     // How far the curve strays between each two of its points, from either
-    // surface: where it is on both it is the crossing.
+    // surface: where it is on both it is the crossing. And whether it runs
+    // *along* the crossing, which being on both surfaces does not say - see
+    // intervalsTurningBack.
     const std::size_t count = points.size();
-    std::vector<double> worst(count - 1, 0.0);
     double global = 0.0;
     for (std::size_t i = 0; i + 1 < count; i++) {
       for (const double s : {0.25, 0.5, 0.75}) {
         const Vector3d p = evaluate(fit, fit.params[i] + (fit.params[i + 1] - fit.params[i]) * s);
-        worst[i] = std::max(worst[i], std::max(distanceTo(a, p), distanceTo(b, p)));
+        global = std::max(global, std::max(distanceTo(a, p), distanceTo(b, p)));
       }
-      global = std::max(global, worst[i]);
     }
-    if (global <= tol) {
+    const std::size_t backward = intervalsTurningBack(fit);
+    if (global <= tol && backward == 0) {
       out = std::move(fit);
       return true;
     }
-    // More of the true curve where it missed; refused once that stops helping.
-    if (!(global < previous)) return false;
-    previous = global;
+    // Twice as many points of the true curve, everywhere and not only where it
+    // missed, so they stay evenly spaced: refining only the intervals that
+    // missed puts a short one beside a long one, and the cubic rings between
+    // them - which is how a fit that should gain sixteenfold with each halving
+    // got worse instead.
+    //
+    // Refused once that stops helping: when neither the number of intervals
+    // turning back falls, nor the miss at least halves. Twice the points of a
+    // smooth curve take a cubic interpolant's miss down sixteenfold; one that
+    // does not even halve is not converging on the curve at all, and is
+    // missing for a reason more points cannot cure - on step-declare-grid-scad
+    // a declared grid and a cylinder that do not cross to 1e-7 there, which
+    // went from 1.3e-2 to 1.02e-2 over 49153 points while "any decrease"
+    // counted as progress. The number turning back, not the share: doubling
+    // the points halves the share of a fixed few bad intervals for ever.
+    if (!(global <= previous / 2) && !(backward < previous_backward)) return false;
+    previous = std::min(previous, global);
+    previous_backward = std::min(previous_backward, backward);
     std::vector<Vector3d> refined;
     refined.reserve(count * 2);
     for (std::size_t i = 0; i + 1 < count; i++) {
       refined.push_back(points[i]);
-      if (worst[i] > tol && !on_both(evaluate(fit, (fit.params[i] + fit.params[i + 1]) * 0.5), points[i],
-                                     points[i + 1], refined)) {
+      if (!on_both(evaluate(fit, (fit.params[i] + fit.params[i + 1]) * 0.5), points[i], points[i + 1],
+                   refined)) {
         return false;
       }
     }

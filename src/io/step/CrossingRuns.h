@@ -23,6 +23,7 @@
  * same interpolation of the same points in a surface's parameters: sharing the
  * knots is what makes the two agree at every interpolated point exactly. */
 
+#include <cstddef>
 #include <vector>
 
 #include <Eigen/Core>
@@ -57,6 +58,15 @@ std::vector<Eigen::Vector2d> interpolateLike(const CurveFit& fit,
 /*! `fit` at parameter `t` in [0, 1]. */
 Vector3d evaluate(const CurveFit& fit, double t);
 
+/*! How many of `fit`'s intervals - between two consecutive points it
+ * interpolates - it turns back in: where its tangent, at either end of the
+ * interval or inside it, points against the chord from the one point to the
+ * next. A curve that doubles back over a stretch of the crossing is on both
+ * surfaces all the way, so no distance catches it; between two close points of
+ * the true curve the curve heads from one to the other, so this does. A sign,
+ * not a tolerance: zero for a fit that runs along its points. */
+std::size_t intervalsTurningBack(const CurveFit& fit);
+
 /*! Curves fitted one after another, each ending where the next begins, as one
  * curve: C0 where they meet - a knot of multiplicity `degree` there - and each
  * part exactly itself in between, over a share of [0, 1] in proportion to its
@@ -75,8 +85,10 @@ bool joinC0(const std::vector<CurveFit>& parts, CurveFit& out);
 std::vector<Vector3d> creaseCorners(const Surface *a, const Surface *b, const Vector3d& p0,
                                     const Vector3d& p1);
 
-/*! The curve `a` and `b` cross along, through `run` - vertices already on both,
- * consecutive along the curve - held to `tol` against each surface. False
+/*! The curve `a` and `b` cross along, from the first of `run` to its last -
+ * vertices already on both, consecutive along the curve - held to `tol`
+ * against each surface. It ends on those two and passes the others within
+ * `tol`, interpolating points of the curve evenly spaced along it. False
  * where the points cannot be put on both surfaces, or where adding points of
  * the true curve stops bringing the fit closer. */
 bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector3d>& run, double tol,
