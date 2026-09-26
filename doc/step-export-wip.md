@@ -4938,6 +4938,60 @@ checklist:
 5. **New rows**: bilinear walls (7) and roof planes (10) first, needing no new
    surface type; then the ellipse, the sweeps, minkowski and the general hull.
 
+### The declared sweep's laws, and what SOLIDWORKS's dialog found: 2026-09-26
+
+The generating law the section above asked for landed (`127db96b0` ..
+`d9ccfc530`): `declare_sweep` takes piecewise-linear radius and profile laws,
+the surface is written as its closed form, and the crossing with a coaxial
+cylinder or cone is solved in the meridian plane. lid10's code-30 fault went.
+The author then opened lid10 and saw SOLIDWORKS's Import Diagnostics list the
+*whole* sweep as faulty - 14 faces - where every API check the driver makes
+passed it.
+
+**The mechanism, by coupon** (`build/sw-kit6` .. `sw-kit14`, the author's
+import settings: diagnostics on, analytic conversion on, check-and-repair 1,
+do not knit; the dialog read by `-Dialog` from `f224af0e7` on):
+
+| variant of step-band-family's ridge on its bore | dialog faulty faces |
+| --- | --- |
+| profile constant - creases only across v, inside one face | 0 |
+| profile fading in and out - law corners at t = 0.2, 0.8 inside one face | 3 |
+| the same, the crossing's C0 knots made vertices (`cb42445c6`) | 3 |
+| the same file split at every C0 knot by OpenCASCADE, same writer both ways | 0 |
+| split at the law corners by the exporter (`511ee04c6`) | 0 |
+| the same, the mesh with no station at the corners | 1, and warned |
+
+So the cause is the face, not the curve: a face spanning a crease of its own
+surface along the sweep. The curve half was believed first and was not enough;
+it stands on its own ground (a kernel wants G1 edges, and D5 now says so), but
+it moved nothing in the dialog. The count on lid10 fits the same reading: one
+sweep face split at 3 law corners and 2 profile creases is 12 pieces, plus 2
+for the run-in face, and SOLIDWORKS's face count rose by exactly 9 over the grid
+version, which it split in v only (3 + 2).
+
+**Open, in order:**
+
+1. **The lead-in's start**, as before: where the rib emerges at zero depth the
+   crossing falls back to chords (lid10: 4 never fitted, 2 more at 1e-2; the
+   coupon: 2 per tip, code 17 up to 0.0335 by the census). lid10's remaining
+   API faults on the feature are exactly the run-in sweep face and the mouth
+   cone beside it (code 7). step-sweep-law-corners' volume waits on this:
+   derived 19509.346883, OpenCASCADE 19509.419 adaptively, 3.7e-6 over.
+2. **The dialog cannot yet say which face an item is.** A UI Automation
+   selection of a tree item does not reach the model's selection manager, and
+   `-DialogLocate` once left SOLIDWORKS spinning until it was ended. lid10's
+   dialog reads 5 (two plain, three starred) and the API 6 (the two above and
+   four code-21 planes); which is which is guessed until this is solved.
+3. **Profile creases across v stay inside faces.** Measured harmless on the
+   control and the on-station coupon (0 faults), not proven so; B9 records it.
+4. **SOLIDWORKS's volume of the law coupon under analytic conversion**,
+   19507.61 against the derived 19509.35 and 9 faces for the file's 14 - it
+   merges faces on import. Not yet measured raw.
+5. **The crossing fits carry more control points** since `9e10a23c5` refines
+   every interval at once (bored cylinder 1167 -> 2019 CARTESIAN_POINTs). The
+   price of a fit that converges; a fit that refines where it misses *and*
+   keeps its spacing even would cost less.
+
 ### A wall split by a Nef boolean
 
 On `--backend=CGAL` a boolean leaves the wall of a ring it never touched cut into

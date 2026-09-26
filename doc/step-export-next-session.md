@@ -421,6 +421,29 @@ of 58, unit tests unchanged.
 
 ## 6. Next steps, in order
 
+**Revised 2026-09-26 - the declared sweep's laws, and SOLIDWORKS's dialog.**
+
+| commit | what |
+| --- | --- |
+| `127db96b0` `02fc1d99d` | `SweepLaws`: a declared sweep's radius and profile are piecewise-linear tables in t; `declare_sweep` takes them, in SCAD at last as well as Python |
+| `0df925862` | a declared sweep is written as its closed form, rendered along t to 1e-7, a knot of full multiplicity at each corner of its laws |
+| `d9ccfc530` | `Meridian`: a sweep crosses a coaxial cylinder or cone in closed form; lid10's rib declares its laws |
+| `5152cd6e1` | the harness integrates a round trip's volume adaptively - the fixed-order default misread long B-spline edges |
+| `9e10a23c5` | the crossing fit samples the curve evenly and refines everywhere; it may not turn back (`intervalsTurningBack`); it stops when refinement no longer halves the miss (approved constant) |
+| `cb42445c6` | **a crossing curve ends at a vertex where it turns a corner** (checklist D5 revised): a C0 knot inside an edge is a fault to a kernel; `CrossingPiece` is a chain |
+| `511ee04c6` | **a declared sweep's face ends at each corner of its laws** (checklist B9): one face per stretch, each carrying its own stretch of the surface; `Meridian::place` keeps a corner on its crease; the missing station is an `EXPORT-WARNING`; `step-sweep-law-corners` |
+| `f224af0e7` | `step-interop-solidworks.ps1 -Dialog`: SOLIDWORKS's Import Diagnostics read through UI Automation |
+| `170a81f84` | lid10's rib puts a station at each corner of its laws |
+
+SOLIDWORKS's Import Diagnostics on lid10's declared sweep, the author's import
+settings: 14 faulty faces -> **5**. What is left of the thread there is the start
+of the lead-in, which is item 1 below and was item 1 before: where the rib emerges
+from the socket at zero depth the crossing falls back to chords, the run-in sweep
+face and the mouth cone read code 7, and step-sweep-law-corners' volume (derived
+19509.346883 in its own comment) cannot be asserted until those tips are exact -
+OpenCASCADE reads 3.7e-6 over. The dialog reader cannot yet say which face an
+item is; that is worth solving before reading its five.
+
 **Revised 2026-09-25 - the feedstock session.** What landed, against the survey
 in `doc/step-export-wip.md`, *Inferred where a declaration was possible*:
 
