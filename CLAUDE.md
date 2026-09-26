@@ -675,7 +675,7 @@ almost always:
 | change | what to run |
 | --- | --- |
 | edited an existing source file | `cmake --build build -jN` — never configure |
-| **added** a source file | configure first; sources are found by glob, and the full rebuild is unavoidable |
+| **added** a source file | list it in `CMakeLists.txt` (library sources are listed by name; only `src/**/*_test.cc` is globbed), then configure |
 | **added** a test or fixture | configure first, or ctest will not see the new test at all |
 
 Two measurements against that, and the hour now looks like the exception rather
