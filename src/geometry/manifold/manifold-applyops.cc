@@ -70,7 +70,11 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       } else if (const auto *ps = dynamic_cast<const PolySet *>(chgeom.get())) {
         per_operand.push_back(ps->surfaces);
         mergeSurfaces(surfaces, ps->surfaces);
-        note_reach(ps->solid_tree);
+        // A polyhedron not yet a Manifold has its faceted statement unresolved:
+        // resolve it here, by position, as its entry would by tag.
+        const bool faceted = ps->solid_tree && ps->solid_tree->op() == SolidTree::Op::Faceted;
+        note_reach(faceted ? facetedEnvelope(*ps, recordByPosition(*ps), ps->solid_tree->what())
+                           : ps->solid_tree);
         pts.reserve(pts.size() + ps->indices.size() * 3);
         for (const auto& p : ps->indices) {
           for (const auto& ind : p) {

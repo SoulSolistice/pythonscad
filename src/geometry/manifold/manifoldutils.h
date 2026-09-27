@@ -2,7 +2,9 @@
 
 #include <CGAL/Surface_mesh/Surface_mesh.h>
 
+#include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "core/enums.h"
@@ -58,6 +60,19 @@ uint32_t triangleTag(const Vector3d& a, const Vector3d& b, const Vector3d& c,
 manifold::Manifold withFreshTags(const manifold::Manifold& mani,
                                  std::vector<std::shared_ptr<Surface>>& surfaces,
                                  const std::set<uint32_t>& taken);
+
+/*! A faceted leaf's envelope (SolidTree::faceted): the box its faces span. A
+ * face on no record is its generator's own exact plane, and its corners are
+ * where it is; one on a record reaches where that record says
+ * (Surface::envelope). Opaque where a record can say nothing, or where the box
+ * has no inside. `record_of` says which record a face is on, or null. */
+std::shared_ptr<const SolidTree> facetedEnvelope(const PolySet& ps,
+                                                 const std::function<const Surface *(size_t)>& record_of,
+                                                 const std::string& what);
+/*! Which record a face of `ps` lies on, by position: the one face-declaring
+ * record all its corners lie on at machine precision - the rule a tag is
+ * minted by - or null. For a PolySet whose tags are not minted yet. */
+std::function<const Surface *(size_t)> recordByPosition(const PolySet& ps);
 
 manifold::Manifold withSurfaceTags(const manifold::Manifold& mani,
                                    std::vector<std::shared_ptr<Surface>>& surfaces);

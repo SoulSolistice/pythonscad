@@ -55,41 +55,6 @@ std::map<std::optional<Color4f>, std::vector<size_t>> colourGroups(const PolySet
   return groups;
 }
 
-/*! A faceted leaf's envelope (SolidTree::faceted): the box its faces span. A
- * face made on no record is its generator's own exact plane, and its corners
- * are where it is; one made on a record reaches where that record says
- * (Surface::envelope). Opaque where a record can say nothing, or where the box
- * has no inside to name a point of. */
-std::shared_ptr<const SolidTree> envelopeOf(const PolySet& ps,
-                                            const std::function<uint32_t(size_t)>& tag_of,
-                                            const std::vector<std::shared_ptr<Surface>>& records,
-                                            const std::string& what)
-{
-  std::map<uint32_t, const Surface *> by_tag;
-  for (const auto& record : records) {
-    if (record == nullptr) continue;
-    for (const uint32_t t : record->tags) by_tag.emplace(t, record.get());
-  }
-  BoundingBox box;
-  box.setEmpty();
-  for (size_t f = 0; f < ps.indices.size(); f++) {
-    std::vector<Vector3d> corners;
-    for (const int v : ps.indices[f]) corners.push_back(ps.vertices[v]);
-    const uint32_t tag = tag_of(f);
-    if (tag == 0) {
-      for (const auto& c : corners) box.extend(c);
-      continue;
-    }
-    const auto it = by_tag.find(tag);
-    BoundingBox reach;
-    if (it == by_tag.end() || !it->second->envelope(corners, reach)) {
-      return SolidTree::opaque(what + ", on a record that states no envelope");
-    }
-    box.extend(reach);
-  }
-  return SolidTree::box(box, what);
-}
-
 std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const PolySet& ps)
 {
   assert(ps.isTriangular());
@@ -183,7 +148,20 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   // generator's own and each knows the record it was made on.
   std::shared_ptr<const SolidTree> solid =
     ps.solid_tree ? ps.solid_tree : SolidTree::opaque("a mesh that states no solid");
-  if (solid->op() == SolidTree::Op::Faceted) solid = envelopeOf(ps, tag_of, tagged, solid->what());
+  if (solid->op() == SolidTree::Op::Faceted) {
+    std::map<uint32_t, const Surface *> by_tag;
+    for (const auto& record : tagged) {
+      if (record == nullptr) continue;
+      for (const uint32_t t : record->tags) by_tag.emplace(t, record.get());
+    }
+    solid = ManifoldUtils::facetedEnvelope(
+      ps,
+      [&](size_t f) -> const Surface * {
+        const auto it = by_tag.find(tag_of(f));
+        return it == by_tag.end() ? nullptr : it->second;
+      },
+      solid->what());
+  }
   return std::make_shared<ManifoldGeometry>(mani, originalIDs, originalIDToColor, std::set<uint32_t>{},
                                             stampOwners(tagged, originalIDs), solid);
 }
@@ -191,6 +169,49 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
 }  // namespace
 
 namespace ManifoldUtils {
+
+std::shared_ptr<const SolidTree> facetedEnvelope(const PolySet& ps,
+                                                 const std::function<const Surface *(size_t)>& record_of,
+                                                 const std::string& what)
+{
+  BoundingBox box;
+  box.setEmpty();
+  for (size_t f = 0; f < ps.indices.size(); f++) {
+    std::vector<Vector3d> corners;
+    for (const int v : ps.indices[f]) corners.push_back(ps.vertices[v]);
+    const Surface *record = record_of(f);
+    if (record == nullptr) {
+      for (const auto& c : corners) box.extend(c);
+      continue;
+    }
+    BoundingBox reach;
+    if (!record->envelope(corners, reach))
+      return SolidTree::opaque(what + ", on a record that states no envelope");
+    box.extend(reach);
+  }
+  return SolidTree::box(box, what);
+}
+
+std::function<const Surface *(size_t)> recordByPosition(const PolySet& ps)
+{
+  return [&ps](size_t f) -> const Surface * {
+    // The one face-declaring record every corner lies on at machine precision,
+    // as the tag says where one is minted (triangleTag): none, or several, and
+    // the face is its generator's own plane.
+    const Surface *found = nullptr;
+    int matches = 0;
+    for (const auto& s : ps.surfaces) {
+      if (s == nullptr || !s->declaresFace()) continue;
+      bool on = true;
+      for (const int v : ps.indices[f]) on = on && recognition::onExactly(s.get(), ps.vertices[v]);
+      if (on) {
+        found = s.get();
+        matches++;
+      }
+    }
+    return matches == 1 ? found : nullptr;
+  };
+}
 
 std::shared_ptr<PolySet> mintOriginals(const PolySet& ps)
 {

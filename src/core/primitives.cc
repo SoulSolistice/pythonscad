@@ -539,27 +539,46 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
   // declared as faces, the rims being evidence and no bound. A slice of up to
   // half a turn is convex and is bounded by its two flat sides as well, which
   // are declared here and nowhere else: as records they would be new faces the
-  // exporter has never been told about. A larger slice is not the intersection
-  // of anything, and states no solid. See SolidTree.h.
-  if (this->angle <= 180 || this->angle == 360) {
-    auto solid = std::make_shared<DeclaredSolid>();
+  // exporter has never been told about. A larger slice is the union of its two
+  // halves. See SolidTree.h.
+  {
+    // The wall and caps bound every piece; a slice adds its two flat sides.
+    std::vector<std::shared_ptr<Surface>> walls;
     for (const auto& record : polyset->surfaces) {
-      if (!record->evidence_only) solid->bounds.push_back(record);
+      if (!record->evidence_only) walls.push_back(record);
     }
     const double mid = (z1 + z2) / 2;
-    if (this->angle == 360) {
-      solid->interior = Vector3d(0, 0, mid);
-    } else {
-      solid->bounds.push_back(std::make_shared<PlaneSurface>(Vector3d(0, 0, 0), Vector3d(0, 1, 0)));
-      solid->bounds.push_back(std::make_shared<PlaneSurface>(
-        Vector3d(0, 0, 0), Vector3d(-sin_degrees(this->angle), cos_degrees(this->angle), 0)));
-      const double reach = (this->r1 + this->r2) / 4;  // half the radius at mid height
-      solid->interior =
-        Vector3d(reach * cos_degrees(this->angle / 2), reach * sin_degrees(this->angle / 2), mid);
-    }
     const double wide = std::max(this->r1, this->r2);
-    solid->extent = BoundingBox(Vector3d(-wide, -wide, z1), Vector3d(wide, wide, z2));
-    polyset->solid_tree = SolidTree::declared(solid, this->toString());
+    const BoundingBox extent(Vector3d(-wide, -wide, z1), Vector3d(wide, wide, z2));
+    // The slice between two angles, a0 < a1 <= a0 + 180 - convex, so the
+    // intersection of its bounds' insides.
+    auto slice = [&](double a0, double a1) {
+      auto solid = std::make_shared<DeclaredSolid>();
+      solid->bounds = walls;
+      solid->bounds.push_back(std::make_shared<PlaneSurface>(
+        Vector3d(0, 0, 0), Vector3d(-sin_degrees(a0), cos_degrees(a0), 0)));
+      solid->bounds.push_back(std::make_shared<PlaneSurface>(
+        Vector3d(0, 0, 0), Vector3d(-sin_degrees(a1), cos_degrees(a1), 0)));
+      const double reach = (this->r1 + this->r2) / 4;  // half the radius at mid height
+      const double at = (a0 + a1) / 2;
+      solid->interior = Vector3d(reach * cos_degrees(at), reach * sin_degrees(at), mid);
+      solid->extent = extent;
+      return SolidTree::declared(solid, this->toString());
+    };
+    if (this->angle == 360) {
+      auto solid = std::make_shared<DeclaredSolid>();
+      solid->bounds = walls;
+      solid->interior = Vector3d(0, 0, mid);
+      solid->extent = extent;
+      polyset->solid_tree = SolidTree::declared(solid, this->toString());
+    } else if (this->angle <= 180) {
+      polyset->solid_tree = slice(0, this->angle);
+    } else {
+      // More than half a turn is not convex, and is exactly the union of its
+      // two halves, each a slice that is.
+      polyset->solid_tree = SolidTree::combine(SolidTree::Op::Union, slice(0, this->angle / 2),
+                                               slice(this->angle / 2, this->angle));
+    }
   }
 
   return polyset;

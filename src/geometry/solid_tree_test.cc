@@ -280,3 +280,25 @@ TEST_CASE("copies of one geometry keep a tag each where they meet", "[identity]"
   }
   CHECK(checked == 24);  // two cubes, twelve triangles each
 }
+
+TEST_CASE("a hull of a polyhedron not yet a Manifold resolves its faces where it stands",
+          "[solidtree][envelope]")
+{
+  // hull() of a declared cube and a bare tetrahedron still a PolySet: the
+  // tetrahedron's faceted statement is resolved in the hull, by position, as
+  // its entry would by tag - and the hull lies within both boxes joined.
+  auto tet = std::make_shared<PolySet>(3);
+  tet->vertices = {{6, 0, 0}, {8, 0, 0}, {6, 3, 0}, {6, 0, 4}};
+  tet->indices = {{0, 2, 1}, {0, 1, 3}, {1, 2, 3}, {0, 3, 2}};
+  tet->solid_tree = SolidTree::faceted("polyhedron (4 points)");
+  Geometry::Geometries two;
+  two.emplace_back(nullptr, manifoldOf(*cube({0, 0, 0}, {1, 1, 1})));
+  two.emplace_back(nullptr, tet);
+  const auto hull = ManifoldUtils::applyOperator3DManifold(two, OpenSCADOperator::HULL);
+  REQUIRE(hull != nullptr);
+  BoundingBox box;
+  REQUIRE(hull->getSolidTree()->op() == SolidTree::Op::Enveloped);
+  REQUIRE(hull->getSolidTree()->extent(box));
+  CHECK((box.min() - Vector3d(0, 0, 0)).norm() == 0);
+  CHECK((box.max() - Vector3d(8, 3, 4)).norm() == 0);
+}
