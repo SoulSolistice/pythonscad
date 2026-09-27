@@ -164,7 +164,7 @@ pythonscad model.scad -o out.stp \
 rebuild:
 
 ```bash
-ctest --test-dir build -R 'export-step-|mutations'   # 67 tests
+ctest --test-dir build -R 'export-step-|mutations'   # 69 tests
 TEST_GENERATE=1 ctest --test-dir build -R <fixture>
 ```
 
@@ -203,6 +203,17 @@ each fix flips a test of its own.
 changes to another cause, shows up nowhere. To see what one fails on, run its
 script directly (`tests/step-flagship-check.py --strict-corners`,
 `tests/step-representation-check.py`, each with `--openscad`).
+
+`export-step-numbering` asserts that the file is a function of the model, not
+of how the mesh happens to be numbered: `OPENSCAD_STEP_PERMUTE=<seed>` makes
+the exporter renumber every vertex and triangle before recognition, and four
+fixtures must come out the same point for point, in OCCT volume and byte for
+byte in DATA. It holds because `export_step.cc` numbers the mesh by its
+positions (`canonicalNumbering`); a choice made by index anywhere downstream
+is safe only for that reason. Since 2026-09-27 two runs of one binary write
+identical DATA sections on either backend, so a file diff is evidence now -
+but a neutral refactor may still reorder entities, and `compare` stays the
+oracle.
 
 `export-step-sanitytest_step-cap-meets-wall` was a third, and the only *fixture*
 ever registered `WILL_FAIL`; it passes on its own merits since 2026-09-16 and the

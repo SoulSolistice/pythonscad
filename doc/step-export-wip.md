@@ -4159,6 +4159,70 @@ A test that exports one model with its vertices permuted and asserts the same
 file, point for point, is the assertion that holds it. Not done yet; recorded so
 the next neutral step does not rediscover it.
 
+**Closed 2026-09-27**, in four commits.
+
+- **The test first** (`3208c24c6`). `OPENSCAD_STEP_PERMUTE=<seed>` makes
+  `export_step.cc` renumber every vertex, reorder every triangle and turn each
+  to start at another corner before recognition sees the mesh, carrying colour,
+  original and surface tag with their triangle. `export-step-numbering`
+  (`tests/step-numbering-check.py`) exports step-bore, step-band-family,
+  step-extrude-refusals and step-declare-grid-scad on both tiers, plain and
+  under two numberings, and asserts the same entity census, every point matched
+  within `DBL_EPSILON` times its magnitude, the same OCCT volume within
+  n_faces x `DBL_EPSILON`, and - since `1861807d7` - the same DATA section byte
+  for byte. It failed on all four fixtures, both tiers, both numberings: the
+  bore's seam, 6885 of step-band-family's 10857 approximation points, OCCT
+  volume 3219.85676 against 3219.85836 on step-extrude-refusals' exact tier,
+  1.06e-4 on step-declare-grid-scad's approximation tier.
+- **The fix is one derivation, not a rule per choice** (`0542ebbb1`). The
+  choices named above are three of many - which band of a chain goes first,
+  which reason an existence verdict is filed under, the order a radius is
+  summed in - and all of them follow one input, the numbering. Fixing each
+  where it is made would never be complete and could not reach machine
+  precision, since a sum in another order is another double. So the exporter
+  numbers the mesh by its positions at its entry (`canonicalNumbering`):
+  vertices in the order of their positions, a tie between coincident vertices
+  broken by refining on their directed neighbours until nothing splits;
+  triangles turned to start at their lowest vertex and sorted. Every choice is
+  then a function of the positions (A10: derived once, from the fact that
+  decides it). Vertices a triangle uses and nothing tells apart would be
+  reported; there are none in the 120 exports. Unused copies are harmless -
+  step-revolve-axis-point has 33 at each end of its axis.
+- **An address, too** (`1861807d7`). With the points agreeing, the byte check
+  found one walk of a pointer-keyed map in the writer: `promoteCurves` minted
+  CIRCLE and ELLIPSE entities in allocation order, different every run. Now in
+  face order.
+- **Item 28 went with it** (`1fed59ca5`); see there.
+
+Measured (`measure n37-base` / `n37-canon`, `compare --relabel-originals`): the
+same EXPORT-ERRORs in the same files. The other differences are the ledger's
+facet numbers, now fixed by position, plus the moves one arbitrary
+start swapped for another would give: lid10 700 -> 704 faces (exact tier 1600 ->
+1604), its "moved 2 holes to the enclosing face" gone; existence reasons
+redistributed at equal totals (bayonet 252/231/42 -> 294/186/45); f04's seams of
+a surface against itself 35 -> 26. OCCT volumes, 92 of 120 differ, 76 by
+less than 1e-12. Exact tier at most 8.4e-7 (step-extrude-refusals 3219.856758 ->
+3219.854049, lid10-exact 7.7e-7). Approximation tier: step-exchange-never-
+surrender 117536.84 -> 117666.56 (1.1e-3), the bayonet 235672.71 -> 235550.01
+(5.2e-4), step-declare-grid-scad 8.6e-5, f04 5.7e-7, lid10 5.0e-7. The step
+after it (`1861807d7`) is neutral: 0 differences. Two measure runs are now
+identical byte for byte in all 120 DATA sections.
+
+**What is left, and it is not small.** The start is now fixed, but by the
+lexicographic order of positions. That is a function of the model's
+coordinates, not of its geometry: move or turn the part and the seam turns with
+the coordinate axes. And the approximation tier's fits move by up to 1.1e-3 of
+the solid's volume depending on where they start sampling -
+step-exchange-never-surrender, 130 mm3. A fit the model determined would not
+depend on its start. That sensitivity is the finding this item leaves open: the
+numbering only exposed it. A closed band's seam could come from the
+declaration - its own reference direction - where one exists; a fit's samples
+from its boundary's geometry and not its first vertex.
+
+It also turned up two things about other items: item 33's error depends on the
+numbering (step-exchange-never-surrender stopped raising it), and item 28's CGAL
+nondeterminism *was* this item.
+
 ### 38. Gates that hide truth, audited 2026-09-27
 
 Every rule that declines, refuses or drops a face or a declaration, classed by
@@ -4234,6 +4298,19 @@ mesh's own coplanarity allows"*. The exporter had been saying so on every suite
 run and nothing read it. Not chased: a Nef boolean's exact coordinates converted
 to doubles is the first branch to name, and is not measured. Each fixture carries
 it as a `KNOWN-EXPORT-ERROR`.
+
+**It depends on the numbering (2026-09-27).** Since the exporter numbers the
+mesh by position (item 37), step-exchange-never-surrender no longer raises it:
+the binary before raises it on every CGAL run, the one after on none of eight.
+Of the `.scad` fixtures, step-band-family, step-bored-cone, step-cap-meets-wall
+and step-sweep-law-corners still raise it, three runs of three each (the Python
+fixtures were not re-run by hand; the suite still requires it of those that
+name it, and passes). Nothing fixed it; which vertex a loop
+meets first decided whether this fixture showed it. So "a bound bent by
+something other than" the Nef conversion stays the question, and a fix is
+proven on the fixtures that still raise it, not on this one. The directive came
+out of step-exchange-never-surrender, as the harness requires, with the reason
+in the fixture.
 
 ### 34. What the D0 regions report found on its first read, 2026-09-24
 
@@ -4357,6 +4434,25 @@ for this and goes when this item does.
   non-deterministic. Nothing observed says that happens; nothing checked says it
   does not. **The cheap check is to export one model a hundred times and diff
   the reports**, which would be a real assertion and does not exist today.
+
+**Closed 2026-09-27, by item 37.** The Nef conversion hands the exporter the
+same mesh under a different numbering each run - the "upstream of recognition"
+above - and every choice the exporter made followed the numbering. Since
+`canonicalNumbering` (`0542ebbb1`) numbers it by position, and `promoteCurves`
+stopped walking a pointer-keyed map (`1861807d7`) - the one walk of an address
+order in the writer; `section_planes`, the likely cause named above, is only
+looked up - every `.scad` fixture on `--backend=CGAL`, three runs each: distinct
+DATA sections on 20 of 47 fixtures before, on 0 after, and each raises the same
+EXPORT-ERRORs every run. On Manifold, two `measure` runs agree byte for byte on
+all 120 exports. `KNOWN-EXPORT-ERROR-INTERMITTENT` is gone (`1fed59ca5`);
+step-cap-meets-wall names its item 33 error as an ordinary directive, raised on
+every run.
+
+So a file diff is now evidence, and the strongest: identical DATA sections are
+identical exports. It does not replace the content oracle for a neutral
+refactor, which may still write the same entities in another order.
+`export-step-numbering` asserts the byte identity for four fixtures under other
+numberings; the hundred-run check across every fixture is still not a test.
 
 ### 24. The flagship third of the suite does 18 exports where 6 would do
 

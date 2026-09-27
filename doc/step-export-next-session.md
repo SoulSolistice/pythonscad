@@ -352,7 +352,7 @@ powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 compare <a> <b>
   fate, measured and carried ownership, centroid, why) and `<file>.surfaces.tsv`
   (every declared surface's parameters, owners and witnesses). Facet indices match
   between tiers, so tier differences are a join of two files.
-- **The suite**: `ctest --test-dir build -R 'export-step-|mutations'`, 67 tests
+- **The suite**: `ctest --test-dir build -R 'export-step-|mutations'`, 69 tests
   (via `step-dev.ps1 test`). Two are **`WILL_FAIL` on purpose** and report
   green while failing: `export-step-flagship-corners`,
   `export-step-representation`. (`step-region-pocket` was the third until
@@ -387,8 +387,10 @@ powershell -ExecutionPolicy Bypass -File scripts\step-dev.ps1 compare <a> <b>
   the Edit tool, not a shell heredoc (it turns `\n` into a newline).
 - **clang-format fails the first commit** after reformatting: stage and commit
   again. Never `--no-verify`.
-- **The exporter is not byte-deterministic**: verify by content (the oracle),
-  never by diffing files.
+- **The exporter is byte-deterministic since 2026-09-27** (wip 28, 37): two
+  runs, or two numberings of one mesh, give the same DATA section. Still verify
+  a neutral refactor by content (the oracle) - it may write the same entities
+  in another order - but identical DATA sections are now proof too.
 - A transient "Permission denied" moving `pythonscad-bundled-py` during staging
   is a file lock; rebuild.
 

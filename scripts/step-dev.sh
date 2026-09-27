@@ -10,7 +10,7 @@
 # its own location so it works in any worktree.
 #
 #   scripts/step-dev.sh build              incremental build and stage (no configure)
-#   scripts/step-dev.sh test               the STEP suite: export-step-|mutations, 67 tests
+#   scripts/step-dev.sh test               the STEP suite: export-step-|mutations, 69 tests
 #   scripts/step-dev.sh flagship           the three flagship tests only
 #   scripts/step-dev.sh export <part> [dir]
 #                                          lid10 | bayonet | f02 | f04 | <file.scad>
@@ -29,9 +29,11 @@
 #                                          two measure runs by content: the report less
 #                                          timings, the entity census, and the ledger
 #                                          sorted row by row. The oracle for a change
-#                                          that claims to change no behaviour - the
-#                                          exporter is not byte-deterministic, so files
-#                                          are never diffed. --relabel-originals compares
+#                                          that claims to change no behaviour. The
+#                                          exporter is byte-deterministic since
+#                                          2026-09-27, but a neutral refactor may still
+#                                          reorder entities, so content is compared,
+#                                          not files. --relabel-originals compares
 #                                          original ids by rank, for a change that mints
 #                                          Manifold ids differently and nothing else.
 #   scripts/step-dev.sh python             print the interpreter ctest uses (has OCP)

@@ -453,6 +453,9 @@ Two smaller notes from the same work, both kept:
   model twice with different entity numbering, most likely a `std::map` keyed on
   a pointer. A behaviour-neutral change has to be verified by content - the
   report text, the entity census, the derived volumes - never by diffing files.
+  *(2026-09-27: it is now - the cause was the mesh's numbering, which the Nef
+  conversion changes run to run, and one walk of a pointer-keyed map; wip 28,
+  37. Content stays the oracle for a refactor, which may reorder entities.)*
 
 ### What this means for step 4
 
@@ -1136,7 +1139,9 @@ Two further rules the same episode earned:
 
 - **A step that claims to change no behaviour must be shown to change none**, by
   content - the export's report, the entity census, the derived volumes - and
-  never by diffing files, because the exporter is not byte-deterministic.
+  never by diffing files, because the exporter is not byte-deterministic
+  (it is since 2026-09-27, wip 28 and 37, but a refactor may reorder entities,
+  so content stays the oracle).
 - **Measure both tiers.** `--enable=step-analytic-surfaces` alone is a separate
   export and the suite is weakest there.
 
