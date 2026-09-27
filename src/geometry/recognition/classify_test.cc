@@ -5,6 +5,7 @@
 #include <catch2/catch_all.hpp>
 #include <memory>
 
+#include "geometry/HullOfRevolution.h"
 #include "geometry/SolidTree.h"
 #include "geometry/Surface.h"
 
@@ -158,4 +159,35 @@ TEST_CASE("an envelope rules a point out, and nothing in", "[classify][envelope]
   CHECK(at(part, -15, 0, 10) == Where::Out);  // in neither
   // and a faceted leaf never resolved says nothing
   CHECK(at(SolidTree::faceted(), 0, 0, 0) == Where::Unknown);
+}
+
+TEST_CASE("a hull of coaxial solids of revolution is declared by what its profile turns",
+          "[classify][hull]")
+{
+  // hull() of cylinder(r = 10) over z 0..5 and cylinder(r = 6) over z 5..8: the
+  // profile's hull is (10, 0), (10, 5), (6, 8) and the axis, so the solid is the
+  // r = 10 wall, a cone from r 10 at z 5 to r 6 at z 8, and the two caps - at
+  // z = 6 the cone is at r = 10 - 4/3 = 8.667.
+  const Vector3d z(0, 0, 1);
+  std::vector<std::vector<std::shared_ptr<Surface>>> operands = {
+    {std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), z, 10),
+     std::make_shared<PlaneSurface>(Vector3d(0, 0, 0), z),
+     std::make_shared<PlaneSurface>(Vector3d(0, 0, 5), z)},
+    {std::make_shared<CylinderSurface>(Vector3d(0, 0, 5), z, 6),
+     std::make_shared<PlaneSurface>(Vector3d(0, 0, 5), z),
+     std::make_shared<PlaneSurface>(Vector3d(0, 0, 8), z)}};
+  const auto solid = solidOfHullOfRevolution(operands);
+  REQUIRE(solid != nullptr);
+  const auto hull = SolidTree::declared(solid, "hull()");
+  CHECK(at(hull, 0, 0, 4) == Where::In);
+  CHECK(at(hull, 8, 0, 6) == Where::In);
+  CHECK(at(hull, 9, 0, 6) == Where::Out);   // beyond the cone
+  CHECK(at(hull, 10, 0, 2) == Where::On);   // on the wall
+  CHECK(at(hull, 5, 0, 9) == Where::Out);   // above the top cap
+  CHECK(at(hull, 0, 0, -1) == Where::Out);  // below the bottom
+  CHECK(at(hull, 8, 0, 6.5) == Where::On);  // on the cone: r = 10 - (z - 5) 4/3 = 8
+
+  // Not coaxial: no solid is claimed.
+  operands[1][0] = std::make_shared<CylinderSurface>(Vector3d(1, 0, 5), z, 6);
+  CHECK(solidOfHullOfRevolution(operands) == nullptr);
 }

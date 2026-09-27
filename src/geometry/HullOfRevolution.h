@@ -26,10 +26,21 @@
 #include <vector>
 
 class Surface;
+struct DeclaredSolid;
 
 /*! The surfaces the hull of `operands` makes, the hull of their profiles
  * turned about their common axis - or none, where the operands' declarations do not
  * state solids of revolution about one axis. `operands` holds each operand's
  * own declarations, face and evidence records alike; only faces are read. */
 std::vector<std::shared_ptr<Surface>> declareHullOfRevolution(
+  const std::vector<std::vector<std::shared_ptr<Surface>>>& operands);
+
+/*! The solid a hull of coaxial solids of revolution is, where the operands'
+ * records say they are such solids: the intersection of the insides of the
+ * surfaces its profile turns - convex, so exactly - with a point inside and
+ * its extent. Null where they are not, or where the turned surfaces do not
+ * bound every edge of the profile. A caller asks this only of operands that are
+ * each one declared primitive: records alone would take a cylinder with an
+ * undeclared cut for the whole cylinder. */
+std::shared_ptr<const DeclaredSolid> solidOfHullOfRevolution(
   const std::vector<std::vector<std::shared_ptr<Surface>>>& operands);

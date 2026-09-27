@@ -50,7 +50,12 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     // them lies within the box that holds them all.
     BoundingBox reach;
     bool reach_known = true;
+    // And whether every operand is one declared primitive: then a hull of
+    // coaxial ones is a declared solid of its own, not a box
+    // (solidOfHullOfRevolution).
+    bool all_primitive = true;
     auto note_reach = [&](const std::shared_ptr<const SolidTree>& tree) {
+      all_primitive = all_primitive && tree != nullptr && tree->op() == SolidTree::Op::Declared;
       BoundingBox b;
       if (tree == nullptr || !tree->extent(b)) reach_known = false;
       else reach.extend(b);
@@ -111,10 +116,15 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     // of them, so nothing beneath it answers for it - but it lies within the box
     // that holds its operands, where every one of them states where it lies, and
     // a point outside that box is outside the hull. See SolidTree.h.
-    return std::make_shared<ManifoldGeometry>(
-      tagged, std::set<uint32_t>{}, std::map<uint32_t, Color4f>{}, std::set<uint32_t>{}, stamped,
+    std::shared_ptr<const SolidTree> solid =
       reach_known ? SolidTree::box(reach, "hull()")
-                  : SolidTree::opaque("hull() of an operand that states no extent"));
+                  : SolidTree::opaque("hull() of an operand that states no extent");
+    if (all_primitive) {
+      if (auto exact = solidOfHullOfRevolution(per_operand))
+        solid = SolidTree::declared(exact, "hull()");
+    }
+    return std::make_shared<ManifoldGeometry>(
+      tagged, std::set<uint32_t>{}, std::map<uint32_t, Color4f>{}, std::set<uint32_t>{}, stamped, solid);
   }
 
   std::shared_ptr<ManifoldGeometry> geom;

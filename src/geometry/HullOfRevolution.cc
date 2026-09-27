@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "geometry/Profile2d.h"
+#include "geometry/SolidTree.h"
 #include "geometry/Surface.h"
 #include "geometry/SweptSurfaces.h"
 #include "geometry/linalg.h"
@@ -109,21 +110,24 @@ std::vector<Vector2d> convexHull(std::vector<Vector2d> points)
 
 }  // namespace
 
-std::vector<std::shared_ptr<Surface>> declareHullOfRevolution(
-  const std::vector<std::vector<std::shared_ptr<Surface>>>& operands)
+namespace {
+
+/*! The hull of the operands' profiles in the (radius, level) half-plane about
+ * their common axis, the axis included - every rim and its foot on it - or
+ * false where the operands are not coaxial solids of revolution. */
+bool hullProfile(const std::vector<std::vector<std::shared_ptr<Surface>>>& operands, Axis& axis,
+                 std::vector<Vector2d>& hull)
 {
-  std::vector<std::shared_ptr<Surface>> out;
-  if (operands.size() < 2) return out;
-  Axis axis;
+  if (operands.size() < 2) return false;
   std::vector<OperandProfile> profiles;
   for (std::size_t i = 0; i < operands.size(); i++) {
     Axis own;
     OperandProfile profile;
-    if (!profileOf(operands[i], own, profile)) return out;
+    if (!profileOf(operands[i], own, profile)) return false;
     if (i == 0) {
       axis = own;
     } else if (!sameLine(axis, own)) {
-      return out;
+      return false;
     } else {
       // the same line, possibly measured from another point: re-level
       const double shift = (own.origin - axis.origin).dot(axis.dir);
@@ -139,9 +143,6 @@ std::vector<std::shared_ptr<Surface>> declareHullOfRevolution(
     }
     profiles.push_back(profile);
   }
-
-  // The hull of the profiles in the (radius, level) half-plane, the axis
-  // included: every rim, and its foot on the axis.
   std::vector<Vector2d> rims;
   for (const OperandProfile& p : profiles) {
     rims.emplace_back(p.r0, p.t0);
@@ -149,25 +150,89 @@ std::vector<std::shared_ptr<Surface>> declareHullOfRevolution(
     rims.emplace_back(0., p.t0);
     rims.emplace_back(0., p.t1);
   }
-  const std::vector<Vector2d> hull = convexHull(std::move(rims));
-  if (hull.size() < 3) return out;
+  hull = convexHull(std::move(rims));
+  return hull.size() >= 3;
+}
 
-  // The hull, a profile of straight edges in the (radius, level) half-plane, is
-  // what gets turned: the sweep table says what each edge makes - the cone of
-  // a sloped edge, and the planes and cylinders the operands declared already.
+/*! The hull profile turned: the sweep table says what each edge makes - the
+ * cone of a sloped edge, and the planes and cylinders the operands declared. */
+std::vector<std::shared_ptr<Surface>> turned(const Axis& axis, const std::vector<Vector2d>& hull)
+{
   Profile2d profile;
   profile.loops.emplace_back();
   for (std::size_t i = 0; i < hull.size(); i++) {
-    const auto& a = hull[i];
-    const auto& b = hull[(i + 1) % hull.size()];
     ProfileEdge edge;
-    edge.a = a;
-    edge.b = b;
+    edge.a = hull[i];
+    edge.b = hull[(i + 1) % hull.size()];
     profile.loops.back().push_back(edge);
   }
   Revolution sweep;
   sweep.origin = axis.origin;
   sweep.axis = axis.dir;
-  out = revolve(profile, sweep);
-  return out;
+  return revolve(profile, sweep);
+}
+
+/*! A unit vector across `dir`. */
+Vector3d across(const Vector3d& dir)
+{
+  const Vector3d pick = std::fabs(dir[0]) < 0.9 ? Vector3d(1, 0, 0) : Vector3d(0, 1, 0);
+  return dir.cross(pick).normalized();
+}
+
+}  // namespace
+
+std::vector<std::shared_ptr<Surface>> declareHullOfRevolution(
+  const std::vector<std::vector<std::shared_ptr<Surface>>>& operands)
+{
+  Axis axis;
+  std::vector<Vector2d> hull;
+  if (!hullProfile(operands, axis, hull)) return {};
+  return turned(axis, hull);
+}
+
+std::shared_ptr<const DeclaredSolid> solidOfHullOfRevolution(
+  const std::vector<std::vector<std::shared_ptr<Surface>>>& operands)
+{
+  Axis axis;
+  std::vector<Vector2d> hull;
+  if (!hullProfile(operands, axis, hull)) return nullptr;
+  auto solid = std::make_shared<DeclaredSolid>();
+  for (const auto& record : turned(axis, hull)) {
+    if (record != nullptr && !record->evidence_only) solid->bounds.push_back(record);
+  }
+  // Every edge of the profile off the axis has to be a bound, or the
+  // intersection is larger than the hull and would call air material: each
+  // needs a bound holding both its ends, turned to any one angle, exactly.
+  const Vector3d out = across(axis.dir);
+  auto at = [&](const Vector2d& rt) { return axis.origin + axis.dir * rt[1] + out * rt[0]; };
+  for (std::size_t i = 0; i < hull.size(); i++) {
+    const Vector2d& a = hull[i];
+    const Vector2d& b = hull[(i + 1) % hull.size()];
+    if (a[0] == 0 && b[0] == 0) continue;  // along the axis: no surface
+    bool held = false;
+    for (const auto& bound : solid->bounds) {
+      held = held || (bound->residual(at(a)).exact() && bound->residual(at(b)).exact());
+    }
+    if (!held) return nullptr;
+  }
+  // Inside a convex profile: the mean of its corners, off the axis.
+  Vector2d mean(0, 0);
+  double reach = 0, lo = hull.front()[1], hi = lo;
+  for (const auto& p : hull) {
+    mean += p;
+    reach = std::max(reach, p[0]);
+    lo = std::min(lo, p[1]);
+    hi = std::max(hi, p[1]);
+  }
+  mean /= double(hull.size());
+  solid->interior = at(mean);
+  for (const double t : {lo, hi}) {
+    const Vector3d c = axis.origin + axis.dir * t;
+    Vector3d spread;
+    for (int k = 0; k < 3; k++)
+      spread[k] = reach * std::sqrt(std::max(0.0, 1 - axis.dir[k] * axis.dir[k]));
+    solid->extent.extend(c - spread);
+    solid->extent.extend(c + spread);
+  }
+  return solid;
 }
