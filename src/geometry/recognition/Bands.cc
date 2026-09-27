@@ -85,12 +85,27 @@ void settleSeams(std::vector<Band>& bands, const std::vector<Vector3d>& vertices
 
   auto vertex_on_ruling = [&](int from, const std::vector<int>& level, const Vector3d& axis,
                               const Vector3d& centre) {
-    const Vector3d a = vertices[from] - centre;
-    const Vector3d ra = (a - axis * axis.dot(a)).normalized();
+    // One ruling where the two radial directions are one direction, as exactly
+    // as the arithmetic can say: each is the vertex's offset from the axis
+    // (difference 3, dot 5, scaled and taken away 6) normalised (9) - 23
+    // operations, whose error grows as the offset's part along the axis
+    // outweighs its part across it - and their difference and its length take
+    // 9 more. No chosen number (checklist C2); it was 1e-6.
+    auto radial = [&](int v, double& conditioning) {
+      const Vector3d d = vertices[v] - centre;
+      const Vector3d across = d - axis * axis.dot(d);
+      conditioning =
+        across.norm() > 0 ? d.norm() / across.norm() : std::numeric_limits<double>::infinity();
+      return across.normalized();
+    };
+    double ca = 0;
+    const Vector3d ra = radial(from, ca);
     for (const int v : level) {
-      const Vector3d b = vertices[v] - centre;
-      const Vector3d rb = (b - axis * axis.dot(b)).normalized();
-      if ((ra - rb).norm() < 1e-6) return v;
+      double cb = 0;
+      const Vector3d rb = radial(v, cb);
+      const double bound = recognition::forwardError(23, ca) + recognition::forwardError(23, cb) +
+                           recognition::forwardError(9, 2.0);
+      if ((ra - rb).norm() <= bound) return v;
     }
     return -1;
   };
