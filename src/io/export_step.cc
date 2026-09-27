@@ -51,6 +51,10 @@
 #include <cstdlib>
 #include <numeric>
 #include <random>
+#include <array>
+#include <functional>
+#include <tuple>
+#include <type_traits>
 
 namespace {
 
@@ -911,46 +915,34 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   }
 }
 
-/*! OPENSCAD_STEP_PERMUTE=<seed>: the same mesh under other numbers. Test-only.
- *
- * Every vertex gets another index, every triangle another place in the list,
- * and every triangle starts at another of its corners - the same triangles,
- * the same positions, the same orientation, and every per-triangle channel
- * (colour, original, surface tag) moved with its triangle. Nothing about the
- * model changes; only what Manifold happens to hand over does, which is what
- * one more vertex property did on 2026-09-26 (open item 37).
- *
- * So an export must not change under it, point for point - A7, order is not
- * policy - and tests/step-numbering-check.py asserts that. A choice that
- * follows the numbering rather than the positions shows up as a point that
- * moved. */
-std::shared_ptr<const PolySet> permutedNumbering(const std::shared_ptr<const PolySet>& ps, unsigned seed)
+/*! `ps` under other numbers, and nothing else changed: vertex v becomes
+ * `new_index[v]`, and triangle t of the result is ps's triangle `order[t]`,
+ * started at its corner `first[order[t]]`. Positions, triangles and their
+ * orientation are untouched; every per-triangle channel (colour, original,
+ * surface tag) moves with its triangle, and every curve's vertex indices with
+ * their vertices. */
+std::shared_ptr<const PolySet> renumbered(const PolySet& ps, const std::vector<int>& new_index,
+                                          const std::vector<std::size_t>& order,
+                                          const std::vector<std::size_t>& first)
 {
-  std::mt19937 rng(seed);
-  auto out = std::make_shared<PolySet>(*ps);
+  auto out = std::make_shared<PolySet>(ps);
+  for (std::size_t v = 0; v < ps.vertices.size(); v++) out->vertices[new_index[v]] = ps.vertices[v];
 
-  std::vector<int> new_index(ps->vertices.size());
-  std::iota(new_index.begin(), new_index.end(), 0);
-  std::shuffle(new_index.begin(), new_index.end(), rng);
-  for (std::size_t v = 0; v < ps->vertices.size(); v++) out->vertices[new_index[v]] = ps->vertices[v];
-
-  std::vector<std::size_t> order(ps->indices.size());
-  std::iota(order.begin(), order.end(), 0);
-  std::shuffle(order.begin(), order.end(), rng);
   const auto per_triangle = [&](auto& dst, const auto& src) {
-    if (src.size() != ps->indices.size()) return;
+    if (src.size() != ps.indices.size()) return;
     for (std::size_t t = 0; t < order.size(); t++) dst[t] = src[order[t]];
   };
   for (std::size_t t = 0; t < order.size(); t++) {
-    const IndexedFace& face = ps->indices[order[t]];
+    const IndexedFace& face = ps.indices[order[t]];
     IndexedFace& moved = out->indices[t];
     moved.resize(face.size());
-    const std::size_t turn = face.empty() ? 0 : rng() % face.size();
-    for (std::size_t i = 0; i < face.size(); i++) moved[i] = new_index[face[(i + turn) % face.size()]];
+    for (std::size_t i = 0; i < face.size(); i++) {
+      moved[i] = new_index[face[(first[order[t]] + i) % face.size()]];
+    }
   }
-  per_triangle(out->color_indices, ps->color_indices);
-  per_triangle(out->original_ids, ps->original_ids);
-  per_triangle(out->surface_tags, ps->surface_tags);
+  per_triangle(out->color_indices, ps.color_indices);
+  per_triangle(out->original_ids, ps.original_ids);
+  per_triangle(out->surface_tags, ps.surface_tags);
 
   const int n = static_cast<int>(new_index.size());
   for (auto& curve : out->curves) {
@@ -960,6 +952,164 @@ std::shared_ptr<const PolySet> permutedNumbering(const std::shared_ptr<const Pol
     if (curve->end >= 0 && curve->end < n) curve->end = new_index[curve->end];
   }
   return out;
+}
+
+/*! OPENSCAD_STEP_PERMUTE=<seed>: the same mesh under other numbers. Test-only.
+ *
+ * Every vertex gets another index, every triangle another place in the list,
+ * and every triangle starts at another of its corners - the same triangles,
+ * the same positions, the same orientation. Nothing about the model changes;
+ * only what Manifold happens to hand over does, which is what one more vertex
+ * property did on 2026-09-26 (open item 37).
+ *
+ * So an export must not change under it, point for point - A7, order is not
+ * policy - and tests/step-numbering-check.py asserts that. A choice that
+ * follows the numbering rather than the positions shows up as a point that
+ * moved. */
+std::shared_ptr<const PolySet> permutedNumbering(const std::shared_ptr<const PolySet>& ps, unsigned seed)
+{
+  std::mt19937 rng(seed);
+  std::vector<int> new_index(ps->vertices.size());
+  std::iota(new_index.begin(), new_index.end(), 0);
+  std::shuffle(new_index.begin(), new_index.end(), rng);
+  std::vector<std::size_t> order(ps->indices.size());
+  std::iota(order.begin(), order.end(), 0);
+  std::shuffle(order.begin(), order.end(), rng);
+  std::vector<std::size_t> first(ps->indices.size(), 0);
+  for (std::size_t t = 0; t < first.size(); t++) {
+    if (!ps->indices[t].empty()) first[t] = rng() % ps->indices[t].size();
+  }
+  return renumbered(*ps, new_index, order, first);
+}
+
+/*! The mesh numbered by its positions alone, whatever numbering it came in.
+ *
+ * Every choice recognition makes that no fact of the model decides is made by
+ * the order things are met in - which vertex of a ring a closed band's seam
+ * runs through (`settleSeams`: the chain's first band, its rim's first
+ * vertex), where a boundary cycle starts and so where a fit samples from
+ * (`boundaryCycles`: the lowest vertex id), which band of a chain goes first,
+ * the order a radius is summed in. That order is the numbering, and the
+ * numbering follows nothing in the model: one more vertex property on
+ * 2026-09-26 made Manifold hand over a few triangles in another order, and 27
+ * of 120 exports wrote other points - thousands of control points on the
+ * approximation tier, the bayonet's volume 5.5e-5 away (open item 37).
+ *
+ * Fixing each such choice where it is made is a list that is never complete,
+ * and could not reach machine precision anyway: a radius summed in another
+ * order is another double. So the numbering itself is derived, once, from the
+ * one fact that decides it (checklist A10): vertices in the order of their
+ * positions, each triangle turned to start at its lowest vertex, and the
+ * triangles in the order of their vertices. Every choice downstream is then a
+ * function of the positions and the same whatever Manifold handed over (A7),
+ * and none needs a rule of its own. Asserted by tests/step-numbering-check.py.
+ *
+ * Two vertices at one position - where two solids touch, or a revolved profile
+ * meets its axis, Manifold keeps several - are told apart by what is around
+ * them, and two triangles on the same vertices in the same turn by what they
+ * carry. Vertices nothing tells apart are left in the order they came; where a
+ * triangle uses them the file may follow the numbering there, so those are
+ * counted, and reported where there are any. */
+std::shared_ptr<const PolySet> canonicalNumbering(const std::shared_ptr<const PolySet>& ps)
+{
+  using Position = std::array<double, 3>;
+  const auto at = [&](int v) {
+    const Vector3d& p = ps->vertices[v];
+    return Position{p[0], p[1], p[2]};
+  };
+  const std::size_t nv = ps->vertices.size();
+
+  // Each vertex's class: first the rank of its position, then refined by the
+  // classes of the vertices its edges lead to and come from, until no class
+  // splits any more - so two vertices at one position part company as soon as
+  // anything around them, however far out, is somewhere else. Refinement only
+  // ever splits a class, so the order stays the order of the positions.
+  std::vector<int> by_position(nv);
+  std::iota(by_position.begin(), by_position.end(), 0);
+  std::sort(by_position.begin(), by_position.end(), [&](int a, int b) { return at(a) < at(b); });
+  std::vector<int> cls(nv, 0);
+  std::size_t classes = nv == 0 ? 0 : 1;
+  for (std::size_t k = 1; k < nv; k++) {
+    if (at(by_position[k - 1]) < at(by_position[k])) classes++;
+    cls[by_position[k]] = static_cast<int>(classes) - 1;
+  }
+  if (classes < nv) {
+    std::vector<std::vector<int>> out_edges(nv), in_edges(nv);
+    for (const IndexedFace& face : ps->indices) {
+      for (std::size_t i = 0; i < face.size(); i++) {
+        const int a = face[i], b = face[(i + 1) % face.size()];
+        out_edges[a].push_back(b);
+        in_edges[b].push_back(a);
+      }
+    }
+    using Signature = std::tuple<int, std::vector<int>, std::vector<int>>;
+    std::vector<Signature> sig(nv);
+    for (;;) {
+      for (std::size_t v = 0; v < nv; v++) {
+        auto& [own, outs, ins] = sig[v];
+        own = cls[v];
+        outs.clear();
+        ins.clear();
+        for (const int w : out_edges[v]) outs.push_back(cls[w]);
+        for (const int w : in_edges[v]) ins.push_back(cls[w]);
+        std::sort(outs.begin(), outs.end());
+        std::sort(ins.begin(), ins.end());
+      }
+      std::sort(by_position.begin(), by_position.end(), [&](int a, int b) { return sig[a] < sig[b]; });
+      std::size_t refined = 1;
+      cls[by_position[0]] = 0;
+      for (std::size_t k = 1; k < nv; k++) {
+        if (sig[by_position[k - 1]] < sig[by_position[k]]) refined++;
+        cls[by_position[k]] = static_cast<int>(refined) - 1;
+      }
+      if (refined == classes) break;
+      classes = refined;
+    }
+    // Only a vertex some triangle uses can carry its order anywhere. Copies no
+    // triangle uses - a revolved profile leaves one on the axis per step - are
+    // one class with no edges, and exchanging them changes nothing at all.
+    std::size_t tied = 0;
+    for (std::size_t k = 1; k < nv; k++) {
+      const int v = by_position[k];
+      if (cls[by_position[k - 1]] == cls[v] && !out_edges[v].empty()) tied++;
+    }
+    if (tied > 0) {
+      LOG(
+        "STEP export: %1$d vertices cannot be told from another by their position or anything "
+        "around them, so their order - and what follows from it - is the mesh's numbering, not the "
+        "model",
+        int(tied));
+    }
+  }
+  std::vector<int> new_index(nv);
+  for (std::size_t k = 0; k < nv; k++) new_index[by_position[k]] = static_cast<int>(k);
+
+  const std::size_t nt = ps->indices.size();
+  std::vector<std::size_t> first(nt, 0);
+  std::vector<IndexedFace> turned(nt);
+  for (std::size_t t = 0; t < nt; t++) {
+    const IndexedFace& face = ps->indices[t];
+    for (std::size_t i = 1; i < face.size(); i++) {
+      if (new_index[face[i]] < new_index[face[first[t]]]) first[t] = i;
+    }
+    turned[t].resize(face.size());
+    for (std::size_t i = 0; i < face.size(); i++) {
+      turned[t][i] = new_index[face[(first[t] + i) % face.size()]];
+    }
+  }
+  const auto channel = [&](const auto& list, std::size_t t) {
+    using T = typename std::decay_t<decltype(list)>::value_type;
+    return list.size() == nt ? list[t] : T{};
+  };
+  const auto key = [&](std::size_t t) {
+    return std::make_tuple(std::cref(turned[t]), channel(ps->original_ids, t),
+                           channel(ps->surface_tags, t), channel(ps->color_indices, t));
+  };
+  std::vector<std::size_t> order(nt);
+  std::iota(order.begin(), order.end(), 0);
+  std::stable_sort(order.begin(), order.end(),
+                   [&](std::size_t a, std::size_t b) { return key(a) < key(b); });
+  return renumbered(*ps, new_index, order, first);
 }
 
 }  // namespace
@@ -1021,6 +1171,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   if (const char *seed = getenv("OPENSCAD_STEP_PERMUTE")) {
     ps = permutedNumbering(ps, static_cast<unsigned>(std::strtoul(seed, nullptr, 10)));
   }
+  ps = canonicalNumbering(ps);
 
   //	printf("export curves: %zu\n",ps->curves.size());
   //	printf("export surfaces: %zu\n",ps->surfaces.size());

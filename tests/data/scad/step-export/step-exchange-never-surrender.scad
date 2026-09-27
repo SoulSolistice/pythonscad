@@ -52,12 +52,13 @@
 // tessellation, so the solid is a mixture of an exact cylinder and 24-gon and
 // 240-gon chords, and no figure for it is derivable from the model.
 //
-// Known systemic defect: on the CGAL backend only, a planar face is written
-// with a bound that leaves its plane by more than the mesh's own coplanarity
-// allows - raised by the exporter about its own output and never read by this
-// test until 2026-09-24. Not yet chased: doc/step-export-wip.md, open item
-// 33. Tolerated by name; the test fails the day it is no longer raised.
-// KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
+// This fixture carried open item 33's defect - on the CGAL backend only, a
+// planar face written with a bound off its plane - as a KNOWN-EXPORT-ERROR from
+// 2026-09-24. It stopped being raised on 2026-09-27, when the exporter began
+// numbering the mesh by its positions (open item 37), and not because anything
+// fixed it: the binary before raises it on every run, the one after on none. So
+// item 33 depends on which vertex a loop meets first, and it stands on the
+// fixtures that still name it. If it comes back here, the test fails on it.
 $fn = 24;
 R = 30; Ri = 24; H = 30;
 z0 = 8; h = 8; ramp = 3;

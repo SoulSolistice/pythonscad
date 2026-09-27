@@ -1297,13 +1297,12 @@ set_tests_properties(export-step-flagship-corners PROPERTIES WILL_FAIL TRUE)
 # points and the same solid (open item 37; checklist A7, order is not policy).
 # OPENSCAD_STEP_PERMUTE renumbers the mesh before recognition sees it, which is
 # all one more Manifold vertex property did on 2026-09-26 - and 27 of 120 exports
-# moved. Registered WILL_FAIL while the exporter's choices follow the numbering;
-# run the script to see which points move.
+# moved. Registered WILL_FAIL when written, failing on every fixture; live since
+# export_step.cc numbers the mesh by its positions (canonicalNumbering).
 add_test(NAME export-step-numbering
   COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/step-numbering-check.py
           --openscad ${OPENSCAD_BINPATH}
 )
-set_tests_properties(export-step-numbering PROPERTIES WILL_FAIL TRUE)
 
 # The same calibration for check_closed_sphere(). A whole sphere is bounded by
 # its seam and nothing else, which is two edges - fewer than any other face of
