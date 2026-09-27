@@ -65,11 +65,12 @@
 // longer raised.
 // KNOWN-EXPORT-ERROR: of a D0 region are left to the tessellation
 // And on the CGAL backend, a planar face whose bound leaves its plane - open
-// item 33, as in step-band-family - but here only in some runs: this model's
-// CGAL export is not deterministic (open item 28; four different reports in six
-// identical runs, measured 2026-09-24, where the Manifold export gave one). So
-// tolerated, not required.
-// KNOWN-EXPORT-ERROR-INTERMITTENT: assert a plane one of their own bounds is not in
+// item 33, as in step-band-family. It was raised in only some runs until
+// 2026-09-27 (open item 28: four different reports in six identical runs), and
+// carried as intermittent; the Nef conversion numbered the mesh differently
+// each run, and since the exporter numbers it by position the CGAL export is
+// the same every run and raises this in every one.
+// KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
 
 $fn = 64;
 intersection() {

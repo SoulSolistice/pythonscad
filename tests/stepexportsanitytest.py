@@ -88,7 +88,7 @@ def export(openscad, inputfile, outfile, extra_args, env=None):
     # A fixture known to carry one says so with a KNOWN-EXPORT-ERROR: line
     # naming it - see known_export_errors(). Only that error is tolerated, and
     # only while it keeps appearing.
-    known = known_export_errors(inputfile) + known_export_errors(inputfile, intermittent=True)
+    known = known_export_errors(inputfile)
     errors = [line for line in output.splitlines() if "EXPORT-ERROR" in line]
     for line in errors:
         hit = [k for k in known if k in line]
@@ -102,7 +102,7 @@ def export(openscad, inputfile, outfile, extra_args, env=None):
 KNOWN_SEEN = set()
 
 
-def known_export_errors(path, intermittent=False):
+def known_export_errors(path):
     """Systemic defects a fixture is known to carry: `KNOWN-EXPORT-ERROR: <text>`,
     each a substring of an EXPORT-ERROR line the exporter raises about its own
     output. Narrower than WILL_FAIL on purpose - that passes a test whatever it
@@ -111,15 +111,13 @@ def known_export_errors(path, intermittent=False):
     longer raised by any run, so the fix announces itself (see the end of this
     script).
 
-    `KNOWN-EXPORT-ERROR-INTERMITTENT:` is the weaker form, for an error that
-    comes and goes between identical runs: tolerated, and not required. It
-    exists only because the exporter is not deterministic on the CGAL backend
-    (doc/step-export-wip.md, open item 28) - measured on step-cap-meets-wall,
-    four different reports in six identical runs - and a fixture using it has
-    to say so. It is a defect of its own, and the directive goes when item 28
-    does."""
+    There was a weaker form, `KNOWN-EXPORT-ERROR-INTERMITTENT:`, tolerated and
+    not required, for an error that came and went between identical runs on the
+    CGAL backend (doc/step-export-wip.md, open item 28). It went with item 28 on
+    2026-09-27: the exporter numbers the mesh by its positions, so an export is
+    the same every run and an error is either raised or not."""
     found = []
-    tag = "KNOWN-EXPORT-ERROR-INTERMITTENT" if intermittent else "KNOWN-EXPORT-ERROR"
+    tag = "KNOWN-EXPORT-ERROR"
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             m = re.search(r"(?<![-\w])" + tag + r":\s*(.+?)\s*$", line)
