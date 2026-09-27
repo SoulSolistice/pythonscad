@@ -48,6 +48,9 @@
 #include <limits>
 #include <climits>
 #include <algorithm>
+#include <cstdlib>
+#include <numeric>
+#include <random>
 
 namespace {
 
@@ -908,6 +911,57 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   }
 }
 
+/*! OPENSCAD_STEP_PERMUTE=<seed>: the same mesh under other numbers. Test-only.
+ *
+ * Every vertex gets another index, every triangle another place in the list,
+ * and every triangle starts at another of its corners - the same triangles,
+ * the same positions, the same orientation, and every per-triangle channel
+ * (colour, original, surface tag) moved with its triangle. Nothing about the
+ * model changes; only what Manifold happens to hand over does, which is what
+ * one more vertex property did on 2026-09-26 (open item 37).
+ *
+ * So an export must not change under it, point for point - A7, order is not
+ * policy - and tests/step-numbering-check.py asserts that. A choice that
+ * follows the numbering rather than the positions shows up as a point that
+ * moved. */
+std::shared_ptr<const PolySet> permutedNumbering(const std::shared_ptr<const PolySet>& ps, unsigned seed)
+{
+  std::mt19937 rng(seed);
+  auto out = std::make_shared<PolySet>(*ps);
+
+  std::vector<int> new_index(ps->vertices.size());
+  std::iota(new_index.begin(), new_index.end(), 0);
+  std::shuffle(new_index.begin(), new_index.end(), rng);
+  for (std::size_t v = 0; v < ps->vertices.size(); v++) out->vertices[new_index[v]] = ps->vertices[v];
+
+  std::vector<std::size_t> order(ps->indices.size());
+  std::iota(order.begin(), order.end(), 0);
+  std::shuffle(order.begin(), order.end(), rng);
+  const auto per_triangle = [&](auto& dst, const auto& src) {
+    if (src.size() != ps->indices.size()) return;
+    for (std::size_t t = 0; t < order.size(); t++) dst[t] = src[order[t]];
+  };
+  for (std::size_t t = 0; t < order.size(); t++) {
+    const IndexedFace& face = ps->indices[order[t]];
+    IndexedFace& moved = out->indices[t];
+    moved.resize(face.size());
+    const std::size_t turn = face.empty() ? 0 : rng() % face.size();
+    for (std::size_t i = 0; i < face.size(); i++) moved[i] = new_index[face[(i + turn) % face.size()]];
+  }
+  per_triangle(out->color_indices, ps->color_indices);
+  per_triangle(out->original_ids, ps->original_ids);
+  per_triangle(out->surface_tags, ps->surface_tags);
+
+  const int n = static_cast<int>(new_index.size());
+  for (auto& curve : out->curves) {
+    if (curve == nullptr) continue;
+    curve = curve->clone();
+    if (curve->start >= 0 && curve->start < n) curve->start = new_index[curve->start];
+    if (curve->end >= 0 && curve->end < n) curve->end = new_index[curve->end];
+  }
+  return out;
+}
+
 }  // namespace
 
 /*! Hold LC_NUMERIC at "C" for as long as it exists.
@@ -964,6 +1018,9 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
     ps = ManifoldUtils::mintOriginals(*ps);
   }
 #endif
+  if (const char *seed = getenv("OPENSCAD_STEP_PERMUTE")) {
+    ps = permutedNumbering(ps, static_cast<unsigned>(std::strtoul(seed, nullptr, 10)));
+  }
 
   //	printf("export curves: %zu\n",ps->curves.size());
   //	printf("export surfaces: %zu\n",ps->surfaces.size());
