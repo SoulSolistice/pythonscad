@@ -172,7 +172,7 @@ std::unique_ptr<const Geometry> CubeNode::createGeometry() const
     Vector3d((coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2, (coord1[2] + coord2[2]) / 2);
   solid->extent =
     BoundingBox(Vector3d(coord1[0], coord1[1], coord1[2]), Vector3d(coord2[0], coord2[1], coord2[2]));
-  ps->solid_tree = SolidTree::declared(solid);
+  ps->solid_tree = SolidTree::declared(solid, this->toString());
 
   return ps;
 }
@@ -323,7 +323,7 @@ std::unique_ptr<const Geometry> SphereNode::createGeometry() const
     solid->bounds.push_back(sphere);
     solid->interior = Vector3d(0, 0, 0);
     solid->extent = BoundingBox(Vector3d(-r, -r, -r), Vector3d(r, r, r));
-    polyset->solid_tree = SolidTree::declared(solid);
+    polyset->solid_tree = SolidTree::declared(solid, this->toString());
   }
 
   // Record the circle at each ring, which is what makes a sphere collapse.
@@ -559,7 +559,7 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
     }
     const double wide = std::max(this->r1, this->r2);
     solid->extent = BoundingBox(Vector3d(-wide, -wide, z1), Vector3d(wide, wide, z2));
-    polyset->solid_tree = SolidTree::declared(solid);
+    polyset->solid_tree = SolidTree::declared(solid, this->toString());
   }
 
   return polyset;
@@ -729,7 +729,7 @@ std::unique_ptr<const Geometry> PolyhedronNode::createGeometry() const
   // statement, and each face is exact wherever no record declares it a piece
   // of a curved surface. What that lets the model say of where it is, where it
   // becomes a Manifold - see SolidTree::faceted.
-  p->solid_tree = SolidTree::faceted();
+  p->solid_tree = SolidTree::faceted("polyhedron (" + std::to_string(this->points.size()) + " points)");
   return p;
 }
 

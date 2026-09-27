@@ -105,7 +105,8 @@ private:
  * decides yet: reported, and a phantom is an EXPORT-ERROR (checklist B10). */
 void runExistence(Context& ctx)
 {
-  ctx.out.existence = existence(ctx.graph, *ctx.in.surfaces, ctx.provenance, ctx.in.solid_tree);
+  ctx.out.existence = existence(ctx.graph, *ctx.in.surfaces, ctx.provenance, ctx.in.solid_tree,
+                                &ctx.out.existence_by, &ctx.out.existence_open);
 }
 
 /*! The region stage: the D0 region of every declared curved surface, by

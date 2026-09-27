@@ -15,33 +15,35 @@ std::shared_ptr<const DeclaredSolid> DeclaredSolid::transformed(const Transform3
   return out;
 }
 
-std::shared_ptr<const SolidTree> SolidTree::opaque()
+std::shared_ptr<const SolidTree> SolidTree::opaque(const std::string& what)
 {
   static const std::shared_ptr<const SolidTree> leaf(new SolidTree(Op::Opaque, {}, nullptr));
-  return leaf;
+  if (what.empty()) return leaf;
+  return std::shared_ptr<const SolidTree>(new SolidTree(Op::Opaque, {}, nullptr, what));
 }
 
-std::shared_ptr<const SolidTree> SolidTree::declared(std::shared_ptr<const DeclaredSolid> solid)
+std::shared_ptr<const SolidTree> SolidTree::declared(std::shared_ptr<const DeclaredSolid> solid,
+                                                     const std::string& what)
 {
-  if (solid == nullptr || solid->bounds.empty()) return opaque();
-  return std::shared_ptr<const SolidTree>(new SolidTree(Op::Declared, {}, std::move(solid)));
+  if (solid == nullptr || solid->bounds.empty()) return opaque(what);
+  return std::shared_ptr<const SolidTree>(new SolidTree(Op::Declared, {}, std::move(solid), what));
 }
 
-std::shared_ptr<const SolidTree> SolidTree::faceted()
+std::shared_ptr<const SolidTree> SolidTree::faceted(const std::string& what)
 {
-  static const std::shared_ptr<const SolidTree> leaf(new SolidTree(Op::Faceted, {}, nullptr));
-  return leaf;
+  return std::shared_ptr<const SolidTree>(new SolidTree(Op::Faceted, {}, nullptr, what));
 }
 
-std::shared_ptr<const SolidTree> SolidTree::enveloped(std::shared_ptr<const DeclaredSolid> solid)
+std::shared_ptr<const SolidTree> SolidTree::enveloped(std::shared_ptr<const DeclaredSolid> solid,
+                                                      const std::string& what)
 {
-  if (solid == nullptr || solid->bounds.empty()) return opaque();
-  return std::shared_ptr<const SolidTree>(new SolidTree(Op::Enveloped, {}, std::move(solid)));
+  if (solid == nullptr || solid->bounds.empty()) return opaque(what);
+  return std::shared_ptr<const SolidTree>(new SolidTree(Op::Enveloped, {}, std::move(solid), what));
 }
 
-std::shared_ptr<const SolidTree> SolidTree::box(const BoundingBox& b)
+std::shared_ptr<const SolidTree> SolidTree::box(const BoundingBox& b, const std::string& what)
 {
-  if (b.isEmpty() || (b.sizes().array() <= 0).any()) return opaque();
+  if (b.isEmpty() || (b.sizes().array() <= 0).any()) return opaque(what);
   auto solid = std::make_shared<DeclaredSolid>();
   for (int k = 0; k < 3; k++) {
     Vector3d n(0, 0, 0);
@@ -51,7 +53,7 @@ std::shared_ptr<const SolidTree> SolidTree::box(const BoundingBox& b)
   }
   solid->interior = b.center();
   solid->extent = b;
-  return enveloped(solid);
+  return enveloped(solid, what);
 }
 
 bool SolidTree::extent(BoundingBox& out) const
@@ -112,10 +114,10 @@ std::shared_ptr<const SolidTree> SolidTree::combine(Op op, std::shared_ptr<const
 std::shared_ptr<const SolidTree> SolidTree::transformed(const Transform3d& mat) const
 {
   switch (op_) {
-  case Op::Opaque:    return opaque();
-  case Op::Declared:  return declared(solid_->transformed(mat));
-  case Op::Faceted:   return faceted();
-  case Op::Enveloped: return enveloped(solid_->transformed(mat));
+  case Op::Opaque:    return opaque(what_);
+  case Op::Declared:  return declared(solid_->transformed(mat), what_);
+  case Op::Faceted:   return faceted(what_);
+  case Op::Enveloped: return enveloped(solid_->transformed(mat), what_);
   default:            break;
   }
   std::vector<std::shared_ptr<const SolidTree>> moved;

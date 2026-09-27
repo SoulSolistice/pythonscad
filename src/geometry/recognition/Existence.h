@@ -45,10 +45,24 @@ enum class Exists : unsigned char {
   Undecided,  // a point on two surfaces, or an operand that states no solid
 };
 
+/*! Why a facet is undecided - what the ledger says of it. */
+enum class Open : unsigned char {
+  No,           // decided
+  Stated,       // an operand stated nothing there: `by` names it
+  TwoSurfaces,  // a point on two surfaces at once, which needs the half-spaces
+  Crosses,      // on the model's boundary at some points and off it at others
+  NoPoint,      // the surface gives no closest point to ask about
+};
+
 /*! Per facet, what the model says of the face it was made on. Empty where the
- * model's boolean was not carried. See the file comment. */
+ * model's boolean was not carried. See the file comment. Where asked, `by`
+ * receives per facet the leaf behind the verdict - the one that ruled the
+ * facet out, carries its face, or stated nothing and left it open - and `open`
+ * why an undecided facet is so. */
 [[nodiscard]] std::vector<Exists> existence(const FacetGraph& graph,
                                             const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                            const Provenance& provenance, const SolidTree *tree);
+                                            const Provenance& provenance, const SolidTree *tree,
+                                            std::vector<const SolidTree *> *by = nullptr,
+                                            std::vector<Open> *open = nullptr);
 
 }  // namespace recognition

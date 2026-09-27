@@ -59,6 +59,8 @@ struct Recognition {
   std::vector<Region> d0_regions;  // each declared surface's D0 region - see Membership.h
   std::vector<RegionRepresentation> d0_representations;  // how each would be written - proposals
   std::vector<Exists> existence;  // per facet: has the model a face of the surface it was made on?
+  std::vector<const SolidTree *> existence_by;  // per facet: the leaf behind that verdict
+  std::vector<Open> existence_open;             // per facet: why an undecided one is so
 };
 
 /*! Run every stage. `out` is filled as the stages run, so a Writability that

@@ -62,7 +62,8 @@ std::map<std::optional<Color4f>, std::vector<size_t>> colourGroups(const PolySet
  * has no inside to name a point of. */
 std::shared_ptr<const SolidTree> envelopeOf(const PolySet& ps,
                                             const std::function<uint32_t(size_t)>& tag_of,
-                                            const std::vector<std::shared_ptr<Surface>>& records)
+                                            const std::vector<std::shared_ptr<Surface>>& records,
+                                            const std::string& what)
 {
   std::map<uint32_t, const Surface *> by_tag;
   for (const auto& record : records) {
@@ -81,10 +82,12 @@ std::shared_ptr<const SolidTree> envelopeOf(const PolySet& ps,
     }
     const auto it = by_tag.find(tag);
     BoundingBox reach;
-    if (it == by_tag.end() || !it->second->envelope(corners, reach)) return SolidTree::opaque();
+    if (it == by_tag.end() || !it->second->envelope(corners, reach)) {
+      return SolidTree::opaque(what + ", on a record that states no envelope");
+    }
     box.extend(reach);
   }
-  return SolidTree::box(box);
+  return SolidTree::box(box, what);
 }
 
 std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const PolySet& ps)
@@ -178,8 +181,9 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   // nothing states it - which is an answer, not a guess. See SolidTree.h.
   // A faceted leaf is resolved here, where the faces it spans are still its
   // generator's own and each knows the record it was made on.
-  std::shared_ptr<const SolidTree> solid = ps.solid_tree ? ps.solid_tree : SolidTree::opaque();
-  if (solid->op() == SolidTree::Op::Faceted) solid = envelopeOf(ps, tag_of, tagged);
+  std::shared_ptr<const SolidTree> solid =
+    ps.solid_tree ? ps.solid_tree : SolidTree::opaque("a mesh that states no solid");
+  if (solid->op() == SolidTree::Op::Faceted) solid = envelopeOf(ps, tag_of, tagged, solid->what());
   return std::make_shared<ManifoldGeometry>(mani, originalIDs, originalIDToColor, std::set<uint32_t>{},
                                             stampOwners(tagged, originalIDs), solid);
 }

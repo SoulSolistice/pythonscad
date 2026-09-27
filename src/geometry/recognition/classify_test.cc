@@ -82,6 +82,11 @@ TEST_CASE("a subtracted operand decides past an opaque one - lid10's phantom", "
                                           cylinder(78.3073, 78.3073, -0.1, 95.2)),
                        SolidTree::opaque());
   CHECK(at(part, 78.2073, 0, 88) == Where::Out);
+  // and the reason given is the socket that holds the point
+  const auto socket = part->children()[1];
+  CHECK(classify(*part, Vector3d(78.2073, 0, 88)).because == socket.get());
+  // where the opaque cutter leaves it open, the cutter is named
+  CHECK(classify(*part, Vector3d(90, 0, 50)).because == part->children()[2].get());
   // Where the socket does not reach, the opaque cutter leaves it unknown.
   CHECK(at(part, 90, 0, 50) == Where::Unknown);
   // And outside the block nothing is needed of the cutter either.

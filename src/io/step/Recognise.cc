@@ -54,7 +54,10 @@ void StepKernel::BodyBuild::reportRecognition()
     owned,
     &rec.d0_regions,
     &rec.d0_representations,
-    &rec.existence};
+    &rec.existence,
+    &rec.existence_by,
+    &rec.existence_open,
+    &faceSurface};
   recognition::dumpLedger(report_inputs);
   recognition::reportArbitration(report_inputs);
   recognition::reportExistence(report_inputs);

@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "geometry/linalg.h"
@@ -64,26 +65,33 @@ class SolidTree
 public:
   enum class Op { Opaque, Declared, Faceted, Enveloped, Union, Intersection, Difference };
 
+  // Every leaf carries `what`: a short name its generator gives it - the
+  // node's own description, "polyhedron (12 points)", "hull()" - so that a
+  // verdict can say which operand decided it, or which stated nothing and left
+  // it open (recognition/Existence.h). Leaves carry no ids, and need none
+  // elsewhere; this is for the ledger.
+
   /*! A leaf that states nothing about its solid. */
-  [[nodiscard]] static std::shared_ptr<const SolidTree> opaque();
+  [[nodiscard]] static std::shared_ptr<const SolidTree> opaque(const std::string& what = "");
   /*! A leaf whose solid its generator declared. */
   [[nodiscard]] static std::shared_ptr<const SolidTree> declared(
-    std::shared_ptr<const DeclaredSolid> solid);
+    std::shared_ptr<const DeclaredSolid> solid, const std::string& what = "");
   /*! A leaf whose generator declares that its faces are its solid's own
    * boundary - each an exact plane, unless a record declares it a piece of a
    * curved surface - as polyhedron() does. It states no solid a point can be
    * classified against; where it becomes a Manifold it is resolved to the
    * envelope its faces span (Enveloped), or opaque. */
-  [[nodiscard]] static std::shared_ptr<const SolidTree> faceted();
+  [[nodiscard]] static std::shared_ptr<const SolidTree> faceted(const std::string& what = "");
   /*! A leaf known only to lie within `solid`: a point outside it is outside the
    * leaf, and nothing more follows. What a faceted leaf resolves to - the box
    * its planar faces' corners and its curved records' envelopes span
    * (Surface::envelope). */
   [[nodiscard]] static std::shared_ptr<const SolidTree> enveloped(
-    std::shared_ptr<const DeclaredSolid> solid);
+    std::shared_ptr<const DeclaredSolid> solid, const std::string& what = "");
   /*! A leaf known only to lie within `box`: enveloped by its six planes, or
    * opaque where the box has no inside to name a point of. */
-  [[nodiscard]] static std::shared_ptr<const SolidTree> box(const BoundingBox& box);
+  [[nodiscard]] static std::shared_ptr<const SolidTree> box(const BoundingBox& box,
+                                                            const std::string& what = "");
   /*! `op` over two operands - null standing for opaque. A union or an
    * intersection absorbs operands of its own kind, and a difference absorbs a
    * difference on its left: the tree says what the model did, not in which
@@ -105,6 +113,8 @@ public:
   /*! The declared solid of a Declared leaf, the envelope of an Enveloped one;
    * null otherwise. */
   [[nodiscard]] const DeclaredSolid *solid() const { return solid_.get(); }
+  /*! A leaf's name, from its generator; empty for a node, or where none was given. */
+  [[nodiscard]] const std::string& what() const { return what_; }
   /*! How many leaves, and how many of them declared. */
   [[nodiscard]] std::size_t leaves() const;
   /*! A box this tree's solid lies within, where the model states one: a leaf's
@@ -116,12 +126,13 @@ public:
 
 private:
   SolidTree(Op op, std::vector<std::shared_ptr<const SolidTree>> children,
-            std::shared_ptr<const DeclaredSolid> solid)
-    : op_(op), children_(std::move(children)), solid_(std::move(solid))
+            std::shared_ptr<const DeclaredSolid> solid, std::string what = "")
+    : op_(op), children_(std::move(children)), solid_(std::move(solid)), what_(std::move(what))
   {
   }
 
   Op op_;
   std::vector<std::shared_ptr<const SolidTree>> children_;
   std::shared_ptr<const DeclaredSolid> solid_;
+  std::string what_;
 };

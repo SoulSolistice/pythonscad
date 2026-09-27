@@ -10,13 +10,16 @@ namespace recognition {
 
 std::vector<Exists> existence(const FacetGraph& graph,
                               const std::vector<std::shared_ptr<Surface>>& surfaces,
-                              const Provenance& provenance, const SolidTree *tree)
+                              const Provenance& provenance, const SolidTree *tree,
+                              std::vector<const SolidTree *> *by, std::vector<Open> *open)
 {
   if (tree == nullptr || provenance.face_surface == nullptr) return {};
   const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
   const std::vector<std::vector<int>>& loops = *mesh.loops;
   std::vector<Exists> out(loops.size(), Exists::NotAsked);
+  if (by != nullptr) by->assign(loops.size(), nullptr);
+  if (open != nullptr) open->assign(loops.size(), Open::No);
   for (std::size_t f = 0; f < loops.size(); f++) {
     if (f >= provenance.face_surface->size()) break;
     const int32_t made = (*provenance.face_surface)[f];
@@ -31,21 +34,42 @@ std::vector<Exists> existence(const FacetGraph& graph,
       centroid += vertices[v];
     }
     points.push_back(centroid / double(loops[f].size()));
-    bool decided_off = true, face = false;
+    bool decided_off = true, face = false, any_on = false, any_off = false, no_point = false;
+    const SolidTree *blocked = nullptr, *centre = nullptr;
+    bool two_surfaces = false, blocked_seen = false;
     for (std::size_t k = 0; k < points.size(); k++) {
       Vector3d on;
       if (!surface->closestPoint(points[k], on)) {
         decided_off = false;
+        no_point = true;
         continue;
       }
       const Classification c = classify(*tree, on);
+      if (c.where == Where::On) any_on = true;
+      if (c.where == Where::In || c.where == Where::Out) any_off = true;
       if (c.where == Where::On || c.where == Where::Unknown) decided_off = false;
-      // A face of this surface at the centroid, the last point.
-      if (k + 1 == points.size() && c.where == Where::On) {
-        for (const Surface *bound : c.on) face = face || describesSameSurface(*bound, *surface);
+      if (c.where == Where::Unknown && !blocked_seen) {
+        blocked_seen = true;
+        blocked = c.because;
+        two_surfaces = c.because == nullptr;
+      }
+      // The centroid, the last point: a face of this surface there, and the
+      // reason given for the facet's verdict.
+      if (k + 1 == points.size()) {
+        centre = c.because;
+        if (c.where == Where::On) {
+          for (const Surface *bound : c.on) face = face || describesSameSurface(*bound, *surface);
+        }
       }
     }
     out[f] = decided_off ? Exists::Phantom : face ? Exists::Face : Exists::Undecided;
+    if (by != nullptr) (*by)[f] = out[f] == Exists::Undecided ? blocked : centre;
+    if (open != nullptr && out[f] == Exists::Undecided) {
+      (*open)[f] = no_point            ? Open::NoPoint
+                   : blocked_seen      ? (two_surfaces ? Open::TwoSurfaces : Open::Stated)
+                   : any_on && any_off ? Open::Crosses
+                                       : Open::TwoSurfaces;
+    }
   }
   return out;
 }

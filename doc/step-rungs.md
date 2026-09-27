@@ -155,6 +155,17 @@ survey says to do*, below, and open item 27.
 | R1 | provenance: the facets whose maker owns this surface | D0 | available (`Provenance`), used only as a *gate*, and its ownership half is **measured** (`owned`: corners on the surface, a 60 degree band, `least = 3`). Since 2026-09-23 ownership is also **carried** - `Surface::owners` (face declarers) and `witnesses` (evidence declarers), stamped where Manifold mints the ids - and reported against the measured one; since 2026-09-24 `owned` *is* identity plus presence - *declared as a face* (carried) **and** *present* (a whole facet of the maker on it by `runsThrough`, not wholly on a declared plane) - with no band and no count. Still used as a gate only; the positive query R0 needs is next. Open item 31 |
 | R2 | whatever a recogniser's own form can express | D4 | what the band pass does today |
 
+**Existence underlies every rung above** - not which surface a facet belongs
+to, but whether the model's solid has a face of that surface where the facet
+is (checklist B10). Its own ladder, and a region is only as exact as the rung
+that decided existence under it (C4):
+
+| rung | rule | class | today |
+| --- | --- | --- | --- |
+| E0 | the model's boolean over declared solids decides the point In, Out or On (`recognition/Classify.h`) | D0 | carried (`SolidTree`), asked per facet (`recognition/Existence.h`); a phantom is an `EXPORT-ERROR` |
+| E1 | an envelope a leaf states rules the point Out (a polyhedron's, a hull's, a sweep's laws) | D0 | the same; an envelope never rules a point In |
+| E2 | undecided - an operand states nothing, a point lies on two surfaces, or the facet crosses the boundary - and the mesh boolean's answer stands | D4 | the rest; the ledger's `.existence.tsv` names, per facet, the leaf behind the verdict or what left it open, and the report counts the undecided by it - each operand named there is a declaration to add |
+
 #### What the attempt got wrong, and it is a class error
 
 **R0 is D0**, and this table says what D0 means: *fixed by declarations alone -

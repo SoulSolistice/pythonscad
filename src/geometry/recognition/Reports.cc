@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "geometry/SolidTree.h"
 #include "geometry/Surface.h"
 #include "geometry/recognition/Exact.h"
 #include "utils/printutils.h"
@@ -168,6 +169,30 @@ void dumpLedger(const ReportInputs& in)
       out << centre[0] << '\t' << centre[1] << '\t' << centre[2] << '\t'
           << (c.why != nullptr ? c.why : "-") << '\t' << d0_reason(c) << '\n';
     }
+    // And existence: per facet made on a declared surface, whether the model's
+    // solid has a face of it there, and what decided that or left it open - the
+    // model's own answer beside the claims that stand on it (Existence.h; B10).
+    if (in.existence != nullptr && !in.existence->empty() && in.face_surface != nullptr) {
+      std::ofstream eout(std::string(ledger_path) + ".existence.tsv");
+      eout << "facet\tmade_on\tverdict\tby\topen\tx\ty\tz\n";
+      const char *verdicts[] = {"-", "face", "phantom", "undecided"};
+      for (std::size_t f = 0; f < in.existence->size(); f++) {
+        const Exists e = (*in.existence)[f];
+        if (e == Exists::NotAsked) continue;
+        Vector3d centre(0, 0, 0);
+        for (const int v : loops[f]) centre += vertices[v];
+        centre /= double(loops[f].size());
+        const SolidTree *by =
+          in.existence_by != nullptr && f < in.existence_by->size() ? (*in.existence_by)[f] : nullptr;
+        const Open open = in.existence_open != nullptr && f < in.existence_open->size()
+                            ? (*in.existence_open)[f]
+                            : Open::No;
+        const char tab = '\t';
+        eout << f << tab << (f < in.face_surface->size() ? (*in.face_surface)[f] : -1) << tab
+             << verdicts[int(e)] << tab << leafName(by) << tab << openName(open) << tab << centre[0]
+             << tab << centre[1] << tab << centre[2] << '\n';
+      }
+    }
     LOG("STEP export: the claim ledger - %1$d claims - written to %2$s",
         int(features.ledger.all().size()), ledger_path);
   }
@@ -299,6 +324,31 @@ void reportRegions(const ReportInputs& in)
   }
 }
 
+std::string leafName(const SolidTree *leaf)
+{
+  if (leaf == nullptr) return "-";
+  if (!leaf->what().empty()) return leaf->what();
+  switch (leaf->op()) {
+  case SolidTree::Op::Opaque:    return "an operand that states no solid";
+  case SolidTree::Op::Declared:  return "a declared solid";
+  case SolidTree::Op::Faceted:   return "a faceted solid";
+  case SolidTree::Op::Enveloped: return "an enveloped solid";
+  default:                       return "a boolean";
+  }
+}
+
+const char *openName(Open open)
+{
+  switch (open) {
+  case Open::No:          return "-";
+  case Open::Stated:      return "an operand stated nothing";
+  case Open::TwoSurfaces: return "a point on two surfaces";
+  case Open::Crosses:     return "crosses the model's boundary";
+  case Open::NoPoint:     return "no closest point";
+  }
+  return "-";
+}
+
 void reportExistence(const ReportInputs& in)
 {
   if (in.existence == nullptr || in.existence->empty()) return;
@@ -317,6 +367,28 @@ void reportExistence(const ReportInputs& in)
     "%2$d on a face the model's solid has, %3$d it has no face for at any point of them, %4$d "
     "undecided (a point on two surfaces, or an operand that states no solid)",
     int(asked), int(face), int(phantom), int(undecided));
+  // What left the undecided open, most first: each operand here is one whose
+  // generator states nothing of its solid - a declaration someone can add.
+  if (undecided > 0 && in.existence_open != nullptr) {
+    std::map<std::string, std::size_t> why;
+    for (std::size_t f = 0; f < in.existence->size(); f++) {
+      if ((*in.existence)[f] != Exists::Undecided) continue;
+      const Open open = f < in.existence_open->size() ? (*in.existence_open)[f] : Open::No;
+      const SolidTree *by =
+        in.existence_by != nullptr && f < in.existence_by->size() ? (*in.existence_by)[f] : nullptr;
+      why[open == Open::Stated ? "stated nothing: " + leafName(by) : std::string(openName(open))]++;
+    }
+    std::vector<std::pair<std::size_t, std::string>> ranked;
+    for (const auto& [reason, n] : why) ranked.emplace_back(n, reason);
+    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+      return a.first != b.first ? a.first > b.first : a.second < b.second;
+    });
+    std::string line;
+    for (std::size_t k = 0; k < ranked.size() && k < 6; k++) {
+      line += (k ? "; " : "") + ranked[k].second + " " + std::to_string(ranked[k].first);
+    }
+    LOG("STEP export:   undecided, by what left it open - %1$s", line);
+  }
   if (phantom > 0) {
     LOG(message_group::Export_Error,
         "STEP export: %1$d facet%2$s made on a declared surface where the model's solid has no face "

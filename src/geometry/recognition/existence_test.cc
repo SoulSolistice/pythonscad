@@ -93,8 +93,13 @@ TEST_CASE("a facet the model rules out at every point is a phantom", "[existence
   provenance.face_surface = &m.made_on;
   const auto part = SolidTree::combine(Op::Difference, cylinder(20, 0, 20), cylinder(15, -1, 22));
 
-  const std::vector<Exists> e = existence(graph, surfaces, provenance, part.get());
+  std::vector<const SolidTree *> by;
+  std::vector<Open> open;
+  const std::vector<Exists> e = existence(graph, surfaces, provenance, part.get(), &by, &open);
   REQUIRE(e.size() == 5);
+  // the phantoms were ruled out by the bore that holds them
+  CHECK(by[0] == part->children()[1].get());
+  CHECK(by[3] == part->children()[1].get());
   CHECK(e[0] == Exists::Phantom);
   CHECK(e[1] == Exists::Face);
   CHECK(e[2] == Exists::Face);
@@ -104,7 +109,12 @@ TEST_CASE("a facet the model rules out at every point is a phantom", "[existence
   // A union with an operand that states nothing rules nothing out: the same
   // facets, all undecided - never guessed.
   const auto blind = SolidTree::combine(Op::Union, part, SolidTree::opaque());
-  const std::vector<Exists> u = existence(graph, surfaces, provenance, blind.get());
+  std::vector<const SolidTree *> ubY;
+  std::vector<Open> uopen;
+  const std::vector<Exists> u = existence(graph, surfaces, provenance, blind.get(), &ubY, &uopen);
+  // and each names the operand that stated nothing
+  CHECK(uopen[0] == Open::Stated);
+  CHECK(ubY[0] == blind->children()[1].get());
   CHECK(u[0] == Exists::Undecided);
   CHECK(u[1] == Exists::Undecided);
   CHECK(u[3] == Exists::Undecided);

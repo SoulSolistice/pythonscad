@@ -9,7 +9,8 @@ diffed. Per export, three things must be identical:
            "written to" line
   census   how many of each STEP entity type the file holds
   ledger   the claim ledger dump, row by row after sorting (the claims are data;
-           the order a pass happened to record them in is not)
+           the order a pass happened to record them in is not), and beside it the
+           surfaces and existence tables the same way
 
     measure-compare.py <run a> <run b> [--show N] [--relabel-originals]
 
@@ -152,6 +153,14 @@ def main():
             bad += 1
             print(f"LEDGER   {rel}" + ("" if ga and gb else " (missing on one side)"))
             print("\n".join(first_differences(ga or [], gb or [], args.show)))
+        # and existence: per facet, what the model says of the face it was made
+        # on and what decided it (recognition/Existence.h)
+        xa = ledger(Path(str(base) + ".ledger.tsv.existence.tsv"))
+        xb = ledger(Path(str(obase) + ".ledger.tsv.existence.tsv"))
+        if xa != xb:
+            bad += 1
+            print(f"EXISTENCE {rel}")
+            print("\n".join(first_differences(xa or [], xb or [], args.show)))
         if sa != sb:
             bad += 1
             print(f"SURFACES {rel}")

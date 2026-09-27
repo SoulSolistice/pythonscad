@@ -34,6 +34,11 @@ struct Classification {
   Where where = Where::Unknown;
   /*! Where On: the declared bounds the point lies on, at machine precision. */
   std::vector<const Surface *> on;
+  /*! The leaf behind the answer: the one that holds the point, rules it out,
+   * or carries its face - or, for Unknown, the operand that stated nothing and
+   * left it open. Null where no one operand is the reason: a point on two
+   * surfaces at once. What the ledger names (SolidTree::what). */
+  const SolidTree *because = nullptr;
 };
 
 /*! Where `p` is with respect to the solid `tree` describes. See the file comment. */

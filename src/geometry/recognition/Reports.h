@@ -30,7 +30,15 @@ struct ReportInputs {
   const std::vector<Region> *regions = nullptr;                        // the D0 regions, where computed
   const std::vector<RegionRepresentation> *representations = nullptr;  // parallel to regions
   const std::vector<Exists> *existence = nullptr;  // per facet, where the model's boolean was carried
+  const std::vector<const SolidTree *> *existence_by = nullptr;  // the leaf behind each verdict
+  const std::vector<Open> *existence_open = nullptr;             // why an undecided facet is so
+  const std::vector<int32_t> *face_surface = nullptr;  // identity: the surface each was made on
 };
+
+/*! A leaf's name for the ledger: what its generator called it, or its kind. */
+std::string leafName(const SolidTree *leaf);
+/*! Why an undecided facet is so, as the ledger says it. */
+const char *openName(Open open);
 
 /*! OPENSCAD_STEP_LEDGER=<file>: every claim as a table row, and the surfaces
  * beside it. Changes nothing unless the variable is set. */

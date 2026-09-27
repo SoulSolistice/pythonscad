@@ -109,7 +109,8 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     // a point outside that box is outside the hull. See SolidTree.h.
     return std::make_shared<ManifoldGeometry>(
       tagged, std::set<uint32_t>{}, std::map<uint32_t, Color4f>{}, std::set<uint32_t>{}, stamped,
-      reach_known ? SolidTree::box(reach) : SolidTree::opaque());
+      reach_known ? SolidTree::box(reach, "hull()")
+                  : SolidTree::opaque("hull() of an operand that states no extent"));
   }
 
   std::shared_ptr<ManifoldGeometry> geom;
