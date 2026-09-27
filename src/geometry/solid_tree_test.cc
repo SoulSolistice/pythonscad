@@ -5,10 +5,12 @@
 #include "geometry/SolidTree.h"
 
 #include <catch2/catch_all.hpp>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <vector>
 
+#include "core/enums.h"
 #include "geometry/PolySet.h"
 #include "geometry/Surface.h"
 #include "geometry/manifold/ManifoldGeometry.h"
@@ -45,6 +47,7 @@ std::unique_ptr<PolySet> cube(const Vector3d& lo, const Vector3d& hi)
     }
   }
   solid->interior = (lo + hi) / 2;
+  solid->extent = BoundingBox(lo, hi);
   ps->solid_tree = SolidTree::declared(solid);
   return ps;
 }
@@ -148,6 +151,107 @@ TEST_CASE("the boolean is carried through Manifold to the exported mesh", "[soli
   REQUIRE(tree->op() == Op::Union);
   CHECK(tree->leaves() == 2);
   CHECK(tree->declaredLeaves() == 1);
+}
+
+TEST_CASE("a faceted leaf becomes the envelope its faces span", "[solidtree][envelope]")
+{
+  // A prism over a square inscribed in r = 10, declared a cylinder: its corners
+  // reach only 10 cos 45 = 7.07 along x, but the cylinder its sides are chords
+  // of reaches 10, and so does the envelope - a face taken as exact would put
+  // the solid's edge at 7.07 and rule out points the model has.
+  auto ps = std::make_unique<PolySet>(3);
+  for (const double z : {0.0, 5.0}) {
+    for (int k = 0; k < 4; k++) {
+      const double a = M_PI / 4 + k * M_PI / 2;
+      ps->vertices.emplace_back(10 * std::cos(a), 10 * std::sin(a), z);
+    }
+  }
+  ps->indices = {{0, 1, 5}, {0, 5, 4}, {1, 2, 6}, {1, 6, 5}, {2, 3, 7}, {2, 7, 6},
+                 {3, 0, 4}, {3, 4, 7}, {0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}};
+  ps->surfaces.push_back(std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10));
+  ps->solid_tree = SolidTree::faceted();
+  const auto tree = manifoldOf(*ps)->toPolySet()->solid_tree;
+  REQUIRE(tree->op() == SolidTree::Op::Enveloped);
+  BoundingBox box;
+  for (const auto& b : tree->solid()->bounds) box.extend(b->refpt);
+  CHECK(box.max()[0] == Catch::Approx(10).margin(1e-12));
+  CHECK(box.min()[1] == Catch::Approx(-10).margin(1e-12));
+  CHECK(box.max()[2] == Catch::Approx(5).margin(1e-12));
+
+  // With nothing declared over its faces, a faceted solid lies within its
+  // corners' box: a tetrahedron's.
+  auto tet = std::make_unique<PolySet>(3);
+  tet->vertices = {{0, 0, 0}, {2, 0, 0}, {0, 3, 0}, {0, 0, 4}};
+  tet->indices = {{0, 2, 1}, {0, 1, 3}, {1, 2, 3}, {0, 3, 2}};
+  tet->solid_tree = SolidTree::faceted();
+  const auto t = manifoldOf(*tet)->toPolySet()->solid_tree;
+  REQUIRE(t->op() == SolidTree::Op::Enveloped);
+  BoundingBox tb;
+  for (const auto& b : t->solid()->bounds) tb.extend(b->refpt);
+  CHECK((tb.max() - Vector3d(2, 3, 4)).norm() == 0);
+  CHECK(tb.min().norm() == 0);
+  // and a transform keeps it faceted until it becomes a Manifold
+  CHECK(SolidTree::faceted()->transformed(Transform3d::Identity())->op() == SolidTree::Op::Faceted);
+}
+
+TEST_CASE("a sweep's envelope is the finite cylinder its laws span", "[envelope]")
+{
+  // radius 20 throughout, a square profile of half width 1, pitch 5, 3 turns
+  // about z from the origin: every point is within 21 of the axis and between
+  // z = -1 and 15 + 1.
+  const auto sweep = std::make_shared<SweepSurface>(
+    Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0),
+    SweepLaws::constant(20, {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}), 5.0, 3.0, 0);
+  BoundingBox box;
+  REQUIRE(sweep->envelope({}, box));
+  CHECK(box.max()[0] == Catch::Approx(21).margin(1e-12));
+  CHECK(box.min()[1] == Catch::Approx(-21).margin(1e-12));
+  CHECK(box.min()[2] == Catch::Approx(-1).margin(1e-12));
+  CHECK(box.max()[2] == Catch::Approx(16).margin(1e-12));
+  for (int i = 0; i <= 60; i++) {
+    for (int j = 0; j <= 16; j++) {
+      const Vector3d p = sweep->evaluate(i / 60.0, j / 16.0);
+      CHECK(box.contains(p));
+    }
+  }
+}
+
+TEST_CASE("a hull lies within the box its operands state they lie in", "[solidtree][envelope]")
+{
+  // hull() of two declared cubes, [0,1]^3 and [4,5] x [0,1] x [0,1]: the hull is
+  // no boolean of them, but it lies within the box that holds both - x from 0
+  // to 5 - and a point beyond it is outside the hull.
+  Geometry::Geometries two;
+  two.emplace_back(nullptr, manifoldOf(*cube({0, 0, 0}, {1, 1, 1})));
+  two.emplace_back(nullptr, manifoldOf(*cube({4, 0, 0}, {5, 1, 1})));
+  const auto hull = ManifoldUtils::applyOperator3DManifold(two, OpenSCADOperator::HULL);
+  REQUIRE(hull != nullptr);
+  const auto tree = hull->getSolidTree();
+  REQUIRE(tree->op() == SolidTree::Op::Enveloped);
+  BoundingBox box;
+  REQUIRE(tree->extent(box));
+  CHECK((box.min() - Vector3d(0, 0, 0)).norm() == 0);
+  CHECK((box.max() - Vector3d(5, 1, 1)).norm() == 0);
+
+  // An operand stating nothing leaves the hull opaque.
+  PolySet plain = *cube({0, 0, 0}, {1, 1, 1});
+  plain.solid_tree = nullptr;
+  Geometry::Geometries mixed;
+  mixed.emplace_back(nullptr, manifoldOf(*cube({4, 0, 0}, {5, 1, 1})));
+  mixed.emplace_back(nullptr, manifoldOf(plain));
+  CHECK(ManifoldUtils::applyOperator3DManifold(mixed, OpenSCADOperator::HULL)->getSolidTree()->op() ==
+        SolidTree::Op::Opaque);
+
+  // Extents through the tree: a union's joined, a difference's first operand's.
+  using Op = SolidTree::Op;
+  BoundingBox u, d;
+  const auto a = manifoldOf(*cube({0, 0, 0}, {1, 1, 1}))->getSolidTree();
+  const auto b = manifoldOf(*cube({2, 0, 0}, {3, 1, 1}))->getSolidTree();
+  REQUIRE(SolidTree::combine(Op::Union, a, b)->extent(u));
+  CHECK((u.max() - Vector3d(3, 1, 1)).norm() == 0);
+  REQUIRE(SolidTree::combine(Op::Difference, a, b)->extent(d));
+  CHECK((d.max() - Vector3d(1, 1, 1)).norm() == 0);
+  CHECK_FALSE(SolidTree::combine(Op::Union, a, SolidTree::opaque())->extent(u));
 }
 
 TEST_CASE("copies of one geometry keep a tag each where they meet", "[identity]")

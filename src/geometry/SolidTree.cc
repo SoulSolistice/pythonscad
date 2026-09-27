@@ -11,6 +11,7 @@ std::shared_ptr<const DeclaredSolid> DeclaredSolid::transformed(const Transform3
   out->bounds = transformedSurfaces(bounds, mat);
   if (out->bounds.size() != bounds.size()) return nullptr;
   out->interior = mat * interior;
+  if (!extent.isEmpty()) out->extent = mat * extent;
   return out;
 }
 
@@ -24,6 +25,66 @@ std::shared_ptr<const SolidTree> SolidTree::declared(std::shared_ptr<const Decla
 {
   if (solid == nullptr || solid->bounds.empty()) return opaque();
   return std::shared_ptr<const SolidTree>(new SolidTree(Op::Declared, {}, std::move(solid)));
+}
+
+std::shared_ptr<const SolidTree> SolidTree::faceted()
+{
+  static const std::shared_ptr<const SolidTree> leaf(new SolidTree(Op::Faceted, {}, nullptr));
+  return leaf;
+}
+
+std::shared_ptr<const SolidTree> SolidTree::enveloped(std::shared_ptr<const DeclaredSolid> solid)
+{
+  if (solid == nullptr || solid->bounds.empty()) return opaque();
+  return std::shared_ptr<const SolidTree>(new SolidTree(Op::Enveloped, {}, std::move(solid)));
+}
+
+std::shared_ptr<const SolidTree> SolidTree::box(const BoundingBox& b)
+{
+  if (b.isEmpty() || (b.sizes().array() <= 0).any()) return opaque();
+  auto solid = std::make_shared<DeclaredSolid>();
+  for (int k = 0; k < 3; k++) {
+    Vector3d n(0, 0, 0);
+    n[k] = 1;
+    solid->bounds.push_back(std::make_shared<PlaneSurface>(b.min(), n));
+    solid->bounds.push_back(std::make_shared<PlaneSurface>(b.max(), n));
+  }
+  solid->interior = b.center();
+  solid->extent = b;
+  return enveloped(solid);
+}
+
+bool SolidTree::extent(BoundingBox& out) const
+{
+  switch (op_) {
+  case Op::Declared:
+  case Op::Enveloped:
+    if (solid_->extent.isEmpty()) return false;
+    out = solid_->extent;
+    return true;
+  case Op::Union: {
+    BoundingBox joined;
+    for (const auto& child : children_) {
+      BoundingBox b;
+      if (!child->extent(b)) return false;
+      joined.extend(b);
+    }
+    out = joined;
+    return !joined.isEmpty();
+  }
+  case Op::Intersection: {
+    bool any = false;
+    for (const auto& child : children_) {
+      BoundingBox b;
+      if (!child->extent(b)) continue;
+      out = any ? out.intersection(b) : b;
+      any = true;
+    }
+    return any;
+  }
+  case Op::Difference: return !children_.empty() && children_.front()->extent(out);
+  default:             return false;
+  }
 }
 
 std::shared_ptr<const SolidTree> SolidTree::combine(Op op, std::shared_ptr<const SolidTree> lhs,
@@ -51,9 +112,11 @@ std::shared_ptr<const SolidTree> SolidTree::combine(Op op, std::shared_ptr<const
 std::shared_ptr<const SolidTree> SolidTree::transformed(const Transform3d& mat) const
 {
   switch (op_) {
-  case Op::Opaque:   return opaque();
-  case Op::Declared: return declared(solid_->transformed(mat));
-  default:           break;
+  case Op::Opaque:    return opaque();
+  case Op::Declared:  return declared(solid_->transformed(mat));
+  case Op::Faceted:   return faceted();
+  case Op::Enveloped: return enveloped(solid_->transformed(mat));
+  default:            break;
   }
   std::vector<std::shared_ptr<const SolidTree>> moved;
   moved.reserve(children_.size());

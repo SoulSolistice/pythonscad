@@ -112,6 +112,11 @@ public:
   /*! How far `p` is from this surface - the size of signedResidual - and the
    * same bound: what D0 membership asks. */
   [[nodiscard]] recognition::Residual residual(const Vector3d& p) const;
+  /*! A box holding the part of this surface that a facet with these corners
+   * stands for - the facet's image on it - in closed form, or false where this
+   * kind has none to give. What an operand that states no solid can still say
+   * of where it is: its envelope (SolidTree.h). */
+  virtual bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const;
   /*! The point of this surface nearest `p`, or false where there is none to give. */
   virtual bool closestPoint(const Vector3d& p, Vector3d& out) const;
   /*! The unit normal where this surface passes nearest `p`, or false. */
@@ -219,6 +224,7 @@ public:
   double r;
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
@@ -360,6 +366,7 @@ public:
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
 
@@ -416,6 +423,7 @@ public:
   double r;
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
@@ -803,6 +811,7 @@ public:
   [[nodiscard]] bool onSurface(const Vector3d& pt, double tol) const override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
+  bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   /*! Where the point sits in the sweep: how far along, and where in the profile

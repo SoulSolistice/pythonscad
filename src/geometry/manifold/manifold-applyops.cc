@@ -46,12 +46,22 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     // Each operand's records apart as well, because what the hull itself makes
     // is stated by its operands one by one - see declareHullOfRevolution.
     std::vector<std::vector<std::shared_ptr<Surface>>> per_operand;
+    // And where each operand's solid lies, as the model states it: the hull of
+    // them lies within the box that holds them all.
+    BoundingBox reach;
+    bool reach_known = true;
+    auto note_reach = [&](const std::shared_ptr<const SolidTree>& tree) {
+      BoundingBox b;
+      if (tree == nullptr || !tree->extent(b)) reach_known = false;
+      else reach.extend(b);
+    };
     for (const auto& item : children) {
       if (!item.second) continue;
       auto& chgeom = item.second;
       if (const auto *mani = dynamic_cast<const ManifoldGeometry *>(chgeom.get())) {
         per_operand.push_back(mani->getSurfaces());
         mergeSurfaces(surfaces, mani->getSurfaces());
+        note_reach(mani->getSolidTree());
         pts.reserve(pts.size() + mani->numVertices());
         mani->foreachVertexUntilTrue([&](auto& p) {
           pts.push_back(p);
@@ -60,6 +70,7 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       } else if (const auto *ps = dynamic_cast<const PolySet *>(chgeom.get())) {
         per_operand.push_back(ps->surfaces);
         mergeSurfaces(surfaces, ps->surfaces);
+        note_reach(ps->solid_tree);
         pts.reserve(pts.size() + ps->indices.size() * 3);
         for (const auto& p : ps->indices) {
           for (const auto& ind : p) {
@@ -72,6 +83,7 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
         if (chN && !chN->isEmpty()) {
           per_operand.push_back(chN->getSurfaces());
           mergeSurfaces(surfaces, chN->getSurfaces());
+          note_reach(chN->getSolidTree());
           chN->foreachVertexUntilTrue([&](auto& p) {
             pts.push_back(p);
             return false;
@@ -91,11 +103,13 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     std::vector<std::shared_ptr<Surface>> stamped = stampOwners(surfaces, hull_ids);
     // The hull's own faces, made on what its operands state it makes.
     const auto tagged = ManifoldUtils::withSurfaceTags(hull, stamped);
-    // Its solid is a leaf of its own, opaque: the hull of exact solids is not a
-    // boolean of them, so nothing beneath it answers for it. See SolidTree.h.
-    return std::make_shared<ManifoldGeometry>(tagged, std::set<uint32_t>{},
-                                              std::map<uint32_t, Color4f>{}, std::set<uint32_t>{},
-                                              stamped, SolidTree::opaque());
+    // Its solid is a leaf of its own: the hull of exact solids is not a boolean
+    // of them, so nothing beneath it answers for it - but it lies within the box
+    // that holds its operands, where every one of them states where it lies, and
+    // a point outside that box is outside the hull. See SolidTree.h.
+    return std::make_shared<ManifoldGeometry>(
+      tagged, std::set<uint32_t>{}, std::map<uint32_t, Color4f>{}, std::set<uint32_t>{}, stamped,
+      reach_known ? SolidTree::box(reach) : SolidTree::opaque());
   }
 
   std::shared_ptr<ManifoldGeometry> geom;

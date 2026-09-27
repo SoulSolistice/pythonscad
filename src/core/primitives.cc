@@ -170,6 +170,8 @@ std::unique_ptr<const Geometry> CubeNode::createGeometry() const
   solid->bounds = ps->surfaces;
   solid->interior =
     Vector3d((coord1[0] + coord2[0]) / 2, (coord1[1] + coord2[1]) / 2, (coord1[2] + coord2[2]) / 2);
+  solid->extent =
+    BoundingBox(Vector3d(coord1[0], coord1[1], coord1[2]), Vector3d(coord2[0], coord2[1], coord2[2]));
   ps->solid_tree = SolidTree::declared(solid);
 
   return ps;
@@ -320,6 +322,7 @@ std::unique_ptr<const Geometry> SphereNode::createGeometry() const
     auto solid = std::make_shared<DeclaredSolid>();
     solid->bounds.push_back(sphere);
     solid->interior = Vector3d(0, 0, 0);
+    solid->extent = BoundingBox(Vector3d(-r, -r, -r), Vector3d(r, r, r));
     polyset->solid_tree = SolidTree::declared(solid);
   }
 
@@ -554,6 +557,8 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
       solid->interior =
         Vector3d(reach * cos_degrees(this->angle / 2), reach * sin_degrees(this->angle / 2), mid);
     }
+    const double wide = std::max(this->r1, this->r2);
+    solid->extent = BoundingBox(Vector3d(-wide, -wide, z1), Vector3d(wide, wide, z2));
     polyset->solid_tree = SolidTree::declared(solid);
   }
 
@@ -720,6 +725,11 @@ std::unique_ptr<const Geometry> PolyhedronNode::createGeometry() const
   p->setTriangular(is_triangular);
   p->colors = this->colors;
   p->color_indices = this->color_indices;
+  // Its faces are its solid's own boundary: the points are the model's
+  // statement, and each face is exact wherever no record declares it a piece
+  // of a curved surface. What that lets the model say of where it is, where it
+  // becomes a Manifold - see SolidTree::faceted.
+  p->solid_tree = SolidTree::faceted();
   return p;
 }
 

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -52,6 +53,38 @@ std::map<std::optional<Color4f>, std::vector<size_t>> colourGroups(const PolySet
     groups[color].push_back(i);
   }
   return groups;
+}
+
+/*! A faceted leaf's envelope (SolidTree::faceted): the box its faces span. A
+ * face made on no record is its generator's own exact plane, and its corners
+ * are where it is; one made on a record reaches where that record says
+ * (Surface::envelope). Opaque where a record can say nothing, or where the box
+ * has no inside to name a point of. */
+std::shared_ptr<const SolidTree> envelopeOf(const PolySet& ps,
+                                            const std::function<uint32_t(size_t)>& tag_of,
+                                            const std::vector<std::shared_ptr<Surface>>& records)
+{
+  std::map<uint32_t, const Surface *> by_tag;
+  for (const auto& record : records) {
+    if (record == nullptr) continue;
+    for (const uint32_t t : record->tags) by_tag.emplace(t, record.get());
+  }
+  BoundingBox box;
+  box.setEmpty();
+  for (size_t f = 0; f < ps.indices.size(); f++) {
+    std::vector<Vector3d> corners;
+    for (const int v : ps.indices[f]) corners.push_back(ps.vertices[v]);
+    const uint32_t tag = tag_of(f);
+    if (tag == 0) {
+      for (const auto& c : corners) box.extend(c);
+      continue;
+    }
+    const auto it = by_tag.find(tag);
+    BoundingBox reach;
+    if (it == by_tag.end() || !it->second->envelope(corners, reach)) return SolidTree::opaque();
+    box.extend(reach);
+  }
+  return SolidTree::box(box);
 }
 
 std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const PolySet& ps)
@@ -143,9 +176,12 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   // And the solid: the tree this PolySet already carries where it came back
   // from a Manifold, the one its generator declared, or an opaque leaf where
   // nothing states it - which is an answer, not a guess. See SolidTree.h.
+  // A faceted leaf is resolved here, where the faces it spans are still its
+  // generator's own and each knows the record it was made on.
+  std::shared_ptr<const SolidTree> solid = ps.solid_tree ? ps.solid_tree : SolidTree::opaque();
+  if (solid->op() == SolidTree::Op::Faceted) solid = envelopeOf(ps, tag_of, tagged);
   return std::make_shared<ManifoldGeometry>(mani, originalIDs, originalIDToColor, std::set<uint32_t>{},
-                                            stampOwners(tagged, originalIDs),
-                                            ps.solid_tree ? ps.solid_tree : SolidTree::opaque());
+                                            stampOwners(tagged, originalIDs), solid);
 }
 
 }  // namespace

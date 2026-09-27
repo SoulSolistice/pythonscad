@@ -787,6 +787,23 @@ does not collapse, it is written as the plane it is and named.
    form - the annulus between its laws' extremes, the profile's added, over the
    height its stations span. That is the next landing; until it, existence is
    decided only where no opaque operand is unioned at the top.
+
+   *(Landed 2026-09-27.)* Two leaf kinds carry it. `polyhedron()` declares its
+   faces its solid's own boundary (`SolidTree::faceted`); where it becomes a
+   Manifold that is resolved to the box its faces span - a face made on no
+   record by its corners, one made on a record by that record's closed-form
+   extent (`Surface::envelope`: a plane is the facet, a cylinder the finite
+   cylinder over the facet's axial range, a sphere its ball, a sweep the finite
+   cylinder its laws span) - an `Enveloped` leaf, from which only Out follows.
+   And every declared solid states its extent, so a `hull()` of declared
+   operands lies within the box that holds them (`SolidTree::extent`). On
+   lid10 the hose collar's hull and thread are then decided, and existence
+   finds **64 phantoms, every one made on the cutters' inner cylinder at
+   r 78.2073 near z 88** - the slivers this section began from - with 240
+   facets confirmed on a face the model has; the bayonet has none. Getting
+   there found an identity bug on the way: copies of one cached geometry
+   carried one set of tags, and a slot's end wall was attributed to another
+   slot's plane (`28fecee89`).
 4. **Membership consumes existence.** Behavioural; the fixture flips.
 5. **Corner constraints from existence**, and the contradiction as an
    `EXPORT-ERROR`.

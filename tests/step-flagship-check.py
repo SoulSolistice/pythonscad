@@ -106,7 +106,15 @@ KNOWN_EXPORT_ERRORS = {
     # boundary the model does not have (lid10's cone 48; the bayonet's cylinder 6
     # and cone 71). R0, region first: doc/step-recognition-design.md, *R0 is
     # region first, and the region is sequence-agnostic*.
-    "lid10": ["split on a boundary the model does not have"],
+    #
+    # And lid10's phantoms: its bayonet cutters stand 0.1 inside a socket whose
+    # chords sag 0.107, so slivers of the cutters' inner cylinder survive in the
+    # mesh that the model never has - 64 facets, every one on that cylinder at
+    # r 78.2073 near z 88, which the file writes as the mesh's, not the model's
+    # solid. doc/step-recognition-design.md, *Existence is a D0 question too*;
+    # checklist B10.
+    "lid10": ["split on a boundary the model does not have",
+              "made on a declared surface where the model's solid has no face"],
     "bayonet": ["split on a boundary the model does not have"],
 }
 

@@ -58,7 +58,12 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
   switch (tree.op()) {
   case Op::Opaque:   return of(Where::Unknown);
   case Op::Declared: return leaf(*tree.solid(), p);
-  default:           break;
+  case Op::Faceted:
+    return of(Where::Unknown);  // resolved where it became a Manifold
+  // Known only to lie within its envelope: outside it, outside the leaf.
+  case Op::Enveloped:
+    return leaf(*tree.solid(), p).where == Where::Out ? of(Where::Out) : of(Where::Unknown);
+  default: break;
   }
   std::vector<Classification> parts;
   parts.reserve(tree.children().size());

@@ -2326,3 +2326,92 @@ bool EllipticCylinderSurface::quadricForm(Matrix3d& M, Vector3d& origin, double&
   constant = 1;
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// Envelopes - see Surface::envelope. Each kind says where the part of it a
+// facet stands for lies, in closed form, or says nothing.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/*! The box of a finite piece of a cylinder about the line through `base`
+ * along the unit `axis`, of radius `r`, between axial positions t0 and t1: the
+ * two end circles' boxes joined, each circle reaching r sqrt(1 - axis_k^2)
+ * either side of its centre along coordinate k. */
+BoundingBox cylinderBox(const Vector3d& base, const Vector3d& axis, double r, double t0, double t1)
+{
+  BoundingBox box;
+  for (const double t : {t0, t1}) {
+    const Vector3d c = base + axis * t;
+    Vector3d reach;
+    for (int k = 0; k < 3; k++) reach[k] = r * std::sqrt(std::max(0.0, 1 - axis[k] * axis[k]));
+    box.extend(c - reach);
+    box.extend(c + reach);
+  }
+  return box;
+}
+
+}  // namespace
+
+bool Surface::envelope(const std::vector<Vector3d>&, BoundingBox&) const
+{
+  return false;
+}
+
+bool PlaneSurface::envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const
+{
+  // A facet on a plane is itself.
+  box.setEmpty();
+  for (const auto& p : corners) box.extend(p);
+  return !corners.empty();
+}
+
+bool CylinderSurface::envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const
+{
+  // Its image lies where the facet's corners lie along the axis - the
+  // cylinder's closest point keeps a point's axial position - and on the
+  // cylinder, so within the finite cylinder over that axial range.
+  if (corners.empty()) return false;
+  const Vector3d a = normdir.normalized();
+  double t0 = std::numeric_limits<double>::infinity(), t1 = -t0;
+  for (const auto& p : corners) {
+    const double t = (p - refpt).dot(a);
+    t0 = std::min(t0, t);
+    t1 = std::max(t1, t);
+  }
+  box = cylinderBox(refpt, a, r, t0, t1);
+  return true;
+}
+
+bool SphereSurface::envelope(const std::vector<Vector3d>&, BoundingBox& box) const
+{
+  box = BoundingBox(refpt - Vector3d(r, r, r), refpt + Vector3d(r, r, r));
+  return true;
+}
+
+bool SweepSurface::envelope(const std::vector<Vector3d>&, BoundingBox& box) const
+{
+  // The whole sweep, from its laws. A point of it is refpt + radial (R(u) +
+  // dr) + axis (pitch turns u + dz), with R and the profile's (dr, dz) linear
+  // between the laws' keys and a profile point between two linear in theirs -
+  // so its distance from the axis and its axial position take their extremes
+  // at a key and a profile point, and every point lies within the finite
+  // cylinder those extremes span.
+  const std::size_t n = laws.points();
+  if (n == 0) return false;
+  std::vector<double> keys = laws.corners();
+  keys.push_back(0);
+  keys.push_back(1);
+  double reach = 0, lo = std::numeric_limits<double>::infinity(), hi = -lo;
+  for (const double u : keys) {
+    for (std::size_t i = 0; i < n; i++) {
+      const Vector2d p = laws.pointAt(i, u);
+      reach = std::max(reach, std::fabs(laws.radiusAt(u) + p[0]));
+      const double along = pitch * turns * u + p[1];
+      lo = std::min(lo, along);
+      hi = std::max(hi, along);
+    }
+  }
+  box = cylinderBox(refpt, normdir.normalized(), reach, lo, hi);
+  return true;
+}

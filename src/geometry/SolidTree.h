@@ -49,6 +49,10 @@ class Surface;
 struct DeclaredSolid {
   std::vector<std::shared_ptr<Surface>> bounds;
   Vector3d interior{0, 0, 0};
+  /*! A box the solid lies within, stated by its generator as exactly as it
+   * states the solid; empty where it states none. What a hull of this solid
+   * can say of where the hull is (SolidTree::extent). */
+  BoundingBox extent;
 
   /*! This solid moved by `mat`, or null where a bound cannot be represented
    * afterwards - the leaf is then opaque, not wrong. */
@@ -58,13 +62,28 @@ struct DeclaredSolid {
 class SolidTree
 {
 public:
-  enum class Op { Opaque, Declared, Union, Intersection, Difference };
+  enum class Op { Opaque, Declared, Faceted, Enveloped, Union, Intersection, Difference };
 
   /*! A leaf that states nothing about its solid. */
   [[nodiscard]] static std::shared_ptr<const SolidTree> opaque();
   /*! A leaf whose solid its generator declared. */
   [[nodiscard]] static std::shared_ptr<const SolidTree> declared(
     std::shared_ptr<const DeclaredSolid> solid);
+  /*! A leaf whose generator declares that its faces are its solid's own
+   * boundary - each an exact plane, unless a record declares it a piece of a
+   * curved surface - as polyhedron() does. It states no solid a point can be
+   * classified against; where it becomes a Manifold it is resolved to the
+   * envelope its faces span (Enveloped), or opaque. */
+  [[nodiscard]] static std::shared_ptr<const SolidTree> faceted();
+  /*! A leaf known only to lie within `solid`: a point outside it is outside the
+   * leaf, and nothing more follows. What a faceted leaf resolves to - the box
+   * its planar faces' corners and its curved records' envelopes span
+   * (Surface::envelope). */
+  [[nodiscard]] static std::shared_ptr<const SolidTree> enveloped(
+    std::shared_ptr<const DeclaredSolid> solid);
+  /*! A leaf known only to lie within `box`: enveloped by its six planes, or
+   * opaque where the box has no inside to name a point of. */
+  [[nodiscard]] static std::shared_ptr<const SolidTree> box(const BoundingBox& box);
   /*! `op` over two operands - null standing for opaque. A union or an
    * intersection absorbs operands of its own kind, and a difference absorbs a
    * difference on its left: the tree says what the model did, not in which
@@ -83,10 +102,16 @@ public:
   {
     return children_;
   }
-  /*! The declared solid of a Declared leaf; null otherwise. */
+  /*! The declared solid of a Declared leaf, the envelope of an Enveloped one;
+   * null otherwise. */
   [[nodiscard]] const DeclaredSolid *solid() const { return solid_.get(); }
   /*! How many leaves, and how many of them declared. */
   [[nodiscard]] std::size_t leaves() const;
+  /*! A box this tree's solid lies within, where the model states one: a leaf's
+   * own extent; a union's operands' joined, all of them needed; an
+   * intersection's any operand's; a difference's first operand's. False where
+   * an operand that matters states none. */
+  bool extent(BoundingBox& out) const;
   [[nodiscard]] std::size_t declaredLeaves() const;
 
 private:

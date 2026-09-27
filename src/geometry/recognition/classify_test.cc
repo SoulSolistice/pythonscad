@@ -130,3 +130,27 @@ TEST_CASE("a mirrored or sheared solid keeps its inside", "[classify]")
   CHECK(at(s, 0.5, 0.5, 0.9) == Where::Out);  // x = -0.4, though inside the unsheared box
   CHECK(at(s, 1.5, 0.5, 1) == Where::On);     // x = 0.5 on the top face z = 1
 }
+
+TEST_CASE("an envelope rules a point out, and nothing in", "[classify][envelope]")
+{
+  auto box = std::make_shared<DeclaredSolid>();
+  for (int i = 0; i < 3; i++) {
+    Vector3d n(0, 0, 0);
+    n[i] = 1;
+    box->bounds.push_back(std::make_shared<PlaneSurface>(Vector3d(0, 0, 0), n));
+    box->bounds.push_back(std::make_shared<PlaneSurface>(Vector3d(2, 2, 2), n));
+  }
+  box->interior = Vector3d(1, 1, 1);
+  const auto thread = SolidTree::enveloped(box);
+  CHECK(at(thread, 5, 1, 1) == Where::Out);
+  CHECK(at(thread, 1, 1, 1) == Where::Unknown);
+  CHECK(at(thread, 2, 1, 1) == Where::Unknown);
+  // lid10's root: a part united with a thread that states only where it is.
+  const auto part = SolidTree::combine(Op::Union, cylinder(10, 10, 0, 20), thread);
+  CHECK(at(part, 7, 0, 10) == Where::In);     // in the part
+  CHECK(at(part, 10, 0, 10) == Where::On);    // on the part's wall, away from the thread
+  CHECK(at(part, 1, 1, 1) == Where::In);      // in the part, whatever the thread
+  CHECK(at(part, -15, 0, 10) == Where::Out);  // in neither
+  // and a faceted leaf never resolved says nothing
+  CHECK(at(SolidTree::faceted(), 0, 0, 0) == Where::Unknown);
+}
