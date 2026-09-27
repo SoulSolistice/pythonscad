@@ -4159,6 +4159,48 @@ A test that exports one model with its vertices permuted and asserts the same
 file, point for point, is the assertion that holds it. Not done yet; recorded so
 the next neutral step does not rediscover it.
 
+### 38. Gates that hide truth, audited 2026-09-27
+
+Every rule that declines, refuses or drops a face or a declaration, classed by
+whether it stands in for a truth that was missing. Landed the same day: a
+cylinder() slice past half a turn and a hull() of a raw polyhedron state their
+solids (`83af07497`); a hull of coaxial declared primitives is a declared solid
+(`6ea7b4634`); the seam ruling is decided at machine precision, not 1e-6
+(`f66d1e9c6`). What stands, in the order they block:
+
+- **"half a surface is worse than none"** (`Pipeline.cc`, quadric writer): the
+  exact tier refuses every patch of a declared surface when one boundary corner
+  is off it. Stands in for cut-corner placement - the existence design's steps
+  5 to 7.
+- **"four times this claim's median stray"** (`Grids.cc`): declines facets of a
+  declared sweep by a statistic over its own cut corners - a D4 rule on declared
+  ground (C3). Stands in for the same cut corners, on the sweep.
+- **The quadric's span and fewer-than-three rules** spare D0 members, but the
+  proposal's D0 means every corner on the surface: a cut facet made on it is D4
+  there. Stands in for identity membership (parked, `b5577d3d4`).
+- **A polyhedron's own faces are corner constraints of the `MeshPlane` tier,
+  unused** - though `polyhedron()` now declares them exact (`faceted`). 154 of
+  lid10's corners have one surface to meet. Needs "made by a faceted generator"
+  carried per facet: a reserved tag, not a record per face.
+- **Band matching at 1e-7** (`Bands.cc`: `declared_cylinder`, `declared_cone`,
+  and the walk's own admission at 1e-7 of the probe scale): measured band
+  parameters compared with the records - C2, and the band half of item 36. Not
+  a swap: a frustum is named from its two rim cylinders, which are evidence and
+  hold no facet, so "every rim vertex exactly on the record" is the test only
+  for the face record, and the walk's admission has to become exact membership.
+- **Two operands on one point** leave existence undecided - coinciding faces,
+  and since `83af07497` the plane a slice's two halves share, which is no face
+  at all. Needs the half-space each operand keeps there.
+- **Operands that state nothing**, counted by the existence table's report: on
+  lid10 a mesh stating no solid 425 facets (extrusions and the like), hull() of
+  other operands 274, the thread polyhedron's box 153; the bayonet's thread 252.
+  Each is a declaration to add at its generator.
+
+Two WILL_FAIL tests hide more than they say: ctest prints nothing for one that
+"passes", so read them directly (CLAUDE.md). Measured 2026-09-27:
+step-representation 1.048888 mm3; flagship-corners only lid10 and the bayonet,
+on the 0.716 cone corner.
+
 ### 32. The fixture sanity test does not look for `EXPORT-ERROR`
 
 `tests/stepexportsanitytest.py` never checks the exporter's own error lines;
