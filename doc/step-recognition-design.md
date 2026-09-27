@@ -805,6 +805,21 @@ does not collapse, it is written as the plane it is and named.
    carried one set of tags, and a slot's end wall was attributed to another
    slot's plane (`28fecee89`).
 4. **Membership consumes existence.** Behavioural; the fixture flips.
+   *(Attempted 2026-09-27 and parked, `b5577d3d4`: membership by identity with
+   phantoms left out is not landable before steps 5 to 7. With the region walk
+   through a vertex twice, lid10's approximation tier reads as no solid (421
+   corners off their faces); without it, inside out (OCCT volume -5.7e21) -
+   cut facets counted D0 escape the rules that kept them out of patches and are
+   written with corners nothing places. The exact tiers stay valid and report
+   11 and 3 split regions. So the order is now: an existence table in the
+   ledger - each facet's verdict and what decided it, the undecided keyed by
+   the operand that blocked them - so every later step is judged facet by
+   facet; **phantom excision** in the writer - the faces either side of a
+   phantom joined along the exact curve they share, which corner placement
+   alone cannot do (on the coupon the fin's corners fold rather than move);
+   the faceted generators' own planes as exact corner constraints, said by a
+   reserved identity tag rather than a record per face; then this step and the
+   pinch walk together.)*
 5. **Corner constraints from existence**, and the contradiction as an
    `EXPORT-ERROR`.
 6. **`polyhedron()` declares its faces' planes** (E1) - a separate landing,
