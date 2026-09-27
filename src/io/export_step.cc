@@ -1079,7 +1079,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
                     faceOrigin, faceSurface, corner_moves, single_owner, owner_split, owned, faceParents,
-                    newNormals, 1e-5, analytic, approximate, corner_owners);
+                    newNormals, 1e-5, analytic, approximate, corner_owners, ps->solid_tree.get());
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;

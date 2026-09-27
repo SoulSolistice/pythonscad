@@ -37,6 +37,7 @@ void StepKernel::BodyBuild::recognise()
     inputs.face_origin = &faceOrigin;
     inputs.face_surface = &faceSurface;
     inputs.owned = &owned;
+    inputs.solid_tree = solidTree;
     inputs.model_tol = model_tol;
     inputs.approximate = approximate;
     recognition::runPipeline(inputs, writability, rec);
@@ -52,9 +53,11 @@ void StepKernel::BodyBuild::reportRecognition()
     faceOrigin,
     owned,
     &rec.d0_regions,
-    &rec.d0_representations};
+    &rec.d0_representations,
+    &rec.existence};
   recognition::dumpLedger(report_inputs);
   recognition::reportArbitration(report_inputs);
+  recognition::reportExistence(report_inputs);
   recognition::reportRegions(report_inputs);
   recognition::reportRepresentations(report_inputs);
 }

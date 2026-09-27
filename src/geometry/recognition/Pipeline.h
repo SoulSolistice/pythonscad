@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/recognition/Existence.h"
 #include "geometry/recognition/FacetGraph.h"
 #include "geometry/recognition/Membership.h"
 #include "geometry/recognition/Representation.h"
@@ -26,6 +27,7 @@ struct Inputs {
   const std::vector<int32_t> *face_origin = nullptr;                // provenance: facet -> original
   const std::vector<int32_t> *face_surface = nullptr;  // provenance: facet -> the surface it was made on
   const std::map<int32_t, std::vector<std::size_t>> *owned = nullptr;  // original -> surfaces
+  const SolidTree *solid_tree = nullptr;  // the model's boolean over its declared solids, where carried
   double model_tol = 0;
   bool approximate = false;  // step-approximate-surfaces: spend the tessellation band
 };
@@ -56,6 +58,7 @@ struct Recognition {
   std::vector<AnalyticFeatures::Patch> quadric_faces;   // trimmed quadrics written as faces
   std::vector<Region> d0_regions;  // each declared surface's D0 region - see Membership.h
   std::vector<RegionRepresentation> d0_representations;  // how each would be written - proposals
+  std::vector<Exists> existence;  // per facet: has the model a face of the surface it was made on?
 };
 
 /*! Run every stage. `out` is filled as the stages run, so a Writability that

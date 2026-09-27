@@ -763,6 +763,30 @@ does not collapse, it is written as the plane it is and named.
    r 15, `$fn` 24 (sagitta 0.128), cut by a slot whose inner wall is at
    `15 - 0.1` - with its volume **derived from the exact model**. It fails
    before step 4, and names why.
+   *(Landed 2026-09-27 as detection, because a fixture may carry a known defect
+   only as a named `EXPORT-ERROR`, never as a failing assertion: the existence
+   stage (`recognition/Existence.h`) classifies every facet made on a declared
+   surface at its corners and centroid, each taken onto that surface, and a
+   facet the model rules out at every one of them is a **phantom** - an
+   `EXPORT-ERROR` while the file writes it. The coupon is
+   `examples/step_test/phantom-sliver.scad`, a specimen and not yet a fixture:
+   its approximation tier fails the round trip on a corner 0.103 off its face -
+   the cut-corner defect of steps 5 to 7, which no directive may excuse - so it
+   joins the suite, with its derived volume asserted, when that is fixed. Until
+   then `existence_test.cc` holds the detection, mutation-checked. On the
+   coupon: 12 phantoms, 137 facets on a face the model has, 7 undecided.)*
+
+   **What it found on the reference parts: nothing decided.** lid10's 1314
+   facets made on declared surfaces are all undecided, and the bayonet's 883:
+   the root of each tree is a union with one opaque operand - the hose thread,
+   a `polyhedron()` under `declare_sweep` - and a union with an operand that
+   states nothing cannot rule out any point, however far away. Kleene is right
+   to say so. The answer is a declaration, not a looser rule: **an opaque leaf
+   may declare an envelope**, a region its solid lies within, and a point
+   outside it is Out of that operand. A declared sweep states its own in closed
+   form - the annulus between its laws' extremes, the profile's added, over the
+   height its stations span. That is the next landing; until it, existence is
+   decided only where no opaque operand is unioned at the top.
 4. **Membership consumes existence.** Behavioural; the fixture flips.
 5. **Corner constraints from existence**, and the contradiction as an
    `EXPORT-ERROR`.

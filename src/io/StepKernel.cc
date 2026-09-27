@@ -82,11 +82,11 @@ void StepKernel::build_tri_body(
   const std::map<int, std::pair<std::size_t, std::size_t>>& ownerSplit,
   const std::map<int32_t, std::vector<std::size_t>>& owned, const std::vector<int>& faceParents,
   const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate,
-  const std::map<int, std::vector<std::size_t>>& cornerOwners)
+  const std::map<int, std::vector<std::size_t>>& cornerOwners, const SolidTree *solidTree)
 {
   BodyBuild(*this, name, mesh_vertices, faces, curves, surfaces, faceOrigin, faceSurface, cornerMoves,
             singleOwner, ownerSplit, owned, faceParents, faceNormals, tol, analytic, approximate,
-            cornerOwners)
+            cornerOwners, solidTree)
     .run();
 }
 

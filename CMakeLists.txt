@@ -1640,6 +1640,7 @@ set(CORE_SOURCES
   src/geometry/recognition/Quadrics.cc
   src/geometry/recognition/Regions.cc
   src/geometry/recognition/Classify.cc
+  src/geometry/recognition/Existence.cc
   src/geometry/recognition/Pipeline.cc
   src/geometry/recognition/Reports.cc
   src/geometry/ClipperUtils.cc

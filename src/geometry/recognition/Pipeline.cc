@@ -99,6 +99,15 @@ private:
   }
 };
 
+/*! The existence stage: per facet made on a declared surface, whether the
+ * model's solid has a face of that surface there - asked of the model's own
+ * boolean, not of the mesh's. See Existence.h. Pure, and read by nothing that
+ * decides yet: reported, and a phantom is an EXPORT-ERROR (checklist B10). */
+void runExistence(Context& ctx)
+{
+  ctx.out.existence = existence(ctx.graph, *ctx.in.surfaces, ctx.provenance, ctx.in.solid_tree);
+}
+
 /*! The region stage: the D0 region of every declared curved surface, by
  * provenance and exact membership alone - see Membership.h. Pure, first, and
  * read by nothing that decides yet: it is the sequence-agnostic region R0 will
@@ -979,6 +988,8 @@ enum Product : unsigned {
   kProposals = 1u << 9,         // what every patch recogniser wants - pure
   kRegions = 1u << 10,          // each declared surface's D0 region - pure
   kRepresentations = 1u << 11,  // how each D0 region would be written - pure
+  kSolid = 1u << 12,            // the model's boolean over its declared solids
+  kExistence = 1u << 13,        // per facet, whether the model has its face - pure
 };
 
 /*! The stages, in the order the policy in force runs them, each with what it
@@ -998,6 +1009,7 @@ struct Stage {
   void (*run)(Context&);
 };
 constexpr Stage kStages[] = {
+  {"exist", kGraph | kDeclarations | kProvenance | kSolid, kExistence, runExistence},
   {"region", kGraph | kDeclarations | kProvenance, kRegions, runRegions},
   {"represent", kGraph | kDeclarations | kRegions, kRepresentations, runRepresent},
   {"band", kGraph | kDeclarations | kRegions, kBands, runBands},
@@ -1015,7 +1027,7 @@ constexpr Stage kStages[] = {
 void runPipeline(const Inputs& in, Writability& writability, Recognition& out)
 {
   Context ctx(in, writability, out);
-  unsigned produced = kGraph | kDeclarations | kProvenance;
+  unsigned produced = kGraph | kDeclarations | kProvenance | kSolid;
   for (const Stage& stage : kStages) {
     if ((stage.reads & ~produced) != 0) {
       LOG(message_group::Export_Error,

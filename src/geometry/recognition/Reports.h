@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/recognition/Existence.h"
 #include "geometry/recognition/FacetGraph.h"
 #include "geometry/recognition/Membership.h"
 #include "geometry/recognition/Representation.h"
@@ -28,6 +29,7 @@ struct ReportInputs {
   const std::map<int32_t, std::vector<std::size_t>>& owned;
   const std::vector<Region> *regions = nullptr;                        // the D0 regions, where computed
   const std::vector<RegionRepresentation> *representations = nullptr;  // parallel to regions
+  const std::vector<Exists> *existence = nullptr;  // per facet, where the model's boolean was carried
 };
 
 /*! OPENSCAD_STEP_LEDGER=<file>: every claim as a table row, and the surfaces
@@ -42,6 +44,12 @@ void reportArbitration(const ReportInputs& in);
  * declarations alone, whatever order anything ran in - written whole, or split
  * on a boundary the model does not have? See Membership.h. */
 void reportRegions(const ReportInputs& in);
+
+/*! Whether the model has the faces the mesh's facets were made on: how many
+ * facets made on a declared surface are on a face of the model's solid, how
+ * many the model rules out at every point - phantoms, an EXPORT-ERROR - and how
+ * many it leaves undecided. See Existence.h; checklist B10. */
+void reportExistence(const ReportInputs& in);
 
 /*! How each D0 region would be written, against what holds it today - the
  * before-measurement for granting regions first; and the facets that are D0 on

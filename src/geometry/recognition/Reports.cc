@@ -299,6 +299,33 @@ void reportRegions(const ReportInputs& in)
   }
 }
 
+void reportExistence(const ReportInputs& in)
+{
+  if (in.existence == nullptr || in.existence->empty()) return;
+  std::size_t asked = 0, face = 0, phantom = 0, undecided = 0;
+  for (std::size_t f = 0; f < in.existence->size(); f++) {
+    const Exists e = (*in.existence)[f];
+    if (e == Exists::NotAsked) continue;
+    asked++;
+    if (e == Exists::Face) face++;
+    if (e == Exists::Undecided) undecided++;
+    if (e == Exists::Phantom) phantom++;
+  }
+  if (asked == 0) return;
+  LOG(
+    "STEP export: existence, by the model's boolean - of %1$d facets made on a declared surface, "
+    "%2$d on a face the model's solid has, %3$d it has no face for at any point of them, %4$d "
+    "undecided (a point on two surfaces, or an operand that states no solid)",
+    int(asked), int(face), int(phantom), int(undecided));
+  if (phantom > 0) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d facet%2$s made on a declared surface where the model's solid has no face "
+        "of it - a cutter nearer a surface than its tessellation's sagitta leaves slivers the model "
+        "does not have, and the file writes the mesh's slivers, not the model's solid (checklist B10)",
+        int(phantom), phantom == 1 ? " is" : "s are");
+  }
+}
+
 void reportRepresentations(const ReportInputs& in)
 {
   if (in.regions == nullptr || in.representations == nullptr || in.regions->empty()) return;

@@ -45,6 +45,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <src/geometry/Curve.h>
 #include <src/geometry/Surface.h>
 
+class SolidTree;
+
 // Format a double as an ISO 10303-21 REAL literal.
 //
 // The default ostream formatting is unusable for STEP: it only emits 6
@@ -2115,7 +2117,8 @@ public:
                       const std::map<int32_t, std::vector<std::size_t>>& owned,
                       const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals,
                       double tol, bool analytic = false, bool approximate = false,
-                      const std::map<int, std::vector<std::size_t>>& cornerOwners = {});
+                      const std::map<int, std::vector<std::size_t>>& cornerOwners = {},
+                      const SolidTree *solidTree = nullptr);
   EdgeCurve *get_line_from_map(std::map<std::pair<int, int>, StepKernel::EdgeCurve *>& edge_map,
                                int ind1, int ind2, StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
                                bool& edge_dir, int& merge_cnt);
