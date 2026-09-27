@@ -240,6 +240,37 @@ uint32_t triangleTag(const Vector3d& a, const Vector3d& b, const Vector3d& c,
   return matches == 1 ? found : 0;
 }
 
+manifold::Manifold withFreshTags(const manifold::Manifold& mani,
+                                 std::vector<std::shared_ptr<Surface>>& surfaces,
+                                 const std::set<uint32_t>& taken)
+{
+  std::map<uint32_t, uint32_t> renamed;
+  for (auto& record : surfaces) {
+    if (record == nullptr) continue;
+    bool clash = false;
+    for (const uint32_t t : record->tags) clash = clash || taken.count(t) != 0;
+    if (!clash) continue;
+    auto copy = record->clone();
+    for (auto& t : copy->tags) {
+      if (taken.count(t) == 0) continue;
+      auto it = renamed.find(t);
+      if (it == renamed.end()) it = renamed.emplace(t, mintTag()).first;
+      t = it->second;
+    }
+    record = copy;
+  }
+  if (renamed.empty()) return mani;
+  manifold::MeshGL64 mesh = mani.GetMeshGL64();
+  if (mesh.numProp <= 3) return mani;
+  for (size_t v = 0; v < mesh.NumVert(); v++) {
+    double& tag = mesh.vertProperties[v * mesh.numProp + 3];
+    const auto it = renamed.find(static_cast<uint32_t>(tag + 0.5));
+    if (it != renamed.end()) tag = static_cast<double>(it->second);
+  }
+  manifold::Manifold out(mesh);
+  return out.Status() == Error::NoError ? out : mani;
+}
+
 manifold::Manifold withSurfaceTags(const manifold::Manifold& mani,
                                    std::vector<std::shared_ptr<Surface>>& surfaces)
 {

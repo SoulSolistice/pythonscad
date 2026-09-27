@@ -301,7 +301,17 @@ template std::shared_ptr<CGAL::Polyhedron_3<CGAL_Kernel3>> ManifoldGeometry::toP
 ManifoldGeometry ManifoldGeometry::binOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs,
                                          manifold::OpType opType) const
 {
-  auto mani = lhs.manifold_.Boolean(rhs.manifold_, opType);
+  // A tag names one record. Two copies of one geometry - evaluated once, placed
+  // twice - carry the same tags, each copy's records standing elsewhere; where
+  // they meet, the right one's are renamed, or a facet of one copy would name
+  // the other's surface (Surface::tags).
+  std::set<uint32_t> held;
+  for (const auto& record : lhs.surfaces_) {
+    if (record) held.insert(record->tags.begin(), record->tags.end());
+  }
+  std::vector<std::shared_ptr<Surface>> right_surfaces = rhs.surfaces_;
+  const manifold::Manifold right = ManifoldUtils::withFreshTags(rhs.manifold_, right_surfaces, held);
+  auto mani = lhs.manifold_.Boolean(right, opType);
   auto originalIDToColor = lhs.originalIDToColor_;
   auto subtractedIDs = lhs.subtractedIDs_;
 
@@ -328,7 +338,7 @@ ManifoldGeometry ManifoldGeometry::binOp(const ManifoldGeometry& lhs, const Mani
   // leaves a bore of the same axis and radius behind, so the surfaces of the
   // right hand side stay meaningful for a subtraction too.
   auto surfaces = lhs.surfaces_;
-  mergeSurfaces(surfaces, rhs.surfaces_);
+  mergeSurfaces(surfaces, right_surfaces);
 
   // And the boolean itself, over the solids the operands declared: what says
   // whether a surface has a face here when the chords the mesh was cut with

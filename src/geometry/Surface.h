@@ -53,7 +53,12 @@ public:
    * its cut corners - so "which surface was this facet made on" is answered by
    * identity rather than by where its corners are (doc/step-design-checklist.md,
    * B7). Copied by clone() and so by every transform; unioned wherever two
-   * records are deduplicated into one. Empty for evidence and until stamped. */
+   * records are deduplicated into one. Empty for evidence and until stamped.
+   *
+   * A tag names one record. A geometry evaluated once and placed several times
+   * carries the same tags in every copy, each copy's records standing
+   * elsewhere; where two copies meet in a boolean the right one's are renamed,
+   * records and triangles alike (ManifoldUtils::withFreshTags). */
   std::vector<uint32_t> tags;
   /*! Whether this record declares a face: after stamping, whether any original
    * owns it; before, whether its generator did not mark it as evidence. */
@@ -175,6 +180,9 @@ void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
  * "declared by nobody". */
 [[nodiscard]] std::vector<std::shared_ptr<Surface>> stampOwners(
   const std::vector<std::shared_ptr<Surface>>& list, const std::set<uint32_t>& ids);
+
+/*! A tag no record has had yet - see Surface::tags. */
+[[nodiscard]] uint32_t mintTag();
 
 /*! The records of `list`, each face a generator declared given an identity tag
  * of its own - see Surface::tags. Copies rather than mutates, as stampOwners.

@@ -256,11 +256,16 @@ std::vector<std::shared_ptr<Surface>> stampOwners(const std::vector<std::shared_
   return out;
 }
 
-std::vector<std::shared_ptr<Surface>> stampTags(const std::vector<std::shared_ptr<Surface>>& list)
+uint32_t mintTag()
 {
   // One counter for the process: a tag is compared only with tags, within one
   // evaluation, and never written anywhere.
   static std::atomic<uint32_t> next{1};
+  return next++;
+}
+
+std::vector<std::shared_ptr<Surface>> stampTags(const std::vector<std::shared_ptr<Surface>>& list)
+{
   std::vector<std::shared_ptr<Surface>> out;
   out.reserve(list.size());
   for (const auto& surface : list) {
@@ -270,7 +275,7 @@ std::vector<std::shared_ptr<Surface>> stampTags(const std::vector<std::shared_pt
       continue;
     }
     auto copy = surface->clone();
-    copy->tags.push_back(next++);
+    copy->tags.push_back(mintTag());
     out.push_back(copy);
   }
   return out;

@@ -49,6 +49,16 @@ uint32_t triangleTag(const Vector3d& a, const Vector3d& b, const Vector3d& c,
  * whose triangles already exist: a declaration over a subtree already a
  * Manifold, a hull. Gives each face record in `surfaces` a tag of its own
  * (stampTags). `mani` itself where nothing new is tagged. */
+/*! `mani` with every tag its records share with `taken` renamed to a fresh
+ * one - in the records of `surfaces` and in the tag property of the triangles
+ * that carry it, the same renaming in both. What keeps a tag naming one record
+ * where two copies of one geometry meet: a geometry evaluated once and placed
+ * several times carries the same tags in every copy, and each copy's records
+ * stand somewhere else. `mani` itself where nothing is shared. */
+manifold::Manifold withFreshTags(const manifold::Manifold& mani,
+                                 std::vector<std::shared_ptr<Surface>>& surfaces,
+                                 const std::set<uint32_t>& taken);
+
 manifold::Manifold withSurfaceTags(const manifold::Manifold& mani,
                                    std::vector<std::shared_ptr<Surface>>& surfaces);
 

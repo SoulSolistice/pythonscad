@@ -5,6 +5,7 @@
 #include "geometry/SolidTree.h"
 
 #include <catch2/catch_all.hpp>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -147,4 +148,31 @@ TEST_CASE("the boolean is carried through Manifold to the exported mesh", "[soli
   REQUIRE(tree->op() == Op::Union);
   CHECK(tree->leaves() == 2);
   CHECK(tree->declaredLeaves() == 1);
+}
+
+TEST_CASE("copies of one geometry keep a tag each where they meet", "[identity]")
+{
+  // One cube, evaluated once and placed twice - its tags are the same in both
+  // copies, and each copy's planes stand elsewhere. United, every triangle has
+  // to name the record of its own copy: the one whose plane holds it.
+  const auto once = manifoldOf(*cube({0, 0, 0}, {1, 1, 1}));
+  ManifoldGeometry moved = *once;
+  Transform3d shift = Transform3d::Identity();
+  shift.translate(Vector3d(3, 0, 0));
+  moved.transform(shift);
+  const auto ps = (*once + moved).toPolySet();
+  REQUIRE(ps->surface_tags.size() == ps->indices.size());
+  std::map<uint32_t, std::vector<const Surface *>> of_tag;
+  for (const auto& r : ps->surfaces) {
+    for (const uint32_t t : r->tags) of_tag[t].push_back(r.get());
+  }
+  std::size_t checked = 0;
+  for (std::size_t f = 0; f < ps->indices.size(); f++) {
+    const uint32_t t = ps->surface_tags[f];
+    REQUIRE(t != 0);
+    REQUIRE(of_tag[t].size() == 1);
+    for (const int v : ps->indices[f]) CHECK(of_tag[t].front()->residual(ps->vertices[v]).exact());
+    checked++;
+  }
+  CHECK(checked == 24);  // two cubes, twelve triangles each
 }
