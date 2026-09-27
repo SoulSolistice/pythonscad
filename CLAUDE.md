@@ -193,9 +193,16 @@ announces itself.
 
 `export-step-flagship-corners` is the third, also **`WILL_FAIL` on purpose**: it
 asks that every corner of an analytic face lie on that face's surface, which
-every fixture's round trip already asks, and all six coupons fail it today on
-the tessellation's slack. It is separate from `--strict` so that each fix flips a
-test of its own.
+every fixture's round trip already asks. Written when all six coupons failed
+it; measured 2026-09-27, the four band-family coupons pass and lid10 and the
+bayonet fail, on a cone corner 0.716 off. It is separate from `--strict` so that
+each fix flips a test of its own.
+
+**A `WILL_FAIL` test that "passes" prints nothing**, even with
+`--output-on-failure` - so a fix that shrinks what it fails on, or a failure that
+changes to another cause, shows up nowhere. To see what one fails on, run its
+script directly (`tests/step-flagship-check.py --strict-corners`,
+`tests/step-representation-check.py`, each with `--openscad`).
 
 `export-step-sanitytest_step-cap-meets-wall` was a third, and the only *fixture*
 ever registered `WILL_FAIL`; it passes on its own merits since 2026-09-16 and the
