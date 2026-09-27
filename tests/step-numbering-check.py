@@ -24,7 +24,11 @@ changes, so nothing in the file may:
     chosen number;
   * OCCT reads the same volume from both, to the rounding of summing one
     contribution per face (n_faces x DBL_EPSILON relative). Skipped, and said
-    so, where OCP is not installed.
+    so, where OCP is not installed;
+  * and, since nothing may differ, the DATA section is the same byte for byte:
+    every entity under the same id. The points and the volume say whether the
+    solid moved; this says whether anything is still written in an order the
+    model does not fix - the numbering, or an address (checklist F9).
 
 It derives nothing from a kernel: both sides are this exporter's, and the
 assertion is that they are one.
@@ -85,7 +89,14 @@ def read(path):
     data = text[text.find("DATA;"):]
     points = [tuple(float(c) for c in m.group(1).split(",")) for m in POINT.finditer(data)]
     census = collections.Counter(ENTITY.findall(data))
-    return points, census
+    return points, census, data
+
+
+def first_difference(a, b):
+    for i, (x, y) in enumerate(zip(a.splitlines(), b.splitlines())):
+        if x != y:
+            return "line %d: %s | %s" % (i + 1, x[:120], y[:120])
+    return "one file is longer"
 
 
 def unmatched(a, b):
@@ -159,7 +170,7 @@ def check(binary, fixture, tier, workdir):
     rc, log = export(binary, fixture, plain, TIERS[tier], None)
     if rc != 0 or not os.path.exists(plain):
         return ["%s %s: plain export failed (exit %d)\n%s" % (name, tier, rc, log[-2000:])]
-    points, census = read(plain)
+    points, census, data = read(plain)
     vol, faces = volume(plain)
     for seed in SEEDS:
         label = "%s %s, numbering %s" % (name, tier, seed)
@@ -168,7 +179,10 @@ def check(binary, fixture, tier, workdir):
         if rc != 0 or not os.path.exists(other):
             failures.append("%s: export failed (exit %d)\n%s" % (label, rc, log[-2000:]))
             continue
-        opoints, ocensus = read(other)
+        opoints, ocensus, odata = read(other)
+        if data != odata:
+            failures.append("%s: the DATA section is not the same, byte for byte - first at %s"
+                            % (label, first_difference(data, odata)))
         if census != ocensus:
             diff = {k: (census.get(k, 0), ocensus.get(k, 0)) for k in set(census) | set(ocensus)
                     if census.get(k, 0) != ocensus.get(k, 0)}
@@ -211,7 +225,8 @@ def main():
     for f in failures:
         print("FAIL " + f)
     if failures:
-        print("%d failure(s): the export follows the mesh's numbering, not the model" % len(failures))
+        print("%d failure(s): the export is not the same under another numbering of the same mesh"
+              % len(failures))
         return 1
     print("every export is the same under %d other numberings" % len(SEEDS))
     return 0

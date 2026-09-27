@@ -14,9 +14,18 @@ using namespace step;
 
 void StepKernel::BodyBuild::promoteCurves()
 {
+  // Looked up by address, but walked in the order the faces meet their edges:
+  // walking the map itself visits edges in allocation order, which differs from
+  // run to run, and each promotion mints its curve's entities as it goes - so
+  // the same file came out with its curves under other ids (checklist F9).
   std::map<EdgeCurve *, std::vector<Face *>> edge_faces;
+  std::vector<EdgeCurve *> edge_order;
   for (std::size_t i = 0; i < face_edges.size(); i++) {
-    for (auto *edge : face_edges[i]) edge_faces[edge].push_back(sfaces[i]);
+    for (auto *edge : face_edges[i]) {
+      auto& faces = edge_faces[edge];
+      if (faces.empty()) edge_order.push_back(edge);
+      faces.push_back(sfaces[i]);
+    }
   }
 
   // The axis and radius a quadric face implies for an edge, if it implies one:
@@ -348,8 +357,8 @@ void StepKernel::BodyBuild::promoteCurves()
   };
 
   int arcs_promoted = 0, arcs_declined = 0;
-  for (auto& entry : edge_faces) {
-    EdgeCurve *edge = entry.first;
+  for (EdgeCurve *edge : edge_order) {
+    const auto& entry = *edge_faces.find(edge);
     auto *was_line = dynamic_cast<Line *>(edge->round);
     if (was_line == nullptr) continue;
     const Vector3d p1 = edge->vert1->point->pt;
