@@ -17,6 +17,9 @@ public:
   std::string name() const override;
   std::string verbose_name() const override;
   Transform3d matrix;
+  /*! What this node states of `matrix`, from its own parameters - see
+   * Similarity. Nothing, unless the node that built it says. */
+  Similarity similarity;
   virtual std::shared_ptr<const Geometry> dragPoint(const Vector3d& pt, const Vector3d& delta,
                                                     DragResult& result) override;
   Transform3d matrix_;

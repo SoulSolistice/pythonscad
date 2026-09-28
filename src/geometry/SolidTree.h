@@ -57,7 +57,8 @@ struct DeclaredSolid {
 
   /*! This solid moved by `mat`, or null where a bound cannot be represented
    * afterwards - the leaf is then opaque, not wrong. */
-  [[nodiscard]] std::shared_ptr<const DeclaredSolid> transformed(const Transform3d& mat) const;
+  [[nodiscard]] std::shared_ptr<const DeclaredSolid> transformed(const Transform3d& mat,
+                                                                 const Similarity& similarity) const;
 };
 
 class SolidTree
@@ -112,7 +113,8 @@ public:
 
   /*! This tree moved by `mat`: every declared leaf moved, a leaf whose solid
    * cannot be moved turned opaque. */
-  [[nodiscard]] std::shared_ptr<const SolidTree> transformed(const Transform3d& mat) const;
+  [[nodiscard]] std::shared_ptr<const SolidTree> transformed(const Transform3d& mat,
+                                                             const Similarity& similarity) const;
 
   [[nodiscard]] Op op() const { return op_; }
   [[nodiscard]] const std::vector<std::shared_ptr<const SolidTree>>& children() const

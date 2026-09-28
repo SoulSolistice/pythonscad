@@ -477,7 +477,8 @@ void transform(CGAL::Surface_mesh<CGAL::Point_3<K>>& mesh, const Transform3d& ma
 
 template <typename K>
 Transform3d computeResizeTransform(const CGAL::Iso_cuboid_3<K>& bb, unsigned int dimension,
-                                   const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize)
+                                   const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize,
+                                   Similarity& similarity)
 {
   // Based on resize() in Giles Bathgate's RapCAD (but not exactly)
 
@@ -494,6 +495,7 @@ Transform3d computeResizeTransform(const CGAL::Iso_cuboid_3<K>& bb, unsigned int
     if (newsize[i]) {
       if (bbox_size[i] == NT(0)) {
         LOG(message_group::Warning, "Resize in direction normal to flat object is not implemented");
+        similarity = Similarity::by(1.0);
         return Transform3d::Identity();
       } else {
         scale[i] = NT(newsize[i]) / bbox_size[i];
@@ -513,13 +515,16 @@ Transform3d computeResizeTransform(const CGAL::Iso_cuboid_3<K>& bb, unsigned int
   Eigen::Matrix4d t;
   t << CGAL::to_double(scale[0]), 0, 0, 0, 0, CGAL::to_double(scale[1]), 0, 0, 0, 0,
     CGAL::to_double(scale[2]), 0, 0, 0, 0, 1;
+  similarity = scaleSimilarity(
+    Vector3d(CGAL::to_double(scale[0]), CGAL::to_double(scale[1]), CGAL::to_double(scale[2])));
 
   return Transform3d(t);
 }
 
 template Transform3d computeResizeTransform(const CGAL_Iso_cuboid_3& bb, unsigned int dimension,
                                             const Vector3d& newsize,
-                                            const Eigen::Matrix<bool, 3, 1>& autosize);
+                                            const Eigen::Matrix<bool, 3, 1>& autosize,
+                                            Similarity& similarity);
 
 std::shared_ptr<const PolySet> getGeometryAsPolySet(const std::shared_ptr<const Geometry>& geom)
 {

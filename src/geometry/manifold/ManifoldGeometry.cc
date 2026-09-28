@@ -421,7 +421,7 @@ Polygon2d ManifoldGeometry::project() const
   return ManifoldUtils::polygonsToPolygon2d(cross_section.ToPolygons());
 }
 
-void ManifoldGeometry::transform(const Transform3d& mat)
+void ManifoldGeometry::transform(const Transform3d& mat, const Similarity& similarity)
 {
   manifold::mat3x4 glMat(
     // Column-major ordering
@@ -434,8 +434,8 @@ void ManifoldGeometry::transform(const Transform3d& mat)
   // referenced by another geometry. A record may change kind - a cylinder under
   // an uneven scale is elliptic - and one that cannot be represented afterwards
   // is dropped rather than kept wrong. See Surface::transformed.
-  surfaces_ = transformedSurfaces(surfaces_, mat);
-  if (solid_tree_) solid_tree_ = solid_tree_->transformed(mat);
+  surfaces_ = transformedSurfaces(surfaces_, mat, similarity);
+  if (solid_tree_) solid_tree_ = solid_tree_->transformed(mat, similarity);
 }
 
 void ManifoldGeometry::addSurface(const std::shared_ptr<Surface>& surface)
@@ -489,7 +489,10 @@ BoundingBox ManifoldGeometry::getBoundingBox() const
 
 void ManifoldGeometry::resize(const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize)
 {
-  transform(GeometryUtils::getResizeTransform(this->getBoundingBox(), newsize, autosize));
+  Similarity similarity;
+  const Transform3d t =
+    GeometryUtils::getResizeTransform(this->getBoundingBox(), newsize, autosize, similarity);
+  transform(t, similarity);
 }
 
 /*! Iterate over all vertices' points until the function returns true (for done). */

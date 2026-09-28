@@ -102,7 +102,7 @@ size_t PolySet::memsize() const
   mem += sizeof(PolySet);
   return mem;
 }
-void PolySet::transform(const Transform3d& mat)
+void PolySet::transform(const Transform3d& mat, const Similarity& similarity)
 {
   // If mirroring transform, flip faces to avoid the object to end up being inside-out
   bool mirrored = mat.matrix().determinant() < 0;
@@ -122,12 +122,12 @@ void PolySet::transform(const Transform3d& mat)
   std::vector<std::shared_ptr<Curve>> moved_curves;
   for (const auto& curve : this->curves) {
     auto copy = curve->clone();
-    if (copy->transform(mat)) moved_curves.push_back(copy);
+    if (copy->transform(mat, similarity)) moved_curves.push_back(copy);
   }
   this->curves = std::move(moved_curves);
 
-  this->surfaces = transformedSurfaces(this->surfaces, mat);
-  if (this->solid_tree) this->solid_tree = this->solid_tree->transformed(mat);
+  this->surfaces = transformedSurfaces(this->surfaces, mat, similarity);
+  if (this->solid_tree) this->solid_tree = this->solid_tree->transformed(mat, similarity);
 
   bbox_.setNull();
 }
@@ -149,7 +149,10 @@ bool PolySet::isConvex() const
 
 void PolySet::resize(const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize)
 {
-  this->transform(GeometryUtils::getResizeTransform(this->getBoundingBox(), newsize, autosize));
+  Similarity similarity;
+  const Transform3d t =
+    GeometryUtils::getResizeTransform(this->getBoundingBox(), newsize, autosize, similarity);
+  this->transform(t, similarity);
 }
 
 /*!

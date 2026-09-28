@@ -124,7 +124,7 @@ TEST_CASE("a declared grid accepts the points it was built from and nothing else
     mat.translate(Vector3d(3, -4, 5));
     auto moved = std::dynamic_pointer_cast<GridSurface>(grid.clone());
     REQUIRE(moved != nullptr);
-    REQUIRE(moved->transform(mat));
+    REQUIRE(moved->transform(mat, Similarity::unstated()));  // an uneven scale
     int found = 0;
     for (const auto& p : moved->net) found += moved->pointMember(scratch, p);
     CHECK(found == rows * cols);
@@ -433,14 +433,14 @@ TEST_CASE("a mirrored sweep is refused rather than declared wrongly", "[sweepsur
 
   auto moved = sweep.clone();
   // Refused, so no declaration survives to disagree with `mesh_says`.
-  CHECK_FALSE(moved->transform(mirror));
+  CHECK_FALSE(moved->transform(mirror, Similarity::by(1.0, true)));
 
   // A rotation of the same magnitude is still accepted, so the guard is on the
   // determinant and not on orthogonal maps in general.
   Transform3d turn = Transform3d::Identity();
   turn.linear() = Eigen::AngleAxisd(M_PI / 2, Vector3d::UnitZ()).toRotationMatrix();
   auto turned = sweep.clone();
-  REQUIRE(turned->transform(turn));
+  REQUIRE(turned->transform(turn, Similarity::by(1.0)));
   const auto *ok = dynamic_cast<const SweepSurface *>(turned.get());
   REQUIRE(ok != nullptr);
   CHECK((ok->evaluate(0.25, 0.0) - turn * before).norm() < 1e-9);

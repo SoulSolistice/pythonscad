@@ -88,7 +88,8 @@ template <typename K>
 void transform(CGAL::Surface_mesh<CGAL::Point_3<K>>& mesh, const Transform3d& matrix);
 template <typename K>
 Transform3d computeResizeTransform(const CGAL::Iso_cuboid_3<K>& bb, unsigned int dimension,
-                                   const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize);
+                                   const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize,
+                                   Similarity& similarity);
 bool tessellatePolygon(const std::vector<CGAL::Point_3<CGAL::Epick>>& polygon, Polygons& triangles,
                        const CGAL::Vector_3<CGAL::Epick> *normal = nullptr);
 bool tessellatePolygonWithHoles(const std::vector<std::vector<CGAL::Point_3<CGAL::Epick>>>& polygons,

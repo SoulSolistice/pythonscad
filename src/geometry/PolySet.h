@@ -84,7 +84,7 @@ public:
 
   void quantizeVertices(std::vector<Vector3d> *pPointsOut = nullptr);
   size_t numFacets() const override { return indices.size(); }
-  void transform(const Transform3d& mat) override;
+  void transform(const Transform3d& mat, const Similarity& similarity) override;
   void resize(const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize) override;
   void setColor(const Color4f& c) override;
   void addSurface(const std::shared_ptr<Surface>& surface) override

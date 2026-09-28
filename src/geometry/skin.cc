@@ -40,7 +40,7 @@ static std::unique_ptr<PolySet> expand_poly2d_to_ccw3d(std::shared_ptr<const Pol
     //}
   }
   std::unique_ptr<PolySet> res = builder.build();
-  res->transform(poly2d->getTransform3d());
+  res->transform(poly2d->getTransform3d(), poly2d->getSimilarity3d());
   return res;
 }
 
@@ -382,7 +382,7 @@ static std::vector<std::shared_ptr<const Polygon2d>> interpolateVertices(
   for (int sl_i = 0, sl_end = slicesin.size(); sl_i != sl_end; ++sl_i) {
     Polygon2d const& polyin = *slicesin[sl_i];
     auto polyadj = slicesadj[sl_i];
-    polyadj->transform3d(polyin.getTransform3d());
+    polyadj->transform3d(polyin.getTransform3d(), polyin.getSimilarity3d());
   }
 
   std::vector<std::shared_ptr<const Polygon2d>> slicesadjconst;  // TODO: why is this not possible?
@@ -421,7 +421,7 @@ static std::vector<std::shared_ptr<const Polygon2d>> spinPolygons(
   for (int sl_i = 0, sl_end = slicesin.size(); sl_i != sl_end; ++sl_i) {
     Polygon2d const& polyin = *slicesin[sl_i];
     auto polyadj = slicesadj[sl_i];
-    polyadj->transform3d(polyin.getTransform3d());
+    polyadj->transform3d(polyin.getTransform3d(), polyin.getSimilarity3d());
   }
 
   std::vector<std::shared_ptr<const Polygon2d>> slicesadjconst;  // TODO: why is this not possible?
@@ -459,7 +459,7 @@ static std::vector<std::shared_ptr<const Polygon2d>> segmentVertices(
 
         polyadj->addOutline(std::move(outlineadj));
       }
-      polyadj->transform3d(polyin.getTransform3d());
+      polyadj->transform3d(polyin.getTransform3d(), polyin.getSimilarity3d());
       slicesadj.push_back(polyadj);
     }
     return slicesadj;

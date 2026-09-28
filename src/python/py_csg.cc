@@ -472,14 +472,17 @@ PyObject *python_nb_sub_vec3(PyObject *arg1, PyObject *arg2,
       case 3:
         node = std::make_shared<TransformNode>(instance, "translate");
         node->matrix.translate(vecs[j]);
+        node->similarity = Similarity::by(1.0);
         break;
       case 1:
         node = std::make_shared<TransformNode>(instance, "scale");
         node->matrix.scale(vecs[j]);
+        node->similarity = scaleSimilarity(vecs[j]);
         break;
       case 2:
         node = std::make_shared<TransformNode>(instance, "translate");
         node->matrix.translate(-vecs[j]);
+        node->similarity = Similarity::by(1.0);
         break;
       }
       node->children.push_back(child);

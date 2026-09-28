@@ -4324,7 +4324,15 @@ literal tolerance in the exporter, recognition and the declaration paths
     makes them - derivable, not comparable). They decide which records merge,
     ownership and its counts, the census, and existence's "is this facet's
     surface On here".
-  - *A record carried through a transform.* `similarityScale` and
+  - ~~*A record carried through a transform.*~~ **Landed 2026-09-28**, and not
+    as planned: a machine-precision test of M'M = s^2 I needed an assumed count
+    of the roundings the matrix had been through, and one of 336 genuine
+    rotate() matrices failed it - a guess, not D0. The maker of a transform
+    states it instead (`Similarity`, linalg.h): rotate, translate and mirror
+    are similarities, scale and resize where their factors have one size;
+    multmatrix, align and Python matrices state nothing. The statement travels
+    with the matrix to every record; no matrix is tested. 0 differences over
+    the corpus. `similarityScale` and
     `SweepSurface::transform` (M'M = s^2 I to 1e-9 relative), the sweep table's
     `StationMap::similar` (1e-12), `Polygon2d`'s arc transform (`isApprox`,
     1e-12): whether a declaration survives a transform, or is dropped.

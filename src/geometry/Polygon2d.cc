@@ -126,7 +126,7 @@ bool Polygon2d::isEmpty() const
   return this->theoutlines.empty() && this->thepolylines.empty();
 }
 
-void Polygon2d::transform(const Transform2d& mat)
+void Polygon2d::transform(const Transform2d& mat, const Similarity& similarity)
 {
   if (mat.matrix().determinant() == 0) {
     LOG(message_group::Warning, "Scaling a 2D object with 0 - removing object");
@@ -145,7 +145,7 @@ void Polygon2d::transform(const Transform2d& mat)
       v = mat * v;
     }
   }
-  transformArcs(mat);
+  transformArcs(mat, similarity);
 }
 
 /*! Move the arc hints with the polygon, or drop them.
@@ -265,7 +265,7 @@ void Polygon2d::nameMergedEdges(const std::function<EdgeId(EdgeId, EdgeId)>& bet
   if (named) dropTransformedCache();
 }
 
-void Polygon2d::transformArcs(const Transform2d& mat)
+void Polygon2d::transformArcs(const Transform2d& mat, const Similarity& similarity)
 {
   // A Bezier is not fussy the way a circle is: an affine map takes one to
   // another of the same degree, by mapping the control points and nothing else.
@@ -286,10 +286,9 @@ void Polygon2d::transformArcs(const Transform2d& mat)
     el.v = linear * Vector2d(el.v);
   }
   if (this->arcs.empty()) return;
-  // a similarity has L^T L = s^2 I
-  const Eigen::Matrix2d gram = linear.transpose() * linear;
-  const double s2 = 0.5 * (gram(0, 0) + gram(1, 1));
-  if (s2 <= 0 || !gram.isApprox(s2 * Eigen::Matrix2d::Identity(), 1e-12)) {
+  // a circle stays one under a similarity its maker stated (linalg.h) - not
+  // one read off the matrix, 1e-12 of its scale until 2026-09-28
+  if (!similarity.stated) {
     // Any other map takes each circle to an ellipse - exactly: the images of the
     // centre and of two perpendicular radii. Until 2026-09-25 the record was
     // dropped here, and the chords kept only their name as curved.
@@ -311,7 +310,7 @@ void Polygon2d::transformArcs(const Transform2d& mat)
     }
     return;
   }
-  const double s = sqrt(s2);
+  const double s = similarity.scale;
   for (auto& arc : this->arcs) {
     arc.centre = mat * arc.centre;
     arc.r *= s;
@@ -337,7 +336,7 @@ void Polygon2d::resize(const Vector2d& newsize, const Eigen::Matrix<bool, 2, 1>&
   Transform2d t;
   t.matrix() << newscale[0], 0, 0, 0, newscale[1], 0, 0, 0, 1;
 
-  this->transform(t);
+  this->transform(t, scaleSimilarity(Vector3d(newscale[0], newscale[1], newscale[1])));
 }
 
 bool Polygon2d::is_convex() const
@@ -397,11 +396,11 @@ std::unique_ptr<PolySet> Polygon2d::tessellate(bool in3d) const
   } else
 #endif
     res = CGALUtils::createTriangulatedPolySetFromPolygon2d(*this, in3d);
-  if (in3d) res->transform(this->getTransform3d());
+  if (in3d) res->transform(this->getTransform3d(), this->getSimilarity3d());
   return res;
 }
 
-void Polygon2d::transform3d(const Transform3d& mat)
+void Polygon2d::transform3d(const Transform3d& mat, const Similarity& similarity)
 {
   // Check whether it can be a 2d transform, and avoid the 3d overhead
   if (trans3dState == Transform3dState::NONE && mat(2, 0) == 0 && mat(2, 1) == 0 && mat(2, 2) > 0 &&
@@ -415,7 +414,7 @@ void Polygon2d::transform3d(const Transform3d& mat)
       trans3dState = Transform3dState::NONE;
       return;
     }
-    transform(t);
+    transform(t, similarity);
     // A 2D transformation may flip the winding order of a polygon.
     // If that happens with a sanitized polygon, we need to reverse
     // the winding order for it to be correct.
@@ -428,6 +427,8 @@ void Polygon2d::transform3d(const Transform3d& mat)
       trans3dState = Transform3dState::NONE;
       return;
     }
+    trans3d_similarity =
+      (trans3dState == Transform3dState::NONE) ? similarity : trans3d_similarity.then(similarity);
     trans3d = (trans3dState == Transform3dState::NONE) ? mat : mat * trans3d;
     trans3dState = Transform3dState::PENDING;
   }

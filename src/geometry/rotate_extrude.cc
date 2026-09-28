@@ -438,7 +438,7 @@ std::unique_ptr<Geometry> rotateBarcode(const RotateExtrudeNode& node, const Bar
       p.addOutline(o);
     }
   }
-  p.transform3d(barcode.getTransform3d());
+  p.transform3d(barcode.getTransform3d(), Similarity::unstated());  // a barcode states nothing
   p.setSanitized(true);
   return std::make_unique<Polygon2d>(p);
 }

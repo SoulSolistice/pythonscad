@@ -110,8 +110,10 @@ void CGALNefGeometry::resize(const Vector3d& newsize, const Eigen::Matrix<bool, 
   // Based on resize() in Giles Bathgate's RapCAD (but not exactly)
   if (this->isEmpty()) return;
 
-  transform(CGALUtils::computeResizeTransform(CGALUtils::boundingBox(*this->p3), getDimension(), newsize,
-                                              autosize));
+  Similarity similarity;
+  const Transform3d t = CGALUtils::computeResizeTransform(CGALUtils::boundingBox(*this->p3),
+                                                          getDimension(), newsize, autosize, similarity);
+  transform(t, similarity);
 }
 
 std::string CGALNefGeometry::dump() const
@@ -119,7 +121,7 @@ std::string CGALNefGeometry::dump() const
   return OpenSCAD::dump_svg(*this->p3);
 }
 
-void CGALNefGeometry::transform(const Transform3d& matrix)
+void CGALNefGeometry::transform(const Transform3d& matrix, const Similarity& similarity)
 {
   if (!this->isEmpty()) {
     if (matrix.matrix().determinant() == 0) {
@@ -132,7 +134,7 @@ void CGALNefGeometry::transform(const Transform3d& matrix)
       // Records are held in world coordinates, so they move with the geometry.
       // A record may change kind, and one which cannot be represented after
       // the transform is dropped rather than left wrong. See Surface::transformed.
-      this->surfaces = transformedSurfaces(this->surfaces, matrix);
+      this->surfaces = transformedSurfaces(this->surfaces, matrix, similarity);
     }
   }
 }

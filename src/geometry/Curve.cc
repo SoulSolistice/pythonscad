@@ -47,7 +47,7 @@ std::shared_ptr<Curve> Curve::clone() const
 
 /*! A straight curve is defined purely by its end vertices, which the caller
  * transforms along with the rest of the geometry, so there is nothing to do. */
-bool Curve::transform(const Transform3d& mat)
+bool Curve::transform(const Transform3d&, const Similarity&)
 {
   return true;
 }
@@ -57,22 +57,15 @@ std::shared_ptr<Curve> ArcCurve::clone() const
   return std::make_shared<ArcCurve>(*this);
 }
 
-bool ArcCurve::transform(const Transform3d& mat)
+bool ArcCurve::transform(const Transform3d& mat, const Similarity& similarity)
 {
-  // Only a similarity keeps an arc circular; see Surface::transform.
+  // Only a similarity keeps an arc circular, as its maker states it; see
+  // Surface::transform.
+  if (!similarity.stated) return false;
   const Matrix3d m = mat.linear();
-  const Matrix3d mtm = m.transpose() * m;
-  const double s2 = mtm(0, 0);
-  if (!(s2 > 0)) return false;
-  for (int i = 0; i < 3; i++) {
-    for (int j = 0; j < 3; j++) {
-      const double expected = (i == j) ? s2 : 0.0;
-      if (fabs(mtm(i, j) - expected) > 1e-9 * s2) return false;
-    }
-  }
   this->center = mat * this->center;
   this->normdir = (m * this->normdir).normalized();
-  this->r *= sqrt(s2);
+  this->r *= similarity.scale;
   return true;
 }
 ArcCurve::ArcCurve(Vector3d cent, Vector3d normdir, double r)

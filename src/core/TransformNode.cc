@@ -75,6 +75,7 @@ std::shared_ptr<AbstractNode> builtin_scale(const std::shared_ptr<const ModuleIn
     }
   }
   node->matrix.scale(scalevec);
+  node->similarity = scaleSimilarity(scalevec);
 
   return children.instantiate(node);
 }
@@ -83,6 +84,7 @@ std::shared_ptr<AbstractNode> builtin_rotate(const std::shared_ptr<const ModuleI
                                              Arguments arguments, const Children& children)
 {
   auto node = std::make_shared<TransformNode>(inst, "rotate");
+  node->similarity = Similarity::by(1.0);  // a rotation, whatever its angles
 
   Parameters parameters = Parameters::parse(std::move(arguments), inst->location(), {"a", "v"});
 
@@ -168,6 +170,7 @@ std::shared_ptr<AbstractNode> builtin_mirror(const std::shared_ptr<const ModuleI
                                              Arguments arguments, const Children& children)
 {
   auto node = std::make_shared<TransformNode>(inst, "mirror");
+  node->similarity = Similarity::by(1.0);  // the identity, until a plane is given
 
   Parameters parameters = Parameters::parse(std::move(arguments), inst->location(), {"v"});
 
@@ -191,6 +194,7 @@ std::shared_ptr<AbstractNode> builtin_mirror(const std::shared_ptr<const ModuleI
     m << 1 - 2 * x * x / a, -2 * y * x / a, -2 * z * x / a, 0, -2 * x * y / a, 1 - 2 * y * y / a,
       -2 * z * y / a, 0, -2 * x * z / a, -2 * y * z / a, 1 - 2 * z * z / a, 0, 0, 0, 0, 1;
     node->matrix = m;
+    node->similarity = Similarity::by(1.0, true);  // a reflection in a plane
   }
 
   return children.instantiate(node);
@@ -200,6 +204,7 @@ std::shared_ptr<AbstractNode> builtin_translate(const std::shared_ptr<const Modu
                                                 Arguments arguments, const Children& children)
 {
   auto node = std::make_shared<TransformNode>(inst, "translate");
+  node->similarity = Similarity::by(1.0);  // a translation
 
   Parameters parameters = Parameters::parse(std::move(arguments), inst->location(), {"v"});
 
@@ -368,7 +373,7 @@ std::shared_ptr<const Geometry> TransformNode::dragPoint(const Vector3d& pt, con
       }
     }
     result_geom->vertices = ps->vertices;  // TODO concatenate vertices
-    result_geom->transform(matrix_);
+    result_geom->transform(matrix_, similarity);
   }
   return result_geom;
 }

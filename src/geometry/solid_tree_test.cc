@@ -98,7 +98,7 @@ TEST_CASE("a transform moves every declared solid, and one it cannot carry turns
   Transform3d move = Transform3d::Identity();
   move.translate(Vector3d(10, 0, 0));
   move.rotate(Eigen::AngleAxisd(0.5, Vector3d(0, 0, 1)));
-  const auto moved = leaf->transformed(move);
+  const auto moved = leaf->transformed(move, Similarity::by(1.0));
   REQUIRE(moved->op() == SolidTree::Op::Declared);
   CHECK((moved->solid()->interior - move * Vector3d(1, 2, 3)).norm() < 1e-12);
   CHECK((moved->solid()->bounds[0]->refpt - move * Vector3d(1, 2, 3)).norm() < 1e-12);
@@ -108,13 +108,13 @@ TEST_CASE("a transform moves every declared solid, and one it cannot carry turns
   // A sphere under an uneven scale is no sphere, and no record of one is kept.
   Transform3d squash = Transform3d::Identity();
   squash.scale(Vector3d(1, 1, 2));
-  CHECK(leaf->transformed(squash)->op() == SolidTree::Op::Opaque);
+  CHECK(leaf->transformed(squash, scaleSimilarity(Vector3d(1, 1, 2)))->op() == SolidTree::Op::Opaque);
 
   // A cube under a shear is still six planes, so it stays declared.
   const auto ps = cube({0, 0, 0}, {1, 1, 1});
   Transform3d shear = Transform3d::Identity();
   shear.linear()(0, 2) = 0.5;
-  const auto sheared = ps->solid_tree->transformed(shear);
+  const auto sheared = ps->solid_tree->transformed(shear, Similarity::unstated());
   REQUIRE(sheared->op() == SolidTree::Op::Declared);
   CHECK((sheared->solid()->interior - shear * Vector3d(0.5, 0.5, 0.5)).norm() < 1e-12);
 }
@@ -139,7 +139,7 @@ TEST_CASE("the boolean is carried through Manifold to the exported mesh", "[soli
   ManifoldGeometry moved = cut;
   Transform3d up = Transform3d::Identity();
   up.translate(Vector3d(0, 0, 7));
-  moved.transform(up);
+  moved.transform(up, Similarity::by(1.0));
   CHECK((moved.toPolySet()->solid_tree->children()[0]->solid()->interior - Vector3d(2, 2, 9)).norm() <
         1e-12);
 
@@ -191,7 +191,8 @@ TEST_CASE("a faceted leaf becomes the envelope its faces span", "[solidtree][env
   CHECK((tb.max() - Vector3d(2, 3, 4)).norm() == 0);
   CHECK(tb.min().norm() == 0);
   // and a transform keeps it faceted until it becomes a Manifold
-  CHECK(SolidTree::faceted()->transformed(Transform3d::Identity())->op() == SolidTree::Op::Faceted);
+  CHECK(SolidTree::faceted()->transformed(Transform3d::Identity(), Similarity::by(1.0))->op() ==
+        SolidTree::Op::Faceted);
 }
 
 TEST_CASE("a sweep's envelope is the finite cylinder its laws span", "[envelope]")
@@ -295,7 +296,7 @@ TEST_CASE("copies of one geometry keep a tag each where they meet", "[identity]"
   ManifoldGeometry moved = *once;
   Transform3d shift = Transform3d::Identity();
   shift.translate(Vector3d(3, 0, 0));
-  moved.transform(shift);
+  moved.transform(shift, Similarity::by(1.0));
   const auto ps = (*once + moved).toPolySet();
   REQUIRE(ps->surface_tags.size() == ps->indices.size());
   std::map<uint32_t, std::vector<const Surface *>> of_tag;

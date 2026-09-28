@@ -49,11 +49,12 @@ std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Re
 
 /*! A profile carried along a straight line, scaled towards the far end. */
 struct Extrusion {
-  Transform3d placement = Transform3d::Identity();  //!< the profile's own 3D transform
-  Vector3d base{0., 0., 0.};                        //!< where the near cap is
-  Vector3d height{0., 0., 1.};                      //!< from the near cap to the far one
-  double scale_x = 1., scale_y = 1.;                //!< the far cap's scale about the profile origin
-  double twist = 0.;                                //!< degrees, over the whole height
+  Transform3d placement = Transform3d::Identity();        //!< the profile's own 3D transform
+  Similarity placement_similarity = Similarity::by(1.0);  //!< what its makers stated of it
+  Vector3d base{0., 0., 0.};                              //!< where the near cap is
+  Vector3d height{0., 0., 1.};                            //!< from the near cap to the far one
+  double scale_x = 1., scale_y = 1.;  //!< the far cap's scale about the profile origin
+  double twist = 0.;                  //!< degrees, over the whole height
 };
 
 /*! The surfaces `profile` makes extruded by `sweep`; `every_curve` as for

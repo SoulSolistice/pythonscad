@@ -5,10 +5,11 @@
 
 #include "geometry/Surface.h"
 
-std::shared_ptr<const DeclaredSolid> DeclaredSolid::transformed(const Transform3d& mat) const
+std::shared_ptr<const DeclaredSolid> DeclaredSolid::transformed(const Transform3d& mat,
+                                                                const Similarity& similarity) const
 {
   auto out = std::make_shared<DeclaredSolid>();
-  out->bounds = transformedSurfaces(bounds, mat);
+  out->bounds = transformedSurfaces(bounds, mat, similarity);
   if (out->bounds.size() != bounds.size()) return nullptr;
   out->interior = mat * interior;
   if (!extent.isEmpty()) out->extent = mat * extent;
@@ -124,18 +125,19 @@ std::shared_ptr<const SolidTree> SolidTree::combine(Op op, std::shared_ptr<const
   return std::shared_ptr<const SolidTree>(new SolidTree(op, std::move(children), nullptr));
 }
 
-std::shared_ptr<const SolidTree> SolidTree::transformed(const Transform3d& mat) const
+std::shared_ptr<const SolidTree> SolidTree::transformed(const Transform3d& mat,
+                                                        const Similarity& similarity) const
 {
   switch (op_) {
   case Op::Opaque:    return opaque(what_);
-  case Op::Declared:  return declared(solid_->transformed(mat), what_);
+  case Op::Declared:  return declared(solid_->transformed(mat, similarity), what_);
   case Op::Faceted:   return faceted(what_);
   case Op::Enveloped: {
-    auto solid = solid_->transformed(mat);
+    auto solid = solid_->transformed(mat, similarity);
     if (solid == nullptr) return opaque(what_);
     std::vector<std::shared_ptr<const SolidTree>> held;
     held.reserve(children_.size());
-    for (const auto& child : children_) held.push_back(child->transformed(mat));
+    for (const auto& child : children_) held.push_back(child->transformed(mat, similarity));
     return std::shared_ptr<const SolidTree>(
       new SolidTree(Op::Enveloped, std::move(held), std::move(solid), what_));
   }
@@ -143,7 +145,7 @@ std::shared_ptr<const SolidTree> SolidTree::transformed(const Transform3d& mat) 
   }
   std::vector<std::shared_ptr<const SolidTree>> moved;
   moved.reserve(children_.size());
-  for (const auto& child : children_) moved.push_back(child->transformed(mat));
+  for (const auto& child : children_) moved.push_back(child->transformed(mat, similarity));
   return std::shared_ptr<const SolidTree>(new SolidTree(op_, std::move(moved), nullptr));
 }
 

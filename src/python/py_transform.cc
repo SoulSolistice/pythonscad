@@ -71,6 +71,7 @@ PyObject *python_scale_sub(PyObject *obj, Vector3d scalevec)
   auto child_dict = py_owned(child_dict_raw);
   if (child == NULL) return propagate_or_typeerror("Invalid type for Object in scale");
   node->matrix.scale(scalevec);
+  node->similarity = scaleSimilarity(scalevec);
   node->setPyName(child->getPyName());
   node->children.push_back(child);
   PyObject *pyresult = PyOpenSCADObjectFromNode(type, node);
@@ -203,6 +204,7 @@ PyObject *python_rotate_sub(PyObject *obj, Vector3d vec3, double angle, PyObject
 
   DECLARE_INSTANCE();
   auto node = std::make_shared<TransformNode>(instance, "rotate");
+  node->similarity = Similarity::by(1.0);  // a rotation, whatever its angles
   node->dragflags = dragflags;
 
   PyObject *child_dict_raw = nullptr;
@@ -226,11 +228,13 @@ PyObject *python_rotate_sub(PyObject *obj, Vector3d vec3, double angle, PyObject
       DECLARE_INSTANCE();
       prenode = std::make_shared<TransformNode>(instance, "translate");
       prenode->matrix.translate(-ref_point);
+      prenode->similarity = Similarity::by(1.0);
     }
     {
       DECLARE_INSTANCE();
       postnode = std::make_shared<TransformNode>(instance, "translate");
       postnode->matrix.translate(ref_point);
+      postnode->similarity = Similarity::by(1.0);
     }
     prenode->children.push_back(child);
     node->children.push_back(prenode);
@@ -315,7 +319,7 @@ PyObject *python_number_mirror(PyObject *mat, Matrix4d m, int vecs)
   return python_frommatrix(raw);
 }
 
-PyObject *python_mirror_sub(PyObject *obj, Matrix4d& m)
+PyObject *python_mirror_sub(PyObject *obj, Matrix4d& m, const Similarity& similarity)
 {
   PyObject *mat = python_number_mirror(obj, m, 4);
   if (mat != nullptr) return mat;
@@ -323,6 +327,7 @@ PyObject *python_mirror_sub(PyObject *obj, Matrix4d& m)
   DECLARE_INSTANCE();
   auto node = std::make_shared<TransformNode>(instance, "mirror");
   node->matrix = m;
+  node->similarity = similarity;
   PyObject *child_dict_raw = nullptr;
   PyTypeObject *type = PyOpenSCADObjectType(obj);
   std::shared_ptr<AbstractNode> child = PyOpenSCADObjectToNodeMulti(obj, &child_dict_raw);
@@ -362,7 +367,9 @@ PyObject *python_mirror_core(PyObject *obj, PyObject *val_v)
   // y /= sqrt(x*x + y*y + z*z)
   // z /= sqrt(x*x + y*y + z*z)
   Matrix4d m = Matrix4d::Identity();
+  Similarity similarity = Similarity::by(1.0);  // the identity, until a plane is given
   if (x != 0.0 || y != 0.0 || z != 0.0) {
+    similarity = Similarity::by(1.0, true);  // a reflection in a plane
     // skip using sqrt to normalize the vector since each element of matrix contributes it with two
     // multiplied terms instead just divide directly within each matrix element simplified calculation
     // leads to less float errors
@@ -371,7 +378,7 @@ PyObject *python_mirror_core(PyObject *obj, PyObject *val_v)
     m << 1 - 2 * x * x / a, -2 * y * x / a, -2 * z * x / a, 0, -2 * x * y / a, 1 - 2 * y * y / a,
       -2 * z * y / a, 0, -2 * x * z / a, -2 * y * z / a, 1 - 2 * z * z / a, 0, 0, 0, 0, 1;
   }
-  return python_mirror_sub(obj, m);
+  return python_mirror_sub(obj, m, similarity);
 }
 
 PyObject *python_mirror(PyObject *self, PyObject *args, PyObject *kwargs)
@@ -423,6 +430,7 @@ PyObject *python_translate_sub(PyObject *obj, Vector3d translatevec, int dragfla
 
   DECLARE_INSTANCE();
   auto node = std::make_shared<TransformNode>(instance, "translate");
+  node->similarity = Similarity::by(1.0);  // a translation
   std::shared_ptr<AbstractNode> child;
   PyTypeObject *type = PyOpenSCADObjectType(obj);
   child = PyOpenSCADObjectToNodeMulti(obj, &child_dict_raw);

@@ -188,19 +188,15 @@ struct StationMap {
   /*! Affine in t: nothing turns. */
   [[nodiscard]] bool affine() const { return sweep.twist == 0; }
 
-  /*! Every station a similarity. The placement is tested as it always was, to
-   * 1e-12 of its own scale: it is a composition of the user's transforms, whose
-   * rounding this cannot bound - the one comparison here that is not machine
-   * precision. */
+  /*! Every station a similarity: the placement as its makers stated it
+   * (linalg.h - it was read off the matrix to 1e-12 of its scale until
+   * 2026-09-28), and an even taper. */
   [[nodiscard]] bool similar(double& scale) const
   {
-    const double sx = ex.norm(), sy = ey.norm();
-    if (sx < 1e-12 || sy < 1e-12) return false;
-    if (fabs(sx - sy) > 1e-12 * sx) return false;          // an ellipse, not a circle
-    if (fabs(ex.dot(ey)) > 1e-12 * sx * sy) return false;  // sheared, likewise
+    if (!sweep.placement_similarity.stated) return false;
     if (sweep.scale_x != sweep.scale_y)
       return false;  // uneven: an ellipse at every station but the first
-    scale = 0.5 * (sx + sy);
+    scale = sweep.placement_similarity.scale;
     return true;
   }
 

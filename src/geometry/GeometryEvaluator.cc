@@ -2195,11 +2195,11 @@ Response GeometryEvaluator::visit(State& state, const TransformNode& node)
             assert(polygons);
 
             geom = polygons;
-            polygons->transform3d(node.matrix);
+            polygons->transform3d(node.matrix, node.similarity);
           } break;
           case 3: {
             auto mutableGeom = res.asMutableGeometry();
-            if (mutableGeom) mutableGeom->transform(node.matrix);
+            if (mutableGeom) mutableGeom->transform(node.matrix, node.similarity);
             geom = mutableGeom;
           } break;
           }  // switch

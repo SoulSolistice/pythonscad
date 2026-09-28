@@ -73,12 +73,13 @@ public:
    * surface another geometry still shares. */
   [[nodiscard]] virtual std::shared_ptr<Surface> clone() const;
 
-  /*! Move the surface with the geometry it describes.
+  /*! Move the surface with the geometry it describes, by `mat`, which its
+   * maker states `similarity` of (linalg.h).
    *
-   * Returns false when the result can no longer be represented - a cylinder
-   * under a non uniform scale becomes elliptical - in which case the caller has
+   * Returns false when the result can no longer be represented - a sphere
+   * under a map nobody stated to be a similarity - in which case the caller has
    * to drop the surface rather than keep a wrong one. */
-  virtual bool transform(const Transform3d& mat);
+  virtual bool transform(const Transform3d& mat, const Similarity& similarity);
 
   /*! Whether two records describe one geometric surface - the surface, not the
    * record: an infinite cylinder referred to from two heights, a plane anchored
@@ -136,14 +137,16 @@ public:
    * kind of surface, where the map takes it to one (a cylinder under an uneven
    * scale is elliptic) - or null where the result cannot be represented. The
    * declarers travel with it. */
-  [[nodiscard]] virtual std::shared_ptr<Surface> transformed(const Transform3d& mat) const;
+  [[nodiscard]] virtual std::shared_ptr<Surface> transformed(const Transform3d& mat,
+                                                             const Similarity& similarity) const;
 };
 
 /*! Every record of `list` moved by `mat` - see Surface::transformed - and those
  * that cannot be represented afterwards dropped rather than kept wrong. Copies:
  * a record may still be shared with another geometry. */
 [[nodiscard]] std::vector<std::shared_ptr<Surface>> transformedSurfaces(
-  const std::vector<std::shared_ptr<Surface>>& list, const Transform3d& mat);
+  const std::vector<std::shared_ptr<Surface>>& list, const Transform3d& mat,
+  const Similarity& similarity);
 
 /*! Whether `list` already holds a record for the same surface. */
 [[nodiscard]] bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
@@ -209,7 +212,7 @@ public:
   SphereSurface(Vector3d center, Vector3d normdir, double r);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
-  bool transform(const Transform3d& mat) override;
+  bool transform(const Transform3d& mat, const Similarity& similarity) override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   double r;
@@ -235,7 +238,7 @@ public:
   void reverse(void);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
-  bool transform(const Transform3d& mat) override;
+  bool transform(const Transform3d& mat, const Similarity& similarity) override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   double r_major, r_minor;
@@ -289,7 +292,7 @@ public:
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
-  bool transform(const Transform3d& mat) override;
+  bool transform(const Transform3d& mat, const Similarity& similarity) override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   [[nodiscard]] const Vector3d& control(int i, int j) const { return net[i * (degree_v + 1) + j]; }
@@ -392,7 +395,8 @@ public:
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
 
-  [[nodiscard]] std::shared_ptr<Surface> transformed(const Transform3d& mat) const override;
+  [[nodiscard]] std::shared_ptr<Surface> transformed(const Transform3d& mat,
+                                                     const Similarity& similarity) const override;
 };
 
 /*! A surface about an axis: a cylinder, a cone - a surface every plane across
@@ -435,7 +439,7 @@ public:
   void reverse(void);
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
-  bool transform(const Transform3d& mat) override;
+  bool transform(const Transform3d& mat, const Similarity& similarity) override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   double r;
@@ -454,7 +458,8 @@ public:
   [[nodiscard]] double size() const override { return r; }
 
   bool quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const override;
-  [[nodiscard]] std::shared_ptr<Surface> transformed(const Transform3d& mat) const override;
+  [[nodiscard]] std::shared_ptr<Surface> transformed(const Transform3d& mat,
+                                                     const Similarity& similarity) const override;
 };
 
 /*! A cone, declared by the model that meant one.
@@ -486,7 +491,7 @@ public:
   void reverse(void) override;
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
-  bool transform(const Transform3d& mat) override;
+  bool transform(const Transform3d& mat, const Similarity& similarity) override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   /*! The radius this cone has where the axis passes `pt`'s own height. */
@@ -534,7 +539,7 @@ public:
                           const Vector3d& v);
 
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
-  bool transform(const Transform3d& mat) override;
+  bool transform(const Transform3d& mat, const Similarity& similarity) override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   [[nodiscard]] bool usable() const override;
@@ -613,7 +618,7 @@ public:
                                                bool closed_v, std::string& why);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
-  bool transform(const Transform3d& mat) override;
+  bool transform(const Transform3d& mat, const Similarity& similarity) override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   [[nodiscard]] const Vector3d& at(int row, int col) const { return net[row * cols + col]; }
@@ -821,7 +826,7 @@ public:
   bool project(const Vector3d& pt, double& u, double& v) const override;
   [[nodiscard]] bool onSurface(const Vector3d& pt, double tol) const override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
-  bool transform(const Transform3d& mat) override;
+  bool transform(const Transform3d& mat, const Similarity& similarity) override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 

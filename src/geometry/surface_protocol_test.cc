@@ -53,7 +53,7 @@ TEST_CASE("cylinder: an uneven scale makes it elliptic, not nothing", "[surface]
 {
   auto cyl = std::make_shared<CylinderSurface>(Vector3d::Zero(), Vector3d(0., 0., 1.), 5.);
   cyl->owners = {7};
-  const auto moved = cyl->transformed(scaling(2., 1., 1.));
+  const auto moved = cyl->transformed(scaling(2., 1., 1.), scaleSimilarity(Vector3d(2., 1., 1.)));
   REQUIRE(moved != nullptr);
   const auto *e = dynamic_cast<const EllipticCylinderSurface *>(moved.get());
   REQUIRE(e != nullptr);
@@ -61,14 +61,14 @@ TEST_CASE("cylinder: an uneven scale makes it elliptic, not nothing", "[surface]
   CHECK(e->b() == Catch::Approx(5.));
   CHECK(e->owners == std::vector<int32_t>{7});
   // a similarity keeps it circular
-  const auto even = cyl->transformed(scaling(2., 2., 2.));
+  const auto even = cyl->transformed(scaling(2., 2., 2.), scaleSimilarity(Vector3d(2., 2., 2.)));
   REQUIRE(dynamic_cast<const CylinderSurface *>(even.get()) != nullptr);
 }
 
 TEST_CASE("plane: a plane under any affine map", "[surface]")
 {
   const PlaneSurface diagonal(Vector3d(1., 0., 0.), Vector3d(1., 1., 0.).normalized());
-  const auto moved = diagonal.transformed(scaling(2., 1., 1.));
+  const auto moved = diagonal.transformed(scaling(2., 1., 1.), scaleSimilarity(Vector3d(2., 1., 1.)));
   REQUIRE(moved != nullptr);
   // x + y = 1 scaled by 2 in x is x/2 + y = 1: normal (1/2, 1)
   CHECK(moved->normdir.isApprox(Vector3d(0.5, 1., 0.).normalized()));
@@ -130,6 +130,37 @@ TEST_CASE("seam: a ruling joins two rims, and must not cross either", "[surface]
   CHECK(clear);
 }
 
+TEST_CASE("a record moves by the similarity its transform's maker states", "[surface][identity]")
+{
+  // Until 2026-09-28 whether a map was a similarity was read off its matrix to
+  // 1e-9, and the scale was a column's norm. Now the maker states both: moved
+  // by a stated similarity a record takes exactly the stated scale; moved by a
+  // matrix nobody stated anything of, a sphere has no image to be, and a
+  // cylinder becomes the elliptic one it is under any affine map.
+  Transform3d m = Transform3d::Identity();
+  m.rotate(Eigen::AngleAxisd(0.7, Vector3d(1, 2, 3).normalized()));
+  m.scale(2.5);
+  const SphereSurface sphere(Vector3d(1, 2, 3), Vector3d(0, 0, 1), 1.3);
+  const auto stated = sphere.transformed(m, Similarity::by(2.5));
+  REQUIRE(stated != nullptr);
+  CHECK(static_cast<const SphereSurface&>(*stated).r == 1.3 * 2.5);
+  CHECK(sphere.transformed(m, Similarity::unstated()) == nullptr);
+
+  const CylinderSurface cyl(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 1.3);
+  const auto circular = cyl.transformed(m, Similarity::by(2.5));
+  REQUIRE(dynamic_cast<const CylinderSurface *>(circular.get()) != nullptr);
+  CHECK(static_cast<const CylinderSurface&>(*circular).r == 1.3 * 2.5);
+  CHECK(dynamic_cast<const EllipticCylinderSurface *>(
+          cyl.transformed(m, Similarity::unstated()).get()) != nullptr);
+
+  // the statement composes: a uniform scale then a rotation; a mirror twice is none
+  CHECK(Similarity::by(2).then(Similarity::by(1)).scale == 2);
+  CHECK_FALSE(Similarity::by(1, true).then(Similarity::by(1, true)).mirrors);
+  CHECK_FALSE(Similarity::by(2).then(Similarity::unstated()).stated);
+  CHECK(scaleSimilarity(Vector3d(-2, -2, -2)).mirrors);
+  CHECK_FALSE(scaleSimilarity(Vector3d(2, 2, 2.0000001)).stated);
+}
+
 TEST_CASE("sameAs: one surface at machine precision, whichever record states it", "[surface][identity]")
 {
   // Until 2026-09-28 every kind compared its fields to an absolute 1e-9, and a
@@ -148,8 +179,8 @@ TEST_CASE("sameAs: one surface at machine precision, whichever record states it"
   Transform3d turn = Transform3d::Identity();
   turn.rotate(Eigen::AngleAxisd(0.3, Vector3d(1, 2, 3).normalized()));
   CylinderSurface a = low, b(Vector3d(0, 0, 11), z, 10);
-  REQUIRE(a.transform(turn));
-  REQUIRE(b.transform(turn));
+  REQUIRE(a.transform(turn, Similarity::by(1.0)));
+  REQUIRE(b.transform(turn, Similarity::by(1.0)));
   CHECK(a.sameAs(b));
 
   // a plane anchored at two of its points, and one a hair off it

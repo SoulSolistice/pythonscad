@@ -42,7 +42,7 @@ public:
   CGALNefGeometry& operator*=(const CGALNefGeometry& other);
   CGALNefGeometry& operator-=(const CGALNefGeometry& other);
   CGALNefGeometry& minkowski(const CGALNefGeometry& other);
-  void transform(const Transform3d& matrix) override;
+  void transform(const Transform3d& matrix, const Similarity& similarity) override;
   void addSurface(const std::shared_ptr<Surface>& surface) override
   {
     mergeSurfaces(surfaces, {surface});  // a duplicate unites its declarers

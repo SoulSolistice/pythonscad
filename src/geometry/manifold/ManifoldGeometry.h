@@ -68,7 +68,7 @@ public:
   Polygon2d slice() const;
   Polygon2d project() const;
 
-  void transform(const Transform3d& mat) override;
+  void transform(const Transform3d& mat, const Similarity& similarity) override;
   void setColor(const Color4f& c) override;
   void toOriginal();
   void resize(const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize) override;

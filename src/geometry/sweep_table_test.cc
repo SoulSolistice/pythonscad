@@ -394,7 +394,7 @@ TEST_CASE("2D ellipse: a circle under an uneven scale keeps its curve and its ch
   poly->declareEdges(EdgeKind::Arc, 0);
   Transform2d stretch = Transform2d::Identity();
   stretch.scale(Vector2d(2., 1.));
-  poly->transform(stretch);
+  poly->transform(stretch, Similarity::unstated());  // an uneven scale
   CHECK(poly->arcs.empty());
   REQUIRE(poly->ellipses.size() == 1);
   CHECK(Vector2d(poly->ellipses[0].u) == Vector2d(4., 0.));

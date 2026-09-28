@@ -183,7 +183,7 @@ static std::unique_ptr<T> optionally_center(std::unique_ptr<T> g, bool center)
       translate.x() = -center.x();
       translate.y() = -center.y();
 
-      g->transform(mat);
+      g->transform(mat, Similarity::by(1.0));  // a translation
     } else {
       auto mat = Transform3d::Identity();
       auto translate = mat.translation();
@@ -192,7 +192,7 @@ static std::unique_ptr<T> optionally_center(std::unique_ptr<T> g, bool center)
       translate.y() = -center.y();
       translate.z() = -center.z();
 
-      g->transform(mat);
+      g->transform(mat, Similarity::by(1.0));  // a translation
     }
   }
 

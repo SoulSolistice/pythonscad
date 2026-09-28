@@ -21,7 +21,7 @@ public:
 
   /*! Move the curve with the geometry it describes. Returns false when the
    * result can no longer be represented, in which case the caller drops it. */
-  virtual bool transform(const Transform3d& mat);
+  virtual bool transform(const Transform3d& mat, const Similarity& similarity);
 };
 
 class ArcCurve : public Curve
@@ -37,7 +37,7 @@ public:
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
 
   [[nodiscard]] std::shared_ptr<Curve> clone() const override;
-  bool transform(const Transform3d& mat) override;
+  bool transform(const Transform3d& mat, const Similarity& similarity) override;
 
   double r;
   Vector3d center, normdir;

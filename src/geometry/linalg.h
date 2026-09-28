@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -34,6 +36,47 @@ using Eigen::Matrix3f;
 using Eigen::Matrix4d;
 #define Transform3d Eigen::Affine3d
 #define Transform2d Eigen::Affine2d
+
+/*! What the maker of a transform states about it: that it is a similarity - a
+ * rigid motion times one uniform scale - with that scale, and whether it
+ * mirrors; or nothing.
+ *
+ * Stated where the matrix is built - a rotate(), a translate(), a mirror(), a
+ * scale() whose three factors are one - never measured from the matrix: the
+ * rounding a matrix carries cannot say what its maker meant, and a test that
+ * reads it needs a number for how much rounding to forgive. A record that only
+ * a similarity can move - a circle, a sphere, a cone, a sweep - is moved by
+ * the stated scale, or not at all; one any affine map can move ignores this.
+ * A multmatrix() states nothing. */
+struct Similarity {
+  bool stated = false;
+  double scale = 1.0;    //!< the uniform scale, positive
+  bool mirrors = false;  //!< whether it reverses orientation
+  [[nodiscard]] static Similarity by(double scale, bool mirrors = false)
+  {
+    return Similarity{true, scale, mirrors};
+  }
+  [[nodiscard]] static Similarity unstated() { return Similarity{}; }
+  /*! This, then `next`: a similarity where both are, their scales multiplied
+   * and their reflections cancelling in pairs. */
+  [[nodiscard]] Similarity then(const Similarity& next) const
+  {
+    if (!stated || !next.stated) return unstated();
+    return by(scale * next.scale, mirrors != next.mirrors);
+  }
+};
+
+/*! What a scale by `factors` is, from the factors themselves: a similarity
+ * where their sizes are one number, mirroring where an odd number of them is
+ * negative; otherwise nothing. */
+inline Similarity scaleSimilarity(const Vector3d& factors)
+{
+  const double a = std::fabs(factors[0]);
+  if (!(a > 0) || std::fabs(factors[1]) != a || std::fabs(factors[2]) != a)
+    return Similarity::unstated();
+  const int negative = (factors[0] < 0) + (factors[1] < 0) + (factors[2] < 0);
+  return Similarity::by(a, negative % 2 == 1);
+}
 
 bool matrix_contains_infinity(const Transform3d& m);
 bool matrix_contains_nan(const Transform3d& m);

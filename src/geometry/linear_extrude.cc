@@ -344,6 +344,7 @@ void declareExtrudedSurfaces(const LinearExtrudeNode& node, const Polygon2d& pro
   const Profile2d classified = classifyProfile(profile);
   Extrusion sweep;
   sweep.placement = profile.getTransform3d();
+  sweep.placement_similarity = profile.getSimilarity3d();
   sweep.base = base;
   sweep.height = height;
   sweep.scale_x = node.scale_x;
@@ -380,7 +381,7 @@ std::unique_ptr<Geometry> extrudePolygon(const LinearExtrudeNode& node, const Po
 
   // Calculate outline segments if appropriate.
   Polygon2d seg_poly;
-  seg_poly.transform3d(poly.getTransform3d());
+  seg_poly.transform3d(poly.getTransform3d(), poly.getSimilarity3d());
 
   // We skip segmentation if the user passed in segments=0
   if (!(node.has_segments && node.segments == 0)) {
@@ -570,7 +571,7 @@ std::unique_ptr<Geometry> extrudeBarcode(const LinearExtrudeNode& node, const Ba
     o.vertices = {v1, v2, v3, v4};
     p.addOutline(o);
   }
-  p.transform3d(barcode.getTransform3d());
+  p.transform3d(barcode.getTransform3d(), Similarity::unstated());  // a barcode states nothing
   p.setSanitized(true);
   return std::make_unique<Polygon2d>(p);
 }

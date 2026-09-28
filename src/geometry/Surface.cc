@@ -53,30 +53,13 @@ std::shared_ptr<Surface> Surface::clone() const
   return std::make_shared<Surface>(*this);
 }
 
-/*! A similarity is a transform whose linear part satisfies M^T M = s^2 I: a
- * rotation and a uniform scale, possibly mirrored. Anything else (non uniform
- * scale, shear) turns a circular cross section into an ellipse, which none of
- * these surface types can describe. */
-static bool similarityScale(const Transform3d& mat, double& scale)
+bool Surface::transform(const Transform3d& mat, const Similarity& similarity)
 {
-  const Matrix3d m = mat.linear();
-  const Matrix3d mtm = m.transpose() * m;
-  const double s2 = mtm(0, 0);
-  if (!(s2 > 0)) return false;
-  for (int i = 0; i < 3; i++) {
-    for (int j = 0; j < 3; j++) {
-      const double expected = (i == j) ? s2 : 0.0;
-      if (fabs(mtm(i, j) - expected) > 1e-9 * s2) return false;
-    }
-  }
-  scale = sqrt(s2);
-  return true;
-}
-
-bool Surface::transform(const Transform3d& mat)
-{
-  double scale;
-  if (!similarityScale(mat, scale)) return false;
+  // Only a map its maker states to be a similarity - a rotation and a uniform
+  // scale, possibly mirrored - keeps a circular section circular; any other
+  // turns it into an ellipse, which none of the kinds moved through here can
+  // describe. Stated, never measured: see Similarity.
+  if (!similarity.stated) return false;
   refpt = mat * refpt;
   normdir = (mat.linear() * normdir).normalized();
   return true;
@@ -296,10 +279,10 @@ std::shared_ptr<Surface> SphereSurface::clone() const
   return std::make_shared<SphereSurface>(*this);
 }
 
-bool SphereSurface::transform(const Transform3d& mat)
+bool SphereSurface::transform(const Transform3d& mat, const Similarity& similarity)
 {
-  if (!Surface::transform(mat)) return false;
-  this->r *= (mat.linear() * Vector3d(1, 0, 0)).norm();
+  if (!Surface::transform(mat, similarity)) return false;
+  this->r *= similarity.scale;
   return true;
 }
 
@@ -338,12 +321,11 @@ std::shared_ptr<Surface> TorusSurface::clone() const
   return std::make_shared<TorusSurface>(*this);
 }
 
-bool TorusSurface::transform(const Transform3d& mat)
+bool TorusSurface::transform(const Transform3d& mat, const Similarity& similarity)
 {
-  if (!Surface::transform(mat)) return false;
-  const double scale = (mat.linear() * Vector3d(1, 0, 0)).norm();
-  this->r_major *= scale;
-  this->r_minor *= scale;
+  if (!Surface::transform(mat, similarity)) return false;
+  this->r_major *= similarity.scale;
+  this->r_minor *= similarity.scale;
   return true;
 }
 
@@ -544,7 +526,7 @@ std::shared_ptr<Surface> BezierPatchSurface::clone() const
   return std::make_shared<BezierPatchSurface>(*this);
 }
 
-bool BezierPatchSurface::transform(const Transform3d& mat)
+bool BezierPatchSurface::transform(const Transform3d& mat, const Similarity&)
 {
   // A Bezier is affine invariant: transforming the control points transforms
   // the surface exactly. Unlike a cylinder, this survives a non uniform scale
@@ -971,12 +953,10 @@ std::shared_ptr<Surface> CylinderSurface::clone() const
   return std::make_shared<CylinderSurface>(*this);
 }
 
-bool CylinderSurface::transform(const Transform3d& mat)
+bool CylinderSurface::transform(const Transform3d& mat, const Similarity& similarity)
 {
-  if (!Surface::transform(mat)) return false;
-  // Surface::transform has established that the linear part is a similarity,
-  // so any column of it gives the uniform scale factor.
-  this->r *= (mat.linear() * Vector3d(1, 0, 0)).norm();
+  if (!Surface::transform(mat, similarity)) return false;
+  this->r *= similarity.scale;
   return true;
 }
 
@@ -1020,13 +1000,13 @@ std::shared_ptr<Surface> ConeSurface::clone() const
   return std::make_shared<ConeSurface>(*this);
 }
 
-bool ConeSurface::transform(const Transform3d& mat)
+bool ConeSurface::transform(const Transform3d& mat, const Similarity& similarity)
 {
-  if (!Surface::transform(mat)) return false;
+  if (!Surface::transform(mat, similarity)) return false;
   // Only the radius carries a length. The slope is a ratio of two of them, so
   // a similarity leaves the half angle alone - which is the whole reason for
   // storing the cone this way.
-  this->r *= (mat.linear() * Vector3d(1, 0, 0)).norm();
+  this->r *= similarity.scale;
   return true;
 }
 
@@ -1590,7 +1570,7 @@ std::shared_ptr<Surface> GridSurface::clone() const
   return std::make_shared<GridSurface>(*this);
 }
 
-bool GridSurface::transform(const Transform3d& mat)
+bool GridSurface::transform(const Transform3d& mat, const Similarity&)
 {
   // Unlike a cylinder this can never fail: the record is a list of points, and
   // points go anywhere an affine map sends them. A sheared thread is still a
@@ -2044,18 +2024,15 @@ std::shared_ptr<Surface> SweepSurface::clone() const
   return std::make_shared<SweepSurface>(refpt, normdir, ref, laws, pitch, turns, stations);
 }
 
-bool SweepSurface::transform(const Transform3d& mat)
+bool SweepSurface::transform(const Transform3d& mat, const Similarity& similarity)
 {
   // A sweep survives a rigid motion with a uniform scale and nothing else. Any
   // other map turns its circular path into an ellipse, which this form cannot
   // state, and refusing is what the caller needs - see Surface::transform.
+  if (!similarity.stated) return false;
   const Eigen::Matrix3d m = mat.linear();
-  const Eigen::Matrix3d mtm = m.transpose() * m;
-  const double scale2 = mtm(0, 0);
-  if (scale2 < 1e-18) return false;
-  // A reflection is not one of those, and `m^T m == scale^2 I` does not exclude
-  // it: every orthogonal matrix satisfies that, whatever its determinant. It
-  // has to be excluded by hand, because this record cannot absorb one.
+  // A reflection is not one of those, though it is a similarity: the maker
+  // states it (Similarity::mirrors), and this record cannot absorb one.
   //
   // `evaluate` builds the second radial direction as `normdir x ref`, and a
   // cross product is not preserved by a reflection - it comes out negated. So a
@@ -2068,14 +2045,8 @@ bool SweepSurface::transform(const Transform3d& mat)
   // the axial rise through `z = pitch * turns * u`, so flipping it reverses a
   // height the mirror did not touch. Refusing loses the declaration and leaves
   // the mesh faceted, which is this file's rule for anything it cannot state.
-  if (m.determinant() < 0) return false;
-  for (int i = 0; i < 3; i++) {
-    for (int j = 0; j < 3; j++) {
-      const double want = i == j ? scale2 : 0.0;
-      if (fabs(mtm(i, j) - want) > 1e-9 * scale2) return false;
-    }
-  }
-  const double scale = sqrt(scale2);
+  if (similarity.mirrors) return false;
+  const double scale = similarity.scale;
   *this = SweepSurface(mat * refpt, (m * normdir).normalized(), (m * ref).normalized(),
                        laws.scaled(scale), pitch * scale, turns, stations);
   return true;
@@ -2356,10 +2327,10 @@ double ConeSurface::offset(const Vector3d& p) const
 // Moving a record with its geometry - see Surface::transformed.
 // ---------------------------------------------------------------------------
 
-std::shared_ptr<Surface> Surface::transformed(const Transform3d& mat) const
+std::shared_ptr<Surface> Surface::transformed(const Transform3d& mat, const Similarity& similarity) const
 {
   auto copy = clone();
-  return copy->transform(mat) ? copy : nullptr;
+  return copy->transform(mat, similarity) ? copy : nullptr;
 }
 
 namespace {
@@ -2376,9 +2347,10 @@ std::shared_ptr<Surface> withDeclarersOfRecord(std::shared_ptr<Surface> into, co
 
 }  // namespace
 
-std::shared_ptr<Surface> CylinderSurface::transformed(const Transform3d& mat) const
+std::shared_ptr<Surface> CylinderSurface::transformed(const Transform3d& mat,
+                                                      const Similarity& similarity) const
 {
-  if (auto moved = Surface::transformed(mat)) return moved;  // a similarity: still circular
+  if (auto moved = Surface::transformed(mat, similarity)) return moved;  // a similarity: still circular
   // Any other affine map takes the circle across the axis to an ellipse, and the
   // cylinder to the elliptic one through it: the images of the axis and of two
   // perpendicular radii are its sweep and two conjugate semi-diameters.
@@ -2391,7 +2363,7 @@ std::shared_ptr<Surface> CylinderSurface::transformed(const Transform3d& mat) co
   return withDeclarersOfRecord(moved, *this);
 }
 
-std::shared_ptr<Surface> PlaneSurface::transformed(const Transform3d& mat) const
+std::shared_ptr<Surface> PlaneSurface::transformed(const Transform3d& mat, const Similarity&) const
 {
   // A plane is a plane under any affine map: its points move by the map and its
   // normal by the inverse transpose of the linear part. Only a singular map,
@@ -2405,12 +2377,13 @@ std::shared_ptr<Surface> PlaneSurface::transformed(const Transform3d& mat) const
 }
 
 std::vector<std::shared_ptr<Surface>> transformedSurfaces(
-  const std::vector<std::shared_ptr<Surface>>& list, const Transform3d& mat)
+  const std::vector<std::shared_ptr<Surface>>& list, const Transform3d& mat,
+  const Similarity& similarity)
 {
   std::vector<std::shared_ptr<Surface>> out;
   out.reserve(list.size());
   for (const auto& surface : list) {
-    if (auto moved = surface->transformed(mat)) out.push_back(std::move(moved));
+    if (auto moved = surface->transformed(mat, similarity)) out.push_back(std::move(moved));
   }
   return out;
 }
@@ -2471,7 +2444,7 @@ bool EllipticCylinderSurface::usable() const
   return std::isfinite(a()) && std::isfinite(b()) && b() > 0 && normdir.norm() > 0;
 }
 
-bool EllipticCylinderSurface::transform(const Transform3d& mat)
+bool EllipticCylinderSurface::transform(const Transform3d& mat, const Similarity&)
 {
   // Any affine map keeps it one: the images of the axis and of the two principal
   // semi-axes are the sweep and two conjugate semi-diameters of a section.

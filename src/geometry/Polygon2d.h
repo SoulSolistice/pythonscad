@@ -232,8 +232,10 @@ public:
   const Outlines2d& transformedPolylines() const;
   using Geometry::transform;
 
-  void transform(const Transform2d& mat);
-  void transform3d(const Transform3d& mat);
+  /*! Move by `mat`, which its maker states `similarity` of: what the arc
+   * records need - a circle stays one only under a stated similarity. */
+  void transform(const Transform2d& mat, const Similarity& similarity);
+  void transform3d(const Transform3d& mat, const Similarity& similarity);
   bool hasTransform3d() const { return trans3dState != Transform3dState::NONE; }
   const Transform3d& getTransform3d() const
   {
@@ -241,6 +243,12 @@ public:
     if (trans3dState == Transform3dState::NONE)
       const_cast<Polygon2d *>(this)->trans3d = Transform3d::Identity();
     return trans3d;
+  }
+  /*! What the makers of the pending 3D transform stated of it: the identity
+   * where there is none. */
+  [[nodiscard]] Similarity getSimilarity3d() const
+  {
+    return trans3dState == Transform3dState::NONE ? Similarity::by(1.0) : trans3d_similarity;
   }
   void resize(const Vector2d& newsize, const Eigen::Matrix<bool, 2, 1>& autosize);
   void resize(const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& autosize) override
@@ -263,10 +271,11 @@ private:
   bool sanitized{false};
   Transform3dState trans3dState{Transform3dState::NONE};
   Transform3d trans3d;
+  Similarity trans3d_similarity;
   Outlines2d trans3dOutlines;
   Outlines2d trans3dPolylines;
   void mergeTrans3d();
   void dropTransformedCache();
-  void transformArcs(const Transform2d& mat);
+  void transformArcs(const Transform2d& mat, const Similarity& similarity);
   void applyTrans3dToOutlines(Polygon2d::Outlines2d& outlines) const;
 };

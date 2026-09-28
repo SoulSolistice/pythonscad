@@ -968,7 +968,7 @@ std::unique_ptr<Polygon2d> applyOffset(const Polygon2d& poly, double offset,
     // pending transform, while the vertices and the records share a frame.
     r->placeOnArcs(std::ldexp(1.0, -scale_bits));
   }
-  r->transform3d(poly.getTransform3d());
+  r->transform3d(poly.getTransform3d(), poly.getSimilarity3d());
   r->stamp_color(poly);
   return r;
 }

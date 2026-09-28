@@ -125,12 +125,12 @@ TEST_CASE("a mirrored or sheared solid keeps its inside", "[classify]")
 {
   Transform3d mirror = Transform3d::Identity();
   mirror.linear()(0, 0) = -1;
-  const auto m = cylinder(10, 0, 0, 10)->transformed(mirror);
+  const auto m = cylinder(10, 0, 0, 10)->transformed(mirror, Similarity::by(1.0, true));
   CHECK(at(m, 0, 0, 5) == Where::In);
   CHECK(at(m, 0, 0, 15) == Where::Out);
   Transform3d shear = Transform3d::Identity();
   shear.linear()(0, 2) = 1;
-  const auto s = box({0, 0, 0}, {1, 1, 1})->transformed(shear);
+  const auto s = box({0, 0, 0}, {1, 1, 1})->transformed(shear, Similarity::unstated());
   // x' = x + z: a point is in where x' - z is in (0, 1)
   CHECK(at(s, 1.5, 0.5, 0.9) == Where::In);   // x = 0.6
   CHECK(at(s, 0.5, 0.5, 0.9) == Where::Out);  // x = -0.4, though inside the unsheared box
@@ -214,7 +214,7 @@ TEST_CASE("a hull holds each of its operands, whatever they are", "[classify][hu
   CHECK(hull->declaredLeaves() == 0);
 
   // and it moves with its operands
-  const auto moved = hull->transformed(Transform3d(Eigen::Translation3d(0, 0, 10)));
+  const auto moved = hull->transformed(Transform3d(Eigen::Translation3d(0, 0, 10)), Similarity::by(1.0));
   CHECK(at(moved, 0.5, 0.5, 10.5) == Where::In);
   CHECK(at(moved, 0.5, 0.5, 0.5) == Where::Out);
 

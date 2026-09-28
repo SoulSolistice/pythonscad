@@ -500,7 +500,8 @@ int GeometryUtils::findUnconnectedEdges(const std::vector<MarkedIndexedTriangle>
 }
 
 Transform3d GeometryUtils::getResizeTransform(const BoundingBox& bbox, const Vector3d& newsize,
-                                              const Eigen::Matrix<bool, 3, 1>& autosize)
+                                              const Eigen::Matrix<bool, 3, 1>& autosize,
+                                              Similarity& similarity)
 {
   // Find largest dimension
   int maxdim = 0;
@@ -519,7 +520,7 @@ Transform3d GeometryUtils::getResizeTransform(const BoundingBox& bbox, const Vec
 
   Transform3d t;
   t.matrix() << newscale[0], 0, 0, 0, 0, newscale[1], 0, 0, 0, 0, newscale[2], 0, 0, 0, 0, 1;
-
+  similarity = scaleSimilarity(newscale);
   return t;
 }
 

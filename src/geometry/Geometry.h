@@ -55,7 +55,12 @@ public:
    * nowhere to put it. */
   virtual void addSurface(const std::shared_ptr<Surface>& /*surface*/) {}
 
-  virtual void transform(const Transform3d& /*mat*/) { assert(!"transform not implemented!"); }
+  /*! Move by `mat`, which its maker states `similarity` of (linalg.h): what
+   * the declared records need to be moved with it. */
+  virtual void transform(const Transform3d& /*mat*/, const Similarity& /*similarity*/)
+  {
+    assert(!"transform not implemented!");
+  }
   virtual void resize(const Vector3d& /*newsize*/, const Eigen::Matrix<bool, 3, 1>& /*autosize*/)
   {
     assert(!"resize not implemented!");

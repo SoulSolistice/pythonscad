@@ -58,8 +58,10 @@ bool tessellatePolygonWithHoles(const std::vector<Vector3f>& vertices,
 int findUnconnectedEdges(const std::vector<MarkedIndexedFaces>& polygons);
 int findUnconnectedEdges(const std::vector<MarkedIndexedTriangle>& triangles);
 
+/*! The scale resize() applies, and what it is: a similarity where its three
+ * factors are one number, stated from those factors. */
 Transform3d getResizeTransform(const BoundingBox& bbox, const Vector3d& newsize,
-                               const Eigen::Matrix<bool, 3, 1>& autosize);
+                               const Eigen::Matrix<bool, 3, 1>& autosize, Similarity& similarity);
 std::shared_ptr<const Geometry> getBackendSpecificGeometry(const std::shared_ptr<const Geometry>& geom);
 
 }  // namespace GeometryUtils
