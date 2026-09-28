@@ -4293,6 +4293,58 @@ Two WILL_FAIL tests hide more than they say: ctest prints nothing for one that
 step-representation 1.048888 mm3; flagship-corners only lid10 and the bayonet,
 on the 0.716 cone corner.
 
+### 39. The B-rep is built in STEP's data model; it belongs to geometry, with a contract for any writer
+
+Raised 2026-09-28 by the author, reading `src/io/step`: an IGES writer, or an
+SVG one that writes true curves, would need everything this directory decides,
+and none of it is STEP's.
+
+**What stands.** Three layers, one of them in the wrong place:
+
+- **Recognition** (`src/geometry/recognition`) is writer-agnostic already -
+  claims, the ledger, D0 regions, existence.
+- **The B-rep** (`src/io/step`, 8685 lines): corner placement, crossing curves,
+  plane sections, seams, loops, pcurves, face assembly. Two files name a STEP
+  entity at all (`BodyBuild.h`, `PromoteCurves.cc`), but every phase is a part of
+  `StepKernel::BodyBuild` and constructs `StepKernel` entities as it decides, so
+  the B-rep exists only as STEP.
+- **Encoding** (`StepKernel`, `export_step.cc`).
+
+**What is whose.** Writer-agnostic: where each corner goes, which exact curve
+bounds each face, sections, region to face, the seams of periodic surfaces, the
+vertex-on-curve and edge-on-surface checks, and the evidence class of every
+entity. Writer-specific: the entity encoding, orientation and tolerance
+conventions, whether pcurves are required (IGES 144/142 needs them; STEP does
+not), and conventions adopted for one reader (SOLIDWORKS) that another would not
+share.
+
+**The contract.** A neutral B-rep in `src/geometry/brep`: vertices, edges,
+coedges and loops, faces, shells. An edge carries its curve's closed form -
+line, circle, ellipse, B-spline, or the intersection of two named surfaces - and
+a face its `Surface` record and orientation; every entity carries its evidence
+class (D0-D4), so that a writer decides what it may write exactly - an SVG
+writer an arc only where the arc is D0 or D1. STEP is its first writer; a second
+(IGES, or STEP AP242) is what proves the contract clean.
+
+**Migration, each step neutral by `compare` at 0 differences (checklist A8):**
+
+1. Define the B-rep types, used by nothing.
+2. `BodyBuild` fills them, and `StepKernel` translates them one to one into
+   entities.
+3. The phases move from `io/step` to `geometry/brep`, free of `StepKernel`.
+4. A second writer.
+
+**When.** After item 38's independent entries, before the existence design's
+steps 5 to 7: those rewrite corner placement, and landing them after the move
+puts that work in the neutral domain once rather than moving it twice.
+
+**Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
+needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records
+with every edge named by its maker (E6; the last gap, edges Clipper merges,
+closed by `cfee50a03`), so an SVG writer could emit `A` and `C` path commands
+and a DXF writer `ARC` and `SPLINE` entities today. True curves in a projection
+of 3D geometry need this item and a projection.
+
 ### 32. The fixture sanity test does not look for `EXPORT-ERROR`
 
 `tests/stepexportsanitytest.py` never checks the exporter's own error lines;
