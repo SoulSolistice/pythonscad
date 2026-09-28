@@ -1546,9 +1546,12 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
             const double step_high =
               fabs(polar(bands[high].base) - polar(bands[high].base + axis * bands[high].height));
             // and the caps have to be flat discs across the axis rather than
-            // whatever else a single neighbouring face might be
+            // whatever else a single neighbouring face might be: every corner
+            // at the first one's level, at machine precision - asked of the
+            // corners, not of the normal measured from them (was 1e-6 on it)
             const auto across = [&](std::size_t f) {
-              return fabs(fabs(loop_normals[f].normalized().dot(axis)) - 1.0) <= 1e-6;
+              return !loops[f].empty() &&
+                     recognition::onPlane(vertices[loops[f][0]], axis, vertices, loops[f]);
             };
             if (gap_low <= step_low && gap_high <= step_high && step_low > 0 && step_high > 0 &&
                 across(lo_rim.loop) && across(hi_rim.loop)) {

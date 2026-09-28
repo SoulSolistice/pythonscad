@@ -98,43 +98,6 @@ void reportProvenance(const PolySet& ps)
 
 using AnalyticFeatures::closestOnSurface;
 
-/*! The surface's own normal where it passes closest to `p`.
- *
- * Needed because corners are not enough to say a facet lies on a surface. The
- * flat cap an oblique cut leaves on a cylinder has *every* corner exactly on
- * that cylinder - the rim is the intersection - and it belongs to the cutting
- * solid, not to the cylinder. Measured by corners alone all 30 of its facets
- * are claimed for the cylinder, and step-nested-rings does the same thing where
- * a plate's top face meets a bore's rim. A facet lying on a surface also faces
- * the way the surface does there; a cap crosses it at a right angle. */
-bool surfaceNormal(const Surface *s, const Vector3d& p, Vector3d& out)
-{
-  if (s == nullptr) return false;
-  if (s->normalAt(p, out)) return true;
-  if (const auto *grid = dynamic_cast<const GridSurface *>(s)) {
-    double u = 0, v = 0;
-    if (!grid->project(p, u, v)) return false;
-    const double h = 1e-4;
-    const Vector3d du =
-      grid->evaluate(std::min(1.0, u + h), v) - grid->evaluate(std::max(0.0, u - h), v);
-    const Vector3d dv =
-      grid->evaluate(u, std::min(1.0, v + h)) - grid->evaluate(u, std::max(0.0, v - h));
-    const Vector3d n = du.cross(dv);
-    if (n.norm() < 1e-18) return false;
-    out = n.normalized();
-    return true;
-  }
-  return false;
-}
-
-/*! Whether two records describe the same surface, geometrically.
- *
- * `Surface::sameAs` deliberately refuses this: it exists for deduplicating the
- * record list, where being wrong loses a surface, so it keeps the same infinite
- * cylinder referred to from two heights as two entries. Nothing is dropped
- * here - the question is only how many *distinct surfaces* claim a vertex - and
- * counting one cylinder twice makes an unambiguous junction look contested,
- * which it did on all 32 of step-declare-cone's. */
 /*! Which declared surface each original solid's facets lie on.
  *
  * The mapping the snap needs, and the one thing distance cannot supply. A cut
@@ -321,47 +284,23 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         if (on.size() == f.size() && !on_declared_plane) row_present[j] = 1;
       } else {
         if (on.size() == f.size() && !on_declared_plane) row_present[j] = 1;
-        // ...and faces the way the surface does there. See surfaceNormal.
-        Vector3d centroid = Vector3d::Zero();
-        for (const int v : on) centroid += ps.vertices[v];
-        centroid /= double(on.size());
-        Vector3d sn;
-        if (!surfaceNormal(ps.surfaces[j].get(), centroid, sn)) continue;
-        // 60 degrees: loose enough for any tessellation a model would carry,
-        // tight enough that a cap crossing the surface at a right angle is out.
-        if (fabs(fn.normalized().dot(sn)) < 0.5) continue;
       }
+      // Counted for the report as presence is asked: a facet wholly on a
+      // declared plane is that plane's, whatever rim its corners are on.
+      if (on_declared_plane) continue;
       if (on.size() == f.size()) row[j]++;
       else row_cut[j]++;
     }
   }
 
-  // An id owns a surface when a real part of it lies there. One facet is a
-  // coincidence - two solids meeting flush share vertices, and a triangle of a
-  // wall can land on a cylinder it was cut against without belonging to it.
-  // Whole facets decide it, and cut ones do not - they are reported because
-  // they say how much of the surface the boolean took, not because they are
-  // evidence of origin. A facet cut across a seam has two corners on the
-  // surface on the *other* side of it, so counting those as ownership makes
-  // every solid own every surface it touches: it did, and it turned 32
-  // unambiguous junctions of step-declare-cone into 64 contested ones. A
-  // boundary artefact cannot produce a whole facet, because a facet wholly on
-  // a surface is on it.
+  // Ownership was measured here until 2026-09-23 - an id owned a surface where
+  // at least three of its whole facets lay on it facing within 60 degrees - and
+  // compared against the carried rule below until 2026-09-28. It failed exactly
+  // where two declarations meet: on step-cylinder-cross 76 slivers along the
+  // crease, every corner on both cylinders, gave the vertical solid the
+  // horizontal cylinder too, and on lid10 it granted cylinder 12 to four
+  // originals that never declared it. Deleted; item 31.
   //
-  // **Superseded 2026-09-23, and kept only to be compared against.** The rule
-  // above is a measurement, and it fails exactly where two declarations meet:
-  // on step-cylinder-cross, 76 of the vertical cylinder's facets are slivers
-  // along the crease whose every corner is on the crossing curve - on *both*
-  // cylinders by position - and near the crease the two normals agree within
-  // 60 degrees, so the vertical solid "owned" the horizontal cylinder too. On
-  // lid10 it granted cylinder 12 to four originals that never declared it.
-  const std::size_t least = 3;
-  std::map<int32_t, std::vector<std::size_t>> owned_measured;
-  for (const auto& entry : covered) {
-    for (std::size_t j = 0; j < nsurf; j++) {
-      if (is_plane[j] == 0 && entry.second[j] >= least) owned_measured[entry.first].push_back(j);
-    }
-  }
   // What an id owns is what it *declared*: Surface::owners, stamped where the
   // id was minted and carried through every boolean. Identity, no tolerance,
   // no count. Asked per geometric surface - two records of one wall from two
@@ -794,61 +733,6 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     }
     LOG("STEP export: original %1$d, %2$d facets, owns %3$s", int(entry.first), int(facets[entry.first]),
         names.c_str());
-  }
-
-  // Ownership carried from the generator, held against the ownership the old
-  // rule measured. `owned_measured` is inferred from positions - whole facets
-  // on the surface by `runsThrough`, facing it within 60 degrees, at least
-  // `least` of them - and `Surface::owners` is stamped where the original's id
-  // was minted. The first is a measurement wearing the name provenance; the
-  // second is identity, and since 2026-09-23 it is what `owned` is. Reported so
-  // every export says where the two would have differed. Over originals present
-  // in this mesh and surfaces that are not planes. See open item 31.
-  {
-    std::size_t agree = 0, measured_only = 0, carried_only = 0, unstamped = 0;
-    std::string first_measured, first_carried;
-    for (std::size_t j = 0; j < nsurf; j++) {
-      if (is_plane[j] != 0 || ps.surfaces[j] == nullptr) continue;
-      // Per geometric surface, not per record: two records of one wall - the
-      // same infinite cylinder declared from two heights - are kept apart, and
-      // whoever declared either of them declared the wall.
-      std::vector<int32_t> carried;
-      for (std::size_t k = 0; k < nsurf; k++) {
-        if (ps.surfaces[k] == nullptr || !ps.surfaces[k]->sameAs(*ps.surfaces[j])) continue;
-        carried.insert(carried.end(), ps.surfaces[k]->owners.begin(), ps.surfaces[k]->owners.end());
-      }
-      std::sort(carried.begin(), carried.end());
-      carried.erase(std::unique(carried.begin(), carried.end()), carried.end());
-      if (carried.empty()) unstamped++;
-      for (const auto& entry : facets) {
-        const int32_t id = entry.first;
-        const auto it = owned_measured.find(id);
-        const bool measured = it != owned_measured.end() &&
-                              std::find(it->second.begin(), it->second.end(), j) != it->second.end();
-        const bool stated = std::binary_search(carried.begin(), carried.end(), id);
-        if (measured && stated) agree++;
-        else if (measured) {
-          measured_only++;
-          if (first_measured.empty()) {
-            first_measured = "original " + std::to_string(int(id)) + " on surface " + std::to_string(j);
-          }
-        } else if (stated) {
-          carried_only++;
-          if (first_carried.empty()) {
-            first_carried = "original " + std::to_string(int(id)) + " on surface " + std::to_string(j);
-          }
-        }
-      }
-    }
-    if (!facets.empty()) {
-      LOG(
-        "STEP export: surface ownership carried from the generator against ownership measured from "
-        "positions: %1$d agree, %2$d measured only%3$s, %4$d carried only%5$s, %6$d surfaces carry no "
-        "owner",
-        int(agree), int(measured_only),
-        first_measured.empty() ? "" : (" (first " + first_measured + ")"), int(carried_only),
-        first_carried.empty() ? "" : (" (first " + first_carried + ")"), int(unstamped));
-    }
   }
 }
 

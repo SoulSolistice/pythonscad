@@ -4327,10 +4327,9 @@ solids (`83af07497`); a hull of coaxial declared primitives is a declared solid
   question. Found on the way: `Surface::sameAs` compares a record's reference
   point, so two records of one cylinder whose points differ along its axis are
   two surfaces to every caller - no fixture has them yet.
-- **An unnamed 2D edge is classified by measurement** (`Profile2d.cc`,
-  `inControlBox`, 1e-9 slack): E6 says an edge's kind is its maker's word. The
-  text fixture's spurious plane was this rule meeting the grid; the grid is
-  fixed, the rule stands wherever a maker names nothing.
+- ~~**An unnamed 2D edge is classified by measurement**~~ **Landed
+  2026-09-28** (`68aa3b373`): never a Bezier's chord by its control box; an
+  unnamed edge is the straight segment of the polygon it is. See A below.
 - **Two operands on one point** leave existence undecided - coinciding faces,
   and since `83af07497` the plane a slice's two halves share, which is no face
   at all. Needs the half-space each operand keeps there.
@@ -4419,11 +4418,17 @@ literal tolerance in the exporter, recognition and the declaration paths
     The classifications themselves - parallel, perpendicular, on a plane, on a
     line, one line, one plane - are each asked in one place, `Exact.h`, and
     PlaneSurface's residual and `sameAs` go through them.
-  - *Keys.* A declared grid's net at 1e-9 (`GRID_RESOLUTION`, and export_step's
-    copy of the key); rotate_extrude welding on-axis vertices by a 1e-9 key,
-    where the points it welds are exactly 0 off the axis by construction.
-  - *An unnamed 2D edge's kind* (`Profile2d::inControlBox`, 1e-9) - E6; only
-    where no maker named the edge, rare since `cfee50a03`.
+  - ~~*Keys.*~~ **Landed 2026-09-28** (`68aa3b373`). A net point is found by
+    `GridSurface::netIndex` - buckets as wide as machine precision at the net's
+    size, the candidate asked by `recognition::samePoint` - and export_step's
+    copy of the key is gone; the seam is two evaluations within the grid's own
+    evaluation bound; rotate_extrude welds the same profile point exactly on
+    the axis and one point at machine precision, by identity, not a height key.
+  - ~~*An unnamed 2D edge's kind*~~ **Landed 2026-09-28** (`68aa3b373`), by
+    removal: the one Bezier maker names every edge, so the box could only name
+    edges nobody made. On step-extrude-text-counter two edges Clipper merged
+    from two makers are now the lines they are, and declare their planes; no
+    entity of any export changed.
 - **B. D1 and D2 at a stated tolerance - legitimate by the rungs, numbers to be
   approved (F6).** A Bezier patch's projection (1e-7, `runsThrough`) and
   recognition (`Bezier.cc`, 1e-7 and 1e-6); crossing curves solved and fitted to
@@ -4482,10 +4487,31 @@ present, never a chosen number:**
   comment derives the answer: a chord facet of a frustum leans by
   lean / cos(dtheta / 2), dtheta the facet's angular span, which its corners
   give. Per facet, in closed form; the factor stood in for "n not too small".
+  **Refuted 2026-09-28, worked through.** A symmetric chord facet of a cone of
+  half angle beta leans *less* than the cone: tan(lean) = tan(beta)
+  cos(dtheta / 2). What leans more are triangles between rims turned against
+  each other, and by how much is their triangulation's, not the surface's. So
+  no closed form of the surface replaces the factor; the gate's real work is
+  telling a wall facet from a cap facet whose corners are all on the rim, and
+  for a cap on a declared plane D0 already answers that (not wholly on a
+  declared plane - the rule presence and D0Membership use).
 - *The quadric's interior test* (1.25 x sagitta). A flat facet with its corners
   on a convex surface lies at most one sagitta inside it - of its longest
   corner-to-corner chord, in the surface's closed form. The quarter was for
   uneven arcs, which the per-facet chord answers exactly.
+  **Worked through 2026-09-28, and it is stronger than proposed.** For corners
+  exactly on a cylinder or one nappe of a cone, the facet's deepest point is
+  at most R_max (1 - cos(dtheta / 2)) cos(beta) inside - the depth is the
+  triangle-inequality defect of the corners' radial vectors, and projecting
+  onto the bisector bounds it - which never exceeds `sagittaOf`. So on the
+  exact tier the test cannot refuse a facet; it acts only where corners are off
+  the surface (the approximation tier, spending the band), and there the
+  bound is that sagitta plus the corners' own offset, with no quarter. Its
+  sampled points (centroid, edge midpoints) are then replaced by the depth's
+  maximum over the facet. The comment's account of step-bored-cone's bore quad
+  needs checking against that: the quad crosses the cone's axis (corners near
+  +-90 degrees), the bound's limit case, and the lean test refuses it there.
+  **C1 and C2 are one question, to be settled together, with the author.**
 - *The grid's four times the median stray.* A statistic over the claim's own
   cut corners; nothing derives it, because what it stands in for is where a cut
   corner belongs - existence steps 5 to 7. Removed by those, not replaced.
@@ -4505,14 +4531,28 @@ present, never a chosen number:**
   solve's conditioning (its normal equations square it) sets how exactly a fit
   can recover an exact surface, so the acceptance follows from the solve's own
   eigenvalues rather than from `model_tol`.
+  **Checked 2026-09-28: it needs a declaration first.** Machine precision
+  holds for the fitted fixtures, whose points are computed in doubles
+  (step-approximate-cylinder, -turned - the only exports the fitted route
+  claims on), and fails every imported binary STL, whose vertices are float32,
+  6e-8 of their size, which `model_tol` swallows today. The resolution of a
+  mesh nobody declared is its source's: an importer can state it (float32 for
+  a binary STL, the digits an ASCII file carries), and nothing does. So the
+  fits' acceptance waits on that channel, to be decided with the author.
 - *The zone's cap test* (`Bands.cc`, a cap's normal along the axis to 1e-6):
-  parallel at machine precision (`recognition::parallel`).
+  parallel at machine precision (`recognition::parallel`). **2026-09-28:** asked
+  of the corners instead - every corner at the first one's level
+  (`recognition::onPlane`) - since the normal is measured from them.
 - *Mesh-plane merging* (`MeshLoops`, a plane's offset to 1e-4 and normals to
   0.9999; `EmitPlanarFaces`, 1e-8 of the extent): whether two facets are one
   plane is exact where their corners are the model's - coplanarity at machine
   precision, by the orientation of four points against its forward error.
 - *Measured ownership* (60 degrees, `least = 3`): reports only, against the
-  carried ownership that replaced it; to be deleted, not refined.
+  carried ownership that replaced it; to be deleted, not refined. **Deleted
+  2026-09-28**, with its comparison report and `surfaceNormal` (a finite
+  difference, h = 1e-4); the per-original report counts whole facets by the
+  rule presence uses, not wholly on a declared plane, in place of the 60
+  degree facing test.
 
 Order, as the rest of this item: record identity first - one exact function,
 `sameAs` kept only where the representation is meant, the duplicate removed,
