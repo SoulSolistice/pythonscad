@@ -246,6 +246,25 @@ void Polygon2d::restoreGivenPoints(const VectorOfVector2d& given, double grid)
   if (moved) dropTransformedCache();
 }
 
+void Polygon2d::nameMergedEdges(const std::function<EdgeId(EdgeId, EdgeId)>& between)
+{
+  bool named = false;
+  for (auto& outline : theoutlines) {
+    const std::size_t n = outline.edge_ids.size();
+    if (n == 0 || n != outline.vertices.size()) continue;
+    for (std::size_t i = 0; i < n; i++) {
+      if (outline.edge_ids[i] != 0) continue;
+      const EdgeId prev = outline.edge_ids[(i + n - 1) % n], next = outline.edge_ids[(i + 1) % n];
+      if (prev == 0 || next == 0) continue;
+      const EdgeId id = between(prev, next);
+      if (id == 0) continue;
+      outline.edge_ids[i] = id;
+      named = true;
+    }
+  }
+  if (named) dropTransformedCache();
+}
+
 void Polygon2d::transformArcs(const Transform2d& mat)
 {
   // A Bezier is not fussy the way a circle is: an affine map takes one to

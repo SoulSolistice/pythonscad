@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -192,6 +193,21 @@ public:
    * because the grid has merged them and neither is the vertex. `given` are the
    * points Clipper was handed, in the frame the result is in. */
   void restoreGivenPoints(const VectorOfVector2d& given, double grid);
+
+  /*! Name the edges a 2D operation made by dropping vertices from a run of one
+   * maker's edges.
+   *
+   * Clipper drops a vertex where its two edges have become collinear on its
+   * grid, and the edge that replaces them has two ends naming no common edge -
+   * unnamed (EdgeIdentity.h), and until 2026-09-28 classified by measuring it,
+   * which called a Bezier's chord a line where the grid put one end outside the
+   * control box. But its two neighbours are named, and what lies between them
+   * in their maker's outline is exactly the run it replaced: `between(prev,
+   * next)` returns an id from that run where every edge of it carries one
+   * declaration - a chord of one record, or a line - and 0 where it does not,
+   * which leaves the edge unnamed. A derivation from the makers' word; nothing
+   * is measured. */
+  void nameMergedEdges(const std::function<EdgeId(EdgeId, EdgeId)>& between);
 
   void reverse(void);
   [[nodiscard]] std::unique_ptr<PolySet> tessellate(bool in3d = false) const;

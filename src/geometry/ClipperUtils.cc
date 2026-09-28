@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include "src/core/ColorUtil.h"
@@ -369,6 +370,63 @@ void carryDeclarations(Polygon2d& result, const std::vector<const Polygon2d *>& 
     ellipse_base[k] = int(result.ellipses.size());
     for (const auto& el : operand->ellipses) result.ellipses.push_back(el);
   }
+  // An edge Clipper made by dropping vertices from a run of one maker's edges
+  // is what that run is, where the whole run is one thing (nameMergedEdges).
+  // Each operand edge's successor along its own outline says what the run
+  // between two named neighbours was; an outline Clipper reversed is walked
+  // from the other neighbour.
+  std::unordered_map<EdgeId, std::pair<EdgeId, std::size_t>> successor;  // id -> (next id, operand)
+  for (std::size_t k = 0; k < operands.size(); k++) {
+    if (operands[k] == nullptr) continue;
+    for (const auto& outline : operands[k]->untransformedOutlines()) {
+      const std::size_t n = outline.edge_ids.size();
+      if (n == 0 || n != outline.vertices.size()) continue;
+      for (std::size_t i = 0; i < n; i++) {
+        if (outline.edge_ids[i] != 0)
+          successor[outline.edge_ids[i]] = {outline.edge_ids[(i + 1) % n], k};
+      }
+    }
+  }
+  // A merged run is edges the result no longer has; an edge it still has is
+  // no part of one - which is also what tells a reversed outline's run from the
+  // long way round.
+  std::unordered_set<EdgeId> present;
+  for (const auto& outline : result.untransformedOutlines()) {
+    present.insert(outline.edge_ids.begin(), outline.edge_ids.end());
+  }
+  auto declOf = [&](EdgeId id, std::size_t k) -> const EdgeDecl * {
+    const auto it = operands[k]->edge_decls.find(id);
+    return it == operands[k]->edge_decls.end() ? nullptr : &it->second;
+  };
+  // An id from the run strictly between `from` and `to` along one outline,
+  // where every edge of the run is gone from the result and has one
+  // declaration; 0 otherwise.
+  auto run = [&](EdgeId from, EdgeId to) -> EdgeId {
+    const auto start = successor.find(from);
+    if (start == successor.end()) return 0;
+    const std::size_t k = start->second.second;
+    const EdgeId first = start->second.first;
+    if (first == to || first == 0) return 0;  // nothing between: not a merge
+    const EdgeDecl *decl = declOf(first, k);
+    if (decl == nullptr || present.count(first) != 0) return 0;
+    EdgeId at = first;
+    for (std::size_t steps = 0; steps <= successor.size(); steps++) {
+      const auto it = successor.find(at);
+      if (it == successor.end() || it->second.second != k) return 0;
+      const EdgeId next = it->second.first;
+      if (next == to) return first;
+      const EdgeDecl *d = declOf(next, k);
+      if (d == nullptr || d->kind != decl->kind || d->record != decl->record) return 0;
+      if (present.count(next) != 0) return 0;
+      at = next;
+    }
+    return 0;
+  };
+  result.nameMergedEdges([&](EdgeId prev, EdgeId next) {
+    const EdgeId forward = run(prev, next);
+    return forward != 0 ? forward : run(next, prev);
+  });
+
   // What each edge of the result is, as the operand that made it declared.
   for (const auto& outline : result.untransformedOutlines()) {
     for (const EdgeId id : outline.edge_ids) {
