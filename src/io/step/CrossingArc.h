@@ -40,15 +40,24 @@ struct ArcOutcome {
  * it exactly - which is what keeps the shell closed without either face knowing
  * what the other did.
  *
- * The degree is raised until the fit is inside `tol` rather than fixed, because
- * how much of the curve one mesh edge spans is not something this can know: a
- * cubic is enough over most of a bore's opening and nowhere near it where the
- * two surfaces run nearly tangent and the curve turns hard. Measured on
- * step-bored-cylinder, a cubic leaves the surfaces by 3.4e-05 - three hundred
- * times better than the chords it replaces, and still not exact.
+ * The degree is raised until the arc is within `target` - the file's own
+ * resolution, BodyBuild::resolution, and not a number chosen for curves - and
+ * the lowest degree that reaches it is taken. How much of the curve one mesh
+ * edge spans is not something this can know: a cubic is enough over most of a
+ * bore's opening and nowhere near it where the two surfaces run nearly tangent
+ * and the curve turns hard. Measured on step-bored-cylinder, a cubic leaves the
+ * surfaces by 3.4e-05 - three hundred times better than the chords it
+ * replaces, and still not exact.
+ *
+ * True where one does; `achieved` is how close the closest degree came either
+ * way. One that does not is not refused for a tolerance: fits of a smooth curve
+ * converge, and one that stops short of the resolution is missing for a reason
+ * more degree cannot cure - on step-sweep-law-corners two stalled at 1.2e-2, and
+ * writing them because they beat their chords made the export invalid.
  */
 bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, const Vector3d& p1,
-                     double tol, std::vector<Vector3d>& ctrl, ArcOutcome *why = nullptr);
+                     double target, std::vector<Vector3d>& ctrl, double& achieved,
+                     ArcOutcome *why = nullptr);
 
 /*! Put `q` on the curve `a` and `b` cross along, near the stretch of it from
  * `p0` to `p1` (both on it already).

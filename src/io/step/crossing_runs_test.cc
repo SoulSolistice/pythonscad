@@ -85,7 +85,12 @@ TEST_CASE("a crossing run with unevenly spaced vertices is one curve", "[step][c
   for (const auto& p : run) REQUIRE(fabs(Vector2d(p.x(), p.y()).norm() - r) < 1e-12);
 
   CurveFit fit;
-  REQUIRE(fitCrossingRun(sweep.get(), &bore, run, 1e-7, fit));
+  // held to the resolution a file of this size states, 1e-9 of it
+  double scale = 1.0;
+  for (const auto& p : run) scale = std::max(scale, p.norm());
+  double achieved = 0;
+  REQUIRE(fitCrossingRun(sweep.get(), &bore, run, 1e-9 * scale, fit, achieved));
+  CHECK(achieved <= 1e-9 * scale);
   CHECK(intervalsTurningBack(fit) == 0);
   CHECK((evaluate(fit, 0.0) - run.front()).norm() < 1e-12);
   CHECK((evaluate(fit, 1.0) - run.back()).norm() < 1e-12);

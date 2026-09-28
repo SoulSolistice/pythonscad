@@ -448,6 +448,12 @@ struct StepKernel::BodyBuild {
    * CLOSED_SHELL has to be connected - each a MANIFOLD_SOLID_BREP, and the
    * product structure and contexts around them. */
   void writeShells();
+  /*! The file's resolution: how exactly its corners are placed on their faces,
+   * the corner ladder's floor at the part's size - see writeShells. What every
+   * approximation in the file is held to, and what it declares as its
+   * uncertainty. A gap in the file wider than this is a defect, and
+   * checkAndReport holds the file to it. */
+  [[nodiscard]] double resolution() const;
 
   // ---- what the phases hand each other
 
@@ -565,7 +571,8 @@ struct StepKernel::BodyBuild {
   // edge, and where: ordered from the edge's lower vertex. See creaseCorners.
   std::map<std::pair<int, int>, std::vector<Vector3d>> crossing_corners;
   std::set<std::pair<int, int>> crossing_keys;  // the same, as the sections' skip set
-  double crossing_fit = 0;                      // the worst any of those arcs leaves either surface
+  double crossing_fit =
+    0;  // the worst any written crossing curve leaves either surface - the file's uncertainty
   // What the fitter knew and used to discard. A count of chorded edges cannot
   // tell a fit that missed by 3.4e-05 from one that missed by a tenth of a
   // millimetre, and those want different work.

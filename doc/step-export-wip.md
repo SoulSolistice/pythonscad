@@ -4403,6 +4403,27 @@ decided with the author: the fits aim at what they can reach, and the file
 declares the precision they actually achieved as its uncertainty (today
 `model_tol`, 1e-5, one of A's numbers).
 
+**Landed 2026-09-28, after one attempt that failed instructively.** Fitting to
+what the fits can reach - refining until they stop gaining - wrote the six
+crossing edges of step-bored-cylinder as B-splines of 5123 control points each,
+a 6.5 MB file, 50 to 100 times the export time, and precision nothing else in
+the file has: a cubic gains sixteenfold per doubling, so machine precision by
+refinement is thousands of points by construction (a sharper method is item 10,
+A1). What landed instead, with the author: the crossing curves are held to the
+file's own **resolution** - how exactly its corners are placed, the corner
+ladder's floor at the part's size (`BodyBuild::resolution`, 1e-9 x the largest
+vertex norm; a chosen number itself, to go with item 39) - and that is what the
+file declares as its uncertainty, in place of 1e-5. A Bezier that reaches it is
+written, the simpler curve; else the spline that does; else the chord. "Better
+than the chord" is not the test: on step-sweep-law-corners two fits stalled at
+1.2e-2, and writing them because they beat their chords made the export
+invalid - a fit that stops short is not converging on the curve. The decision
+and the writer now fit the same way (the decision used to accept a flank by a
+Bezier the writer never tried). Every export states the uncertainty it declares
+first in its report; the chord fallbacks are measured against it. On the
+reference parts it is 1.26e-7 (lid10), 1.24e-7 (bayonet), 4.61e-8 (f02, f04),
+and every crossing curve is within it.
+
 **C, checked 2026-09-28, by the same rule - machine precision where the
 question is exact, else a tolerance derived from the resolution actually
 present, never a chosen number:**

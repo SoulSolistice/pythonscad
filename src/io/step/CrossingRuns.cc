@@ -285,8 +285,8 @@ std::vector<Vector3d> creaseCorners(const Surface *a, const Surface *b, const Ve
   return out;
 }
 
-bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector3d>& run, double tol,
-                    CurveFit& out)
+bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector3d>& run, double target,
+                    CurveFit& out, double& achieved)
 {
   if (run.size() < 2) return false;
   double scale = 1.0;
@@ -309,7 +309,7 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
   // then stalls above what it asks for however many points it adds, and the run
   // is cut into pieces nothing meets. The inner vertices need not be
   // interpolated - they are not vertices of the file, the run being one edge -
-  // only passed within the tolerance, which the fit is held to everywhere.
+  // only passed as closely as the fit passes everything else.
   std::vector<double> along(run.size(), 0.0);
   for (std::size_t k = 1; k < run.size(); k++) along[k] = along[k - 1] + (run[k] - run[k - 1]).norm();
   const double length = along.back();
@@ -331,9 +331,10 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
 
   double previous = std::numeric_limits<double>::infinity();
   std::size_t previous_backward = std::numeric_limits<std::size_t>::max();
+  double best = std::numeric_limits<double>::infinity();
   for (;;) {
     CurveFit fit;
-    if (!interpolateCubic(points, fit)) return false;
+    if (!interpolateCubic(points, fit)) break;
     // How far the curve strays between each two of its points, from either
     // surface: where it is on both it is the crossing. And whether it runs
     // *along* the crossing, which being on both surfaces does not say - see
@@ -347,17 +348,18 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
       }
     }
     const std::size_t backward = intervalsTurningBack(fit);
-    if (global <= tol && backward == 0) {
-      out = std::move(fit);
-      return true;
+    if (backward == 0 && global < best) {
+      best = global;
+      out = fit;
     }
+    if (backward == 0 && global <= target) break;
     // Twice as many points of the true curve, everywhere and not only where it
     // missed, so they stay evenly spaced: refining only the intervals that
     // missed puts a short one beside a long one, and the cubic rings between
     // them - which is how a fit that should gain sixteenfold with each halving
     // got worse instead.
     //
-    // Refused once that stops helping: when neither the number of intervals
+    // Stopped once that stops helping: when neither the number of intervals
     // turning back falls, nor the miss at least halves. Twice the points of a
     // smooth curve take a cubic interpolant's miss down sixteenfold; one that
     // does not even halve is not converging on the curve at all, and is
@@ -366,7 +368,7 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
     // went from 1.3e-2 to 1.02e-2 over 49153 points while "any decrease"
     // counted as progress. The number turning back, not the share: doubling
     // the points halves the share of a fixed few bad intervals for ever.
-    if (!(global <= previous / 2) && !(backward < previous_backward)) return false;
+    if (!(global <= previous / 2) && !(backward < previous_backward)) break;
     previous = std::min(previous, global);
     previous_backward = std::min(previous_backward, backward);
     std::vector<Vector3d> refined;
@@ -375,12 +377,16 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
       refined.push_back(points[i]);
       if (!on_both(evaluate(fit, (fit.params[i] + fit.params[i + 1]) * 0.5), points[i], points[i + 1],
                    refined)) {
-        return false;
+        refined.clear();
+        break;
       }
     }
+    if (refined.empty()) break;
     refined.push_back(points.back());
     points.swap(refined);
   }
+  achieved = best;
+  return best <= target;
 }
 
 }  // namespace step

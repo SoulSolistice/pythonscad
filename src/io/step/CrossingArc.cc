@@ -105,7 +105,7 @@ bool onCrossing(const Surface *a, const Surface *b, Vector3d& q, const Vector3d&
 }
 
 bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, const Vector3d& p1,
-                     double tol, std::vector<Vector3d>& ctrl, ArcOutcome *why)
+                     double target, std::vector<Vector3d>& ctrl, double& achieved, ArcOutcome *why)
 {
   const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
   // The band does NOT belong here, and putting it here was wrong once already.
@@ -117,7 +117,8 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
   // accept a cubic on its first try and write a curve no better than the chord
   // it replaces - measured: identical boundary deviation to seven digits.
   const double solve_tol = 1e-14 * scale;
-  const double fit_tol = tol;
+  std::vector<Vector3d> best;
+  double best_error = std::numeric_limits<double>::infinity();
   // A declared sweep's profile is a *polyline*, so the surface is creased along
   // every profile corner and its v derivative does not exist there. Where the
   // other surface crosses a crease the intersection curve has a kink, and no
@@ -201,10 +202,15 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
       why->on_quadric = on_quadric;
       why->on_fitted = on_fitted;
     }
-    if (err <= fit_tol) return true;
+    if (err < best_error) {
+      best_error = err;
+      best = ctrl;
+    }
+    if (err <= target) break;
   }
-  ctrl.clear();
-  return false;
+  ctrl = best;
+  achieved = best_error;
+  return !best.empty() && best_error <= target;
 }
 
 double intersectionArcError(const Surface *a, const Surface *b, const std::vector<Vector3d>& ctrl,

@@ -126,7 +126,6 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
   for (const auto& patch : grid_faces) walk_into_along(patch);
   crossing_edges.clear();
   crossing_corners.clear();
-  double worst_arc = 0;
   for (const auto& entry : along) {
     if (entry.second.size() != 2) continue;
     const Surface *a = entry.second[0], *b = entry.second[1];
@@ -150,48 +149,48 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
       }
     }
     if (!on) continue;
+    // The curve at the file's resolution, two ways: one Bezier, and a spline
+    // refined along it. No polynomial follows the crossing where
+    // it turns a corner - a sweep's crease inside the edge, across its profile
+    // or along its path - but the corner itself is a point the crease and the
+    // other surface state between them, and either side of it the crossing is
+    // smooth; so the spline is fitted either side of its corners and written
+    // as one curve with a corner in it. Whether a crease lies inside is asked
+    // of the sweep's declared knots, not of the fit (`straddles_crease` looks
+    // across the profile only). The spline is also what follows the curve
+    // where it turns harder than a Bezier of degree 9 can - at the tip of the
+    // lens a sweep makes as it fades into the surface it grows from.
+    //
+    // The Bezier where it reaches the file's resolution - the simpler curve,
+    // and nothing finer is written - and the spline where only that does.
+    // Neither reaching it leaves the chord: a fit that stops short is not
+    // converging on the curve. decideCrossingRuns fits the same way and writes
+    // what it finds.
+    const double target = resolution();
     std::vector<Vector3d> ctrl;
-    // The same 1e-7 the exact tier holds every other boundary to.
     ArcOutcome why;
-    if (!intersectionArc(a, b, p0, p1, 1e-7, ctrl, &why)) {
-      // No polynomial follows the crossing where it turns a corner - a sweep's
-      // crease inside the edge, across its profile or along its path - but the
-      // corner itself is a point the crease and the other surface state between
-      // them, and either side of it the crossing is smooth. So such an edge is
-      // the curve too: fitted either side of its corner, and written as one
-      // curve with a corner in it. Whether a crease lies inside is asked of the
-      // sweep's declared knots, not of the fit (`straddles_crease` looks across
-      // the profile only).
-      //
-      // And where one Bezier of degree 9 or less is not enough - the curve
-      // turning hard, as it does at the tip of the lens a sweep makes as it
-      // fades into the surface it grows from - the fit that refines where it
-      // misses is asked before the edge is given up as a chord.
-      {
-        const std::vector<Vector3d> corners = creaseCorners(a, b, p0, p1);
-        bool halves = true;
-        double worst = 0;
-        Vector3d from = p0;
-        std::vector<Vector3d> half;
-        for (std::size_t k = 0; k <= corners.size() && halves; k++) {
-          const Vector3d& to = k < corners.size() ? corners[k] : p1;
-          if (intersectionArc(a, b, from, to, 1e-7, half)) {
-            worst = std::max(worst, intersectionArcError(a, b, half));
-          } else {
-            CurveFit refined;
-            halves = fitCrossingRun(a, b, {from, to}, 1e-7, refined);
-            if (halves) worst = std::max(worst, 1e-7);
-          }
-          from = to;
-        }
-        if (halves) {
-          worst_arc = std::max(worst_arc, worst);
-          crossing_fit = std::max(crossing_fit, worst_arc);
-          crossing_edges.emplace(entry.first, std::make_pair(a, b));
-          crossing_corners.emplace(entry.first, corners);
-          continue;
-        }
+    double arc_error = std::numeric_limits<double>::infinity();
+    const bool arc = intersectionArc(a, b, p0, p1, target, ctrl, arc_error, &why);
+    std::vector<Vector3d> corners;
+    bool flanks = false;
+    if (!arc) {
+      corners = creaseCorners(a, b, p0, p1);
+      flanks = true;
+      Vector3d from = p0;
+      for (std::size_t k = 0; k <= corners.size() && flanks; k++) {
+        const Vector3d& to = k < corners.size() ? corners[k] : p1;
+        CurveFit refined;
+        double achieved = 0;
+        flanks = fitCrossingRun(a, b, {from, to}, target, refined, achieved);
+        from = to;
       }
+    }
+    if (flanks) {
+      crossing_edges.emplace(entry.first, std::make_pair(a, b));
+      crossing_corners.emplace(entry.first, corners);
+      continue;
+    }
+    if (!arc) {
       arc_refused++;
       if (why.degree == 0 || why.best_error == std::numeric_limits<double>::infinity()) {
         arc_no_fit++;  // no degree ever got as far as a curve to measure
@@ -230,8 +229,6 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
     // other gate and every one of them is planar to 1e-9, because each
     // spans a single facet and a short arc of anything is flat.
     if (flat <= 1e-9 * scale && isQuadric(a) && isQuadric(b)) continue;
-    worst_arc = std::max(worst_arc, intersectionArcError(a, b, ctrl));
-    crossing_fit = std::max(crossing_fit, worst_arc);
     crossing_edges.emplace(entry.first, std::make_pair(a, b));
   }
   crossing_keys.clear();

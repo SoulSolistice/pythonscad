@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <utility>
@@ -153,32 +154,30 @@ void StepKernel::BodyBuild::decideCrossingRuns()
       if (u > w) std::reverse(out.begin(), out.end());
       return out;
     };
-    // One edge the Bezier fits between its two ends is written as it always
-    // was; anything else - a longer run, a corner inside, a curve turning too
-    // hard for one Bezier - by the fit below.
+    // One edge with no corner inside is fitted as one Bezier first, and written
+    // as one where that reaches the file's resolution. Otherwise the run is
+    // fitted flank by flank, an edge of the file each: where the sweep has a
+    // crease inside a mesh edge the curve turns a corner there, and a vertex of
+    // the file stands at it - a kernel wants every edge's curve G1. A corner at
+    // a mesh vertex has already ended the run - see `interior`. As
+    // decideSections chose.
+    const double target = resolution();
     std::vector<Vector3d> ctrl;
+    double arc_error = std::numeric_limits<double>::infinity();
     const std::pair<int, int> key{std::min(run[0], run[1]), std::max(run[0], run[1])};
-    const bool one_bezier = run.size() == 2 && corners_in(run[0], run[1]).empty() &&
-                            intersectionArc(a, b, vertices[key.first], vertices[key.second], 1e-7, ctrl);
-    if (one_bezier) {
-      piece.verts = {key.first, key.second};
-      std::vector<Point *> cp;
-      cp.reserve(ctrl.size());
-      for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
-      piece.edges = {new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
-                                   new BSplineCurve(entities, "", cp), true)};
-      piece.fits = {CurveFit()};
-    } else {
-      // Fitted flank by flank, and an edge of the file each: where the sweep has
-      // a crease inside a mesh edge the curve turns a corner there, and a vertex
-      // of the file stands at it - a kernel wants every edge's curve G1. A corner
-      // at a mesh vertex has already ended the run - see `interior`.
-      std::vector<CurveFit> parts;
+    const bool arc =
+      run.size() == 2 && corners_in(run[0], run[1]).empty() &&
+      intersectionArc(a, b, vertices[key.first], vertices[key.second], target, ctrl, arc_error);
+    std::vector<CurveFit> parts;
+    double parts_error = 0;
+    bool fitted = !arc;
+    if (fitted) {
       std::vector<Vector3d> points{vertices[run[0]]};
-      bool fitted = true;
       auto close_part = [&](const Vector3d& at) {
         parts.emplace_back();
-        fitted = fitted && fitCrossingRun(a, b, points, 1e-7, parts.back());
+        double achieved = 0;
+        fitted = fitted && fitCrossingRun(a, b, points, target, parts.back(), achieved);
+        parts_error = std::max(parts_error, achieved);
         points = {at};
       };
       for (std::size_t k = 1; k < run.size() && fitted; k++) {
@@ -189,6 +188,18 @@ void StepKernel::BodyBuild::decideCrossingRuns()
         points.push_back(vertices[run[k]]);
         if (k + 1 == run.size()) close_part(vertices[run[k]]);
       }
+    }
+    const bool one_bezier = arc;
+    if (one_bezier) {
+      crossing_fit = std::max(crossing_fit, arc_error);
+      piece.verts = {key.first, key.second};
+      std::vector<Point *> cp;
+      cp.reserve(ctrl.size());
+      for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
+      piece.edges = {new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
+                                   new BSplineCurve(entities, "", cp), true)};
+      piece.fits = {CurveFit()};
+    } else {
       if (!fitted) {
         if (run.size() > 2) {
           const std::size_t mid = run.size() / 2;
@@ -199,6 +210,7 @@ void StepKernel::BodyBuild::decideCrossingRuns()
         // One edge whose corner could not be fitted round: its chord, as before.
         piece.verts = {std::min(run[0], run[1]), std::max(run[0], run[1])};
       } else {
+        crossing_fit = std::max(crossing_fit, parts_error);
         piece.verts = run;
         Vertex *from = get_vertex(run.front());
         for (std::size_t k = 0; k < parts.size(); k++) {

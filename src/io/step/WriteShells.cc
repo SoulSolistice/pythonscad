@@ -1,12 +1,28 @@
 /*! The shells, and the product around them - see BodyBuild.h. */
 #include "io/step/BodyBuild.h"
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
 #include "io/step/LoopGeometry.h"
 
 using namespace step;
+
+// Corners are placed on their faces to the corner ladder's floor, 1e-9 of their
+// size (CornerLadder.h - a chosen number itself, to go with open item 39): that
+// is how exactly the file states where anything is, and an approximation finer
+// than the corners it runs between gains nothing a reader can see. So the
+// crossing curves are held to it, and say how closely they came
+// (`crossing_fit`); and it is what the file declares as its uncertainty, what a
+// reader may take two points as one within. That was 1e-5 whatever the file
+// held until 2026-09-28.
+double StepKernel::BodyBuild::resolution() const
+{
+  double size = 1.0;
+  for (const Vector3d& v : vertices) size = std::max(size, v.norm());
+  return 1e-9 * size;
+}
 
 void StepKernel::BodyBuild::writeShells()
 {
@@ -33,11 +49,11 @@ void StepKernel::BodyBuild::writeShells()
     shell_faces[uf_find(component, int(i))].push_back(sfaces[i]);
   }
 
-  // units and modelling tolerance
+  // units and the file's uncertainty
   auto length_unit = new SiUnit(entities, SiUnit::LENGTH);
   auto angle_unit = new SiUnit(entities, SiUnit::PLANE_ANGLE);
   auto solid_angle_unit = new SiUnit(entities, SiUnit::SOLID_ANGLE);
-  auto uncertainty = new UncertaintyMeasure(entities, length_unit, model_tol);
+  auto uncertainty = new UncertaintyMeasure(entities, length_unit, resolution());
   auto geom_context =
     new GeometricContext(entities, uncertainty, length_unit, angle_unit, solid_angle_unit);
 

@@ -15,8 +15,10 @@ void StepKernel::BodyBuild::checkAndReport()
   // relation a CAD kernel rejects a substituted curve on and the one nothing
   // here used to measure. It is asked of the finished entities rather than of
   // any pass's intermediate state, so no substitution can be added later that
-  // quietly escapes it.
+  // quietly escapes it. Held to what the file declares as its uncertainty: a
+  // vertex further off than that is off by more than the file says anything is.
   {
+    const double owed = resolution();
     std::size_t off = 0;
     double worst = 0;
     std::vector<double> strays;
@@ -26,7 +28,6 @@ void StepKernel::BodyBuild::checkAndReport()
       for (const Vertex *v : {edge->vert1, edge->vert2}) {
         if (v == nullptr || v->point == nullptr) continue;
         const double d = vertexOffCurve(edge->round, v->point->pt);
-        const double owed = 1e-6 * std::max(1.0, v->point->pt.norm());
         if (d <= owed) continue;
         off++;
         strays.push_back(d);
@@ -37,9 +38,10 @@ void StepKernel::BodyBuild::checkAndReport()
       std::sort(strays.begin(), strays.end());
       LOG(message_group::Export_Warning,
           "STEP export: %1$d vertex%2$s not on the curve its own edge is written as, by "
-          "%3$.2e median and %4$.2e at worst - a reader checks exactly this, and calls it "
+          "%3$.2e median and %4$.2e at worst, against the %5$.2e the file declares as its "
+          "uncertainty - a reader checks exactly this, and calls it "
           "\"vertex does not lie on edge\'s curve\"",
-          int(off), off == 1 ? " is" : "es are", strays[strays.size() / 2], worst);
+          int(off), off == 1 ? " is" : "es are", strays[strays.size() / 2], worst, owed);
     }
   }
   if (reseamed > 0 || reseam_full > 0) {
@@ -57,6 +59,13 @@ void StepKernel::BodyBuild::checkAndReport()
       int(section_stats.trimmed), section_stats.trimmed == 1 ? " was" : "s were",
       int(section_stats.dropped), section_stats.end_stray);
   }
+  // The precision the file states, and what it rests on - the first thing to
+  // read when a reader's tolerance is suspected. How closely the crossing curves
+  // came, and which fell back to chords, follow below.
+  LOG(
+    "STEP export: uncertainty declared %1$.2e - the file's resolution, its corners' placement "
+    "floor at the part's size; every curve fitted in it is held to that",
+    resolution());
   if (crossing_written > 0) {
     LOG(
       "STEP export: %1$d edge%2$s written as the curve where two declared surfaces cross, "
@@ -90,8 +99,8 @@ void StepKernel::BodyBuild::checkAndReport()
     LOG(
       "EXPORT-WARNING: STEP export: %1$d edge%2$s could not be written as that curve and fell "
       "back to a chord - %3$d never fitted at any degree, the rest came within "
-      "%4$.2e/%5$.2e/%6$.2e min/med/max of both surfaces against the %7$.0e asked for",
-      int(arc_refused), arc_refused == 1 ? "" : "s", int(arc_no_fit), lo, med, hi, 1e-7);
+      "%4$.2e/%5$.2e/%6$.2e min/med/max of both surfaces against the file's resolution of %7$.2e",
+      int(arc_refused), arc_refused == 1 ? "" : "s", int(arc_no_fit), lo, med, hi, resolution());
     std::sort(arc_on_quadric.begin(), arc_on_quadric.end());
     std::sort(arc_on_fitted.begin(), arc_on_fitted.end());
     if (!arc_on_quadric.empty()) {

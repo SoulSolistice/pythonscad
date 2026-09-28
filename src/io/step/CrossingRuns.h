@@ -78,12 +78,16 @@ std::vector<Vector3d> creaseCorners(const Surface *a, const Surface *b, const Ve
                                     const Vector3d& p1);
 
 /*! The curve `a` and `b` cross along, from the first of `run` to its last -
- * vertices already on both, consecutive along the curve - held to `tol`
- * against each surface. It ends on those two and passes the others within
- * `tol`, interpolating points of the curve evenly spaced along it. False
- * where the points cannot be put on both surfaces, or where adding points of
- * the true curve stops bringing the fit closer. */
-bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector3d>& run, double tol,
-                    CurveFit& out);
+ * vertices already on both, consecutive along the curve: points of the curve
+ * evenly spaced along it, doubled until the fit is within `target` of both
+ * surfaces - the file's own resolution - or adding points stops bringing it
+ * closer, and the closest fit that runs along its points kept. It ends on the
+ * run's two ends. True where it reaches `target`; `achieved` is how close the
+ * closest came either way. A fit that stops short is not converging on the
+ * curve - twice the points take a cubic's miss down sixteenfold - so it is not
+ * written, whatever chord it would replace. False too where no point of the
+ * curve can be put on both surfaces. */
+bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector3d>& run, double target,
+                    CurveFit& out, double& achieved);
 
 }  // namespace step
