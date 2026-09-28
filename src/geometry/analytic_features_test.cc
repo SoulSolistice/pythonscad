@@ -16,6 +16,7 @@
 #include <catch2/catch_all.hpp>
 #include <cmath>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -321,6 +322,67 @@ TEST_CASE("a band on a declaration writes the declaration's ring, not a fitted o
     CHECK(band.axis == Vector3d(0, 0, 1));
     CHECK(band.base == Vector3d(0, 0, 0));
   }
+}
+
+TEST_CASE("a facet on two declared surfaces is the one its maker made it on", "[analytic][d0]")
+{
+  // The Steinmetz solid's walls: quads of the cylinder x^2 + y^2 = 100 between
+  // z = -y and z = y, where every corner is also on x^2 + z^2 = 100. Corners
+  // cannot say which cylinder the wall is (checklist C9); identity can - the
+  // D0 region is the maker's - and until identity is asked the band declines
+  // the seed as a declaration's question.
+  std::vector<Vector3d> vertices;
+  std::vector<std::vector<int>> loops;
+  std::vector<Vector3d> normals;
+  const int n = 7;
+  for (int i = 0; i <= n; i++) {
+    const double a = (20.0 + 140.0 * i / n) * M_PI / 180.0;
+    const double x = 10 * cos(a), y = 10 * sin(a);
+    vertices.emplace_back(x, y, -y);
+    vertices.emplace_back(x, y, y);
+  }
+  for (int i = 0; i < n; i++) {
+    loops.push_back({2 * i, 2 * i + 2, 2 * i + 3, 2 * i + 1});
+    const double a = (20.0 + 140.0 * (i + 0.5) / n) * M_PI / 180.0;
+    normals.emplace_back(cos(a), sin(a), 0.0);
+  }
+  const std::vector<char> valid(loops.size(), 1), is_hole(loops.size(), 0);
+  Mesh mesh;
+  mesh.vertices = &vertices;
+  mesh.loops = &loops;
+  mesh.valid = &valid;
+  mesh.is_hole = &is_hole;
+  mesh.normals = &normals;
+  const recognition::FacetGraph graph(mesh);
+
+  std::vector<std::shared_ptr<Surface>> surfaces;
+  surfaces.push_back(std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10.0));
+  surfaces.push_back(std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 1, 0), 10.0));
+
+  auto reasons = [&](const Result& res, std::size_t surface) {
+    std::set<std::string> out;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      for (const auto *c : res.ledger.claimants(f)) {
+        if (c->surface_index == surface && c->why != nullptr) out.insert(c->why);
+      }
+    }
+    return out;
+  };
+  const std::string two =
+    "the facet lies wholly on two declared surfaces that are not one - which it "
+    "belongs to is a declaration's question";
+
+  const Result silent = recogniseSurfacesOfRevolution(graph, surfaces, 1e-6, surfaces.size());
+  CHECK(reasons(silent, 0).count(two) == 1);
+  CHECK(reasons(silent, 1).count(two) == 1);
+
+  recognition::Region made_on_z{0, {}};
+  for (std::size_t f = 0; f < loops.size(); f++) made_on_z.facets.push_back(f);
+  const recognition::D0Membership d0({made_on_z});
+  const Result told = recogniseSurfacesOfRevolution(graph, surfaces, 1e-6, surfaces.size(), &d0);
+  CHECK(reasons(told, 0).count(two) == 0);
+  CHECK(reasons(told, 1).empty());  // nothing is asked of the surface the walls were not made on
+  CHECK_FALSE(reasons(told, 0).empty());
 }
 
 TEST_CASE("a rim bordering one face per facet rejects the band, and says so", "[analytic][rims]")

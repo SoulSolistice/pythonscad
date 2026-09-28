@@ -4265,11 +4265,17 @@ solids (`83af07497`); a hull of coaxial declared primitives is a declared solid
   What the pass still holds by measurement is structure, not membership: which
   vertices share a rim is `model_tol` along the axis, and a tilted trim's plane
   is fitted - the model did not declare it.
-- **Facets on two declared surfaces at once** (C9): step-cylinder-cross, the
-  Steinmetz solid, has 120 facets per tier whose every corner lies on both
-  cylinders. The band pass declines them now rather than take the first record;
-  the quadric face holds them, by identity. Corners cannot decide these; only
-  identity or a declaration can, and a band ought to ask identity.
+- ~~**Facets on two declared surfaces at once**~~ (C9) **Landed 2026-09-28.**
+  step-cylinder-cross, the Steinmetz solid, has 120 facets per tier whose every
+  corner lies on both cylinders. The band pass asks identity: a seed wholly on
+  two records is named after the one whose D0 region holds it, and the walk
+  takes no facet identity gives to another surface (B5). The 480 two-surface
+  declines became 240, each against the cylinder its maker made it on and for
+  its structural reason (the far rim is not flat); honoured claims identical.
+  Only where identity is silent too is it still declined as a declaration's
+  question. Found on the way: `Surface::sameAs` compares a record's reference
+  point, so two records of one cylinder whose points differ along its axis are
+  two surfaces to every caller - no fixture has them yet.
 - **An unnamed 2D edge is classified by measurement** (`Profile2d.cc`,
   `inControlBox`, 1e-9 slack): E6 says an edge's kind is its maker's word. The
   text fixture's spurious plane was this rule meeting the grid; the grid is

@@ -464,6 +464,13 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       //
       // Only where no declaration holds the seed does the measured probe
       // below run, and it matches fitted records only.
+      // Whether identity puts `f` in the D0 region of a declared surface and
+      // not in `record`'s: its maker made it on another surface.
+      auto made_elsewhere = [&](std::size_t record, std::size_t f) {
+        if (d0 == nullptr) return false;
+        const std::vector<std::size_t> of = d0->surfacesOf(f);
+        return !of.empty() && std::find(of.begin(), of.end(), record) == of.end();
+      };
       struct {
         bool on = false;
         std::size_t record = std::size_t(-1);  // the face record; -1 on the rim route
@@ -506,9 +513,26 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
           }
         };
 
-        const std::vector<std::size_t> whole = holders(seed_loop, true, false);
+        std::vector<std::size_t> whole = holders(seed_loop, true, false);
+        // Where the corners are on two surfaces, identity says which one the
+        // maker made the facet on: its D0 region is the one that holds it
+        // (checklist C9, B5). Only where identity is silent too is it the
+        // declaration's question.
+        if (whole.size() > 1 && d0 != nullptr) {
+          std::vector<std::size_t> by_identity;
+          for (const std::size_t i : whole) {
+            if (d0->contains(i, seed)) by_identity.push_back(i);
+          }
+          if (by_identity.size() == 1) whole = by_identity;
+        }
         if (whole.size() > 1) {
           two_holders(whole);
+          continue;
+        }
+        if (whole.size() == 1 && made_elsewhere(whole[0], seed)) {
+          declined.emplace(std::make_pair(seed, whole[0]),
+                           "the facet's maker made it on another declared surface - it is that "
+                           "surface's facet");
           continue;
         }
         if (whole.size() == 1) {
@@ -589,7 +613,9 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
                                  : (fabs(t - probe_hi) < model_tol ? exact.at_hi : exact.between);
             if (s == nullptr || !recognition::onExactly(s, vertices[v])) return false;
           }
-          return true;
+          // and a facet identity gives to another surface is that surface's,
+          // wherever its corners also lie
+          return exact.record == std::size_t(-1) || !made_elsewhere(exact.record, f);
         };
         walk_strip(seed, side, walls, entry, &on_surface);
         if (walls.size() < 3) {

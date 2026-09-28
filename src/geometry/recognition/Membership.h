@@ -67,6 +67,17 @@ public:
     const auto it = by_surface_.find(surface_index);
     return it != by_surface_.end() && std::binary_search(it->second.begin(), it->second.end(), facet);
   }
+  /*! Every declared surface whose D0 region holds `facet`, ascending: what
+   * identity and exact position say it is a facet of. Empty where they say
+   * nothing - no provenance, or a cut corner off every surface. */
+  [[nodiscard]] std::vector<std::size_t> surfacesOf(std::size_t facet) const
+  {
+    std::vector<std::size_t> out;
+    for (const auto& kv : by_surface_) {
+      if (std::binary_search(kv.second.begin(), kv.second.end(), facet)) out.push_back(kv.first);
+    }
+    return out;
+  }
 
 private:
   std::map<std::size_t, std::vector<std::size_t>> by_surface_;
