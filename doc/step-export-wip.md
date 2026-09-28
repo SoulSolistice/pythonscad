@@ -4288,6 +4288,74 @@ solids (`83af07497`); a hull of coaxial declared primitives is a declared solid
   other operands 274, the thread polyhedron's box 153; the bayonet's thread 252.
   Each is a declaration to add at its generator.
 
+**Remnants: thresholds older than C2, surveyed 2026-09-28.** Asked by the
+author of `describesSameSurface` - is its 1e-9 needed, or history? History:
+`Surface::sameAs` took its 1e-9 on 2026-08-12, when records were first carried
+through the CGAL backend, and `describesSameSurface` copied its tests from
+export_step.cc's `sameSurfaceGeometrically` on 2026-09-23 - both before C2 and
+`recognition/Exact.h` (2026-09-24), and no audit since reached them. Every
+literal tolerance in the exporter, recognition and the declaration paths
+(about 420) was read in place and classed by what it decides:
+
+- **A. D0 decided at a chosen number - remnants, to go to machine precision.**
+  - *Record identity.* `Surface::sameAs` in every kind (1e-9, and by reference
+    point, so two records of one plane or one cylinder anchored apart are two
+    surfaces); `describesSameSurface` and its duplicate `sameSurfaceGeometrically`
+    in export_step.cc (1e-9 on axis, radius, slope; planes fall through to
+    `sameAs`); the surfaces' `operator==`, still what `PolySetBuilder`
+    deduplicates by (1e-6); ClipperUtils' arc merge (1e-12 relative); sphere()'s
+    ring records (1e-12, where the ring pairs are equal by the symmetry that
+    makes them - derivable, not comparable). They decide which records merge,
+    ownership and its counts, the census, and existence's "is this facet's
+    surface On here".
+  - *A record carried through a transform.* `similarityScale` and
+    `SweepSurface::transform` (M'M = s^2 I to 1e-9 relative), the sweep table's
+    `StationMap::similar` (1e-12), `Polygon2d`'s arc transform (`isApprox`,
+    1e-12): whether a declaration survives a transform, or is dropped.
+  - *The corner ladder's "exactness floor".* On a declared surface or plane to
+    1e-9 - absolute in some places, relative in others (`CornerLadder.h`,
+    `CornersOnFileFaces`, `CornersOnOwnQuadric`, `CornersStayOnFaces`,
+    `CornerPlacement`, `CornersApply`, export_step.cc's two-surface acceptance,
+    `BoundaryCycles`); plane identity at 1e-9 (`DecideSections`,
+    `PromoteCurves`, `EmitPlanarFaces`) and 1e-6 (`CornersOnMeshPlanes`,
+    `CornersKeepExact`). Each asks whether a point is on a declaration - what
+    `onExactly` answers - and belongs with item 39's move, which relocates them.
+  - *The band pass's structure on the exact route.* Rulings parallel and chords
+    perpendicular to the declared axis at 1e-9, a tilted rim's plane refused
+    below 1e-3 of the axis, and `model_tol` (1e-5, set in export_step.cc and
+    read across the pipeline) grouping vertices into rims.
+  - *Keys.* A declared grid's net at 1e-9 (`GRID_RESOLUTION`, and export_step's
+    copy of the key); rotate_extrude welding on-axis vertices by a 1e-9 key,
+    where the points it welds are exactly 0 off the axis by construction.
+  - *An unnamed 2D edge's kind* (`Profile2d::inControlBox`, 1e-9) - E6; only
+    where no maker named the edge, rare since `cfee50a03`.
+- **B. D1 and D2 at a stated tolerance - legitimate by the rungs, numbers to be
+  approved (F6).** A Bezier patch's projection (1e-7, `runsThrough`) and
+  recognition (`Bezier.cc`, 1e-7 and 1e-6); crossing curves solved and fitted to
+  1e-7 (`intersectionArc`, `fitCrossingRun`, `DecideSections`); a declared
+  grid's tessellation band plus a 1e-6 slack (`Grids.cc`).
+- **C. D3 and D4 rules - the gates above, and the fits.** The quadric's lean
+  factor 1.05 and 0.99 and 1.25 x sagitta, the grid's four times the median, the
+  fitted route's 1e-7 (`Bands.cc`), `Fits.cc` (1e-6 to 1e-3), the zone's facing
+  test (1e-6), mesh-plane merging (1e-4 in `MeshLoops`, 1e-8 of the extent in
+  `EmitPlanarFaces`), and the measured-ownership path (60 degrees, `least = 3`),
+  which now only reports against the carried one.
+- **D. Numerics, deciding nothing.** Solver stops (1e-11, 1e-14), bisection
+  floors, degeneracy guards (a norm below 1e-12). Finite-difference normals of a
+  grid or Bezier patch (h = 1e-4 to 1e-7) are the one remnant here: both have
+  closed-form derivatives.
+- **E. Dead or elsewhere.** Every surface's `pointMember` (1e-5, 1e-7) is called
+  only by tests; the cube's drag handle (1e-3, the GUI), polygon()'s rounded
+  corners (-1e-6) and the extruders' zero-height guards are not the exporter's.
+
+Order, as the rest of this item: record identity first - one exact function,
+`sameAs` kept only where the representation is meant, the duplicate removed,
+`PolySetBuilder` on it - since every other list merges by it; then carriage
+through transforms; then the band's structure and `model_tol`; the ladder's floor
+with item 39. Each measured, and where records stop merging at machine
+precision, the arithmetic upstream that made one surface two numbers is the
+bug.
+
 Two WILL_FAIL tests hide more than they say: ctest prints nothing for one that
 "passes", so read them directly (CLAUDE.md). Measured 2026-09-27:
 step-representation 1.048888 mm3; flagship-corners only lid10 and the bayonet,
