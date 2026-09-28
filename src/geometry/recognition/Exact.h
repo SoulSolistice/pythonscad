@@ -51,6 +51,7 @@
  */
 
 #include <cmath>
+#include <vector>
 
 #include "geometry/MachinePrecision.h"
 #include "geometry/Surface.h"
@@ -114,6 +115,20 @@ inline bool onPlane(const Vector3d& origin, const Vector3d& normal, const Vector
 {
   const Residual r = planeResidual(origin, normal, p);
   return fabs(r.value) <= r.bound;
+}
+
+/*! Whether every one of `ids` is on the plane through `origin` across
+ * `normal`, at machine precision: which declared plane a mesh loop lies in is
+ * this question, and not a comparison of the loop's normal with the plane's -
+ * the vertices are what the generator put on the plane; the normal is measured
+ * from them. */
+inline bool onPlane(const Vector3d& origin, const Vector3d& normal,
+                    const std::vector<Vector3d>& vertices, const std::vector<int>& ids)
+{
+  for (const int v : ids) {
+    if (!onPlane(origin, normal, vertices[v])) return false;
+  }
+  return !ids.empty();
 }
 
 /*! Whether `p` is on the line through `origin` along `dir`, at machine

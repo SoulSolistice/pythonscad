@@ -770,10 +770,8 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         // cylinder's cap. Distinct records that are one plane are one answer.
         for (std::size_t i = 0; i < first_fit; i++) {
           const auto *plane = dynamic_cast<const PlaneSurface *>(surfaces[i].get());
-          if (plane == nullptr) continue;
-          bool holds = true;
-          for (const int v : top_set) holds = holds && recognition::onExactly(plane, vertices[v]);
-          if (!holds) continue;
+          if (plane == nullptr || !recognition::onPlane(plane->refpt, plane->normdir, vertices, top_set))
+            continue;
           if (cut == nullptr) cut = plane;
           else if (!cut->sameAs(*plane)) {
             cut = nullptr;

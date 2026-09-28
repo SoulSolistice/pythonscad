@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/recognition/Exact.h"
 #include "io/step/PlaneSections.h"
 #include "utils/printutils.h"
 
@@ -231,13 +232,13 @@ void StepKernel::BodyBuild::promoteCurves()
     // unsound. Telling them apart is what the claim ledger is for.
     {
       bool declared_plane = false;
-      const double scale = std::max(1.0, ppoint.norm());
       for (const auto& d : surfaces) {
         const auto *pl = dynamic_cast<const PlaneSurface *>(d.get());
         if (pl == nullptr) continue;
-        const Vector3d dn = pl->normdir.normalized();
-        if (!(dn.norm() > 0) || fabs(fabs(dn.dot(pnorm)) - 1) > 1e-9) continue;
-        if (fabs(dn.dot(ppoint - pl->refpt)) > 1e-9 * scale) continue;
+        if (!recognition::parallel(pl->normdir, pnorm) ||
+            !recognition::onPlane(pl->refpt, pl->normdir, ppoint)) {
+          continue;
+        }
         declared_plane = true;
         break;
       }

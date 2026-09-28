@@ -271,13 +271,12 @@ void StepKernel::BodyBuild::placeOnFileFaces()
                       : interpolant(sf.get()) ? ConstraintTier::DeclaredInterpolant
                                               : ConstraintTier::DeclaredFace);
       }
-      const double scale = std::max(1.0, vertices[v].norm());
       for (const auto& sf : entry.second) {
         const auto sp = section_planes.find(sf.get());
         if (sp == section_planes.end()) continue;
         for (const auto& cp : sp->second) {
           if (!cp.declared) continue;
-          if (fabs((vertices[v] - cp.on_plane).dot(cp.normal)) > 1e-6 * scale) continue;
+          if (!recognition::onPlane(cp.on_plane, cp.normal, vertices[v])) continue;
           keep_alive.push_back(std::make_shared<PlaneSurface>(cp.on_plane, cp.normal));
           add(keep_alive.back().get(), ConstraintTier::DeclaredFace);
         }
@@ -300,14 +299,11 @@ void StepKernel::BodyBuild::placeOnFileFaces()
             // let lid10's z = 95 cap - declared by the cylinder whose top it is -
             // go soft, and the corners of its hole were placed 0.65 below it on
             // the outer wall, leaving an annulus of no width no fan could cut.
-            const Vector3d on = vertices[loops[i][0]];
             const PlaneSurface *declared = nullptr;
             for (const auto& d : surfaces) {
               const auto *pl = dynamic_cast<const PlaneSurface *>(d.get());
               if (pl == nullptr) continue;
-              const Vector3d dn = pl->normdir.normalized();
-              if (fabs(fabs(dn.dot(n)) - 1) > 1e-9) continue;
-              if (fabs(dn.dot(on - pl->refpt)) > 1e-9 * std::max(1.0, on.norm())) continue;
+              if (!recognition::onPlane(pl->refpt, pl->normdir, vertices, loops[i])) continue;
               declared = pl;
               break;
             }
@@ -315,7 +311,7 @@ void StepKernel::BodyBuild::placeOnFileFaces()
               add(declared, ConstraintTier::DeclaredFace);
               continue;
             }
-            keep_alive.push_back(std::make_shared<PlaneSurface>(on, n));
+            keep_alive.push_back(std::make_shared<PlaneSurface>(vertices[loops[i][0]], n));
             add(keep_alive.back().get(), ConstraintTier::MeshPlane);
           }
         }

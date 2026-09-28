@@ -12,6 +12,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/recognition/Exact.h"
 #include "io/step/BoundaryCycles.h"
 #include "io/step/CrossingArc.h"
 #include "utils/printutils.h"
@@ -72,8 +73,9 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
         const double off = fabs((cp.on_plane - pl.first).dot(pl.second));
         if (tilt < best_tilt) best_tilt = tilt;
         if (tilt <= 1e-6 && off < best_off) best_off = off;
-        if (tilt > 1e-6) continue;
-        if (off > 1e-6) continue;
+        // Taken where every corner of the loop is on it, at machine precision
+        // (recognition/Exact.h) - the corners are what the maker put there.
+        if (!recognition::onPlane(pl.first, pl.second, vertices, loops[run.loop])) continue;
         cp.normal = cp.normal.dot(pl.second) > 0 ? pl.second : Vector3d(-pl.second);
         cp.on_plane = pl.first;
         cp.declared = true;
@@ -84,8 +86,12 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
       }
       bool have = false;
       for (const auto& seen : list) {
-        have = fabs(fabs(seen.normal.dot(cp.normal)) - 1.0) < 1e-9 &&
-               fabs((cp.on_plane - seen.on_plane).dot(seen.normal)) < 1e-9;
+        // Two declared are one plane or not, at machine precision; a fitted
+        // one is measured, and still compared as measured (item 38, C).
+        have = seen.declared && cp.declared
+                 ? recognition::samePlane(seen.on_plane, seen.normal, cp.on_plane, cp.normal)
+                 : fabs(fabs(seen.normal.dot(cp.normal)) - 1.0) < 1e-9 &&
+                     fabs((cp.on_plane - seen.on_plane).dot(seen.normal)) < 1e-9;
         if (have) break;
       }
       if (!have) list.push_back(cp);

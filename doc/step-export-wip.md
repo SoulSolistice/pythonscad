@@ -4345,6 +4345,11 @@ literal tolerance in the exporter, recognition and the declaration paths
     `PromoteCurves`, `EmitPlanarFaces`) and 1e-6 (`CornersOnMeshPlanes`,
     `CornersKeepExact`). Each asks whether a point is on a declaration - what
     `onExactly` answers - and belongs with item 39's move, which relocates them.
+    **Plane identity landed 2026-09-28** where it asks which declared plane a
+    loop lies in (`DecideSections`, `EmitPlanarFaces`, `CornersOnFileFaces`,
+    `PromoteCurves`' count): every corner on it, `recognition::onPlane`, one
+    helper; 0 differences. `CornersOnMeshPlanes` and `CornersKeepExact` ask it
+    of placed corners, and go with the ladder.
   - ~~*The band pass's structure on the exact route.*~~ **Landed 2026-09-28.**
     Rims are vertices at one level along the declared axis - each on the plane
     across it through the seed's extreme corner, at machine precision

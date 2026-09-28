@@ -6,6 +6,7 @@
 #include <map>
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Reports.h"
 #include "io/step/CurveChecks.h"
 #include "io/step/LoopGeometry.h"
@@ -102,19 +103,9 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     }
     Vector3d on_plane = vertices[loop[0]];
     {
-      double extent = 0;
-      for (int j = 0; j < n; j++) {
-        extent = std::max(extent, (vertices[loop[j]] - on_plane).norm());
-      }
-      const double tol = std::max(1e-12, 1e-9 * std::max(1.0, extent));
       for (std::size_t dp = 0; dp < declared_planes.size(); dp++) {
         const auto& declared = declared_planes[dp];
-        if (fabs(fabs(declared.second.dot(norm)) - 1.0) > 1e-9) continue;
-        bool holds = true;
-        for (int j = 0; holds && j < n; j++) {
-          holds = fabs((vertices[loop[j]] - declared.first).dot(declared.second)) <= tol;
-        }
-        if (!holds) continue;
+        if (!recognition::onPlane(declared.first, declared.second, vertices, loop)) continue;
         if (dp < declared_plane_index.size() && declared_plane_index[dp] < decl_written.size()) {
           decl_written[declared_plane_index[dp]] = 1;
         }
