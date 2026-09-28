@@ -70,17 +70,24 @@ inline bool onExactly(const Surface *s, const Vector3d& p)
   return residualOf(s, p).exact();
 }
 
+/*! Whether two directions are one, either sense, at machine precision: two
+ * normalisations, 9 roundings each, and a cross product, 9 more, over unit
+ * vectors. */
+inline bool parallel(const Vector3d& dir_a, const Vector3d& dir_b)
+{
+  return dir_a.normalized().cross(dir_b.normalized()).norm() <= forwardError(27, 2.0);
+}
+
 /*! Whether two lines - each a point and a direction, as a declaration states
- * an axis - are one line, at machine precision: parallel (two normalisations,
- * 9 each, and a cross, 9 more) and the second's point on the first line (a
- * difference, a dot, a scale, a difference, a norm: 20). Asked of two
- * declarations, never of a measured axis: which declarations share an axis is
- * a fact of the model. */
+ * an axis - are one line, at machine precision: parallel, and the second's
+ * point on the first line (a difference, a dot, a scale, a difference, a norm:
+ * 20). Asked of two declarations, never of a measured axis: which declarations
+ * share an axis is a fact of the model. */
 inline bool sameLine(const Vector3d& origin_a, const Vector3d& dir_a, const Vector3d& origin_b,
                      const Vector3d& dir_b)
 {
-  const Vector3d a = dir_a.normalized(), b = dir_b.normalized();
-  if (a.cross(b).norm() > forwardError(27, 2.0)) return false;
+  if (!parallel(dir_a, dir_b)) return false;
+  const Vector3d a = dir_a.normalized();
   const Vector3d d = origin_b - origin_a;
   const double scale = origin_a.norm() + origin_b.norm();
   return (d - a * d.dot(a)).norm() <= forwardError(20, scale);

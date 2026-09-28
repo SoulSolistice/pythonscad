@@ -129,3 +129,47 @@ TEST_CASE("seam: a ruling joins two rims, and must not cross either", "[surface]
   CHECK_FALSE(through_ramp);
   CHECK(clear);
 }
+
+TEST_CASE("sameAs: one surface at machine precision, whichever record states it", "[surface][identity]")
+{
+  // Until 2026-09-28 every kind compared its fields to an absolute 1e-9, and a
+  // plane or a sphere anchored elsewhere was another surface. Now: the
+  // geometric surface, and nothing chosen - a record 5e-10 off at radius 10 is
+  // tens of thousands of roundings away, and another surface.
+  const Vector3d z(0, 0, 1);
+
+  // a cylinder declared at two heights, and one turned about its own axis line
+  const CylinderSurface low(Vector3d(0, 0, 0), z, 10), high(Vector3d(0, 0, 37), -z, 10);
+  CHECK(low.sameAs(high));
+  CHECK_FALSE(low.sameAs(CylinderSurface(Vector3d(0, 0, 0), z, 10 + 5e-10)));
+  CHECK_FALSE(low.sameAs(CylinderSurface(Vector3d(5e-10, 0, 0), z, 10)));
+  // the same wall reached by two chains of arithmetic: a rotation of the record
+  // at the origin, and of one declared along the axis
+  Transform3d turn = Transform3d::Identity();
+  turn.rotate(Eigen::AngleAxisd(0.3, Vector3d(1, 2, 3).normalized()));
+  CylinderSurface a = low, b(Vector3d(0, 0, 11), z, 10);
+  REQUIRE(a.transform(turn));
+  REQUIRE(b.transform(turn));
+  CHECK(a.sameAs(b));
+
+  // a plane anchored at two of its points, and one a hair off it
+  const PlaneSurface p(Vector3d(1, 2, 3), Vector3d(1, 1, 0)),
+    q(Vector3d(1 - 50, 2 + 50, 3 + 9), -Vector3d(1, 1, 0));
+  CHECK(p.sameAs(q));
+  CHECK_FALSE(p.sameAs(PlaneSurface(Vector3d(1 + 5e-10, 2, 3), Vector3d(1, 1, 0))));
+
+  // a cone from two levels, and traversed the other way: radius 10 at z 0,
+  // 8 at z 4, so from z 4 down it is radius 8 growing by 0.5 per unit
+  const ConeSurface c1(Vector3d(0, 0, 0), z, 10, -0.5), c2(Vector3d(0, 0, 4), -z, 8, 0.5);
+  CHECK(c1.sameAs(c2));
+  CHECK_FALSE(c1.sameAs(ConeSurface(Vector3d(0, 0, 0), z, 10, -0.5 - 1e-10)));
+
+  // a sphere and a torus: the centre, and each radius
+  const SphereSurface s(Vector3d(1, 2, 3), z, 5);
+  CHECK(s.sameAs(SphereSurface(Vector3d(1, 2, 3), Vector3d(1, 0, 0), 5)));
+  CHECK_FALSE(s.sameAs(SphereSurface(Vector3d(1, 2, 3 + 5e-10), z, 5)));
+  const TorusSurface t(Vector3d(0, 0, 2), z, 20, 3);
+  CHECK(t.sameAs(TorusSurface(Vector3d(0, 0, 2), -z, 20, 3)));
+  CHECK_FALSE(t.sameAs(TorusSurface(Vector3d(0, 0, 2), z, 20, 3 + 5e-10)));
+  CHECK_FALSE(t.sameAs(SphereSurface(Vector3d(0, 0, 2), z, 20)));  // the kind first
+}

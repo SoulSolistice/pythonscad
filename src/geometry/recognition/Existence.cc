@@ -58,7 +58,7 @@ std::vector<Exists> existence(const FacetGraph& graph,
       if (k + 1 == points.size()) {
         centre = c.because;
         if (c.where == Where::On) {
-          for (const Surface *bound : c.on) face = face || describesSameSurface(*bound, *surface);
+          for (const Surface *bound : c.on) face = face || bound->sameAs(*surface);
         }
       }
     }

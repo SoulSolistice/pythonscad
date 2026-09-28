@@ -67,7 +67,6 @@ public:
     return !owners.empty() || (witnesses.empty() && !evidence_only);
   }
   virtual void reverse(void);
-  virtual int operator==(const Surface& other);
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
 
   /*! Independent copy, so that transforming one geometry never mutates a
@@ -81,18 +80,20 @@ public:
    * to drop the surface rather than keep a wrong one. */
   virtual bool transform(const Transform3d& mat);
 
-  /*! Whether two records describe the same surface. For deduplication only.
+  /*! Whether two records describe one geometric surface - the surface, not the
+   * record: an infinite cylinder referred to from two heights, a plane anchored
+   * at two of its points, a cone traversed either way are each one surface.
+   * What every list merges by, ownership counts by, and existence asks.
    *
-   * Not `operator==`: that one is declared per subclass, taking that subclass,
-   * so it never overrides anything, and the base version always returns 0. It
-   * cannot answer this question about two `shared_ptr<Surface>`. This can.
-   *
-   * Deliberately conservative in one direction only. Two records describing one
-   * surface but differing - the same infinite cylinder referred to from two
-   * heights - are both kept, which costs one more candidate for a fit that
-   * would have accepted either. Two records describing *different* surfaces
-   * that compared equal would lose one, so the dynamic type is checked before
-   * anything else. */
+   * At machine precision (recognition/Exact.h, checklist C2): an axis by
+   * recognition::sameLine, and otherwise a few points of each record, in
+   * closed form, on the other at D0 - the bound a generator's own points meet.
+   * No tolerance is chosen; two records apart by more than the arithmetic that
+   * made them are two surfaces, and where one surface became two numbers that
+   * far apart, the arithmetic upstream is the defect. The dynamic type is
+   * checked first: a sphere and a torus about one centre are not one surface.
+   * Kinds defined by a net - a grid, a sweep, a Bezier patch - are the same
+   * where the nets are. */
   [[nodiscard]] virtual bool sameAs(const Surface& other) const;
 
   // What a surface says about a point. Each kind answers for itself, in closed
@@ -144,21 +145,12 @@ public:
 [[nodiscard]] std::vector<std::shared_ptr<Surface>> transformedSurfaces(
   const std::vector<std::shared_ptr<Surface>>& list, const Transform3d& mat);
 
-/*! Whether two records describe one geometric surface - `sameAs`, plus a
- * cylinder or cone declared from two points along its own axis. Two records of
- * one wall are kept apart in a list (see mergeSurfaces), so any question about
- * the *surface* rather than the record - who declared it, above all - has to be
- * asked through this. */
-[[nodiscard]] bool describesSameSurface(const Surface& a, const Surface& b);
-
 /*! Whether `list` already holds a record for the same surface. */
 [[nodiscard]] bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
                                    const std::shared_ptr<Surface>& surface);
 
 /*! Append a surface record unless one describing the same surface is already
- * there, and say which happened. Coaxial cylinders of equal radius count as the
- * same surface, and so do cones on one axis line with one slope through one
- * radius; see the definition.
+ * there (Surface::sameAs), and say which happened.
  *
  * False therefore means "the model already states this surface", which is worth
  * knowing to a caller that has just *fitted* one: the declaration was there all
@@ -215,7 +207,6 @@ class SphereSurface : public Surface
 {
 public:
   SphereSurface(Vector3d center, Vector3d normdir, double r);
-  int operator==(const SphereSurface& other);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
@@ -229,9 +220,6 @@ public:
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
   [[nodiscard]] bool isQuadric() const override { return true; }
-
-private:
-  int operator==(const Surface& other) override { return 0; }
 };
 
 /*! A torus: a circle of radius `r_minor` swept round `normdir` at a distance
@@ -245,7 +233,6 @@ class TorusSurface : public Surface
 public:
   TorusSurface(Vector3d center, Vector3d normdir, double r_major, double r_minor);
   void reverse(void);
-  int operator==(const TorusSurface& other);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
@@ -256,9 +243,6 @@ public:
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
-
-private:
-  int operator==(const Surface& other) override { return 0; }
 };
 
 /*! A tensor-product Bezier patch, declared by the generator that drew it.
@@ -338,9 +322,6 @@ public:
   int degree_u, degree_v;
   std::vector<Vector3d> net;
   std::vector<double> weights;  // empty, or parallel to net
-
-private:
-  int operator==(const Surface& other) override { return 0; }
 };
 
 /*! A plane, declared by the model that meant a flat face.
@@ -362,7 +343,6 @@ class PlaneSurface : public Surface
 {
 public:
   PlaneSurface(Vector3d refpt, Vector3d normdir);
-  int operator==(const PlaneSurface& other);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
@@ -373,9 +353,6 @@ public:
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
 
   [[nodiscard]] std::shared_ptr<Surface> transformed(const Transform3d& mat) const override;
-
-private:
-  int operator==(const Surface& other) override { return 0; }
 };
 
 /*! A surface about an axis: a cylinder, a cone - a surface every plane across
@@ -416,7 +393,6 @@ class CylinderSurface : public AxialSurface
 public:
   CylinderSurface(Vector3d center, Vector3d normdir, double r);
   void reverse(void);
-  int operator==(const CylinderSurface& other);
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
@@ -439,9 +415,6 @@ public:
 
   bool quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const override;
   [[nodiscard]] std::shared_ptr<Surface> transformed(const Transform3d& mat) const override;
-
-private:
-  virtual int operator==(const Surface& other) { return 0; }
 };
 
 /*! A cone, declared by the model that meant one.
@@ -471,7 +444,6 @@ class ConeSurface : public AxialSurface
 public:
   ConeSurface(Vector3d refpt, Vector3d normdir, double r, double slope);
   void reverse(void) override;
-  int operator==(const ConeSurface& other);
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
@@ -496,9 +468,6 @@ public:
   [[nodiscard]] double size() const override { return r; }
 
   bool quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const override;
-
-private:
-  virtual int operator==(const Surface& other) { return 0; }
 };
 
 /*! An ellipse swept along a straight line.
@@ -554,7 +523,6 @@ public:
 private:
   /*! Where `p` is in the section across the sweep, in the principal frame. */
   void section(const Vector3d& p, double& x, double& y) const;
-  int operator==(const Surface& other) override { return 0; }
 };
 
 /*! An ordered grid of points a generator swept, declared by that generator.
@@ -737,7 +705,6 @@ protected:
   std::vector<double> uknots;   // clamped, averaged; empty when rows < 4
   std::vector<Vector3d> poles;  // rows * cols, parallel to net
   double band = 0;              // see tessellationBand()
-  int operator==(const Surface& other) override { return 0; }
 };
 
 /*! A profile swept along a helix, declared as the shape rather than as points.
@@ -794,7 +761,7 @@ struct SweepLaws {
   [[nodiscard]] std::string invalid() const;
   /*! Both tables scaled by `s`, as a uniform scale of the sweep scales them. */
   [[nodiscard]] SweepLaws scaled(double s) const;
-  [[nodiscard]] bool sameAs(const SweepLaws& o, double tol) const;
+  [[nodiscard]] bool sameAs(const SweepLaws& o) const;
 };
 
 class SweepSurface : public GridSurface

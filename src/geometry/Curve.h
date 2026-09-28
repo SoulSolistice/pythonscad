@@ -10,7 +10,9 @@ public:
   int start, end;
   virtual void display(const std::vector<Vector3d>& vertices);
   virtual void reverse(void);
-  virtual int operator==(const Curve& other);
+  /*! Whether two curve records are one curve, for deduplication. A straight
+   * curve is its two vertex indices and is never merged here. */
+  [[nodiscard]] virtual bool sameAs(const Curve& other) const;
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
 
   /*! Independent copy, so transforming one geometry never mutates a curve
@@ -28,7 +30,9 @@ public:
   ArcCurve(Vector3d center, Vector3d normdir, double r);
   void display(const std::vector<Vector3d>& vertices);
   void reverse(void);
-  int operator==(const ArcCurve& other);
+  /*! The same vertices, and one circle at machine precision: parallel planes,
+   * and three points of each circle on the other (recognition/Exact.h). */
+  [[nodiscard]] bool sameAs(const Curve& other) const override;
   double calcAngle(Vector3d refdir, Vector3d dir, Vector3d normdir);
   virtual int pointMember(std::vector<Vector3d>& vertices, Vector3d pt);
 
@@ -37,7 +41,4 @@ public:
 
   double r;
   Vector3d center, normdir;
-
-private:
-  virtual int operator==(const Curve& other) { return 0; }
 };

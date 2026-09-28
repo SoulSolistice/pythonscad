@@ -148,32 +148,6 @@ bool surfaceNormal(const Surface *s, const Vector3d& p, Vector3d& out)
  * here - the question is only how many *distinct surfaces* claim a vertex - and
  * counting one cylinder twice makes an unambiguous junction look contested,
  * which it did on all 32 of step-declare-cone's. */
-bool sameSurfaceGeometrically(const Surface *a, const Surface *b)
-{
-  if (a == b || a->sameAs(*b)) return true;
-  const auto axesAgree = [](const Surface *p, const Surface *q) {
-    const Vector3d u = p->normdir.normalized(), w = q->normdir.normalized();
-    if (fabs(fabs(u.dot(w)) - 1.0) > 1e-9) return false;
-    const Vector3d d = q->refpt - p->refpt;
-    return (d - u * d.dot(u)).norm() <= 1e-9;  // the same axis *line*
-  };
-  if (const auto *ca = dynamic_cast<const CylinderSurface *>(a)) {
-    const auto *cb = dynamic_cast<const CylinderSurface *>(b);
-    return cb != nullptr && fabs(ca->r - cb->r) <= 1e-9 && axesAgree(a, b);
-  }
-  if (const auto *ca = dynamic_cast<const ConeSurface *>(a)) {
-    const auto *cb = dynamic_cast<const ConeSurface *>(b);
-    if (cb == nullptr || !axesAgree(a, b)) return false;
-    // Radius at a shared point rather than at each record's own refpt, which is
-    // the whole difference between them. The slopes are compared in absolute
-    // value because reversing a cone's axis negates it and describes the same
-    // cone.
-    return fabs(fabs(ca->slope) - fabs(cb->slope)) <= 1e-9 &&
-           fabs(ca->radiusAt(cb->refpt) - cb->r) <= 1e-9;
-  }
-  return false;
-}
-
 /*! Which declared surface each original solid's facets lie on.
  *
  * The mapping the snap needs, and the one thing distance cannot supply. A cut
@@ -435,7 +409,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     if (is_plane[j] != 0 || ps.surfaces[j] == nullptr) continue;
     std::set<int32_t> declared_by;
     for (std::size_t k = 0; k < nsurf; k++) {
-      if (ps.surfaces[k] == nullptr || !describesSameSurface(*ps.surfaces[k], *ps.surfaces[j])) continue;
+      if (ps.surfaces[k] == nullptr || !ps.surfaces[k]->sameAs(*ps.surfaces[j])) continue;
       declared_by.insert(ps.surfaces[k]->owners.begin(), ps.surfaces[k]->owners.end());
     }
     // Declared as a face by this original, *and* present in its facets. Identity
@@ -553,7 +527,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         bool have = false;
         for (std::size_t c = 0; c < candidates.size(); c++) {
           const std::size_t k = candidates[c];
-          if (k == j || sameSurfaceGeometrically(ps.surfaces[k].get(), ps.surfaces[j].get())) {
+          if (k == j || ps.surfaces[k]->sameAs(*ps.surfaces[j])) {
             named_by[c].push_back(id);
             have = true;
             break;
@@ -876,8 +850,7 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // whoever declared either of them declared the wall.
       std::vector<int32_t> carried;
       for (std::size_t k = 0; k < nsurf; k++) {
-        if (ps.surfaces[k] == nullptr || !describesSameSurface(*ps.surfaces[k], *ps.surfaces[j]))
-          continue;
+        if (ps.surfaces[k] == nullptr || !ps.surfaces[k]->sameAs(*ps.surfaces[j])) continue;
         carried.insert(carried.end(), ps.surfaces[k]->owners.begin(), ps.surfaces[k]->owners.end());
       }
       std::sort(carried.begin(), carried.end());

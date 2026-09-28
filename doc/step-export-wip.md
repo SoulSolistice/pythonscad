@@ -4311,7 +4311,10 @@ literal tolerance in the exporter, recognition and the declaration paths
 (about 420) was read in place and classed by what it decides:
 
 - **A. D0 decided at a chosen number - remnants, to go to machine precision.**
-  - *Record identity.* `Surface::sameAs` in every kind (1e-9, and by reference
+  - ~~*Record identity.*~~ **Landed 2026-09-28**: one `Surface::sameAs`, the
+    geometric surface at machine precision, asked directly at every call site;
+    the rest below is what it replaced. It changed five corner reports and
+    nothing else - one bore from two heights had been two records. `Surface::sameAs` in every kind (1e-9, and by reference
     point, so two records of one plane or one cylinder anchored apart are two
     surfaces); `describesSameSurface` and its duplicate `sameSurfaceGeometrically`
     in export_step.cc (1e-9 on axis, radius, slope; planes fall through to

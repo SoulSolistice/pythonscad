@@ -142,7 +142,7 @@ void dumpLedger(const ReportInputs& in)
           surfaces[c.surface_index] != nullptr) {
         bool any = false, mine = false;
         for (const auto& other : surfaces) {
-          if (other == nullptr || !describesSameSurface(*other, *surfaces[c.surface_index])) continue;
+          if (other == nullptr || !other->sameAs(*surfaces[c.surface_index])) continue;
           any = any || !other->owners.empty();
           mine =
             mine || std::binary_search(other->owners.begin(), other->owners.end(), faceOrigin[c.facet]);

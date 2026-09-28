@@ -4,6 +4,8 @@
 #include <vector>
 #include "geometry/linalg.h"
 #include "geometry/Curve.h"
+#include "geometry/Surface.h"
+#include "geometry/recognition/Exact.h"
 
 void Curve::display(const std::vector<Vector3d>& vertices)
 {
@@ -33,9 +35,9 @@ int Curve::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
   return 1;
 }
 
-int Curve::operator==(const Curve& other)
+bool Curve::sameAs(const Curve&) const
 {
-  return 0;
+  return false;
 }
 
 std::shared_ptr<Curve> Curve::clone() const
@@ -96,14 +98,35 @@ void ArcCurve::reverse(void)
   this->normdir = -this->normdir;
 }
 
-int ArcCurve::operator==(const ArcCurve& other)
+bool ArcCurve::sameAs(const Curve& other) const
 {
-  if (start != other.start) return 0;
-  if (end != other.end) return 0;
-  if ((normdir - other.normdir).norm() > 1e-6) return 0;
-  if ((center - other.center).norm() > 1e-6) return 0;
-  if (fabs(r - other.r) > 1e-6) return 0;
-  return 1;
+  const auto *o = dynamic_cast<const ArcCurve *>(&other);
+  if (o == nullptr || start != o->start || end != o->end) return false;
+  if (!recognition::parallel(normdir, o->normdir)) return false;
+  // A point is on a circle where it is on the circle's plane and on the sphere
+  // about its centre through it, each at D0.
+  auto on = [](const ArcCurve& c, const Vector3d& p) {
+    return PlaneSurface(c.center, c.normdir).residual(p).exact() &&
+           SphereSurface(c.center, c.normdir, c.r).residual(p).exact();
+  };
+  auto three = [](const ArcCurve& c) {
+    const Vector3d n = c.normdir.normalized();
+    int k = 0;
+    for (int i = 1; i < 3; i++) {
+      if (std::fabs(n[i]) < std::fabs(n[k])) k = i;
+    }
+    Vector3d axis(0, 0, 0);
+    axis[k] = 1;
+    const Vector3d e1 = n.cross(axis).normalized(), e2 = n.cross(e1);
+    return std::vector<Vector3d>{c.center + e1 * c.r, c.center + e2 * c.r, c.center - e1 * c.r};
+  };
+  for (const Vector3d& p : three(*o)) {
+    if (!on(*this, p)) return false;
+  }
+  for (const Vector3d& p : three(*this)) {
+    if (!on(*o, p)) return false;
+  }
+  return true;
 }
 
 double ArcCurve::calcAngle(Vector3d refdir, Vector3d dir, Vector3d normdir)

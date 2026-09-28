@@ -13,6 +13,7 @@
 #include <vector>
 #include "geometry/linalg.h"
 #include "geometry/Surface.h"
+#include "geometry/recognition/Exact.h"
 
 #include <Eigen/SVD>
 
@@ -88,21 +89,38 @@ int Surface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
   return 1;
 }
 
-int Surface::operator==(const Surface& other)
+namespace {
+
+/*! A unit vector across `axis`: its cross product with the coordinate axis it
+ * leans on least, so the product never vanishes. */
+Vector3d across(const Vector3d& axis)
 {
-  return 0;
+  const Vector3d a = axis.normalized();
+  int k = 0;
+  for (int i = 1; i < 3; i++) {
+    if (std::fabs(a[i]) < std::fabs(a[k])) k = i;
+  }
+  Vector3d e(0, 0, 0);
+  e[k] = 1;
+  return a.cross(e).normalized();
 }
+
+/*! Every one of `points` on `on`, at D0. */
+bool allOn(const Surface& on, const std::vector<Vector3d>& points)
+{
+  for (const Vector3d& p : points) {
+    if (!on.residual(p).exact()) return false;
+  }
+  return true;
+}
+
+}  // namespace
 
 bool Surface::sameAs(const Surface& other) const
 {
-  // The type first: a sphere and a torus drawn about the same axis through the
-  // same point agree on everything the base class holds, and dropping one of
-  // them for the other loses a surface no measurement can recover.
-  if (typeid(*this) != typeid(other)) return false;
-  if ((refpt - other.refpt).norm() > 1e-9) return false;
-  // antiparallel axes describe the same surface, only parameterised the other
-  // way round
-  return fabs(fabs(normdir.dot(other.normdir)) - 1.0) < 1e-9;
+  // A kind with no rule of its own: the same record, exactly. Every kind
+  // declared here has its own.
+  return typeid(*this) == typeid(other) && refpt == other.refpt && normdir == other.normdir;
 }
 
 bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
@@ -110,55 +128,14 @@ bool containsSurface(const std::vector<std::shared_ptr<Surface>>& list,
 {
   for (const auto& s : list) {
     if (s == surface) return true;
-    if (s && surface && describesSameSurface(*s, *surface)) return true;
+    if (s && surface && s->sameAs(*surface)) return true;
   }
   return false;
 }
 
-/*! sameAs(), plus the one case it deliberately does not cover.
- *
- * Surface::sameAs() compares refpt exactly, which is right for a sphere or a
- * torus - move the centre and it is a different surface. A cylinder is not like
- * that: it is infinite along its axis, so two records with the same axis and
- * radius whose reference points differ *along* that axis describe the same
- * surface, and the point only ever says where the circle that declared it was.
- *
- * That distinction shows up as soon as two generators declare the same wall:
- * `declare_cylinder()` places the point where the model says and an extrusion
- * places it at the base of the sweep. Without this they are two records, and
- * every count a fixture asserts moves for a surface nothing gained.
- */
-bool describesSameSurface(const Surface& a, const Surface& b)
-{
-  if (a.sameAs(b)) return true;
-  // The same axis *line*, which is what "infinite along the axis" means: the
-  // two reference points may differ, but only along it.
-  const auto axesAgree = [](const Surface& p, const Surface& q) {
-    const Vector3d u = p.normdir.normalized(), w = q.normdir.normalized();
-    if (fabs(fabs(u.dot(w)) - 1.0) > 1e-9) return false;
-    const Vector3d between = q.refpt - p.refpt;
-    return (between - u * between.dot(u)).norm() <= 1e-9;
-  };
-  if (const auto *ca = dynamic_cast<const CylinderSurface *>(&a)) {
-    const auto *cb = dynamic_cast<const CylinderSurface *>(&b);
-    return cb != nullptr && fabs(ca->r - cb->r) <= 1e-9 && axesAgree(a, b);
-  }
-  // A cone is infinite along its axis too, and its record says the radius at
-  // one height rather than the surface: the same cone measured from two heights
-  // is two records that agree nowhere in their fields. Compared the way
-  // sameSurfaceGeometrically in export_step.cc compares them, so the record
-  // list and the owner count answer this question the same way - the radius at
-  // a shared point, and the slope in absolute value because reversing the axis
-  // negates it and describes the same cone.
-  if (const auto *ca = dynamic_cast<const ConeSurface *>(&a)) {
-    const auto *cb = dynamic_cast<const ConeSurface *>(&b);
-    if (cb == nullptr || !axesAgree(a, b)) return false;
-    return fabs(fabs(ca->slope) - fabs(cb->slope)) <= 1e-9 &&
-           fabs(ca->radiusAt(cb->refpt) - cb->r) <= 1e-9;
-  }
-  return false;
-}
-
+/*! Two generators declaring one wall - `declare_cylinder()` where the model
+ * says, an extrusion at the base of its sweep - make one record, or every count
+ * a fixture asserts moves for a surface nothing gained. */
 bool addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
                       const std::shared_ptr<Surface>& surface)
 {
@@ -166,7 +143,7 @@ bool addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
   for (auto& s : list) {
     // Not added, but its declarers are: a face offered after the same surface
     // was offered as evidence makes the kept record a face.
-    if (s != nullptr && describesSameSurface(*s, *surface)) {
+    if (s != nullptr && s->sameAs(*surface)) {
       s = withDeclarersOf(s, *surface);
       return false;
     }
@@ -187,7 +164,7 @@ void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
       // and entry slot both declare r = 79.8094, and came out as two surfaces,
       // one of them "unexplained". Measured neutral on geometry when first
       // tried (open item 17); it matters now because identity is per record.
-      if (s == surface || (s && surface && describesSameSurface(*s, *surface))) {
+      if (s == surface || (s && surface && s->sameAs(*surface))) {
         // The same surface declared by two originals is declared by both.
         if (surface) s = withDeclarersOf(s, *surface);
         found = true;
@@ -292,21 +269,14 @@ std::shared_ptr<Surface> PlaneSurface::clone() const
   return std::make_shared<PlaneSurface>(*this);
 }
 
-int PlaneSurface::operator==(const PlaneSurface& other)
-{
-  if (fabs(fabs(normdir.dot(other.normdir)) - 1.0) > 1e-6) return 0;
-  return fabs(normdir.dot(refpt - other.refpt)) > 1e-6 ? 0 : 1;
-}
-
 bool PlaneSurface::sameAs(const Surface& other) const
 {
-  // The plane, not the point on it. Every other subclass anchors something -
-  // a centre, an apex, a rim - so the base class compares refpt and is right
-  // to; a plane's refpt is only somewhere it passes through, and two records
-  // anchored a metre apart on the same plane are one surface.
+  // The plane, not the point on it: two records anchored a metre apart on one
+  // plane are one surface. Parallel, and each one's point on the other.
   if (typeid(*this) != typeid(other)) return false;
-  if (fabs(fabs(normdir.dot(other.normdir)) - 1.0) > 1e-9) return false;
-  return fabs(normdir.dot(refpt - other.refpt)) < 1e-9;
+  const auto& o = static_cast<const PlaneSurface&>(other);
+  return recognition::parallel(normdir, o.normdir) && residual(o.refpt).exact() &&
+         o.residual(refpt).exact();
 }
 
 int PlaneSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
@@ -333,20 +303,16 @@ bool SphereSurface::transform(const Transform3d& mat)
   return true;
 }
 
-int SphereSurface::operator==(const SphereSurface& other)
-{
-  // the polar axis is not compared: it only orients the parameterisation, and
-  // two records of the same sphere describe the same surface whichever way
-  // their poles point
-  if ((refpt - other.refpt).norm() > 1e-6) return 0;
-  if (fabs(r - other.r) > 1e-6) return 0;
-  return 1;
-}
-
 bool SphereSurface::sameAs(const Surface& other) const
 {
-  if (!Surface::sameAs(other)) return false;
-  return fabs(r - static_cast<const SphereSurface&>(other).r) < 1e-9;
+  // Four points of each, not in one plane, on the other.
+  if (typeid(*this) != typeid(other)) return false;
+  const auto& o = static_cast<const SphereSurface&>(other);
+  auto points = [](const SphereSurface& s) {
+    return std::vector<Vector3d>{s.refpt + Vector3d(s.r, 0, 0), s.refpt - Vector3d(s.r, 0, 0),
+                                 s.refpt + Vector3d(0, s.r, 0), s.refpt + Vector3d(0, 0, s.r)};
+  };
+  return allOn(*this, points(o)) && allOn(o, points(*this));
 }
 
 int SphereSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
@@ -381,20 +347,20 @@ bool TorusSurface::transform(const Transform3d& mat)
   return true;
 }
 
-int TorusSurface::operator==(const TorusSurface& other)
-{
-  if ((normdir - other.normdir).norm() > 1e-6) return 0;
-  if ((refpt - other.refpt).norm() > 1e-6) return 0;
-  if (fabs(r_major - other.r_major) > 1e-6) return 0;
-  if (fabs(r_minor - other.r_minor) > 1e-6) return 0;
-  return 1;
-}
-
 bool TorusSurface::sameAs(const Surface& other) const
 {
-  if (!Surface::sameAs(other)) return false;
+  // One axis line, and each one's outer, inner and top circles through a point
+  // of the other.
+  if (typeid(*this) != typeid(other)) return false;
   const auto& o = static_cast<const TorusSurface&>(other);
-  return fabs(r_major - o.r_major) < 1e-9 && fabs(r_minor - o.r_minor) < 1e-9;
+  if (!recognition::sameLine(refpt, normdir, o.refpt, o.normdir)) return false;
+  auto points = [](const TorusSurface& s) {
+    const Vector3d e = across(s.normdir), a = s.normdir.normalized();
+    return std::vector<Vector3d>{s.refpt + e * (s.r_major + s.r_minor),
+                                 s.refpt + e * (s.r_major - s.r_minor),
+                                 s.refpt + e * s.r_major + a * s.r_minor};
+  };
+  return allOn(*this, points(o)) && allOn(o, points(*this));
 }
 
 int TorusSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
@@ -491,19 +457,12 @@ bool BezierPatchSurface::transform(const Transform3d& mat)
 
 bool BezierPatchSurface::sameAs(const Surface& other) const
 {
+  // A patch is its net: the same degrees, the same control points, the same
+  // weights - two patches on one net with different weights are different
+  // surfaces, a parabola and a circular arc through the same three points.
   if (typeid(*this) != typeid(other)) return false;
   const auto& o = static_cast<const BezierPatchSurface&>(other);
-  if (degree_u != o.degree_u || degree_v != o.degree_v || net.size() != o.net.size()) return false;
-  if (weights.size() != o.weights.size()) return false;
-  for (std::size_t i = 0; i < net.size(); i++) {
-    if ((net[i] - o.net[i]).norm() > 1e-9) return false;
-  }
-  // Two patches on one net but different weights are different surfaces - a
-  // parabola and a circular arc through the same three points.
-  for (std::size_t i = 0; i < weights.size(); i++) {
-    if (fabs(weights[i] - o.weights[i]) > 1e-9) return false;
-  }
-  return true;
+  return degree_u == o.degree_u && degree_v == o.degree_v && net == o.net && weights == o.weights;
 }
 
 Vector3d BezierPatchSurface::evaluate(double u, double v) const
@@ -699,18 +658,14 @@ bool CylinderSurface::transform(const Transform3d& mat)
   return true;
 }
 
-int CylinderSurface::operator==(const CylinderSurface& other)
-{
-  if ((normdir - other.normdir).norm() > 1e-6) return 0;
-  if ((refpt - other.refpt).norm() > 1e-6) return 0;
-  if (fabs(r - other.r) > 1e-6) return 0;
-  return 1;
-}
-
 bool CylinderSurface::sameAs(const Surface& other) const
 {
-  if (!Surface::sameAs(other)) return false;
-  return fabs(r - static_cast<const CylinderSurface&>(other).r) < 1e-9;
+  // One axis line - wherever along it either record was declared - and a point
+  // of each wall on the other.
+  if (typeid(*this) != typeid(other)) return false;
+  const auto& o = static_cast<const CylinderSurface&>(other);
+  if (!recognition::sameLine(refpt, normdir, o.refpt, o.normdir)) return false;
+  return allOn(*this, {o.refpt + across(o.normdir) * o.r}) && allOn(o, {refpt + across(normdir) * r});
 }
 
 int CylinderSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
@@ -758,26 +713,26 @@ double ConeSurface::radiusAt(const Vector3d& pt) const
   return r + slope * (pt - refpt).dot(normdir);
 }
 
-int ConeSurface::operator==(const ConeSurface& other)
-{
-  if ((normdir - other.normdir).norm() > 1e-6) return 0;
-  if ((refpt - other.refpt).norm() > 1e-6) return 0;
-  if (fabs(r - other.r) > 1e-6) return 0;
-  if (fabs(slope - other.slope) > 1e-6) return 0;
-  return 1;
-}
-
 bool ConeSurface::sameAs(const Surface& other) const
 {
-  if (!Surface::sameAs(other)) return false;
+  // One axis line, and two circles of each on the other: at its reference
+  // level, and a step its own size towards its wider side. A cone is infinite
+  // along its axis and traversed either way is one cone; its record says the
+  // radius at one level, so two records of it agree nowhere in their fields.
+  if (typeid(*this) != typeid(other)) return false;
   const auto& o = static_cast<const ConeSurface&>(other);
-  if (fabs(r - o.r) > 1e-9) return false;
-  // The base class counts antiparallel axes as the same surface, and for a
-  // cone they are - traversed the other way, so the radius grows the other way
-  // too. Comparing the slopes without that would keep both records, which is
-  // only wasteful, but saying they differ when they do not is still wrong.
-  const double sense = normdir.dot(o.normdir) > 0 ? 1.0 : -1.0;
-  return fabs(slope - sense * o.slope) < 1e-9;
+  if (!recognition::sameLine(refpt, normdir, o.refpt, o.normdir)) return false;
+  auto points = [](const ConeSurface& s, std::vector<Vector3d>& out) {
+    const double step = std::fabs(s.r) + s.refpt.norm();
+    if (!(step > 0)) return false;  // an apex at the origin, and no size to step by
+    const Vector3d e = across(s.normdir), a = s.normdir.normalized();
+    const Vector3d level = s.refpt + a * (s.slope * a.dot(s.normdir) >= 0 ? step : -step);
+    out = {s.refpt + e * s.r, level + e * s.radiusAt(level)};
+    return true;
+  };
+  std::vector<Vector3d> of_other, of_this;
+  if (!points(o, of_other) || !points(*this, of_this)) return false;
+  return allOn(*this, of_other) && allOn(o, of_this);
 }
 
 int ConeSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
@@ -1331,11 +1286,7 @@ bool GridSurface::sameAs(const Surface& other) const
 {
   const auto *o = dynamic_cast<const GridSurface *>(&other);
   if (o == nullptr) return false;
-  if (o->rows != rows || o->cols != cols || o->closed_v != closed_v) return false;
-  for (std::size_t i = 0; i < net.size(); i++) {
-    if ((net[i] - o->net[i]).norm() > 1e-9) return false;
-  }
-  return true;
+  return o->rows == rows && o->cols == cols && o->closed_v == closed_v && o->net == net;
 }
 
 // ---------------------------------------------------------------------------
@@ -1494,21 +1445,10 @@ SweepLaws SweepLaws::scaled(double s) const
   return out;
 }
 
-bool SweepLaws::sameAs(const SweepLaws& o, double tol) const
+bool SweepLaws::sameAs(const SweepLaws& o) const
 {
-  if (radius.size() != o.radius.size() || profile.size() != o.profile.size() || points() != o.points()) {
-    return false;
-  }
-  for (std::size_t k = 0; k < radius.size(); k++) {
-    if (fabs(radius_at[k] - o.radius_at[k]) > tol || fabs(radius[k] - o.radius[k]) > tol) return false;
-  }
-  for (std::size_t k = 0; k < profile.size(); k++) {
-    if (fabs(profile_at[k] - o.profile_at[k]) > tol) return false;
-    for (std::size_t i = 0; i < points(); i++) {
-      if ((profile[k][i] - o.profile[k][i]).norm() > tol) return false;
-    }
-  }
-  return true;
+  return radius_at == o.radius_at && radius == o.radius && profile_at == o.profile_at &&
+         profile == o.profile;
 }
 
 SweepSurface::SweepSurface(const Vector3d& origin, const Vector3d& axis, const Vector3d& ref_in,
@@ -1823,11 +1763,8 @@ bool SweepSurface::sameAs(const Surface& other) const
 {
   const auto *o = dynamic_cast<const SweepSurface *>(&other);
   if (o == nullptr) return false;
-  if ((refpt - o->refpt).norm() > 1e-9) return false;
-  if ((normdir - o->normdir).norm() > 1e-9) return false;
-  if ((ref - o->ref).norm() > 1e-9) return false;
-  if (fabs(pitch - o->pitch) > 1e-9 || fabs(turns - o->turns) > 1e-9) return false;
-  return laws.sameAs(o->laws, 1e-9);
+  return refpt == o->refpt && normdir == o->normdir && ref == o->ref && pitch == o->pitch &&
+         turns == o->turns && laws.sameAs(o->laws);
 }
 
 // ---------------------------------------------------------------------------
@@ -2228,15 +2165,16 @@ bool EllipticCylinderSurface::transform(const Transform3d& mat)
 
 bool EllipticCylinderSurface::sameAs(const Surface& other) const
 {
+  // One axis line, and three points of each section on the other - an ellipse
+  // about a known centre is fixed by three.
   const auto *o = dynamic_cast<const EllipticCylinderSurface *>(&other);
   if (o == nullptr) return false;
-  if (fabs(fabs(normdir.dot(o->normdir)) - 1.0) > 1e-9) return false;
-  const Vector3d gap = o->refpt - refpt;
-  if ((gap - normdir * gap.dot(normdir)).norm() > 1e-9) return false;  // one axis line
-  if (fabs(a() - o->a()) > 1e-9 || fabs(b() - o->b()) > 1e-9) return false;
-  // a circular section has no major direction to agree on
-  if (fabs(a() - b()) <= 1e-9) return true;
-  return fabs(fabs(major.normalized().dot(o->major.normalized())) - 1.0) <= 1e-9;
+  if (!recognition::sameLine(refpt, normdir, o->refpt, o->normdir)) return false;
+  auto points = [](const EllipticCylinderSurface& s) {
+    return std::vector<Vector3d>{s.refpt + s.major, s.refpt + s.minor,
+                                 s.refpt + (s.major + s.minor) * M_SQRT1_2};
+  };
+  return allOn(*this, points(*o)) && allOn(*o, points(*this));
 }
 
 void EllipticCylinderSurface::frame(Vector3d& ref, Vector3d& ref2) const

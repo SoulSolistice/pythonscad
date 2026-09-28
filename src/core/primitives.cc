@@ -342,19 +342,15 @@ std::unique_ptr<const Geometry> SphereNode::createGeometry() const
   // circles closed by a flat cap, not fans of triangles meeting at a point -
   // every band's outer rim is the complete bound of one face.
   //
-  // The radii repeat in pairs about the equator, so they are deduplicated: a
-  // record is only ever matched on its radius and axis.
-  std::vector<double> declared;
-  for (auto i = 0; i < num_rings; ++i) {
+  // The radii repeat in pairs about the equator - ring i and ring
+  // num_rings - 1 - i are at phi and 180 - phi - so only the rings up to the
+  // equator are declared: a record is the infinite cylinder of its radius, and
+  // the mirror ring is the same one. Derived from the symmetry, not found by
+  // comparing radii.
+  for (auto i = 0; i < (num_rings + 1) / 2; ++i) {
     const double phi = (180.0 * (i + 0.5)) / num_rings;
     const double radius = r * sin_degrees(phi);
     if (radius <= 0) continue;
-    bool seen = false;
-    for (const double d : declared) {
-      seen = seen || fabs(d - radius) <= 1e-12 * std::max(1.0, d);
-    }
-    if (seen) continue;
-    declared.push_back(radius);
     // Evidence, not a face: the ring is how a band of the zone is identified,
     // and the sphere is what the facets are on. Declared as a face until
     // 2026-09-24, which made every facet between the two equatorial rings - all

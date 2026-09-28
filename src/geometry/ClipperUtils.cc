@@ -16,12 +16,36 @@
 
 #include "clipper2/clipper.h"
 #include "geometry/Polygon2d.h"
+#include "geometry/Surface.h"
 #include "geometry/linalg.h"
 #include "utils/printutils.h"
 
 namespace ClipperUtils {
 
 namespace {
+
+/*! Whether two arc records are one circle, at machine precision: three points
+ * of each on the other, a point being on a circle where it is on the sphere
+ * about its centre through it, in the circle's plane, at D0 (recognition/Exact.h). */
+bool sameCircle(const Arc2d& a, const Arc2d& b)
+{
+  auto on = [](const Arc2d& c, const Vector2d& p) {
+    return SphereSurface(Vector3d(c.centre[0], c.centre[1], 0), Vector3d(0, 0, 1), c.r)
+      .residual(Vector3d(p[0], p[1], 0))
+      .exact();
+  };
+  auto three = [](const Arc2d& c) {
+    const Vector2d m(c.centre[0], c.centre[1]);
+    return std::vector<Vector2d>{m + Vector2d(c.r, 0), m + Vector2d(0, c.r), m - Vector2d(c.r, 0)};
+  };
+  for (const Vector2d& p : three(b)) {
+    if (!on(a, p)) return false;
+  }
+  for (const Vector2d& p : three(a)) {
+    if (!on(b, p)) return false;
+  }
+  return true;
+}
 
 /*! Identity through Clipper - see EdgeIdentity.h.
  *
@@ -349,10 +373,7 @@ void carryDeclarations(Polygon2d& result, const std::vector<const Polygon2d *>& 
       int at = -1;
       for (std::size_t j = 0; j < result.arcs.size() && at < 0; j++) {
         const auto& have = result.arcs[j];
-        if (fabs(have.r - arc.r) <= 1e-12 * std::max(1.0, arc.r) &&
-            (have.centre - arc.centre).norm() <= 1e-12 * std::max(1.0, arc.r)) {
-          at = int(j);
-        }
+        if (sameCircle(have, arc)) at = int(j);
       }
       if (at < 0) {
         at = int(result.arcs.size());

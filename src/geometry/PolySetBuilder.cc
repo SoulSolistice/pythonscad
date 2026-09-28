@@ -245,42 +245,16 @@ void PolySetBuilder::copyVertices(std::vector<Vector3f>& vertices)
 void PolySetBuilder::addCurve(std::shared_ptr<Curve> new_curve)
 {
   if (new_curve->start > new_curve->end) new_curve->reverse();
-  auto arc_new_curve = std::dynamic_pointer_cast<ArcCurve>(new_curve);
-  if (arc_new_curve != nullptr) {
-    for (auto& curve : curves) {
-      auto arc_curve = std::dynamic_pointer_cast<ArcCurve>(curve);
-      if (arc_curve != nullptr) {
-        if (arc_curve->operator==(*arc_new_curve)) return;  // duplicate
-      }
-    }
+  for (auto& curve : curves) {
+    if (curve->sameAs(*new_curve)) return;  // duplicate
   }
-  for (auto& curve : curves)
-    if (curve->operator==(*new_curve)) return;  // duplicate
   curves.push_back(new_curve);
 }
 
 void PolySetBuilder::addSurface(std::shared_ptr<Surface> new_surface)
 {
-  auto cyl_new_surface = std::dynamic_pointer_cast<CylinderSurface>(new_surface);
   // A duplicate keeps the owners of both records - see Surface::owners.
-  if (cyl_new_surface != nullptr) {
-    for (auto& surface : surfaces) {
-      auto cyl_surface = std::dynamic_pointer_cast<CylinderSurface>(surface);
-      if (cyl_surface != nullptr) {
-        if (cyl_surface->operator==(*cyl_new_surface)) {
-          surface = withDeclarersOf(surface, *new_surface);
-          return;
-        }
-      }
-    }
-  }
-  for (auto& surface : surfaces) {
-    if (surface->operator==(*new_surface)) {
-      surface = withDeclarersOf(surface, *new_surface);
-      return;
-    }
-  }
-  surfaces.push_back(new_surface);
+  (void)addSurfaceUnique(surfaces, new_surface);
 }
 
 std::unique_ptr<PolySet> PolySetBuilder::build()
