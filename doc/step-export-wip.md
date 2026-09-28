@@ -2131,6 +2131,13 @@ list.
 
 ### 13. Provenance loses an original a boolean cut on every facet
 
+**Expected to be answered by item 38's existence steps 5 to 7, 2026-09-28.**
+Existence decides which surfaces have a face at a corner, and a corner is then
+where those surfaces meet, in closed form (`doc/step-recognition-design.md`,
+*Existence*, "Corner constraints"); the ladder's search stands in for that fact.
+Not closed in advance: this item's own measure is the acceptance test, and it
+closes when that measure moves.
+
 **Filed 2026-09-14, out of item 11's root cause C.** An original owns a surface
 when at least three of its facets lie on it *whole*
 (`export_step.cc`, `least = 3`), and cut facets are deliberately not counted -
@@ -2198,6 +2205,13 @@ What counts as ownership is the question, and the seam case in §10 is the
 constraint any answer has to keep.
 
 ### 14. The two-owner placement takes corners off declared surfaces, and no face notices
+
+**Expected to be answered by item 38's existence steps 5 to 7, 2026-09-28.**
+Existence decides which surfaces have a face at a corner, and a corner is then
+where those surfaces meet, in closed form (`doc/step-recognition-design.md`,
+*Existence*, "Corner constraints"); the ladder's search stands in for that fact.
+Not closed in advance: this item's own measure is the acceptance test, and it
+closes when that measure moves.
 
 **Filed 2026-09-14, measured and not chased.** While choosing C's fix, every
 proposed move on every export was asked whether it takes a corner off a declared
@@ -2570,7 +2584,8 @@ it at all.
 
 **Superseded 2026-09-23**: the record rule is now `describesSameSurface`, because
 identity is carried per record and a duplicate counted one surface twice in
-ownership, the ledger and the census - see item 31.
+ownership, the ledger and the census - see item 31. *(And that is gone too since
+2026-09-28: one `Surface::sameAs` per kind, at machine precision - item 38, A.)*
 
 **What the measurement leaves.** Which surface a facet lies on is never decided
 by order on anything measured here. Where the recogniser is actually short is
@@ -2971,6 +2986,13 @@ including the one code 7 left, which is on an ellipse whose vertices are on it t
 
 ### 21. One corner is left off its cone by the ladder's own travel bound
 
+**Expected to be answered by item 38's existence steps 5 to 7, 2026-09-28.**
+Existence decides which surfaces have a face at a corner, and a corner is then
+where those surfaces meet, in closed form (`doc/step-recognition-design.md`,
+*Existence*, "Corner constraints"); the ladder's search stands in for that fact.
+Not closed in advance: this item's own measure is the acceptance test, and it
+closes when that measure moves.
+
 lid10 and the bayonet share a feature, and in both the last corner off a surface
 its face is written on is the same vertex: (-77.1194, -11.6539, 65.0000), 0.1050
 off the cone, bounded by two faces - the sweep `#12103` and the cone `#14571` -
@@ -2996,6 +3018,16 @@ what is refused varies by three orders of magnitude between coupons, and the
 `$fn` 64 ones are inside any tolerance that matters.
 
 ### 22. What SOLIDWORKS repairs is a curve off its surface by 1e-4, and ours are off by 0.1
+
+**Still so, measured 2026-09-28** (`edge-on-surface.py`, the reference parts,
+both tiers): lid10 has `line-on-bspl` edges up to 0.109 off their sweep and 33
+`ell-on-plane` up to 0.107; the bayonet `line-on-bspl` to 0.109 and
+`line-on-cone` to 0.077; f04 `line-on-bspl` to 0.024. The exact tiers are clean
+but for lid10's ellipses. What changed is the file's own claim: it declared 1e-5
+whatever it held and now declares its resolution, about 1e-7 on these parts
+(item 38, B), so every one of these gaps is a defect by the file's own
+statement. The chords on sweeps are item 3's - edges whose ends are not on the
+sweep, a corner question, expected to move with existence steps 5 to 7.
 
 `f04-band-fn064-analytic` reads `valid=1 faults=0 faultyfaces=0` from every API
 check, and the Import Diagnostics dialog shows one faulty face: "General geometry
@@ -3342,6 +3374,13 @@ surveyed in item 23, with a matrix that makes the precedence a table.
 
 ### 23. The precision ladder: a survey, a matrix, and what stands between it and landing
 
+**Expected to be answered by item 38's existence steps 5 to 7, 2026-09-28.**
+Existence decides which surfaces have a face at a corner, and a corner is then
+where those surfaces meet, in closed form (`doc/step-recognition-design.md`,
+*Existence*, "Corner constraints"); the ladder's search stands in for that fact.
+Not closed in advance: this item's own measure is the acceptance test, and it
+closes when that measure moves.
+
 **Opened 2026-09-19**, under the standing rule that where a less precise rung
 has claimed a corner, face or edge first, the more precise answer replaces it -
 the low-precision rungs are historical, and first refusal kept them winning.
@@ -3550,6 +3589,13 @@ plane one of their own bounds is not in" on the old binary; the arbiter adds
 gates that mode's EXPORT-ERROR.
 
 ### 25. The claim must be revised after placement, not decided before it
+
+**Expected to be answered by item 38's existence steps 5 to 7, 2026-09-28.**
+Existence decides which surfaces have a face at a corner, and a corner is then
+where those surfaces meet, in closed form (`doc/step-recognition-design.md`,
+*Existence*, "Corner constraints"); the ladder's search stands in for that fact.
+Not closed in advance: this item's own measure is the acceptance test, and it
+closes when that measure moves.
 
 **Measured 2026-09-21**, taking item 23's first follower. The conclusion is not
 the one the follower expected, and it is worth more.
@@ -3824,6 +3870,10 @@ floor used to decline them - planes either way, and the ledger now names the
 real reason.
 
 ### 31. Provenance's ownership is measured, not carried
+
+**Status 2026-09-28: answered.** Ownership is carried (identity plus presence,
+landed 2026-09-24); the measured path (60 degrees, `least = 3`) only reports
+against it now, and item 38, C, has it deleted rather than refined.
 
 **Found 2026-09-23.** `Provenance` is presented throughout as identity, and half
 of it is. *Which original made a facet* is carried from the generator
