@@ -156,9 +156,13 @@ std::vector<std::shared_ptr<Surface>> turned(const Axis& axis, const std::vector
   Profile2d profile;
   profile.loops.emplace_back();
   for (std::size_t i = 0; i < hull.size(); i++) {
+    // Straight by construction: an edge of the convex hull of the rims, which
+    // the hull states as the maker of this profile (E7).
     ProfileEdge edge;
     edge.a = hull[i];
     edge.b = hull[(i + 1) % hull.size()];
+    edge.kind = EdgeKind::Line;
+    edge.declared = true;
     profile.loops.back().push_back(edge);
   }
   Revolution sweep;

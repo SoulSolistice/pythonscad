@@ -37,6 +37,27 @@ std::vector<const T *> ofKind(const std::vector<std::shared_ptr<Surface>>& surfa
   return out;
 }
 
+/*! A profile whose maker named every edge, as the classifier would measure it
+ * - a chord of an arc where both its ends are on one, a line otherwise: what a
+ * generator that declares its edges hands a sweep. */
+Profile2d declared(const std::vector<VectorOfVector2d>& loops, const std::vector<Arc2d>& arcs,
+                   const std::vector<Bezier2d>& beziers)
+{
+  const Profile2d measured = classifyProfile(loops, arcs, beziers);
+  std::vector<std::vector<EdgeId>> ids;
+  EdgeDecls decls;
+  for (const auto& loop : measured.loops) {
+    const EdgeId first = reserveEdgeIds(loop.size());
+    std::vector<EdgeId> named;
+    for (std::size_t i = 0; i < loop.size(); i++) {
+      named.push_back(first + EdgeId(i));
+      decls[first + EdgeId(i)] = EdgeDecl{loop[i].kind, loop[i].record};
+    }
+    ids.push_back(named);
+  }
+  return classifyProfile(loops, arcs, beziers, ids, &decls);
+}
+
 /*! step-rotate-extrude.scad's stepped tube: a bore, two walls and a taper. */
 const VectorOfVector2d kSteppedTube{{8., 0.}, {10., 0.}, {10., 6.}, {12., 10.}, {12., 16.}, {8., 16.}};
 
@@ -100,9 +121,25 @@ TEST_CASE("Profile2d: every edge is classified, the closing one included", "[swe
   CHECK(p.loops[0][2].b == Vector2d(0., 0.));
 }
 
+TEST_CASE("sweep: an unnamed straight edge sweeps nothing, a named one its plane", "[sweep-table][e6]")
+{
+  // Line is only an unnamed edge's default, and a default is no maker's word:
+  // declared, it put a plane under facets text() made on its Bezier patch
+  // (step-extrude-text-counter, 2026-09-28), and the D0 membership its maker
+  // gave them was lost to it.
+  const VectorOfVector2d square{{0., 0.}, {1., 0.}, {1., 1.}, {0., 1.}};
+  Extrusion sweep;
+  sweep.height = Vector3d(0., 0., 2.);
+  const auto unnamed = ofKind<PlaneSurface>(extrude(classifyProfile({square}, {}, {}), sweep));
+  const auto named = ofKind<PlaneSurface>(extrude(declared({square}, {}, {}), sweep));
+  CHECK(named.size() == unnamed.size() + 4);  // the four walls, over the same caps
+  CHECK(ofKind<PlaneSurface>(revolve(classifyProfile({square}, {}, {}), Revolution{})).size() + 2 ==
+        ofKind<PlaneSurface>(revolve(declared({square}, {}, {}), Revolution{})).size());
+}
+
 TEST_CASE("revolve: each straight edge by its course", "[sweep-table]")
 {
-  const auto surfaces = revolve(classifyProfile({kSteppedTube}, {}, {}), Revolution{});
+  const auto surfaces = revolve(declared({kSteppedTube}, {}, {}), Revolution{});
   // three walls, each a face; the taper's rims are the r = 10 and r = 12 walls
   // already, so no radius is evidence only
   const auto cylinders = ofKind<CylinderSurface>(surfaces);
@@ -125,7 +162,7 @@ TEST_CASE("revolve: an edge reaching the axis sweeps its cone, apex on the axis"
 {
   // step-revolve-axis-point.scad: rotate_extrude() polygon([[0,0], [10,0], [0,20]])
   const VectorOfVector2d triangle{{0., 0.}, {10., 0.}, {0., 20.}};
-  const auto surfaces = revolve(classifyProfile({triangle}, {}, {}), Revolution{});
+  const auto surfaces = revolve(declared({triangle}, {}, {}), Revolution{});
   const auto cones = ofKind<ConeSurface>(surfaces);
   REQUIRE(cones.size() == 1);
   CHECK(cones[0]->r == 10.);
@@ -144,7 +181,7 @@ TEST_CASE("revolve: a plane is at the level its edge is at", "[sweep-table]")
   // applied - and until 2026-09-25 added the offset to the planes a second time.
   VectorOfVector2d lifted = kSteppedTube;
   for (auto& v : lifted) v[1] += 5.;
-  const auto planes = ofKind<PlaneSurface>(revolve(classifyProfile({lifted}, {}, {}), Revolution{}));
+  const auto planes = ofKind<PlaneSurface>(revolve(declared({lifted}, {}, {}), Revolution{}));
   REQUIRE(planes.size() == 2);
   CHECK(planes[0]->refpt[2] == 5.);
   CHECK(planes[1]->refpt[2] == 21.);
@@ -155,7 +192,7 @@ TEST_CASE("revolve: about any axis, not only z", "[sweep-table]")
   Revolution sweep;
   sweep.origin = Vector3d(1., 2., 3.);
   sweep.axis = Vector3d(1., 0., 0.);
-  const auto cones = ofKind<ConeSurface>(revolve(classifyProfile({kSteppedTube}, {}, {}), sweep));
+  const auto cones = ofKind<ConeSurface>(revolve(declared({kSteppedTube}, {}, {}), sweep));
   REQUIRE(cones.size() == 1);
   CHECK(cones[0]->refpt == Vector3d(11., 2., 3.));
   CHECK(cones[0]->normdir == Vector3d(1., 0., 0.));
@@ -165,7 +202,7 @@ TEST_CASE("revolve: an arc is a sphere on the axis and a torus off it", "[sweep-
 {
   const Arc2d on_axis{Vector2d(0., 4.), 3.};
   const Arc2d ring{Vector2d(10., 0.), 2.};
-  const auto surfaces = revolve(classifyProfile({}, {on_axis, ring}, {}), Revolution{});
+  const auto surfaces = revolve(declared({}, {on_axis, ring}, {}), Revolution{});
   const auto spheres = ofKind<SphereSurface>(surfaces);
   const auto tori = ofKind<TorusSurface>(surfaces);
   REQUIRE(spheres.size() == 1);
@@ -177,7 +214,7 @@ TEST_CASE("revolve: a partial turn is closed by the profile's plane at each end"
 {
   Revolution sweep;
   sweep.angle = 90.;
-  const auto planes = ofKind<PlaneSurface>(revolve(classifyProfile({kSteppedTube}, {}, {}), sweep));
+  const auto planes = ofKind<PlaneSurface>(revolve(declared({kSteppedTube}, {}, {}), sweep));
   // the two annuli, and the ends at 0 and 90 degrees
   CHECK(planes.size() == 4);
 }
@@ -195,7 +232,7 @@ TEST_CASE("extrude: a chord is not a wall", "[sweep-table]")
   profile.emplace_back(-3., -5.);
   Extrusion sweep;
   sweep.height = Vector3d(0., 0., 7.);
-  const auto surfaces = extrude(classifyProfile({profile}, {arc}, {}), sweep);
+  const auto surfaces = extrude(declared({profile}, {arc}, {}), sweep);
   // two caps and the three straight walls - none of the eight chords
   CHECK(ofKind<PlaneSurface>(surfaces).size() == 5);
   REQUIRE(ofKind<CylinderSurface>(surfaces).size() == 1);
@@ -209,7 +246,7 @@ TEST_CASE("extrude: an uneven scale sweeps a diagonal edge into a bilinear patch
   Extrusion sweep;
   sweep.height = Vector3d(0., 0., 10.);
   sweep.scale_x = 0.5;
-  const auto surfaces = extrude(classifyProfile({triangle}, {}, {}), sweep);
+  const auto surfaces = extrude(declared({triangle}, {}, {}), sweep);
   // the caps, and the walls over the two edges along the axes, which the scale
   // keeps parallel to themselves
   CHECK(ofKind<PlaneSurface>(surfaces).size() == 4);
@@ -271,7 +308,7 @@ TEST_CASE("roof: a plane over each edge, and a cone over each reflex corner of a
 {
   // an L, material on the left: counter clockwise, one reflex corner at (5, 5)
   const VectorOfVector2d ell{{0., 0.}, {10., 0.}, {10., 5.}, {5., 5.}, {5., 10.}, {0., 10.}};
-  const Profile2d profile = classifyProfile({ell}, {}, {});
+  const Profile2d profile = declared({ell}, {}, {});
   const auto straight = roofSurfaces(profile, false);
   CHECK(ofKind<PlaneSurface>(straight).size() == 7);  // the floor and six edges
   CHECK(ofKind<ConeSurface>(straight).empty());

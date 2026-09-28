@@ -71,7 +71,8 @@ std::vector<Region> d0Regions(const FacetGraph& graph,
     }
     std::vector<char> member(loops.size(), 0);
     for (std::size_t f = 0; f < loops.size(); f++) {
-      if (!valid[f] || is_hole[f] || loops[f].size() < 3 || planar[f]) continue;
+      if (!valid[f] || is_hole[f] || loops[f].size() < 3 || planeTakes(planar, provenance, f, j))
+        continue;
       if (!provenance.owns(f, j)) continue;
       bool exact = true;
       for (const int v : loops[f]) {

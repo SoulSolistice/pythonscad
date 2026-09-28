@@ -15,12 +15,14 @@
 
 #include <catch2/catch_all.hpp>
 #include <cmath>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Membership.h"
 #include "geometry/recognition/Representation.h"
 
@@ -383,6 +385,55 @@ TEST_CASE("a facet on two declared surfaces is the one its maker made it on", "[
   CHECK(reasons(told, 0).count(two) == 0);
   CHECK(reasons(told, 1).empty());  // nothing is asked of the surface the walls were not made on
   CHECK_FALSE(reasons(told, 0).empty());
+}
+
+TEST_CASE("a plane takes no facet identity gives to another surface", "[analytic][d0]")
+{
+  // A prism facet of the cylinder x^2 + y^2 = 100 between two rulings lies
+  // wholly on the plane x = 10 cos(d) as well - both at machine precision, as
+  // every chord facet does. Where identity is silent the plane takes it: a
+  // cap has every corner on the rim. Where identity says its maker made it on
+  // the cylinder, no plane takes it (checklist C9, universal): D0 is not
+  // overwritten by position.
+  const double d = 0.2;
+  std::vector<Vector3d> vertices{{10 * cos(d), -10 * sin(d), 0.0},
+                                 {10 * cos(d), 10 * sin(d), 0.0},
+                                 {10 * cos(d), 10 * sin(d), 5.0},
+                                 {10 * cos(d), -10 * sin(d), 5.0}};
+  std::vector<std::vector<int>> loops{{0, 1, 2, 3}};
+  std::vector<Vector3d> normals{{1.0, 0.0, 0.0}};
+  const std::vector<char> valid(1, 1), is_hole(1, 0);
+  Mesh mesh;
+  mesh.vertices = &vertices;
+  mesh.loops = &loops;
+  mesh.valid = &valid;
+  mesh.is_hole = &is_hole;
+  mesh.normals = &normals;
+  const recognition::FacetGraph graph(mesh);
+
+  std::vector<std::shared_ptr<Surface>> surfaces;
+  surfaces.push_back(std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10.0));
+  surfaces.push_back(std::make_shared<PlaneSurface>(Vector3d(10 * cos(d), 0, 0), Vector3d(1, 0, 0)));
+  REQUIRE(recognition::onExactly(surfaces[0].get(), vertices[0]));
+  REQUIRE(recognition::onExactly(surfaces[1].get(), vertices[0]));
+
+  const std::vector<int32_t> origin{7};
+  const std::map<int32_t, std::vector<std::size_t>> owned{{7, {0}}};
+  recognition::Provenance provenance;
+  provenance.face_origin = &origin;
+  provenance.owned = &owned;
+  provenance.declared = surfaces.size();
+
+  const std::vector<int32_t> unknown{recognition::Provenance::kUnknown};
+  provenance.face_surface = &unknown;
+  CHECK(recognition::d0Regions(graph, surfaces, surfaces.size(), provenance).empty());
+
+  const std::vector<int32_t> made_on_cylinder{0};
+  provenance.face_surface = &made_on_cylinder;
+  const auto regions = recognition::d0Regions(graph, surfaces, surfaces.size(), provenance);
+  REQUIRE(regions.size() == 1);
+  CHECK(regions[0].surface_index == 0);
+  CHECK(regions[0].facets == std::vector<std::size_t>{0});
 }
 
 TEST_CASE("a rim bordering one face per facet rejects the band, and says so", "[analytic][rims]")

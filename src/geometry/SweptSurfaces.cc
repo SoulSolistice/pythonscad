@@ -362,7 +362,10 @@ std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Re
   for (const auto& loop : profile.loops) {
     for (const ProfileEdge& edge : loop) {
       revolveVertex(edge.a, records);
-      if (edge.kind == EdgeKind::Line) revolveLine(edge, records);
+      // A line its maker declared. An unnamed edge is Line by default only, and
+      // a default declares nothing: it would put a plane under facets a maker
+      // made on something else (E6).
+      if (edge.declared && edge.kind == EdgeKind::Line) revolveLine(edge, records);
     }
   }
   for (std::size_t k = 0; k < profile.arcs.size(); k++) {
@@ -411,7 +414,7 @@ std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Ex
   extrudeCaps(map, out);
   for (const auto& loop : profile.loops) {
     for (const ProfileEdge& edge : loop) {
-      if (edge.kind == EdgeKind::Line) extrudeLine(edge, map, out);
+      if (edge.declared && edge.kind == EdgeKind::Line) extrudeLine(edge, map, out);  // see revolve
     }
   }
   return out;
@@ -426,7 +429,8 @@ std::vector<std::shared_ptr<Surface>> roofSurfaces(const Profile2d& profile, boo
     const std::size_t n = loop.size();
     for (std::size_t i = 0; i < n; i++) {
       const ProfileEdge& e = loop[i];
-      if (e.kind != EdgeKind::Line) continue;
+      // A line its maker declared - see revolve (E7).
+      if (!e.declared || e.kind != EdgeKind::Line) continue;
       const Vector2d d = e.b - e.a;
       if (d[0] == 0 && d[1] == 0) continue;
       // Over the edge: away from the material, which is on the edge's left, is
@@ -437,7 +441,7 @@ std::vector<std::shared_ptr<Surface>> roofSurfaces(const Profile2d& profile, boo
       // Over the corner this edge turns into: reflex where it turns right, away
       // from the material. Anchored one unit up, where its radius is one.
       const ProfileEdge& next = loop[(i + 1) % n];
-      if (!voronoi || next.kind != EdgeKind::Line) continue;
+      if (!voronoi || !next.declared || next.kind != EdgeKind::Line) continue;
       const Vector2d d2 = next.b - next.a;
       if (d[0] * d2[1] - d[1] * d2[0] >= 0) continue;
       addSurfaceUnique(out, std::make_shared<ConeSurface>(Vector3d(e.b[0], e.b[1], 1.), up, 1., 1.));

@@ -4619,6 +4619,39 @@ closed by `cfee50a03`), so an SVG writer could emit `A` and `C` path commands
 and a DXF writer `ARC` and `SPLINE` entities today. True curves in a projection
 of 3D geometry need this item and a projection.
 
+### 40. Identity is measured where it is minted, and records carry no evidence class
+
+**Opened 2026-09-28**, by the author's question "shouldn't a D0 never be
+overwritten?" - asked of a measure-compare in which two facets text() made on
+its Bezier patch stopped being D0 there. The cause was two rules the doctrine did
+not state, now checklist E7, E8 and C9 made universal:
+
+- **A record states its evidence (E7).** The sweep table declared a plane for
+  every edge classified Line, and Line is only an unnamed edge's default; the
+  plane then took those facets from the patch. Fixed where it arose - extrude,
+  revolve and the roof declare from a declared line only, and the hull of
+  revolution, which makes its profile's edges, now says so (it had not, and its
+  cone vanished under the fix: a maker that does not state its word). Audited:
+  every other record is a maker's, a file's, or fitted and labelled by its
+  index. **Open:** records carry no evidence class, so nothing enforces this in
+  general; and two derived records are unlabelled - an arc chord inferred from
+  its ends (E6's fallback) and `quadricOfPatch`'s cylinder or sphere, accepted by
+  a tolerance.
+- **Position never overrides identity (C9).** The D0 regions, the ledger's D0
+  column and ownership presence let a declared plane take any facet wholly on it,
+  before asking what its maker made it on. Now one rule, `recognition::planeTakes`,
+  in all three. **Open:** the arbiter's grant is still pass order.
+- **Identity is minted by the maker (E8) - open, not started.** Where a facet's
+  surface is minted (`ManifoldUtils::TriangleTagger`, and `facetedEnvelope`'s
+  `record_of`), it is measured: the one face-declaring record a triangle's
+  corners lie on, and nothing where two hold it - so a chord facet of a patch
+  that is also flat carries no identity, and only the absence of a spurious
+  record kept it D0. The generators know: the extruder builds each wall from one
+  edge, a primitive each face from one record. They should tag their triangles
+  where they make them, and the tagger become the fallback for geometry nobody
+  tagged. Belongs before existence steps 5 to 7, which read identity to place
+  cut corners.
+
 ### 32. The fixture sanity test does not look for `EXPORT-ERROR`
 
 `tests/stepexportsanitytest.py` never checks the exporter's own error lines;

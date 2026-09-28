@@ -82,7 +82,7 @@ void dumpLedger(const ReportInputs& in)
     auto d0_reason = [&](const Claim& c) -> std::string {
       if (c.surface_index >= surfaces.size() || surfaces[c.surface_index] == nullptr) return "fitted";
       if (!prov.owns(c.facet, c.surface_index)) return "maker does not own";
-      if (c.facet < planar.size() && planar[c.facet]) return "on a declared plane";
+      if (planeTakes(planar, prov, c.facet, c.surface_index)) return "on a declared plane";
       if (c.facet >= loops.size()) return "-";
       double worst = 0, bound = 0;
       bool exact = true;

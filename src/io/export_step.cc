@@ -263,6 +263,16 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         if (on_surface[j][v]) on.push_back(v);
       }
       if (bad || on.size() < 2) continue;
+      // A facet wholly on a declared plane is that plane's - a cap has every
+      // corner on the rim - unless identity says its maker made it on this
+      // surface: then no plane its corners also lie on takes it
+      // (recognition::planeTakes, the same rule on the merged mesh).
+      bool made_here = false;
+      if (t < ps.surface_tags.size() && ps.surface_tags[t] != 0) {
+        const auto& tags = ps.surfaces[j]->tags;
+        made_here = std::find(tags.begin(), tags.end(), ps.surface_tags[t]) != tags.end();
+      }
+      const bool plane_takes = on_declared_plane && !made_here;
 
       if (!cell_of[j].empty()) {
         // A grid says it outright: these corners are points the generator
@@ -281,13 +291,12 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
           }
         }
         if (!adjacent) continue;
-        if (on.size() == f.size() && !on_declared_plane) row_present[j] = 1;
+        if (on.size() == f.size() && !plane_takes) row_present[j] = 1;
       } else {
-        if (on.size() == f.size() && !on_declared_plane) row_present[j] = 1;
+        if (on.size() == f.size() && !plane_takes) row_present[j] = 1;
       }
-      // Counted for the report as presence is asked: a facet wholly on a
-      // declared plane is that plane's, whatever rim its corners are on.
-      if (on_declared_plane) continue;
+      // Counted for the report as presence is asked.
+      if (plane_takes) continue;
       if (on.size() == f.size()) row[j]++;
       else row_cut[j]++;
     }

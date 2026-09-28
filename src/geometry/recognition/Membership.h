@@ -39,6 +39,19 @@ class Surface;
 
 namespace recognition {
 
+/*! Whether a facet wholly on a declared plane (`planar`, from onDeclaredPlane)
+ * is thereby not a D0 member of `surface`: a cap has every corner on the rim,
+ * and is its plane's facet, not the wall's. Only where identity is silent -
+ * where it says the facet's maker made it on `surface`, the facet is
+ * `surface`'s, and a plane its corners also lie on takes nothing from it (D0
+ * is not overwritten by position). The one rule d0Regions, the ledger and the
+ * exporter's presence all ask. */
+inline bool planeTakes(const std::vector<char>& planar, const Provenance& provenance, std::size_t facet,
+                       std::size_t surface)
+{
+  return facet < planar.size() && planar[facet] != 0 && provenance.madeOn(facet, surface) != 1;
+}
+
 /*! One connected component of the D0 members of one declared surface. */
 struct Region {
   std::size_t surface_index = 0;
