@@ -19,15 +19,15 @@
  * **Declared where the maker said, measured where it did not.** The generator
  * knows what each edge is - `square()` makes lines, `circle()` chords of its arc
  * - and says so (EdgeIdentity.h), and identity carried through Clipper names each
- * edge of a boolean's or an offset's result by the edge it came from. That is
- * the answer wherever it exists. Where it does not - a producer that names
- * nothing, or an edge Clipper merged out of two - the edge's kind is recovered
- * from the records (Arc2d, Bezier2d) by asking where its ends lie: an arc at
- * machine precision, which is exact once Polygon2d::placeOnArcs has put the
- * points Clipper rounded back on it, and a Bezier by the bounding-box test it
- * had, which errs towards calling an edge curved and so declaring nothing. The
- * measurement cannot tell a D-shaft's flat, both ends on its circle, from a
- * chord; identity can.
+ * edge of a boolean's or an offset's result by the edge it came from - an edge
+ * Clipper merged out of two as well (Polygon2d::nameMergedEdges). That is the
+ * answer wherever it exists. Where it does not - a producer that names nothing -
+ * an arc is still recovered from its records by asking where the edge's ends
+ * lie, at machine precision, exact once Polygon2d::placeOnArcs has put the
+ * points Clipper rounded back on it. The measurement cannot tell a D-shaft's
+ * flat, both ends on its circle, from a chord; identity can. A Bezier is never
+ * recovered so since 2026-09-28: its one maker, text(), names every edge, and
+ * the bounding-box test that stood in for that named edges nobody made.
  */
 
 #include <vector>

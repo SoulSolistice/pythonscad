@@ -131,6 +131,14 @@ inline bool onPlane(const Vector3d& origin, const Vector3d& normal,
   return !ids.empty();
 }
 
+/*! Whether two points are one, at machine precision: a difference, 3; its
+ * norm, 6 - over |p| + |q|. A generator's point and the mesh vertex made from
+ * it are one point by this, whatever arithmetic carried each. */
+inline bool samePoint(const Vector3d& p, const Vector3d& q)
+{
+  return (p - q).norm() <= forwardError(9, p.norm() + q.norm());
+}
+
 /*! Whether `p` is on the line through `origin` along `dir`, at machine
  * precision: a normalisation, 9; a difference, a dot, a scale, a difference, a
  * norm, 20 - over |p| + |origin|. */

@@ -1046,15 +1046,11 @@ int ConeSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
 }
 
 namespace {
-/*! How close two points are before a GridSurface calls them one: the grid it
- *  indexes its points on, and the distance at which a point is on its seam. */
-constexpr double GRID_RESOLUTION = 1e-9;
-
-/*! The 1e-9 grid a GridSurface indexes its points on. */
-std::tuple<int64_t, int64_t, int64_t> gridKey(const Vector3d& pt)
+/*! The bucket of width `width` a GridSurface indexes a point in. */
+std::tuple<int64_t, int64_t, int64_t> gridKey(const Vector3d& pt, double width)
 {
-  const double res = GRID_RESOLUTION;
-  return {(int64_t)llround(pt[0] / res), (int64_t)llround(pt[1] / res), (int64_t)llround(pt[2] / res)};
+  return {(int64_t)llround(pt[0] / width), (int64_t)llround(pt[1] / width),
+          (int64_t)llround(pt[2] / width)};
 }
 }  // namespace
 
@@ -1233,8 +1229,24 @@ bool GridSurface::onSeam(double u, double v) const
   // Asked in space and not of v, because v is where a projection left it: a
   // corner on the seam is v = 0 and v = 1 at once, and `project` returns either,
   // or a few ulps off one, depending on which span's descent finished first.
+  // Two evaluations, each off by at most evaluationBound(), and the norm of
+  // their difference: at machine precision, the same point.
   const Vector3d at = evaluate(u, v);
-  return std::min((at - evaluate(u, 0.0)).norm(), (at - evaluate(u, 1.0)).norm()) <= GRID_RESOLUTION;
+  const double bound = 2 * evaluationBound() + recognition::forwardError(9, 2 * at.norm());
+  return std::min((at - evaluate(u, 0.0)).norm(), (at - evaluate(u, 1.0)).norm()) <= bound;
+}
+
+double GridSurface::evaluationBound() const
+{
+  // `evaluate` sums positive weights of one - the cubic basis in u, which is a
+  // partition of unity, and the linear blend in v - so its result is off by the
+  // rounding of the weights and the sums times the largest point combined. The
+  // basis: three levels of Cox-de Boor, 7 operations each (21); four products
+  // summed (7); the blend in v (4) - 32. The bilinear fallback is fewer.
+  double largest = 0;
+  for (const auto& p : poles) largest = std::max(largest, p.norm());
+  for (const auto& p : net) largest = std::max(largest, p.norm());
+  return recognition::forwardError(32, largest);
 }
 
 bool GridSurface::splineForm(int& degree_u, int& degree_v, int& rows_out, int& cols_out,
@@ -1482,19 +1494,22 @@ bool GridSurface::onSurface(const Vector3d& pt, double tol) const
   return (evaluate(u, v) - pt).norm() <= tol;
 }
 
-bool GridSurface::isDeclaredPoint(const Vector3d& pt) const
+int GridSurface::netIndex(const Vector3d& pt) const
 {
-  const auto key = gridKey(pt);
+  if (!(bucket > 0)) return -1;
+  const auto key = gridKey(pt, bucket);
   for (int64_t dx = -1; dx <= 1; dx++) {
     for (int64_t dy = -1; dy <= 1; dy++) {
       for (int64_t dz = -1; dz <= 1; dz++) {
-        if (lookup.count({std::get<0>(key) + dx, std::get<1>(key) + dy, std::get<2>(key) + dz})) {
-          return true;
+        const auto it =
+          lookup.find({std::get<0>(key) + dx, std::get<1>(key) + dy, std::get<2>(key) + dz});
+        if (it != lookup.end() && recognition::samePoint(net[std::size_t(it->second)], pt)) {
+          return it->second;
         }
       }
     }
   }
-  return false;
+  return -1;
 }
 
 std::shared_ptr<GridSurface> GridSurface::fromRows(const std::vector<std::vector<Vector3d>>& rows,
@@ -1550,7 +1565,14 @@ GridSurface::GridSurface(int rows, int cols, std::vector<Vector3d> net, bool clo
 void GridSurface::reindex()
 {
   lookup.clear();
-  for (std::size_t i = 0; i < net.size(); i++) lookup.emplace(gridKey(net[i]), int(i));
+  // As wide as two points one at machine precision can be apart at the net's
+  // size (recognition::samePoint); a point at the far end of the net is at
+  // most that from its net point in each coordinate, so a neighbour's bucket.
+  double largest = 0;
+  for (const auto& p : net) largest = std::max(largest, p.norm());
+  bucket = recognition::forwardError(9, 2 * largest);
+  if (!(bucket > 0)) return;
+  for (std::size_t i = 0; i < net.size(); i++) lookup.emplace(gridKey(net[i], bucket), int(i));
 }
 
 int GridSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)

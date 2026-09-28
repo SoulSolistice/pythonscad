@@ -71,6 +71,26 @@ TEST_CASE("Profile2d: an arc is asked at machine precision, not within a thresho
   CHECK(p.loops[0][2].kind == EdgeKind::Arc);
 }
 
+TEST_CASE("Profile2d: an unnamed edge is never a Bezier's chord by measurement", "[sweep-table][e6]")
+{
+  // Both ends inside the control box of a cubic whose one maker, text(), names
+  // every edge it makes: until 2026-09-28 the box made this edge the Bezier's
+  // chord. Nobody made it on the curve.
+  Bezier2d bez;
+  bez.degree = 3;
+  bez.ctrl[0] = Vector2d(0., 0.);
+  bez.ctrl[1] = Vector2d(1., 2.);
+  bez.ctrl[2] = Vector2d(2., 2.);
+  bez.ctrl[3] = Vector2d(3., 0.);
+  const VectorOfVector2d loop{{1., 0.5}, {2., 0.5}, {1.5, 1.}};
+  const Profile2d p = classifyProfile({loop}, {}, {bez});
+  REQUIRE(p.loops.size() == 1);
+  for (const auto& e : p.loops[0]) {
+    CHECK(e.kind == EdgeKind::Line);
+    CHECK(e.record == -1);
+  }
+}
+
 TEST_CASE("Profile2d: every edge is classified, the closing one included", "[sweep-table]")
 {
   const VectorOfVector2d triangle{{0., 0.}, {1., 0.}, {0., 1.}};

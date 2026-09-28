@@ -679,9 +679,14 @@ public:
 
   [[nodiscard]] double membershipTolerance() const { return std::max(band, 1e-7); }
 
-  /*! Whether `pt` is one of the points the generator emitted. Exact, by
-   * position - no projection, no tolerance to choose. */
-  [[nodiscard]] bool isDeclaredPoint(const Vector3d& pt) const;
+  /*! Whether `pt` is one of the points the generator emitted, at machine
+   * precision (recognition::samePoint) - no projection, no tolerance to
+   * choose. */
+  [[nodiscard]] bool isDeclaredPoint(const Vector3d& pt) const { return netIndex(pt) >= 0; }
+  /*! Which point of the net `pt` is, row major, or -1 where it is none: the
+   * cell of the generator's own net a mesh vertex stands at, asked by position
+   * with nothing to converge. */
+  [[nodiscard]] int netIndex(const Vector3d& pt) const;
   /*! The same surface `evaluate` describes, in the form a STEP file wants.
    *
    * `ctrl` is row major over `rows_out` x `cols_out`, and each direction gets
@@ -728,12 +733,15 @@ protected:
 protected:
   // What a closed form deriving from the grid renders itself with - see
   // SweepSurface::splineForm.
-  /*! Positions rounded to a grid, so membership is a lookup rather than a scan
-   * over every declared point for every vertex of the mesh. Rebuilt whenever
-   * the points move. 1e-9 is far below anything measured and far above one ulp
-   * at any plausible model size - the same reasoning as VertexSnapper in
-   * core/FilletNode.cc, which exists for the same kind of problem. */
+  /*! Positions bucketed, so membership is a lookup rather than a scan over
+   * every declared point for every vertex of the mesh. A bucket is as wide as
+   * two points one at machine precision can be apart at the net's size, so a
+   * point one with a net point is in its bucket or a neighbour, and is then
+   * asked exactly. Rebuilt whenever the points move. */
   void reindex();
+  /*! How far an evaluation of this surface can be off by its own rounding:
+   * the forward error of `evaluate` over the largest point it combines. */
+  [[nodiscard]] double evaluationBound() const;
   /*! How many spans the profile has across it. One more than the number of
    * columns has gaps between them when the profile is declared closed, because
    * the strip from the last column back to the first is part of the sweep. */
@@ -747,6 +755,7 @@ protected:
    * only the points it passes through. Runs on construction and after a move. */
   void buildSpline();
   std::map<std::tuple<int64_t, int64_t, int64_t>, int> lookup;
+  double bucket = 0;            // see reindex()
   std::vector<double> uknots;   // clamped, averaged; empty when rows < 4
   std::vector<Vector3d> poles;  // rows * cols, parallel to net
   double band = 0;              // see tessellationBand()

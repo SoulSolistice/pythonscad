@@ -24,6 +24,7 @@
 #include "geometry/Barcode1d.h"
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
+#include "geometry/recognition/Exact.h"
 #include "geometry/GeometryEvaluator.h"
 #include "utils/calc.h"
 #include "utils/degree_trig.h"
@@ -289,15 +290,22 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   // dropped facet leaves a hole, and a shared index leaves a fan.
   std::vector<int> canonical(vertices.size());
   for (std::size_t i = 0; i < vertices.size(); i++) canonical[i] = int(i);
+  //
+  // Which copies are one point is identity, not a key: the same profile point,
+  // exactly on the axis - a point of no radius and no pitch is multiplied by
+  // zero into every slice, so x and y are 0, not small - and one point at
+  // machine precision, which its heights are up to the rounding of cos^2 + sin^2
+  // (recognition::samePoint). Where the slices lift it (`v`), the copies are
+  // different points on the axis and stay apart.
   {
-    std::map<long long, int> first_on_axis;  // quantised height -> the index that keeps it
+    std::map<std::size_t, int> first_on_axis;  // profile point -> the index that keeps it
     for (std::size_t i = 0; i < vertices.size(); i++) {
       const Vector3d& p = vertices[i];
-      if (p[0] * p[0] + p[1] * p[1] > 1e-18) continue;
-      const long long key = llround(p[2] / 1e-9);
-      const auto it = first_on_axis.find(key);
-      if (it == first_on_axis.end()) first_on_axis.emplace(key, int(i));
-      else canonical[i] = it->second;
+      if (p[0] != 0 || p[1] != 0) continue;
+      const std::size_t profile_point = slice_stride > 0 ? i % slice_stride : i;
+      const auto it = first_on_axis.find(profile_point);
+      if (it == first_on_axis.end()) first_on_axis.emplace(profile_point, int(i));
+      else if (recognition::samePoint(vertices[std::size_t(it->second)], p)) canonical[i] = it->second;
     }
   }
 

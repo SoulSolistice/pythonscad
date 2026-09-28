@@ -279,6 +279,24 @@ TEST_CASE("a profile declared closed has a surface over its closing strip", "[su
   GridSurface open(rows, cols, net);
   GridSurface closed(rows, cols, net, true);
 
+  SECTION("a net point is found wherever it is carried, and a point beside it is not")
+  {
+    // Moved as a mesh vertex is, by another chain of the same arithmetic: the
+    // net point is still the net point, at machine precision. A point 1e-10 off
+    // is not - it was, under the 1e-9 buckets the net was indexed on until
+    // 2026-09-28.
+    Transform3d turn = Transform3d::Identity();
+    turn.rotate(Eigen::AngleAxisd(0.7, Vector3d(1, -2, 3).normalized()));
+    turn.pretranslate(Vector3d(40, -7, 12));
+    GridSurface moved(rows, cols, net, true);
+    REQUIRE(moved.transform(turn, Similarity::by(1.0)));
+    const int k = cols * (rows / 2) + 1;
+    const Vector3d carried = turn.linear() * net[std::size_t(k)] + turn.translation();
+    CHECK(moved.netIndex(carried) == k);
+    CHECK(moved.isDeclaredPoint(carried));
+    CHECK(moved.netIndex(carried + Vector3d(1e-10, 0, 0)) == -1);
+  }
+
   SECTION("the midpoint of the closing strip lies on the closed surface only")
   {
     std::vector<Vector3d> scratch;

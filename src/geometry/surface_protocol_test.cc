@@ -229,6 +229,11 @@ TEST_CASE("classifications: each asked in one place, at machine precision", "[su
   const Vector3d far = turn * Vector3d(1000, 0, 5), near = turn * Vector3d(1000, 0.01, 5);
   CHECK(recognition::onPlane(far, axis, near));
 
+  // one point reached by two chains of arithmetic, and a hair beside it
+  const Vector3d far_by_parts = turn.linear() * Vector3d(1000, 0, 5) + turn.translation();
+  CHECK(recognition::samePoint(far, far_by_parts));
+  CHECK_FALSE(recognition::samePoint(far, far + Vector3d(0, 1e-10, 0)));
+
   // directions at right angles, and a hair off them
   const Vector3d across = turn.linear() * Vector3d(1, 0, 0);
   CHECK(recognition::perpendicular(axis, across));

@@ -218,29 +218,13 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
     const Surface *s = ps.surfaces[j].get();
     const auto *grid = dynamic_cast<const GridSurface *>(s);
     if (grid != nullptr) {
-      // The same quantisation GridSurface::isDeclaredPoint uses, and the same
-      // neighbour probe, so a point on the boundary of a bucket still matches.
-      auto key = [](const Vector3d& p) {
-        return std::make_tuple(int64_t(llround(p[0] / 1e-9)), int64_t(llround(p[1] / 1e-9)),
-                               int64_t(llround(p[2] / 1e-9)));
-      };
-      std::map<std::tuple<int64_t, int64_t, int64_t>, int> where;
-      for (std::size_t i = 0; i < grid->net.size(); i++) where.emplace(key(grid->net[i]), int(i));
+      // The grid's own lookup, at machine precision (GridSurface::netIndex).
       cell_of[j].assign(ps.vertices.size(), {-1, -1});
       for (std::size_t v = 0; v < ps.vertices.size(); v++) {
-        const auto k = key(ps.vertices[v]);
-        for (int64_t dx = -1; dx <= 1 && cell_of[j][v].first < 0; dx++) {
-          for (int64_t dy = -1; dy <= 1 && cell_of[j][v].first < 0; dy++) {
-            for (int64_t dz = -1; dz <= 1 && cell_of[j][v].first < 0; dz++) {
-              const auto it =
-                where.find({std::get<0>(k) + dx, std::get<1>(k) + dy, std::get<2>(k) + dz});
-              if (it != where.end()) {
-                cell_of[j][v] = {it->second / grid->cols, it->second % grid->cols};
-                on_surface[j][v] = 1;
-              }
-            }
-          }
-        }
+        const int i = grid->netIndex(ps.vertices[v]);
+        if (i < 0) continue;
+        cell_of[j][v] = {i / grid->cols, i % grid->cols};
+        on_surface[j][v] = 1;
       }
       continue;
     }
