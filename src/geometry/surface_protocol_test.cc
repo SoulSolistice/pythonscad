@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Seam.h"
 
 namespace {
@@ -203,4 +204,45 @@ TEST_CASE("sameAs: one surface at machine precision, whichever record states it"
   CHECK(t.sameAs(TorusSurface(Vector3d(0, 0, 2), -z, 20, 3)));
   CHECK_FALSE(t.sameAs(TorusSurface(Vector3d(0, 0, 2), z, 20, 3 + 5e-10)));
   CHECK_FALSE(t.sameAs(SphereSurface(Vector3d(0, 0, 2), z, 20)));  // the kind first
+}
+
+TEST_CASE("classifications: each asked in one place, at machine precision", "[surface][identity]")
+{
+  // A rim of a turned cylinder: every point of it at one level along the turned
+  // axis, and a point 1e-9 above it not - the band pass asked this against an
+  // absolute 1e-5 until 2026-09-28.
+  Transform3d turn = Transform3d::Identity();
+  turn.rotate(Eigen::AngleAxisd(0.3, Vector3d(1, 2, 3).normalized()));
+  turn.pretranslate(Vector3d(40, -7, 12));
+  const Vector3d axis = turn.linear() * Vector3d(0, 0, 1);
+  std::vector<Vector3d> rim;
+  for (int i = 0; i < 32; i++) {
+    const double a = 2 * M_PI * i / 32;
+    rim.push_back(turn * Vector3d(10 * cos(a), 10 * sin(a), 5));
+  }
+  for (const Vector3d& v : rim) CHECK(recognition::onPlane(rim[0], axis, v));
+  CHECK_FALSE(recognition::onPlane(rim[0], axis, turn * Vector3d(10, 0, 5 + 1e-9)));
+
+  // Asked of the ends, not of the direction between them: a chord a hundredth
+  // long, a thousand out, is in the rim though its normalised direction is off
+  // by the rounding of both ends over that hundredth.
+  const Vector3d far = turn * Vector3d(1000, 0, 5), near = turn * Vector3d(1000, 0.01, 5);
+  CHECK(recognition::onPlane(far, axis, near));
+
+  // directions at right angles, and a hair off them
+  const Vector3d across = turn.linear() * Vector3d(1, 0, 0);
+  CHECK(recognition::perpendicular(axis, across));
+  CHECK_FALSE(recognition::perpendicular(axis, turn.linear() * Vector3d(1, 0, 1e-12)));
+  CHECK(recognition::parallel(axis, -axis));
+  CHECK_FALSE(recognition::parallel(axis, turn.linear() * Vector3d(1e-12, 0, 1)));
+
+  // a point on the turned axis line, and one off it
+  const Vector3d origin = turn * Vector3d(0, 0, 0);
+  CHECK(recognition::onLine(origin, axis, turn * Vector3d(0, 0, 37)));
+  CHECK_FALSE(recognition::onLine(origin, axis, turn * Vector3d(1e-10, 0, 37)));
+  CHECK(recognition::sameLine(origin, axis, turn * Vector3d(0, 0, 37), -axis));
+
+  // one plane anchored at two of its points, and one a hair above
+  CHECK(recognition::samePlane(rim[0], axis, rim[17], -axis));
+  CHECK_FALSE(recognition::samePlane(rim[0], axis, turn * Vector3d(0, 0, 5 + 1e-9), axis));
 }

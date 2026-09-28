@@ -50,6 +50,8 @@
  * membership is then a D4 question - the tessellation band - and is labelled so.
  */
 
+#include <cmath>
+
 #include "geometry/MachinePrecision.h"
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
@@ -70,6 +72,15 @@ inline bool onExactly(const Surface *s, const Vector3d& p)
   return residualOf(s, p).exact();
 }
 
+/* The classifications of directions, lines and planes - parallel,
+ * perpendicular, on a line, on a plane, one line, one plane - each asked in one
+ * place and at machine precision, so that a question has one answer wherever
+ * it is asked. Each is a membership question in the end: a segment
+ * perpendicular to a direction is its second end on the plane across that
+ * direction through its first; one parallel to it is its second end on the
+ * line. So the ends are asked, never the normalised difference, whose
+ * direction is off by the rounding of both ends over the length between them. */
+
 /*! Whether two directions are one, either sense, at machine precision: two
  * normalisations, 9 roundings each, and a cross product, 9 more, over unit
  * vectors. */
@@ -78,19 +89,61 @@ inline bool parallel(const Vector3d& dir_a, const Vector3d& dir_b)
   return dir_a.normalized().cross(dir_b.normalized()).norm() <= forwardError(27, 2.0);
 }
 
+/*! Whether two directions are at right angles, at machine precision: two
+ * normalisations and a dot, over unit vectors. */
+inline bool perpendicular(const Vector3d& dir_a, const Vector3d& dir_b)
+{
+  return fabs(dir_a.normalized().dot(dir_b.normalized())) <= forwardError(23, 2.0);
+}
+
+/*! How far `p` is from the plane through `origin` across `normal`, signed, and
+ * the bound on that figure: a normalisation, 9; a difference, 3; a dot, 5 - 17
+ * roundings over |p| + |origin|. The one plane residual; PlaneSurface states
+ * its own through it. */
+inline Residual planeResidual(const Vector3d& origin, const Vector3d& normal, const Vector3d& p)
+{
+  Residual out;
+  out.value = (p - origin).dot(normal.normalized());
+  out.bound = forwardError(17, p.norm() + origin.norm());
+  return out;
+}
+
+/*! Whether `p` is on the plane through `origin` across `normal`, at machine
+ * precision - and so whether two points are at one level along a direction. */
+inline bool onPlane(const Vector3d& origin, const Vector3d& normal, const Vector3d& p)
+{
+  const Residual r = planeResidual(origin, normal, p);
+  return fabs(r.value) <= r.bound;
+}
+
+/*! Whether `p` is on the line through `origin` along `dir`, at machine
+ * precision: a normalisation, 9; a difference, a dot, a scale, a difference, a
+ * norm, 20 - over |p| + |origin|. */
+inline bool onLine(const Vector3d& origin, const Vector3d& dir, const Vector3d& p)
+{
+  const Vector3d a = dir.normalized();
+  const Vector3d d = p - origin;
+  return (d - a * d.dot(a)).norm() <= forwardError(29, origin.norm() + p.norm());
+}
+
 /*! Whether two lines - each a point and a direction, as a declaration states
  * an axis - are one line, at machine precision: parallel, and the second's
- * point on the first line (a difference, a dot, a scale, a difference, a norm:
- * 20). Asked of two declarations, never of a measured axis: which declarations
- * share an axis is a fact of the model. */
+ * point on the first line. Asked of two declarations, never of a measured
+ * axis: which declarations share an axis is a fact of the model. */
 inline bool sameLine(const Vector3d& origin_a, const Vector3d& dir_a, const Vector3d& origin_b,
                      const Vector3d& dir_b)
 {
-  if (!parallel(dir_a, dir_b)) return false;
-  const Vector3d a = dir_a.normalized();
-  const Vector3d d = origin_b - origin_a;
-  const double scale = origin_a.norm() + origin_b.norm();
-  return (d - a * d.dot(a)).norm() <= forwardError(20, scale);
+  return parallel(dir_a, dir_b) && onLine(origin_a, dir_a, origin_b);
+}
+
+/*! Whether two planes - each a point and a normal - are one plane, at machine
+ * precision: parallel, and each one's point on the other. Not the point on it:
+ * two records anchored a metre apart on one plane are one plane. */
+inline bool samePlane(const Vector3d& origin_a, const Vector3d& normal_a, const Vector3d& origin_b,
+                      const Vector3d& normal_b)
+{
+  return parallel(normal_a, normal_b) && onPlane(origin_a, normal_a, origin_b) &&
+         onPlane(origin_b, normal_b, origin_a);
 }
 
 }  // namespace recognition

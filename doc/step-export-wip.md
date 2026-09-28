@@ -4264,7 +4264,8 @@ solids (`83af07497`); a hull of coaxial declared primitives is a declared solid
   2.6e-9 off where step-declare's model wrote it (`restoreGivenPoints`).
   What the pass still holds by measurement is structure, not membership: which
   vertices share a rim is `model_tol` along the axis, and a tilted trim's plane
-  is fitted - the model did not declare it.
+  is fitted - the model did not declare it. (Both answered at D0 on the exact
+  route since 2026-09-28 - see A below.)
 - ~~**Facets on two declared surfaces at once**~~ (C9) **Landed 2026-09-28.**
   step-cylinder-cross, the Steinmetz solid, has 120 facets per tier whose every
   corner lies on both cylinders. The band pass asks identity: a seed wholly on
@@ -4344,10 +4345,25 @@ literal tolerance in the exporter, recognition and the declaration paths
     `PromoteCurves`, `EmitPlanarFaces`) and 1e-6 (`CornersOnMeshPlanes`,
     `CornersKeepExact`). Each asks whether a point is on a declaration - what
     `onExactly` answers - and belongs with item 39's move, which relocates them.
-  - *The band pass's structure on the exact route.* Rulings parallel and chords
-    perpendicular to the declared axis at 1e-9, a tilted rim's plane refused
-    below 1e-3 of the axis, and `model_tol` (1e-5, set in export_step.cc and
-    read across the pipeline) grouping vertices into rims.
+  - ~~*The band pass's structure on the exact route.*~~ **Landed 2026-09-28.**
+    Rims are vertices at one level along the declared axis - each on the plane
+    across it through the seed's extreme corner, at machine precision
+    (`recognition::onPlane`) - and a chord is in a rim where its two *ends* are,
+    not where its normalised direction is perpendicular to 1e-9: that direction
+    is off by both ends' rounding over the chord's length. The rim route splits
+    its seed by structure, its two chords, and measures no level at all. A
+    tilted rim's plane is the declared plane holding every vertex of it where
+    the model declared one - a cube's side, another cylinder's cap - fitted only
+    where not, and refused only where it is along the axis at machine precision
+    (was below 1e-3). Radius guards ask whether there is a radius, not whether
+    it exceeds `model_tol`. Left, and in C: the measured route keeps
+    `model_tol` for its levels, since its axis is measured too; and the
+    rulings' 1e-9 still gates which seeds propose an axis on either route -
+    measured directions, before any declaration is known; the declaration then
+    decides. 0 differences over the corpus.
+    The classifications themselves - parallel, perpendicular, on a plane, on a
+    line, one line, one plane - are each asked in one place, `Exact.h`, and
+    PlaneSurface's residual and `sameAs` go through them.
   - *Keys.* A declared grid's net at 1e-9 (`GRID_RESOLUTION`, and export_step's
     copy of the key); rotate_extrude welding on-axis vertices by a 1e-9 key,
     where the points it welds are exactly 0 off the axis by construction.

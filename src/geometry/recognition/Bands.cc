@@ -323,13 +323,6 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
     return Vector3d(0, 0, 0);
   };
 
-  auto perpendicular_to = [](const std::vector<Vector3d>& chords, const Vector3d& axis) {
-    for (const Vector3d& c : chords) {
-      if (fabs(c.dot(axis)) >= 1e-9) return false;
-    }
-    return true;
-  };
-
   // Declarations this pass read in order to identify something. Recorded where
   // the match is made rather than derived afterwards: which records were
   // *consulted* is not recoverable from the claim, because a claim names one
@@ -543,23 +536,17 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
           if (dynamic_cast<const CylinderSurface *>(s) != nullptr) exact.between = s;
           named = whole[0];
         } else {
-          // The rim route: the seed's corners at its two levels along the axis
-          // the rulings gave - structure, which ruling is which - each on a
-          // declared cylinder, the two about one line.
-          double seed_lo = axis.dot(vertices[seed_loop[0]]), seed_hi = seed_lo;
-          for (const int v : seed_loop) {
-            seed_lo = std::min(seed_lo, axis.dot(vertices[v]));
-            seed_hi = std::max(seed_hi, axis.dot(vertices[v]));
+          // The rim route: the seed's two chords - structure, the edges the
+          // walk did not cross - each on a declared cylinder, the two about
+          // one line. Which chord is near is the sense of a ruling along the
+          // axis the rulings gave; no level is measured.
+          const int r = entry.at(seed);
+          std::vector<int> near_corners{seed_loop[r], seed_loop[(r + 3) % 4]};
+          std::vector<int> far_corners{seed_loop[(r + 1) % 4], seed_loop[(r + 2) % 4]};
+          if ((vertices[seed_loop[(r + 1) % 4]] - vertices[seed_loop[r]]).dot(axis) < 0) {
+            std::swap(near_corners, far_corners);
           }
-          std::vector<int> near_corners, far_corners;
-          bool two_levels = seed_hi - seed_lo >= model_tol;
-          for (const int v : seed_loop) {
-            const double t = axis.dot(vertices[v]);
-            if (fabs(t - seed_lo) < model_tol) near_corners.push_back(v);
-            else if (fabs(t - seed_hi) < model_tol) far_corners.push_back(v);
-            else two_levels = false;
-          }
-          if (two_levels) {
+          {
             const std::vector<std::size_t> near_holders = holders(near_corners, false, true);
             const std::vector<std::size_t> far_holders = holders(far_corners, false, true);
             if (near_holders.size() > 1 || far_holders.size() > 1) {
@@ -597,20 +584,30 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         }
       }
 
+      // Whether vertex `b` is at vertex `a`'s level along the axis. On the D0
+      // route the axis is the declaration's, and the question is whether `b`
+      // is on the plane across it through `a`, at machine precision
+      // (recognition/Exact.h). On the measured route the axis is measured too,
+      // and so is the answer: model_tol, D3, until that route has a residual
+      // of its own (item 38, C).
+      auto same_level = [&](int a, int b) {
+        if (exact.on) return recognition::onPlane(vertices[a], axis, vertices[b]);
+        return fabs(axis.dot(vertices[b]) - axis.dot(vertices[a])) < model_tol;
+      };
+
       if (exact.on) {
         // The levels are the seed's own; a vertex at neither is admitted only
         // where the record is a cylinder, which holds it at any height.
-        double probe_lo = axis.dot(vertices[loops[seed][0]]), probe_hi = probe_lo;
+        int probe_lo = loops[seed][0], probe_hi = probe_lo;
         for (const int v : loops[seed]) {
-          probe_lo = std::min(probe_lo, axis.dot(vertices[v]));
-          probe_hi = std::max(probe_hi, axis.dot(vertices[v]));
+          if (axis.dot(vertices[v]) < axis.dot(vertices[probe_lo])) probe_lo = v;
+          if (axis.dot(vertices[v]) > axis.dot(vertices[probe_hi])) probe_hi = v;
         }
         const OnSurface on_surface = [&](std::size_t f) {
           for (const int v : loops[f]) {
-            const double t = axis.dot(vertices[v]);
-            const Surface *s = fabs(t - probe_lo) < model_tol
+            const Surface *s = same_level(probe_lo, v)
                                  ? exact.at_lo
-                                 : (fabs(t - probe_hi) < model_tol ? exact.at_hi : exact.between);
+                                 : (same_level(probe_hi, v) ? exact.at_hi : exact.between);
             if (s == nullptr || !recognition::onExactly(s, vertices[v])) return false;
           }
           // and a facet identity gives to another surface is that surface's,
@@ -662,7 +659,7 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
           probe_r1 /= double(probe_top.size());
         }
         const double probe_scale = std::max(probe_r0, probe_r1);
-        if (probe_scale < model_tol) continue;
+        if (!(probe_scale > 0)) continue;
 
         // On a cylinder a vertex which is on the surface is on it at any
         // height, so a vertex between the probe's two rims is admitted rather
@@ -714,20 +711,21 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         }
       };
       measure_along();
-      double lo = along.begin()->second, hi = lo;
+      int v_lo = along.begin()->first, v_hi = v_lo;
       for (const auto& kv : along) {
-        lo = std::min(lo, kv.second);
-        hi = std::max(hi, kv.second);
+        if (kv.second < along[v_lo]) v_lo = kv.first;
+        if (kv.second > along[v_hi]) v_hi = kv.first;
       }
-      if (hi - lo < model_tol) {
+      double lo = along[v_lo], hi = along[v_hi];
+      if (same_level(v_lo, v_hi)) {
         decline("the walk has no height along the axis");
         continue;
       }
 
-      auto count_at = [&](double level) {
+      auto count_at = [&](int level) {
         std::size_t n = 0;
         for (const auto& kv : along) {
-          if (fabs(kv.second - level) < model_tol) n++;
+          if (same_level(level, kv.first)) n++;
         }
         return n;
       };
@@ -738,23 +736,26 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       // the *top*, so a band which came out the other way up is turned over.
       // The axis sign is arbitrary - axis_from only normalises it - so this
       // costs nothing but re-measuring.
-      if (count_at(lo) < walls.size() && count_at(hi) > count_at(lo)) {
+      if (count_at(v_lo) < walls.size() && count_at(v_hi) > count_at(v_lo)) {
         axis = -axis;
         measure_along();
-        const double was_lo = lo;
-        lo = -hi;
-        hi = -was_lo;
+        std::swap(v_lo, v_hi);
+        lo = along[v_lo];
+        hi = along[v_hi];
       }
 
       std::vector<int> bottom_set, top_set;
       bool tilted = false;
       for (const auto& kv : along) {
-        if (fabs(kv.second - lo) < model_tol) bottom_set.push_back(kv.first);
-        else if (fabs(kv.second - hi) < model_tol) top_set.push_back(kv.first);
+        if (same_level(v_lo, kv.first)) bottom_set.push_back(kv.first);
+        else if (same_level(v_hi, kv.first)) top_set.push_back(kv.first);
         else tilted = true;
       }
 
       Vector3d top_normal(0, 0, 0);
+      // The plane of a tilted far rim, where the model declared one: a
+      // declared plane holding every vertex of the rim at machine precision.
+      const Surface *cut = nullptr;
       if (tilted) {
         // Everything off the flat rim has to lie on one plane, and that plane
         // has to cross the axis rather than run along it: a plane containing
@@ -762,14 +763,32 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         // ellipse, and there is no rim there to write.
         top_set.clear();
         for (const auto& kv : along) {
-          if (fabs(kv.second - lo) >= model_tol) top_set.push_back(kv.first);
+          if (!same_level(v_lo, kv.first)) top_set.push_back(kv.first);
         }
-        if (!fitPlane(vertices, top_set, model_tol, top_normal)) {
+        // The declaration first (checklist C2): the trim is a declared face
+        // wherever the model cut the band with one - a cube's side, another
+        // cylinder's cap. Distinct records that are one plane are one answer.
+        for (std::size_t i = 0; i < first_fit; i++) {
+          const auto *plane = dynamic_cast<const PlaneSurface *>(surfaces[i].get());
+          if (plane == nullptr) continue;
+          bool holds = true;
+          for (const int v : top_set) holds = holds && recognition::onExactly(plane, vertices[v]);
+          if (!holds) continue;
+          if (cut == nullptr) cut = plane;
+          else if (!cut->sameAs(*plane)) {
+            cut = nullptr;
+            break;
+          }
+        }
+        if (cut != nullptr) {
+          top_normal = cut->normdir.normalized();
+        } else if (!fitPlane(vertices, top_set, model_tol, top_normal)) {
           decline("the far rim is neither at one height nor on one plane - no ring to write");
           continue;
         }
         if (top_normal.dot(axis) < 0) top_normal = -top_normal;
-        if (top_normal.dot(axis) < 1e-3) {
+        // Any plane crossing the axis at all cuts an ellipse.
+        if (recognition::perpendicular(top_normal, axis)) {
           decline("the far rim's plane runs along the axis - no ring to write");
           continue;
         }
@@ -785,20 +804,29 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       // perpendicular to anything. Those are already known to be coplanar, so
       // what this has left to catch there is a chord running between the two
       // rims - a ruling the walk mistook for a chord, which is neither.
-      if (!tilted) {
-        if (!perpendicular_to(chords_of(walls, entry), axis)) {
-          decline("a chord runs between the rims - the walls are not one ring");
-          continue;
+      //
+      // A chord is in a rim where its two ends are at one level, or, tilted,
+      // both on the cut plane - asked of the ends at machine precision where
+      // the axis or the plane is declared, of the direction where measured.
+      auto in_a_rim = [&](int a, int b) {
+        const Vector3d dir = vertices[b] - vertices[a];
+        const bool none = !(dir.norm() > 1e-12);
+        if (exact.on ? same_level(a, b) : (none || fabs(dir.normalized().dot(axis)) < 1e-9)) return true;
+        if (!tilted) return false;
+        if (cut != nullptr)
+          return recognition::onExactly(cut, vertices[a]) && recognition::onExactly(cut, vertices[b]);
+        return none || fabs(dir.normalized().dot(top_normal)) < 1e-9;
+      };
+      bool chords_ok = true;
+      for (const std::size_t f : walls) {
+        const int r = entry.at(f);
+        for (const int c : {(r + 1) % 4, (r + 3) % 4}) {
+          chords_ok = chords_ok && in_a_rim(loops[f][c], loops[f][(c + 1) % 4]);
         }
-      } else {
-        bool chords_ok = true;
-        for (const Vector3d& c : chords_of(walls, entry)) {
-          if (fabs(c.dot(axis)) >= 1e-9 && fabs(c.dot(top_normal)) >= 1e-9) chords_ok = false;
-        }
-        if (!chords_ok) {
-          decline("a chord runs between the rims - the walls are not one ring");
-          continue;
-        }
+      }
+      if (!chords_ok) {
+        decline("a chord runs between the rims - the walls are not one ring");
+        continue;
       }
 
       // A band which closes on itself has one rim vertex per facet; one which
@@ -838,12 +866,14 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       if (tilted) {
         // Where the axis pierces the cut plane. That is the ellipse's centre,
         // and it is not the centroid of the rim's vertices unless the
-        // tessellation happens to be symmetric about it. The cut plane is a
-        // trim the model did not declare, so it is fitted on either route.
-        Vector3d centroid(0, 0, 0);
-        for (const int v : top_set) centroid += vertices[v];
-        centroid /= double(top_set.size());
-        top_centre = base + axis * (top_normal.dot(centroid - base) / top_normal.dot(axis));
+        // tessellation happens to be symmetric about it. The plane is the
+        // declared one where the model declared it, and fitted only where not.
+        Vector3d on_cut = cut != nullptr ? cut->refpt : Vector3d(0, 0, 0);
+        if (cut == nullptr) {
+          for (const int v : top_set) on_cut += vertices[v];
+          on_cut /= double(top_set.size());
+        }
+        top_centre = base + axis * (top_normal.dot(on_cut - base) / top_normal.dot(axis));
       } else if (exact.on) {
         top_centre = base + axis * (hi - lo);
       } else {
@@ -875,7 +905,7 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         r_top /= double(top_set.size());
       }
       const double scale = std::max(r_bottom, r_top);
-      if (scale < model_tol) continue;
+      if (!(scale > 0)) continue;
       if (!exact.on) {
         double dev = 0;
         for (const int v : bottom_set) {

@@ -258,8 +258,7 @@ bool PlaneSurface::sameAs(const Surface& other) const
   // plane are one surface. Parallel, and each one's point on the other.
   if (typeid(*this) != typeid(other)) return false;
   const auto& o = static_cast<const PlaneSurface&>(other);
-  return recognition::parallel(normdir, o.normdir) && residual(o.refpt).exact() &&
-         o.residual(refpt).exact();
+  return recognition::samePlane(refpt, normdir, o.refpt, o.normdir);
 }
 
 int PlaneSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)
@@ -2130,11 +2129,7 @@ Residual SphereSurface::signedResidual(const Vector3d& p) const
 
 Residual PlaneSurface::signedResidual(const Vector3d& p) const
 {
-  // normal: 9; rel: 3; dot: 5 - the distance along the normal.
-  Residual out;
-  out.value = (p - refpt).dot(normdir.normalized());
-  out.bound = forwardError(17, p.norm() + refpt.norm());
-  return out;
+  return recognition::planeResidual(refpt, normdir, p);
 }
 
 Residual TorusSurface::signedResidual(const Vector3d& p) const
