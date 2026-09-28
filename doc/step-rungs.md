@@ -327,7 +327,7 @@ two reports the channel working correctly as a list of defects:
 | fate | meaning |
 | --- | --- |
 | **written** | a face stands on it |
-| **evidence** | something read it to identify a surface and no face stands on it. `hull()` of two coaxial cylinders declares the two *cylinders* and nothing declares the cone between them, so the band pass matches **both rims**; those two have done their job and will never be a face |
+| **evidence** | something read it to identify a surface and no face stands on it. `hull()` of two coaxial cylinders the hull-of-revolution rule cannot state declares the two *cylinders* and nothing declares the cone between them, so the band pass matches **both rims**; those two have done their job and will never be a face. A declared cone needs no witness since 2026-09-28 - its own record holds every corner - so a cone primitive's rim cylinders count as *no mesh left* |
 | **no mesh left** | nothing matched it because the booleans took the geometry away. `step-bored-cylinder` declares the bore's two end discs and `difference()` consumes them - nothing to write and nothing to explain. Decided by **provenance**, which is identity: is any facet of the mesh from a maker that owns this surface |
 | **unexplained** | mesh on it, no face on it, nothing read it. *That* one is the bug report |
 

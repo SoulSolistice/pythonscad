@@ -884,13 +884,14 @@ What each pass records that it did not before:
 
 | pass | newly recorded |
 | --- | --- |
-| band | a walk confined to a declared surface and then refused **for want of a ring shape** - named from the probe at the same 1e-7 its own match uses, recorded once per (facet, surface) and only where no band claim exists |
+| band | a walk confined to a declared surface and then refused **for want of a ring shape** - named from the seed's corners on the declaration at machine precision (a relative 1e-7 of fitted rims until 2026-09-28), recorded once per (facet, surface) and only where no band claim exists |
 | Bezier | held facets are now examined, not skipped; patches it could not sheet; patches the writer could not bound |
 | grid | its 4x-median refusal; every patch the writer does not write, with why (seam, awaiting the approximation flag) |
 | quadric | its three-facet floors, its span rule, `worst > band`, a seam-split piece too small, dead patches, and the exact tier's "half a surface" refusal |
 
 **Evidence classes, stated honestly.** A band's wall is D0 (every corner on the
-declared surface to 1e-7, rims matched to 1e-7). A band's cap is D4 (absorbed
+declared surface at machine precision, and its ring the record's - until
+2026-09-28 corners and rims to a relative 1e-7). A band's cap is D4 (absorbed
 because its gap is under one ring step). A declared sweep or Bezier is D1. **A
 quadric face is D4 in both tiers**: `OnQuadric::covers` holds corners to
 `min(bandOf(f), max_off)` and the interior to 1.25x the facet's sagitta, so the

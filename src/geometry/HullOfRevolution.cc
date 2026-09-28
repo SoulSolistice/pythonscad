@@ -29,15 +29,10 @@ struct Axis {
   Vector3d origin{0, 0, 0}, dir{0, 0, 1};
 };
 
-/*! Whether two axes are one line, at machine precision: parallel (two
- * normalisations, 9 each, and a cross, 9 more) and the second's point on the
- * first line (a difference, a dot, a scale, a difference, a norm: 20). */
+/*! Whether two axes are one line, at machine precision - recognition::sameLine. */
 bool sameLine(const Axis& a, const Axis& b)
 {
-  if (a.dir.cross(b.dir).norm() > forwardError(27, 2.0)) return false;
-  const Vector3d d = b.origin - a.origin;
-  const double scale = a.origin.norm() + b.origin.norm();
-  return (d - a.dir * d.dot(a.dir)).norm() <= forwardError(20, scale);
+  return recognition::sameLine(a.origin, a.dir, b.origin, b.dir);
 }
 
 /*! An operand's profile, from its face declarations alone: exactly one lateral

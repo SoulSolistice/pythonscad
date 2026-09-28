@@ -284,6 +284,45 @@ TEST_CASE("a wrongly declared radius leaves the wall faceted", "[analytic][inten
   CHECK(consumedCount(res) == 0);
 }
 
+TEST_CASE("a declaration a hair off the mesh is not the mesh's surface", "[analytic][intent][d0]")
+{
+  // D0 is the declared points against the declaration at machine precision,
+  // and nothing looser. Until 2026-09-28 the band fitted its rims and matched
+  // them to a declaration at a relative 1e-7, so a record one part in 1e9 off
+  // was named as the surface the wall is on - a measurement settling what only
+  // the model's statement may.
+  const FacetedCylinder cyl(8, 10.0, 5.0);
+
+  const Result res =
+    recogniseSurfacesOfRevolution(cyl.mesh(), declaredCylinder(10.0 * (1 + 1e-9)), 1e-6);
+
+  CHECK(res.bands.empty());
+  CHECK(consumedCount(res) == 0);
+}
+
+TEST_CASE("a band on a declaration writes the declaration's ring, not a fitted one", "[analytic][d0]")
+{
+  // Once the seed is on the record, the ring's axis, centre and radius are the
+  // record's: a D0 claim settled on the closed description. The fit it
+  // replaces - a centre from a least-squares circle, a radius averaged over the
+  // rim - lands within rounding of these and not on them.
+  for (const int fn : {5, 7, 9, 13}) {
+    const double r = 10.3, h = 4.1;
+    const FacetedCylinder cyl(fn, r, h);
+    const auto declared = declaredCylinder(r);
+    const Result res = recogniseSurfacesOfRevolution(cyl.mesh(), declared, 1e-6);
+
+    CAPTURE(fn);
+    REQUIRE(res.bands.size() == 1);
+    const Band& band = res.bands[0];
+    REQUIRE(band.alive);
+    CHECK(band.r_bottom == r);
+    CHECK(band.r_top == r);
+    CHECK(band.axis == Vector3d(0, 0, 1));
+    CHECK(band.base == Vector3d(0, 0, 0));
+  }
+}
+
 TEST_CASE("a rim bordering one face per facet rejects the band, and says so", "[analytic][rims]")
 {
   // The topology gate, which is where the losses are: the bayonet lid had 11

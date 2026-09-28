@@ -30,18 +30,21 @@
  * census of all 106 exports shows it decided nothing there.
  *
  * Asked here by the quadric pass, by export_step.cc's `runsThrough` (ownership
- * and presence) and by the band pass's sphere and torus zones. The first export
+ * and presence), by the band pass's sphere and torus zones, and since
+ * 2026-09-28 by the band pass itself: a band names a declared cylinder or cone
+ * only by its seed's corners on it, walks only onto facets whose corners are on
+ * it, and takes its ring from the record rather than from circles fitted to the
+ * mesh. The first export
  * it was not neutral on was step-rounded-profile, whose four tori became 32
  * cones: offset()'s points came off Clipper's 2^-27 grid, half a cell off the
  * arcs they were computed on, and the relative 1e-7 had hidden it. Fixed at the
  * origin - Polygon2d::placeOnArcs, after the offset and after every 2D boolean -
  * and asserted by step-rounded-profile-notched.
  *
- * Not yet asked here: the band pass still compares an axis and a radius it
- * measured from the mesh against the declaration, at a relative 1e-7, where the
- * D0 question is the generator's points against the declaration itself; a
- * declared grid still matches its net through a 1e-9 quantisation; and a Bezier
- * patch, D1, keeps its projection's tolerance.
+ * Not yet asked here: a declared grid still matches its net through a 1e-9
+ * quantisation, and a Bezier patch, D1, keeps its projection's tolerance. The
+ * band pass keeps a relative 1e-7 for the approximation's *fits* alone, which
+ * are measurements of the mesh already and are labelled D3.
  *
  * Anything that fails this is not on the surface at D0, however close. Its
  * membership is then a D4 question - the tessellation band - and is labelled so.
@@ -65,6 +68,22 @@ inline Residual residualOf(const Surface *s, const Vector3d& p)
 inline bool onExactly(const Surface *s, const Vector3d& p)
 {
   return residualOf(s, p).exact();
+}
+
+/*! Whether two lines - each a point and a direction, as a declaration states
+ * an axis - are one line, at machine precision: parallel (two normalisations,
+ * 9 each, and a cross, 9 more) and the second's point on the first line (a
+ * difference, a dot, a scale, a difference, a norm: 20). Asked of two
+ * declarations, never of a measured axis: which declarations share an axis is
+ * a fact of the model. */
+inline bool sameLine(const Vector3d& origin_a, const Vector3d& dir_a, const Vector3d& origin_b,
+                     const Vector3d& dir_b)
+{
+  const Vector3d a = dir_a.normalized(), b = dir_b.normalized();
+  if (a.cross(b).norm() > forwardError(27, 2.0)) return false;
+  const Vector3d d = origin_b - origin_a;
+  const double scale = origin_a.norm() + origin_b.norm();
+  return (d - a * d.dot(a)).norm() <= forwardError(20, scale);
 }
 
 }  // namespace recognition

@@ -4246,12 +4246,34 @@ solids (`83af07497`); a hull of coaxial declared primitives is a declared solid
   unused** - though `polyhedron()` now declares them exact (`faceted`). 154 of
   lid10's corners have one surface to meet. Needs "made by a faceted generator"
   carried per facet: a reserved tag, not a record per face.
-- **Band matching at 1e-7** (`Bands.cc`: `declared_cylinder`, `declared_cone`,
-  and the walk's own admission at 1e-7 of the probe scale): measured band
-  parameters compared with the records - C2, and the band half of item 36. Not
-  a swap: a frustum is named from its two rim cylinders, which are evidence and
-  hold no facet, so "every rim vertex exactly on the record" is the test only
-  for the face record, and the walk's admission has to become exact membership.
+- ~~**Band matching at 1e-7**~~ **Landed 2026-09-28.** A band names a declared
+  cylinder or cone only by its seed's corners on it at machine precision, walks
+  only onto facets whose corners are on the record their level names, and takes
+  its axis, centre and radii from the record - D0 settled on the closed
+  description, never on a circle fitted to the mesh. Two coaxial rim cylinders
+  still identify a cone nobody declared (a hull the hull-of-revolution rule
+  cannot state, a sphere's ring bands), each rim's vertices exactly on its
+  cylinder. The relative 1e-7 stays for the approximation's fits alone, which
+  are measurements already and labelled D3. Measured on all 120 exports against
+  the Clipper fix before it: honoured claims identical (31254, sorted
+  checksum), no entity moved, 630 more declines recorded - 480 below, 80 "far
+  rim", 70 "too short" that the fitted probe used to leave unnamed; a declared
+  cone's rim cylinders are no longer read as witnesses, so the census counts
+  them "no mesh left". WILL_FAIL figures unchanged. It took one upstream fix
+  first: every 2D polygon passed through Clipper came back rounded to its grid,
+  2.6e-9 off where step-declare's model wrote it (`restoreGivenPoints`).
+  What the pass still holds by measurement is structure, not membership: which
+  vertices share a rim is `model_tol` along the axis, and a tilted trim's plane
+  is fitted - the model did not declare it.
+- **Facets on two declared surfaces at once** (C9): step-cylinder-cross, the
+  Steinmetz solid, has 120 facets per tier whose every corner lies on both
+  cylinders. The band pass declines them now rather than take the first record;
+  the quadric face holds them, by identity. Corners cannot decide these; only
+  identity or a declaration can, and a band ought to ask identity.
+- **An unnamed 2D edge is classified by measurement** (`Profile2d.cc`,
+  `inControlBox`, 1e-9 slack): E6 says an edge's kind is its maker's word. The
+  text fixture's spurious plane was this rule meeting the grid; the grid is
+  fixed, the rule stands wherever a maker names nothing.
 - **Two operands on one point** leave existence undecided - coinciding faces,
   and since `83af07497` the plane a slice's two halves share, which is no face
   at all. Needs the half-space each operand keeps there.

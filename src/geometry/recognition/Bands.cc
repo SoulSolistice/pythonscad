@@ -176,13 +176,22 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
 
   auto edge_key = [](int a, int b) { return std::make_pair(std::min(a, b), std::max(a, b)); };
 
-  // Did the model declare a cylinder of this radius about this axis?
-  // `which` takes the index of the record that matched, so a caller can tell a
-  // surface the model declared from one the approximation fitted - they arrive
-  // in one list, declarations first. See Band::on_declared.
-  auto declared_cylinder = [&](double radius, const Vector3d& axis, const Vector3d& base,
-                               std::size_t *which = nullptr) {
-    for (std::size_t i = 0; i < surfaces.size(); i++) {
+  // The records past the declarations are the approximation's fits, and only
+  // they are ever matched by measurement. A declaration is named by the one
+  // thing that settles D0 - the facet's corners on it at machine precision,
+  // `exact_record` below - and never by a radius and an axis measured off the
+  // mesh and compared with it: that would settle the model's own statement on
+  // a measurement (doc/step-design-checklist.md, C2 and C4).
+  const std::size_t first_fit = std::min(declared_count, surfaces.size());
+
+  // Did the approximation fit a cylinder of this radius about this axis?
+  // `which` takes the index of the record that matched. A fit is itself a
+  // measurement of the mesh, and is matched by one - a relative 1e-7, the
+  // threshold every band match used before 2026-09-28, kept for fits alone.
+  // Its claims are D3 and say so.
+  auto fitted_cylinder = [&](double radius, const Vector3d& axis, const Vector3d& base,
+                             std::size_t *which = nullptr) {
+    for (std::size_t i = first_fit; i < surfaces.size(); i++) {
       const auto *cyl = dynamic_cast<const CylinderSurface *>(surfaces[i].get());
       if (cyl == nullptr) continue;
       if (fabs(cyl->r - radius) > 1e-7 * radius) continue;
@@ -194,16 +203,15 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
     return false;
   };
 
-  // Did the model declare a cone which passes through both of these rims?
+  // Did the approximation fit a cone which passes through both of these rims?
   //
   // Asked of the two rims rather than of an apex and an angle, because that is
   // what the band has measured and it is well conditioned however shallow the
-  // taper. A cone that agrees with both rims of an exactly fitted frustum is
-  // the frustum, so nothing further is checked.
-  auto declared_cone = [&](double r_bottom, double r_top, const Vector3d& axis, const Vector3d& base,
-                           double height, std::size_t *which = nullptr) {
+  // taper. Fitted records only - see `first_fit`.
+  auto fitted_cone = [&](double r_bottom, double r_top, const Vector3d& axis, const Vector3d& base,
+                         double height, std::size_t *which = nullptr) {
     const double scale = std::max(std::max(r_bottom, r_top), 1e-9);
-    for (std::size_t i = 0; i < surfaces.size(); i++) {
+    for (std::size_t i = first_fit; i < surfaces.size(); i++) {
       const auto& surface = surfaces[i];
       const auto *cone = dynamic_cast<const ConeSurface *>(surface.get());
       if (cone == nullptr) continue;
@@ -378,10 +386,10 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
   // it, and one seed's refusal is not a claim when another seed's band took it.
   //
   // Walls the pass already holds are not re-walked: every earlier band here is
-  // a band on a surface its walls lie on at 1e-7, and a quad lies on one
-  // declared quadric at that precision, so the only other claim such a walk
-  // could name is the same surface. Examining held facets is the later passes'
-  // job, and they do.
+  // a band on a surface its walls lie on - exactly, for a declaration - and a
+  // quad wholly on two declared surfaces that are not one is declined, so the
+  // only other claim such a walk could name is the same surface. Examining
+  // held facets is the later passes' job, and they do.
   std::map<std::pair<std::size_t, std::size_t>, const char *> declined;
 
   for (std::size_t seed = 0; seed < face_cnt; seed++) {
@@ -431,21 +439,171 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       if (axis.norm() < 0.5) axis = axis_from(chords_of(near, entry));
       if (axis.norm() < 0.5) continue;
 
-      // Which declared surface the confined walk is on, once there is one to
-      // name - see `declined` above. Asked with the same 1e-7 equality against
-      // a declaration the match further down uses, of the probe's rims; the
-      // walk admits a facet only if every corner is on the probe surface to
-      // 1e-7, so this is a statement about declared points, not a fit.
+      // Which surface the confined walk is on, once there is one to name - see
+      // `declined` above.
       std::size_t named = std::size_t(-1);
       auto decline = [&](const char *why) {
         if (named == std::size_t(-1)) return;
         for (const std::size_t f : walls) declined.emplace(std::make_pair(f, named), why);
       };
 
-      // Fit the surface from the seed and its first two neighbours - four
-      // vertices on each rim, which is enough - and walk again, this time
-      // admitting only facets which sit on it.
+      // The D0 route: the seed on a declaration, at machine precision
+      // (recognition/Exact.h), and nothing measured deciding it.
+      //
+      // Every corner of the seed on one declared cylinder or cone names that
+      // record. Failing that, the seed's near corners on one declared cylinder
+      // and its far corners on one about the same line name the pair: a hull()
+      // the hull-of-revolution rule cannot state, whose cone nobody declared,
+      // or a band between two of a sphere's rings, identified by the rims it
+      // runs between - witnesses, and the claim that names one is still
+      // misattributed until a zone takes it (open item 36). Either
+      // way the walk then admits a facet only if each corner is on the record
+      // its level says, and once named, the band's axis, centre and radii are
+      // the declaration's: a D0 claim is settled on the closed description,
+      // never on a circle fitted to the mesh (checklist C2, C4).
+      //
+      // Only where no declaration holds the seed does the measured probe
+      // below run, and it matches fitted records only.
+      struct {
+        bool on = false;
+        std::size_t record = std::size_t(-1);  // the face record; -1 on the rim route
+        std::size_t rim_near = std::size_t(-1), rim_far = std::size_t(-1);  // the rim route's cylinders
+        const Surface *at_lo = nullptr, *at_hi = nullptr, *between = nullptr;
+        Vector3d origin{0, 0, 0};
+      } exact;
       {
+        const std::vector<int>& seed_loop = loops[seed];
+        auto on_record = [&](std::size_t i, const std::vector<int>& vs) {
+          for (const int v : vs) {
+            if (!recognition::onExactly(surfaces[i].get(), vertices[v])) return false;
+          }
+          return !vs.empty();
+        };
+        // Every declared lateral record holding all of `vs`, one per surface.
+        // Two that are not one surface make it a declaration's question
+        // (checklist C9): neither is chosen by its place in the list.
+        auto holders = [&](const std::vector<int>& vs, bool faces_only, bool cylinders_only) {
+          std::vector<std::size_t> out;
+          for (std::size_t i = 0; i < first_fit; i++) {
+            const Surface *s = surfaces[i].get();
+            if (s == nullptr) continue;
+            const bool cyl = dynamic_cast<const CylinderSurface *>(s) != nullptr;
+            const bool cone = dynamic_cast<const ConeSurface *>(s) != nullptr;
+            if (!cyl && !(cone && !cylinders_only)) continue;
+            if (faces_only && !s->declaresFace()) continue;
+            if (!on_record(i, vs)) continue;
+            bool same = false;
+            for (const std::size_t j : out) same = same || surfaces[j]->sameAs(*s);
+            if (!same) out.push_back(i);
+          }
+          return out;
+        };
+        auto two_holders = [&](const std::vector<std::size_t>& found) {
+          for (const std::size_t i : found) {
+            declined.emplace(std::make_pair(seed, i),
+                             "the facet lies wholly on two declared surfaces that are not one - which "
+                             "it belongs to is a declaration's question");
+          }
+        };
+
+        const std::vector<std::size_t> whole = holders(seed_loop, true, false);
+        if (whole.size() > 1) {
+          two_holders(whole);
+          continue;
+        }
+        if (whole.size() == 1) {
+          exact.on = true;
+          exact.record = whole[0];
+          const Surface *s = surfaces[whole[0]].get();
+          exact.at_lo = exact.at_hi = s;
+          if (dynamic_cast<const CylinderSurface *>(s) != nullptr) exact.between = s;
+          named = whole[0];
+        } else {
+          // The rim route: the seed's corners at its two levels along the axis
+          // the rulings gave - structure, which ruling is which - each on a
+          // declared cylinder, the two about one line.
+          double seed_lo = axis.dot(vertices[seed_loop[0]]), seed_hi = seed_lo;
+          for (const int v : seed_loop) {
+            seed_lo = std::min(seed_lo, axis.dot(vertices[v]));
+            seed_hi = std::max(seed_hi, axis.dot(vertices[v]));
+          }
+          std::vector<int> near_corners, far_corners;
+          bool two_levels = seed_hi - seed_lo >= model_tol;
+          for (const int v : seed_loop) {
+            const double t = axis.dot(vertices[v]);
+            if (fabs(t - seed_lo) < model_tol) near_corners.push_back(v);
+            else if (fabs(t - seed_hi) < model_tol) far_corners.push_back(v);
+            else two_levels = false;
+          }
+          if (two_levels) {
+            const std::vector<std::size_t> near_holders = holders(near_corners, false, true);
+            const std::vector<std::size_t> far_holders = holders(far_corners, false, true);
+            if (near_holders.size() > 1 || far_holders.size() > 1) {
+              std::vector<std::size_t> both = near_holders;
+              both.insert(both.end(), far_holders.begin(), far_holders.end());
+              two_holders(both);
+              continue;
+            }
+            if (near_holders.size() == 1 && far_holders.size() == 1) {
+              const auto *a = static_cast<const CylinderSurface *>(surfaces[near_holders[0]].get());
+              const auto *b = static_cast<const CylinderSurface *>(surfaces[far_holders[0]].get());
+              if (recognition::sameLine(a->refpt, a->normdir, b->refpt, b->normdir)) {
+                exact.on = true;
+                exact.rim_near = near_holders[0];
+                exact.rim_far = far_holders[0];
+                exact.at_lo = a;
+                exact.at_hi = b;
+                // Two rims of one radius about one line are one cylinder: the
+                // band between a sphere's two equator rings, which sphere()
+                // declares as the rings' cylinders and never as a wall.
+                if (a->r == b->r) exact.between = a;
+                named = std::max(near_holders[0], far_holders[0]);  // as the claim names it below
+              }
+            }
+          }
+        }
+        if (exact.on) {
+          // The axis is the declaration's from here on, turned to the rulings'
+          // sense so that the near rim stays the near rim.
+          const Surface *s = exact.at_lo;
+          Vector3d own = s->normdir.normalized();
+          if (own.dot(axis) < 0) own = -own;
+          axis = own;
+          exact.origin = s->refpt;
+        }
+      }
+
+      if (exact.on) {
+        // The levels are the seed's own; a vertex at neither is admitted only
+        // where the record is a cylinder, which holds it at any height.
+        double probe_lo = axis.dot(vertices[loops[seed][0]]), probe_hi = probe_lo;
+        for (const int v : loops[seed]) {
+          probe_lo = std::min(probe_lo, axis.dot(vertices[v]));
+          probe_hi = std::max(probe_hi, axis.dot(vertices[v]));
+        }
+        const OnSurface on_surface = [&](std::size_t f) {
+          for (const int v : loops[f]) {
+            const double t = axis.dot(vertices[v]);
+            const Surface *s = fabs(t - probe_lo) < model_tol
+                                 ? exact.at_lo
+                                 : (fabs(t - probe_hi) < model_tol ? exact.at_hi : exact.between);
+            if (s == nullptr || !recognition::onExactly(s, vertices[v])) return false;
+          }
+          return true;
+        };
+        walk_strip(seed, side, walls, entry, &on_surface);
+        if (walls.size() < 3) {
+          decline("fewer than three facets walk out on the surface - too short to be a band");
+          continue;
+        }
+      } else {
+        // No declaration holds the seed, and there is no fit to match.
+        if (first_fit == surfaces.size()) continue;
+
+        // Fit the surface from the seed and its first two neighbours - four
+        // vertices on each rim, which is enough - and walk again, this time
+        // admitting only facets which sit on it. Only a fit can be named here -
+        // see `fitted_cylinder`.
         std::map<int, double> probe_along;
         for (std::size_t f = 0; f < 3 && f < walls.size(); f++) {
           for (const int v : loops[walls[f]]) probe_along[v] = axis.dot(vertices[v]);
@@ -503,14 +661,14 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         };
         {
           std::size_t which = 0, which_top = 0;
-          // The same order as the match below: a declared cone is the face, and
+          // The same order as the match below: a fitted cone is the face, and
           // is named before two rims that only witness it.
           if (cylindrical) {
-            if (declared_cylinder(probe_r0, axis, probe_base, &which)) named = which;
-          } else if (declared_cone(probe_r0, probe_r1, axis, probe_base, probe_hi - probe_lo, &which)) {
+            if (fitted_cylinder(probe_r0, axis, probe_base, &which)) named = which;
+          } else if (fitted_cone(probe_r0, probe_r1, axis, probe_base, probe_hi - probe_lo, &which)) {
             named = which;
-          } else if (declared_cylinder(probe_r0, axis, probe_base, &which) &&
-                     declared_cylinder(probe_r1, axis, probe_base, &which_top)) {
+          } else if (fitted_cylinder(probe_r0, axis, probe_base, &which) &&
+                     fitted_cylinder(probe_r1, axis, probe_base, &which_top)) {
             named = std::max(which, which_top);  // as the match below names it
           }
         }
@@ -637,22 +795,31 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         continue;
       }
 
-      // Fit each rim on its own: the centroid of a full rim lies on the axis
-      // but the centroid of an arc sits inside its chord, and the two rims of
-      // a frustum have different radii anyway.
+      // The rims. On the D0 route they are the declaration's sections at the
+      // walk's two levels: the centre is where the declared axis crosses the
+      // near level, the radii are what the record says there, and nothing is
+      // fitted. On the measured route each rim is fitted on its own: the
+      // centroid of a full rim lies on the axis but the centroid of an arc
+      // sits inside its chord, and the two rims of a frustum have different
+      // radii anyway.
       Vector3d base, top_centre;
-      if (!fitCircleCentre(vertices, bottom_set, axis, lo, base)) {
+      if (exact.on) {
+        base = exact.origin + axis * (lo - axis.dot(exact.origin));
+      } else if (!fitCircleCentre(vertices, bottom_set, axis, lo, base)) {
         decline("the near rim does not fit a circle");
         continue;
       }
       if (tilted) {
         // Where the axis pierces the cut plane. That is the ellipse's centre,
         // and it is not the centroid of the rim's vertices unless the
-        // tessellation happens to be symmetric about it.
+        // tessellation happens to be symmetric about it. The cut plane is a
+        // trim the model did not declare, so it is fitted on either route.
         Vector3d centroid(0, 0, 0);
         for (const int v : top_set) centroid += vertices[v];
         centroid /= double(top_set.size());
         top_centre = base + axis * (top_normal.dot(centroid - base) / top_normal.dot(axis));
+      } else if (exact.on) {
+        top_centre = base + axis * (hi - lo);
       } else {
         if (!fitCircleCentre(vertices, top_set, axis, hi, top_centre)) {
           decline("the far rim does not fit a circle");
@@ -665,30 +832,56 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       }
 
       double r_bottom = 0, r_top = 0;
-      for (const int v : bottom_set) r_bottom += distanceToAxis(vertices[v], base, axis);
-      for (const int v : top_set) r_top += distanceToAxis(vertices[v], base, axis);
-      r_bottom /= double(bottom_set.size());
-      r_top /= double(top_set.size());
+      if (exact.on) {
+        // Every rim vertex is on the record its level names, at machine
+        // precision - the walk admitted nothing else - so the radius is the
+        // record's, not an average of what the mesh put there.
+        auto radius_of = [&](const Surface *s, const Vector3d& at) {
+          if (const auto *cyl = dynamic_cast<const CylinderSurface *>(s)) return cyl->r;
+          return static_cast<const ConeSurface *>(s)->radiusAt(at);
+        };
+        r_bottom = radius_of(exact.at_lo, base);
+        r_top = radius_of(exact.at_hi, base + axis * (hi - lo));
+      } else {
+        for (const int v : bottom_set) r_bottom += distanceToAxis(vertices[v], base, axis);
+        for (const int v : top_set) r_top += distanceToAxis(vertices[v], base, axis);
+        r_bottom /= double(bottom_set.size());
+        r_top /= double(top_set.size());
+      }
       const double scale = std::max(r_bottom, r_top);
       if (scale < model_tol) continue;
-      double dev = 0;
-      for (const int v : bottom_set) {
-        dev = std::max(dev, fabs(distanceToAxis(vertices[v], base, axis) - r_bottom));
-      }
-      for (const int v : top_set) {
-        dev = std::max(dev, fabs(distanceToAxis(vertices[v], base, axis) - r_top));
-      }
-      if (dev > 1e-7 * scale) {
-        decline("a rim vertex is off its rim's circle");
-        continue;
+      if (!exact.on) {
+        double dev = 0;
+        for (const int v : bottom_set) {
+          dev = std::max(dev, fabs(distanceToAxis(vertices[v], base, axis) - r_bottom));
+        }
+        for (const int v : top_set) {
+          dev = std::max(dev, fabs(distanceToAxis(vertices[v], base, axis) - r_top));
+        }
+        if (dev > 1e-7 * scale) {
+          decline("a rim vertex is off its rim's circle");
+          continue;
+        }
       }
 
-      // Intent. A cylinder needs its own record; a frustum has none, because
-      // the shape that produces one - hull() of two coaxial cylinders, the
-      // standard chamfer - declares the two cylinders rather than the cone
-      // between them. Both of its rims matching a declared cylinder is the
-      // same statement of intent, made by two primitives instead of one.
-      const bool is_cone = fabs(r_bottom - r_top) > 1e-9 * scale;
+      // Intent. On the D0 route it was read when the seed was named: a declared
+      // cone is the face, a declared cylinder is the face, and two coaxial
+      // declared cylinders of two radii identify a cone between them that no
+      // one declared - a hull() of two cylinders, which declares those and
+      // never the blend (step-chamfered-cylinder asserts it), where the
+      // hull-of-revolution rule cannot state its profile.
+      //
+      // Where the model declared the cone, that is the face and the claim
+      // names it: a rim cylinder a frustum declares is a *witness* - evidence
+      // offered to identify the cone - and a claim naming it attributes the
+      // cone's facets to a surface they are not on. It did, on
+      // step-split-surface, step-bored-cone and step-cap-meets-wall, until the
+      // D0 regions report caught it (2026-09-24). The rims name the claim only
+      // where no cone is declared; that is a missing declaration, and still
+      // misattributed.
+      // On the D0 route a cone is what holds no vertex between its rims: a
+      // declared cone, or two rim cylinders of two radii.
+      const bool is_cone = exact.on ? exact.between == nullptr : fabs(r_bottom - r_top) > 1e-9 * scale;
       std::size_t matched = 0;
       // A cone cut off-axis gives a conic whose rim has no single radius, and
       // the ellipse written below would be the wrong curve rather than an
@@ -697,42 +890,37 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         decline("a cone cut off-axis has no single-radius rim, and a band writes only those");
         continue;
       }
-      if (is_cone) {
-        // Either both rims match a declared cylinder - a hull() of two coaxial
-        // cylinders declares those and never the cone between them, which is
-        // what step-chamfered-cylinder asserts - or the model named the cone
-        // itself. The second way exists because the first cannot state a cone
-        // whose far rim is only where a boolean cut it, and asking that trim to
-        // declare itself is asking the wrong thing of it.
-        //
-        // Where the model declared the cone, that is the face and the claim
-        // names it, whatever the rims also match: a rim cylinder a frustum
-        // declares is a *witness* - evidence offered to identify the cone - and
-        // a claim naming it attributes the cone's facets to a surface they are
-        // not on. It did, on step-split-surface, step-bored-cone and
-        // step-cap-meets-wall, until the D0 regions report caught it
-        // (2026-09-24). The rims name the claim only where no cone is declared -
-        // hull() of two cylinders, which declares no blend; that is a missing
-        // declaration, and still misattributed.
+      if (exact.on) {
+        // Everything read to identify it is evidence, and only one record can
+        // be `matched`. Record them all, or a census cannot tell a declaration
+        // doing its job from one nothing used - see Result::evidence.
+        matched = named;
+        if (exact.record != std::size_t(-1)) {
+          note_evidence(exact.record);
+        } else {
+          note_evidence(exact.rim_near);
+          note_evidence(exact.rim_far);
+        }
+      } else if (is_cone) {
+        // The measured route: fitted records only (`first_fit`), matched the
+        // way the declared ones were until 2026-09-28 - a fitted cone first,
+        // else two fitted rim cylinders.
         std::size_t which_bottom = 0, which_top = 0, which_cone = 0;
-        const bool by_rims = declared_cylinder(r_bottom, axis, base, &which_bottom) &&
-                             declared_cylinder(r_top, axis, base, &which_top);
-        const bool by_cone = declared_cone(r_bottom, r_top, axis, base, hi - lo, &which_cone);
+        const bool by_rims = fitted_cylinder(r_bottom, axis, base, &which_bottom) &&
+                             fitted_cylinder(r_top, axis, base, &which_top);
+        const bool by_cone = fitted_cone(r_bottom, r_top, axis, base, hi - lo, &which_cone);
         if (!by_rims && !by_cone) {
-          decline("the rims fitted over the whole walk match no declaration");
+          decline("the rims fitted over the whole walk match no fitted surface");
           continue;
         }
         matched = by_cone ? which_cone : std::max(which_bottom, which_top);
-        // Everything read to identify this cone is evidence, and only one record
-        // can be `matched`. Record them all, or a census cannot tell a
-        // declaration doing its job from one nothing used - see Result::evidence.
         if (by_rims) {
           note_evidence(which_bottom);
           note_evidence(which_top);
         }
         if (by_cone) note_evidence(which_cone);
-      } else if (!declared_cylinder(r_bottom, axis, base, &matched)) {
-        decline("the rims fitted over the whole walk match no declaration");
+      } else if (!fitted_cylinder(r_bottom, axis, base, &matched)) {
+        decline("the rims fitted over the whole walk match no fitted surface");
         continue;
       } else {
         note_evidence(matched);
@@ -780,9 +968,10 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         consumed[f] = 1;
         result.consumed_by[f] = "a band's wall";
         // D0 where the facet is in its surface's D0 region - identity and exact
-        // position decided it. Otherwise D3: the band fitted its rims to the
-        // mesh and matched them to the declaration at a relative 1e-7, which is
-        // a fit and a threshold, not identity. *Which* facets is still what a
+        // position decided it. Otherwise D3: a band on a fit, or one on a
+        // declaration whose maker identity does not name - exact position with
+        // no owner is not the model's statement that this facet is that face,
+        // and membership by identity is parked (open item 38). *Which* facets is still what a
         // band can express (R2), and the declines above are its record.
         recognition::recordClaim(result.ledger, recognition::kBandWall, f, surfaces[matched], matched,
                                  declared_count, ClaimFate::Honoured,
