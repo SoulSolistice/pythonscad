@@ -326,13 +326,22 @@ namespace {
 
 /*! Declare the surfaces the extrusion makes - SweptSurfaces.h, from the
  * profile's own declarations. Only for a sweep whose stations are this profile:
- * a Python profile or twist function makes each station its own. */
+ * a Python profile or twist function makes each station its own.
+ *
+ * And its solid, as far as the extrusion can state it: where the profile's
+ * makers named every edge and recorded every curve, and nothing twists the
+ * walls, every face of the extrusion is an exact plane - a cap, a straight
+ * edge's wall - or is made on a record declared here, which is what
+ * SolidTree::faceted states; it resolves to the envelope those faces span. A
+ * twisted wall is neither, and the leaf then states nothing, under its name. */
 void declareExtrudedSurfaces(const LinearExtrudeNode& node, const Polygon2d& profile,
                              const Vector3d& height, const Vector3d& base, PolySet& polyset)
 {
+  polyset.solid_tree = SolidTree::opaque(node.toString());
 #ifdef ENABLE_PYTHON
   if (node.profile_func != nullptr || node.twist_func != nullptr) return;
 #endif
+  const Profile2d classified = classifyProfile(profile);
   Extrusion sweep;
   sweep.placement = profile.getTransform3d();
   sweep.base = base;
@@ -340,8 +349,12 @@ void declareExtrudedSurfaces(const LinearExtrudeNode& node, const Polygon2d& pro
   sweep.scale_x = node.scale_x;
   sweep.scale_y = node.scale_y;
   sweep.twist = node.twist;
-  for (auto& surface : extrude(classifyProfile(profile), sweep))
+  bool every_curve = false;
+  for (auto& surface : extrude(classified, sweep, &every_curve))
     polyset.surfaces.push_back(std::move(surface));
+  if (node.twist == 0 && every_curve && statesEveryEdge(classified)) {
+    polyset.solid_tree = SolidTree::faceted(node.toString());
+  }
 }
 
 }  // namespace

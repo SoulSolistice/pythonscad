@@ -87,6 +87,17 @@ Profile2d classifyProfile(const std::vector<VectorOfVector2d>& loops, std::vecto
   return out;
 }
 
+bool statesEveryEdge(const Profile2d& profile)
+{
+  for (const auto& loop : profile.loops) {
+    for (const auto& e : loop) {
+      if (!e.declared) return false;
+      if (e.kind != EdgeKind::Line && e.record < 0) return false;
+    }
+  }
+  return !profile.loops.empty();
+}
+
 Profile2d classifyProfile(const Polygon2d& poly)
 {
   std::vector<VectorOfVector2d> loops;

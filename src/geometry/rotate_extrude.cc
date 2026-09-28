@@ -159,6 +159,11 @@ VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double s
 static void declareSurfacesOfRevolution(const RotateExtrudeNode& node, const Polygon2d& poly,
                                         PolySet& polyset)
 {
+  // And its solid, where the revolution can state it - see
+  // declareExtrudedSurfaces: named edges, recorded curves, no station unlike
+  // the others, and every face is an exact plane or made on a record declared
+  // here. Otherwise the leaf states nothing, under its name.
+  polyset.solid_tree = SolidTree::opaque(node.toString());
   if (node.v.norm() != 0 || node.twist != 0) return;
 #ifdef ENABLE_PYTHON
   if (node.profile_func != nullptr || node.twist_func != nullptr) return;
@@ -171,9 +176,11 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node, const Pol
   Revolution sweep;
   sweep.start = node.start;
   sweep.angle = node.angle;
-  for (auto& surface : revolve(profile, sweep)) {
+  bool every_curve = false;
+  for (auto& surface : revolve(profile, sweep, &every_curve)) {
     polyset.surfaces.push_back(std::move(surface));
   }
+  if (every_curve && statesEveryEdge(profile)) polyset.solid_tree = SolidTree::faceted(node.toString());
 }
 
 std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const Polygon2d& poly,

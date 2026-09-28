@@ -4286,7 +4286,20 @@ solids (`83af07497`); a hull of coaxial declared primitives is a declared solid
 - **Operands that state nothing**, counted by the existence table's report: on
   lid10 a mesh stating no solid 425 facets (extrusions and the like), hull() of
   other operands 274, the thread polyhedron's box 153; the bayonet's thread 252.
-  Each is a declaration to add at its generator.
+  Each is a declaration to add at its generator. *Two landed 2026-09-28.* A hull
+  holds each of its operands (`a5ae79f4c`): In wherever an operand is, which
+  decides nothing in the corpus today. And linear_extrude and rotate_extrude
+  state their solid where they can - every profile edge named, every curved one
+  recorded, no twist, helix or Python station, and the sweep table reporting
+  that every curve became a surface - as `faceted`, resolved to the envelope
+  their faces span; otherwise an opaque leaf under the node's own name, so the
+  table says which generator. With the cone, torus, elliptic cylinder and
+  Bezier patch given closed-form envelopes, lid10's crush bead stopped blocking
+  the lid's whole outer wall: 283 -> 373 facets on a face the model has, 967 ->
+  877 undecided, phantoms unchanged at 64; step-region-pocket 8 decided of 44.
+  What stays open is inside an envelope, where only Out follows: the bead's
+  ring (140 on lid10), hull() (274), the thread polyhedron (267 on lid10, 294 on
+  the bayonet) - the next statement each needs is its solid, not its box.
 
 **Remnants: thresholds older than C2, surveyed 2026-09-28.** Asked by the
 author of `describesSameSurface` - is its 1e-9 needed, or history? History:

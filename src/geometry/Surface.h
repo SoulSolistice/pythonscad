@@ -254,6 +254,7 @@ public:
   double r_major, r_minor;
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
 
 private:
@@ -301,6 +302,7 @@ public:
    * or the declaration describes a different surface from the mesh. */
   BezierPatchSurface(int degree_u, int degree_v, std::vector<Vector3d> net,
                      std::vector<double> weights = {});
+  bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat) override;
@@ -481,6 +483,7 @@ public:
   double r, slope;
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
@@ -537,6 +540,7 @@ public:
   [[nodiscard]] double size() const override { return a(); }
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
   [[nodiscard]] bool isQuadric() const override { return true; }

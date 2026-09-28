@@ -2383,6 +2383,75 @@ bool CylinderSurface::envelope(const std::vector<Vector3d>& corners, BoundingBox
   return true;
 }
 
+bool ConeSurface::envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const
+{
+  // The part of the cone a facet stands for lies between its corners' levels
+  // along the axis, and the frustum between two levels lies within the box of
+  // its two end circles - convex, and the apex, where it passes one, on the
+  // axis between their centres. The radius at a level is |r + slope t|.
+  if (corners.empty()) return false;
+  const Vector3d a = normdir.normalized();
+  double t0 = std::numeric_limits<double>::infinity(), t1 = -t0;
+  for (const auto& p : corners) {
+    const double t = (p - refpt).dot(a);
+    t0 = std::min(t0, t);
+    t1 = std::max(t1, t);
+  }
+  box = cylinderBox(refpt, a, std::fabs(radiusAt(refpt + a * t0)), t0, t0);
+  box.extend(cylinderBox(refpt, a, std::fabs(radiusAt(refpt + a * t1)), t1, t1));
+  return true;
+}
+
+bool TorusSurface::envelope(const std::vector<Vector3d>&, BoundingBox& box) const
+{
+  // The whole ring: a point is c + (R + r cos f) u + r sin f a, u a unit
+  // vector across the axis a, so along coordinate k it reaches at most
+  // R sqrt(1 - a_k^2) + r from the centre.
+  const Vector3d a = normdir.normalized();
+  Vector3d reach;
+  for (int k = 0; k < 3; k++)
+    reach[k] = std::fabs(r_major) * std::sqrt(std::max(0.0, 1 - a[k] * a[k])) + std::fabs(r_minor);
+  box = BoundingBox(refpt - reach, refpt + reach);
+  return true;
+}
+
+bool EllipticCylinderSurface::envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const
+{
+  // Between the corners' levels along the sweep, the sections are the ellipse
+  // centre + major cos t + minor sin t moved along it, which along coordinate k
+  // reaches sqrt(major_k^2 + minor_k^2) from its centre.
+  if (corners.empty()) return false;
+  const Vector3d a = normdir.normalized();
+  double t0 = std::numeric_limits<double>::infinity(), t1 = -t0;
+  for (const auto& p : corners) {
+    const double t = (p - refpt).dot(a);
+    t0 = std::min(t0, t);
+    t1 = std::max(t1, t);
+  }
+  Vector3d reach;
+  for (int k = 0; k < 3; k++) reach[k] = std::sqrt(major[k] * major[k] + minor[k] * minor[k]);
+  box.setEmpty();
+  for (const double t : {t0, t1}) {
+    const Vector3d c = refpt + a * t;
+    box.extend(c - reach);
+    box.extend(c + reach);
+  }
+  return true;
+}
+
+bool BezierPatchSurface::envelope(const std::vector<Vector3d>&, BoundingBox& box) const
+{
+  // A Bezier patch lies within the convex hull of its control net, a rational
+  // one too where every weight is positive.
+  for (const double w : weights) {
+    if (!(w > 0)) return false;
+  }
+  if (net.empty()) return false;
+  box.setEmpty();
+  for (const auto& p : net) box.extend(p);
+  return true;
+}
+
 bool SphereSurface::envelope(const std::vector<Vector3d>&, BoundingBox& box) const
 {
   box = BoundingBox(refpt - Vector3d(r, r, r), refpt + Vector3d(r, r, r));

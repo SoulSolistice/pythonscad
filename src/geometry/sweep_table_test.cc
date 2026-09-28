@@ -425,3 +425,73 @@ TEST_CASE("2D ellipse: a circle under an uneven scale keeps its curve and its ch
   CHECK(ellipse_edges == 16);
 #endif
 }
+
+TEST_CASE("sweep: says whether every curved edge became a surface", "[sweep-table][solid]")
+{
+  // What a sweep may state of its solid rests on this: a curved edge the table
+  // makes no surface of leaves a wall that is neither a plane nor on a record
+  // (SolidTree::faceted).
+  Extrusion taper;
+  taper.height = Vector3d(0., 0., 20.);
+  taper.scale_x = taper.scale_y = 0.5;
+  bool every = false;
+  // a circle about the scaling origin tapers to the cone through its end circles
+  (void)extrude(
+    classifyProfile({sampled(Vector2d(0., 0.), 10., 24)}, {Arc2d{Vector2d(0., 0.), 10.}}, {}), taper,
+    &every);
+  CHECK(every);
+  // one off it slides sideways as it shrinks - an oblique cone, none here
+  (void)extrude(classifyProfile({sampled(Vector2d(3., 0.), 2., 24)}, {Arc2d{Vector2d(3., 0.), 2.}}, {}),
+                taper, &every);
+  CHECK_FALSE(every);
+  // a record no edge is a chord of does not matter
+  (void)extrude(classifyProfile({{{0., 0.}, {1., 0.}, {1., 1.}}}, {Arc2d{Vector2d(3., 0.), 2.}}, {}),
+                taper, &every);
+  CHECK(every);
+
+  Revolution turn;
+  (void)revolve(
+    classifyProfile({sampled(Vector2d(20., 0.), 2., 24)}, {Arc2d{Vector2d(20., 0.), 2.}}, {}), turn,
+    &every);
+  CHECK(every);  // a torus
+  // a Bezier turned about an axis makes nothing this table has
+  Profile2d curved;
+  Bezier2d bez;
+  bez.degree = 2;
+  bez.ctrl[0] = Vector2d(10., 0.);
+  bez.ctrl[1] = Vector2d(14., 5.);
+  bez.ctrl[2] = Vector2d(10., 10.);
+  curved.beziers.push_back(bez);
+  ProfileEdge chord;
+  chord.a = Vector2d(10., 0.);
+  chord.b = Vector2d(12., 5.);
+  chord.kind = EdgeKind::Bezier;
+  chord.record = 0;
+  chord.declared = true;
+  curved.loops.push_back({chord});
+  (void)revolve(curved, turn, &every);
+  CHECK_FALSE(every);
+}
+
+TEST_CASE("Profile2d: a profile states every edge only where its makers named them",
+          "[sweep-table][solid]")
+{
+  // measured, not named
+  const Profile2d measured =
+    classifyProfile({sampled(Vector2d(0., 0.), 10., 12)}, {Arc2d{Vector2d(0., 0.), 10.}}, {});
+  CHECK_FALSE(statesEveryEdge(measured));
+  // named, every one a chord of the circle
+  const VectorOfVector2d ring = sampled(Vector2d(0., 0.), 10., 12);
+  const EdgeId first = reserveEdgeIds(ring.size());
+  std::vector<EdgeId> ids;
+  EdgeDecls decls;
+  for (std::size_t i = 0; i < ring.size(); i++) {
+    ids.push_back(first + EdgeId(i));
+    decls[first + EdgeId(i)] = EdgeDecl{EdgeKind::Arc, 0};
+  }
+  CHECK(statesEveryEdge(classifyProfile({ring}, {Arc2d{Vector2d(0., 0.), 10.}}, {}, {ids}, &decls)));
+  // a named curved edge with no record says it is curved and not which curve
+  decls[first] = EdgeDecl{EdgeKind::Arc, -1};
+  CHECK_FALSE(
+    statesEveryEdge(classifyProfile({ring}, {Arc2d{Vector2d(0., 0.), 10.}}, {}, {ids}, &decls)));
+}

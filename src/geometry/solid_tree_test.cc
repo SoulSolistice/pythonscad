@@ -216,6 +216,38 @@ TEST_CASE("a sweep's envelope is the finite cylinder its laws span", "[envelope]
   }
 }
 
+TEST_CASE("a cone's and a torus's envelopes are their closed forms", "[envelope]")
+{
+  // cone r 10 at z 0 about z, slope -0.5: radius 9 at z 2 and 7 at z 6, so a
+  // facet with corners at those levels stands for a frustum within x, y in
+  // [-9, 9] and z in [2, 6]
+  const auto cone = std::make_shared<ConeSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10.0, -0.5);
+  BoundingBox box;
+  REQUIRE(cone->envelope({Vector3d(9, 0, 2), Vector3d(0, 7, 6)}, box));
+  CHECK(box.max()[0] == Catch::Approx(9).margin(1e-12));
+  CHECK(box.min()[1] == Catch::Approx(-9).margin(1e-12));
+  CHECK(box.min()[2] == Catch::Approx(2).margin(1e-12));
+  CHECK(box.max()[2] == Catch::Approx(6).margin(1e-12));
+  // past its apex at z 20 the radius grows again: z 18 to 24 is radius 1 and 2
+  REQUIRE(cone->envelope({Vector3d(1, 0, 18), Vector3d(2, 0, 24)}, box));
+  CHECK(box.max()[0] == Catch::Approx(2).margin(1e-12));
+  CHECK(box.contains(Vector3d(0, 0, 20)));
+
+  // torus R 20, r 3 about z at the origin: within 23 across and 3 along
+  const auto torus = std::make_shared<TorusSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 20.0, 3.0);
+  REQUIRE(torus->envelope({}, box));
+  CHECK(box.max()[0] == Catch::Approx(23).margin(1e-12));
+  CHECK(box.min()[1] == Catch::Approx(-23).margin(1e-12));
+  CHECK(box.max()[2] == Catch::Approx(3).margin(1e-12));
+  for (int i = 0; i < 24; i++) {
+    for (int j = 0; j < 12; j++) {
+      const double u = 2 * M_PI * i / 24, v = 2 * M_PI * j / 12;
+      const Vector3d p((20 + 3 * cos(v)) * cos(u), (20 + 3 * cos(v)) * sin(u), 3 * sin(v));
+      CHECK(box.contains(p));
+    }
+  }
+}
+
 TEST_CASE("a hull lies within the box its operands state they lie in", "[solidtree][envelope]")
 {
   // hull() of two declared cubes, [0,1]^3 and [4,5] x [0,1] x [0,1]: the hull is

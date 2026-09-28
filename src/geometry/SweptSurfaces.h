@@ -40,8 +40,12 @@ struct Revolution {
   double start = 0., angle = 360.;
 };
 
-/*! The surfaces `profile` makes turned about `sweep`'s axis. */
-std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Revolution& sweep);
+/*! The surfaces `profile` makes turned about `sweep`'s axis. Where asked,
+ * `every_curve` says whether every curved record an edge of the profile is a
+ * chord of turned into a surface here - what a caller needs before it states
+ * that every face of the sweep is a plane or on a record (SolidTree::faceted). */
+std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Revolution& sweep,
+                                              bool *every_curve = nullptr);
 
 /*! A profile carried along a straight line, scaled towards the far end. */
 struct Extrusion {
@@ -52,8 +56,10 @@ struct Extrusion {
   double twist = 0.;                                //!< degrees, over the whole height
 };
 
-/*! The surfaces `profile` makes extruded by `sweep`. */
-std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Extrusion& sweep);
+/*! The surfaces `profile` makes extruded by `sweep`; `every_curve` as for
+ * revolve(). */
+std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Extrusion& sweep,
+                                              bool *every_curve = nullptr);
 
 /*! The surfaces a roof over `profile` makes. Both roof methods raise a point by
  * its distance to the nearest feature of the profile - the straight skeleton's

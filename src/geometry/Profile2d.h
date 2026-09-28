@@ -75,3 +75,9 @@ Profile2d classifyProfile(const Polygon2d& poly);
 
 /*! The same profile moved by `by`: its edges and its records. */
 Profile2d translated(Profile2d profile, const Vector2d& by);
+
+/*! Whether the profile's makers said what every edge is - named, not measured
+ * (EdgeIdentity.h) - and every curved one has a record. Then a sweep of it
+ * that the sweep table answers has faces each of which is an exact plane or
+ * made on a record it declares, which is what SolidTree::faceted states. */
+bool statesEveryEdge(const Profile2d& profile);

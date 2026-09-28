@@ -112,21 +112,25 @@ void revolveLine(const ProfileEdge& e, RevolutionRecords& records)
 }
 
 /*! A circle in the profile sweeps a sphere where its centre is on the axis, and
- * a ring torus where the whole circle is off it. */
-void revolveArc(const Arc2d& arc, RevolutionRecords& records)
+ * a ring torus where the whole circle is off it. Whether it declared one. */
+bool revolveArc(const Arc2d& arc, RevolutionRecords& records)
 {
-  if (!(arc.r > 0)) return;  // a point
+  if (!(arc.r > 0)) return false;  // a point
   const Vector2d centre(arc.centre[0], arc.centre[1]);
   if (centre[0] == 0) {
     addSurfaceUnique(records.out,
                      std::make_shared<SphereSurface>(records.at(centre[1]), records.sweep.axis, arc.r));
-  } else if (centre[0] > arc.r) {
+    return true;
+  }
+  if (centre[0] > arc.r) {
     addSurfaceUnique(records.out, std::make_shared<TorusSurface>(records.at(centre[1]),
                                                                  records.sweep.axis, centre[0], arc.r));
+    return true;
   }
   // An arc reaching the axis without being centred on it sweeps a horn or a
   // spindle torus, which is self-intersecting; a profile crossing the axis is
   // rejected long before a sweep, so there is nothing to say.
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,10 +248,10 @@ void extrudeLine(const ProfileEdge& e, const StationMap& map, Surfaces& out)
 
 /*! A Bezier segment, swept by an affine map: the (n, 1) patch whose control net
  * is the segment's own control points at either end. */
-void extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
+bool extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
 {
-  if (!map.affine()) return;
-  if (bez.degree < 2 || bez.degree > 3) return;
+  if (!map.affine()) return false;
+  if (bez.degree < 2 || bez.degree > 3) return false;
   std::vector<Vector3d> net;
   net.reserve((bez.degree + 1) * 2);
   for (int i = 0; i <= bez.degree; i++) {
@@ -256,6 +260,7 @@ void extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
     net.push_back(map.at(p, 1));
   }
   out.push_back(std::make_shared<BezierPatchSurface>(bez.degree, 1, std::move(net)));
+  return true;
 }
 
 /*! A circle, swept. With no taper, the cylinder over the section the placement
@@ -269,34 +274,35 @@ void extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
  *
  * The cone is a face; the two end circles are evidence, the rims the band pass
  * identifies it by. */
-void extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const StationMap& map,
+bool extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const StationMap& map,
                   Surfaces& out);
 
-void extrudeArc(const Arc2d& arc, const StationMap& map, Surfaces& out)
+bool extrudeArc(const Arc2d& arc, const StationMap& map, Surfaces& out)
 {
-  if (!(arc.r > 0)) return;
-  extrudeConic(Vector2d(arc.centre), Vector2d(arc.r, 0.), Vector2d(0., arc.r), map, out);
+  if (!(arc.r > 0)) return false;
+  return extrudeConic(Vector2d(arc.centre), Vector2d(arc.r, 0.), Vector2d(0., arc.r), map, out);
 }
 
 /*! An ellipse in the profile, swept: the circle's derivation, since a circle is
  * the ellipse whose semi-diameters are two perpendicular radii. */
-void extrudeEllipse(const Ellipse2d& el, const StationMap& map, Surfaces& out)
+bool extrudeEllipse(const Ellipse2d& el, const StationMap& map, Surfaces& out)
 {
-  extrudeConic(Vector2d(el.centre), Vector2d(el.u), Vector2d(el.v), map, out);
+  return extrudeConic(Vector2d(el.centre), Vector2d(el.u), Vector2d(el.v), map, out);
 }
 
-/*! The conic centre + u cos t + v sin t in the profile, swept. */
-void extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const StationMap& map,
+/*! The conic centre + u cos t + v sin t in the profile, swept. Whether it
+ * declared the surface the conic sweeps. */
+bool extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const StationMap& map,
                   Surfaces& out)
 {
   // a circle: u and v two perpendicular radii of one length
   const bool circle = u.norm() == v.norm() && u.dot(v) == 0;
-  if (!map.affine() && !(c[0] == 0 && c[1] == 0)) return;  // the centre turns with the twist
+  if (!map.affine() && !(c[0] == 0 && c[1] == 0)) return false;  // the centre turns with the twist
   const Vector3d c0 = map.at(c, 0), c1 = map.at(c, 1);
   const Vector3d n = map.normal();
   const Vector3d d = c1 - c0;
   const double len = d.norm();
-  if (n.isZero() || !(len > 0)) return;
+  if (n.isZero() || !(len > 0)) return false;
   // along the normal, at machine precision: the cross product's forward error
   const bool along_normal = d.cross(n).norm() <= forwardError(12, len);
   double scale = 0;
@@ -311,17 +317,18 @@ void extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const
     const Eigen::Matrix3d L = map.sweep.placement.linear();
     auto elliptic = std::make_shared<EllipticCylinderSurface>(c0, d, L * Vector3d(u[0], u[1], 0.),
                                                               L * Vector3d(v[0], v[1], 0.));
-    if (elliptic->usable()) addSurfaceUnique(out, elliptic);
-    return;
+    if (!elliptic->usable()) return false;
+    addSurfaceUnique(out, elliptic);
+    return true;
   }
   if (!circle || !similar || !along_normal)
-    return;  // a tapered ellipse, or an oblique cone: none here yet
+    return false;  // a tapered ellipse, or an oblique cone: none here yet
   const Vector3d axis = d / len;
   const double r0 = u.norm() * scale, r1 = u.norm() * scale * map.sweep.scale_x;
-  if (!(r1 >= 0) || !std::isfinite(r1)) return;
+  if (!(r1 >= 0) || !std::isfinite(r1)) return false;
   if (r1 == r0) {
     addSurfaceUnique(out, std::make_shared<CylinderSurface>(c0, axis, r0));
-    return;
+    return true;
   }
   // Anchored at the wider end, as every cone here is.
   const bool near_wider = r0 >= r1;
@@ -335,20 +342,44 @@ void extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const
   };
   rim(c0, r0);
   rim(c1, r1);
+  return true;
 }
 
 }  // namespace
 
-std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Revolution& sweep)
+/*! Whether an edge of `profile` is a chord of record `index` of kind `kind`. */
+static bool chordOf(const Profile2d& profile, EdgeKind kind, std::size_t index)
+{
+  for (const auto& loop : profile.loops) {
+    for (const ProfileEdge& e : loop) {
+      if (e.kind == kind && e.record == int(index)) return true;
+    }
+  }
+  return false;
+}
+
+std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Revolution& sweep,
+                                              bool *every_curve)
 {
   RevolutionRecords records{sweep, {}, {}};
+  bool all = true;
   for (const auto& loop : profile.loops) {
     for (const ProfileEdge& edge : loop) {
       revolveVertex(edge.a, records);
       if (edge.kind == EdgeKind::Line) revolveLine(edge, records);
     }
   }
-  for (const auto& arc : profile.arcs) revolveArc(arc, records);
+  for (std::size_t k = 0; k < profile.arcs.size(); k++) {
+    if (!revolveArc(profile.arcs[k], records) && chordOf(profile, EdgeKind::Arc, k)) all = false;
+  }
+  // A Bezier or an ellipse turned about an axis makes no surface this table has.
+  for (std::size_t k = 0; k < profile.beziers.size(); k++) {
+    if (chordOf(profile, EdgeKind::Bezier, k)) all = false;
+  }
+  for (std::size_t k = 0; k < profile.ellipses.size(); k++) {
+    if (chordOf(profile, EdgeKind::Ellipse, k)) all = false;
+  }
+  if (every_curve != nullptr) *every_curve = all;
 
   // The two faces a partial turn is closed with. Each is the profile's own
   // plane, standing at one end of the turn and containing the axis, so its
@@ -363,13 +394,24 @@ std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Re
   return std::move(records.out);
 }
 
-std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Extrusion& sweep)
+std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Extrusion& sweep,
+                                              bool *every_curve)
 {
   const StationMap map(sweep);
   Surfaces out;
-  for (const auto& arc : profile.arcs) extrudeArc(arc, map, out);
-  for (const auto& el : profile.ellipses) extrudeEllipse(el, map, out);
-  for (const auto& bez : profile.beziers) extrudeBezier(bez, map, out);
+  bool all = true;
+  for (std::size_t k = 0; k < profile.arcs.size(); k++) {
+    if (!extrudeArc(profile.arcs[k], map, out) && chordOf(profile, EdgeKind::Arc, k)) all = false;
+  }
+  for (std::size_t k = 0; k < profile.ellipses.size(); k++) {
+    if (!extrudeEllipse(profile.ellipses[k], map, out) && chordOf(profile, EdgeKind::Ellipse, k))
+      all = false;
+  }
+  for (std::size_t k = 0; k < profile.beziers.size(); k++) {
+    if (!extrudeBezier(profile.beziers[k], map, out) && chordOf(profile, EdgeKind::Bezier, k))
+      all = false;
+  }
+  if (every_curve != nullptr) *every_curve = all;
   extrudeCaps(map, out);
   for (const auto& loop : profile.loops) {
     for (const ProfileEdge& edge : loop) {
