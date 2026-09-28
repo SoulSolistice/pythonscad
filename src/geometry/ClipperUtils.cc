@@ -387,6 +387,17 @@ void carryDeclarations(Polygon2d& result, const std::vector<const Polygon2d *>& 
     }
   }
   if (same_frame) result.placeOnArcs(grid);
+  // And every point an operand stated goes back where it was stated - after the
+  // arcs, so a stated point is the one the model wrote rather than its
+  // projection. In the frame Clipper saw, which is the result's, so wherever.
+  VectorOfVector2d given;
+  for (const auto *operand : operands) {
+    if (operand == nullptr) continue;
+    for (const auto& outline : operand->transformedOutlines()) {
+      given.insert(given.end(), outline.vertices.begin(), outline.vertices.end());
+    }
+  }
+  result.restoreGivenPoints(given, grid);
 }
 
 namespace {

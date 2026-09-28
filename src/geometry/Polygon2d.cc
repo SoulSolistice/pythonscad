@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -212,6 +213,33 @@ void Polygon2d::placeOnArcs(double grid)
       if (best == nullptr) continue;
       const Vector2d c(best->centre[0], best->centre[1]);
       v = c + (v - c) * (best->r / (v - c).norm());
+      moved = true;
+    }
+  }
+  if (moved) dropTransformedCache();
+}
+
+void Polygon2d::restoreGivenPoints(const VectorOfVector2d& given, double grid)
+{
+  if (given.empty() || !(grid > 0)) return;
+  // `grid` is a power of two, so v / grid is exact and rounds as Clipper's
+  // Point64 rounded it.
+  auto cell = [grid](const Vector2d& v) {
+    return std::make_pair(std::round(v[0] / grid), std::round(v[1] / grid));
+  };
+  // Per cell, the given point that rounds to it, and whether it is the only one.
+  std::map<std::pair<double, double>, std::pair<std::size_t, bool>> stated;
+  for (std::size_t i = 0; i < given.size(); i++) {
+    const auto it = stated.find(cell(given[i]));
+    if (it == stated.end()) stated.emplace(cell(given[i]), std::make_pair(i, true));
+    else if (given[it->second.first] != given[i]) it->second.second = false;
+  }
+  bool moved = false;
+  for (auto& outline : theoutlines) {
+    for (Vector2d& v : outline.vertices) {
+      const auto it = stated.find(cell(v));
+      if (it == stated.end() || !it->second.second || given[it->second.first] == v) continue;
+      v = given[it->second.first];
       moved = true;
     }
   }

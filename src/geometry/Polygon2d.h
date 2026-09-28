@@ -174,6 +174,25 @@ public:
    * arc per source vertex. */
   void placeOnArcs(double grid);
 
+  /*! Put back where an operand stated it every vertex a rounding grid moved.
+   *
+   * Clipper rounds each coordinate to its integer grid, `grid` wide, and every
+   * polygon passes through it - a leaf is sanitized, a boolean is computed - so
+   * a point the model wrote down, 10 cos 11.25 degrees, arrives up to half a
+   * cell off where it was written. A declaration made of those points - a
+   * declare_cylinder() over a hand-written circle - is then compared with the
+   * grid instead of the model.
+   *
+   * Rounding is a function of the point, so a vertex of the result whose grid
+   * cell is the cell exactly one of the `given` points rounds to *is* that
+   * point, and takes its coordinates back. Nothing measured and nothing chosen:
+   * the cell is the same `std::round` of the same exact product Clipper took. A
+   * vertex Clipper made - where two edges cross - rounds from no given point
+   * and stays where the grid put it; a cell two given points share is left too,
+   * because the grid has merged them and neither is the vertex. `given` are the
+   * points Clipper was handed, in the frame the result is in. */
+  void restoreGivenPoints(const VectorOfVector2d& given, double grid);
+
   void reverse(void);
   [[nodiscard]] std::unique_ptr<PolySet> tessellate(bool in3d = false) const;
   [[nodiscard]] double area() const;
