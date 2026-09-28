@@ -4364,6 +4364,56 @@ literal tolerance in the exporter, recognition and the declaration paths
   only by tests; the cube's drag handle (1e-3, the GUI), polygon()'s rounded
   corners (-1e-6) and the extruders' zero-height guards are not the exporter's.
 
+**B, checked 2026-09-28.** A Bezier patch's membership, its boundary
+curves' and its sifting box need no tolerance: the patch is a closed form and
+answers at machine precision (`7bd5cc9a9`). A declared grid's band is
+resolution already - what the grid publishes - but sampled, three points a
+cell, which is a statistic; its bound belongs with C. Crossing curves need an
+approximation, since two quadrics meet in a quartic STEP has no entity for;
+decided with the author: the fits aim at what they can reach, and the file
+declares the precision they actually achieved as its uncertainty (today
+`model_tol`, 1e-5, one of A's numbers).
+
+**C, checked 2026-09-28, by the same rule - machine precision where the
+question is exact, else a tolerance derived from the resolution actually
+present, never a chosen number:**
+
+- *The quadric's lean test* (`lean x 1.05 + 1e-6`, capped at 0.99). Its own
+  comment derives the answer: a chord facet of a frustum leans by
+  lean / cos(dtheta / 2), dtheta the facet's angular span, which its corners
+  give. Per facet, in closed form; the factor stood in for "n not too small".
+- *The quadric's interior test* (1.25 x sagitta). A flat facet with its corners
+  on a convex surface lies at most one sagitta inside it - of its longest
+  corner-to-corner chord, in the surface's closed form. The quarter was for
+  uneven arcs, which the per-facet chord answers exactly.
+- *The grid's four times the median stray.* A statistic over the claim's own
+  cut corners; nothing derives it, because what it stands in for is where a cut
+  corner belongs - existence steps 5 to 7. Removed by those, not replaced.
+- *A declared grid's band*, sampled at three points a cell. The interpolant's
+  deviation from its bilinear tessellation has a bound in closed form from the
+  net's second differences; the band should be that bound, and the sifting box
+  padded by it and the rounding, not 1e-6 of the extent.
+- *The fitted route's 1e-7* (`Bands.cc`, fits matched to measured rims). A fit
+  knows how well it fits: match at the fit's own residual.
+- *The fits* (`Fits.cc`). The eigenvalue ratios (1e-6: the normals lie in a
+  plane; 1e-3: they spread) are zero and non-zero on exact data up to rounding,
+  so the rounding of the sums is their bound; the taper cut-offs (alpha, slope
+  1e-4) are redundant - the cylinder is fitted first, at the same resolution,
+  and a taper it could not describe is a cone; the ring quantum is 100 x
+  `model_tol`, and goes with `model_tol`. What a fit accepts - every vertex on
+  it within `tol` - is the one real resolution question: the least squares
+  solve's conditioning (its normal equations square it) sets how exactly a fit
+  can recover an exact surface, so the acceptance follows from the solve's own
+  eigenvalues rather than from `model_tol`.
+- *The zone's cap test* (`Bands.cc`, a cap's normal along the axis to 1e-6):
+  parallel at machine precision (`recognition::parallel`).
+- *Mesh-plane merging* (`MeshLoops`, a plane's offset to 1e-4 and normals to
+  0.9999; `EmitPlanarFaces`, 1e-8 of the extent): whether two facets are one
+  plane is exact where their corners are the model's - coplanarity at machine
+  precision, by the orientation of four points against its forward error.
+- *Measured ownership* (60 degrees, `least = 3`): reports only, against the
+  carried ownership that replaced it; to be deleted, not refined.
+
 Order, as the rest of this item: record identity first - one exact function,
 `sameAs` kept only where the representation is meant, the duplicate removed,
 `PolySetBuilder` on it - since every other list merges by it; then carriage
