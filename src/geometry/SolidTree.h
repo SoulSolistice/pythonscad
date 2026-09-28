@@ -92,6 +92,15 @@ public:
    * opaque where the box has no inside to name a point of. */
   [[nodiscard]] static std::shared_ptr<const SolidTree> box(const BoundingBox& box,
                                                             const std::string& what = "");
+  /*! A leaf that lies within `box` and contains every solid in `contained`:
+   * outside the box it is out, inside any of them it is in, and nothing more
+   * follows. What a hull() is of its operands - the hull of solids holds each
+   * of them - whatever they are. The contained trees are the leaf's children;
+   * they are no operands of a boolean, and nothing but classification reads
+   * them. */
+  [[nodiscard]] static std::shared_ptr<const SolidTree> enveloping(
+    const BoundingBox& box, std::vector<std::shared_ptr<const SolidTree>> contained,
+    const std::string& what = "");
   /*! `op` over two operands - null standing for opaque. A union or an
    * intersection absorbs operands of its own kind, and a difference absorbs a
    * difference on its left: the tree says what the model did, not in which

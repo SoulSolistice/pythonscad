@@ -191,3 +191,36 @@ TEST_CASE("a hull of coaxial solids of revolution is declared by what its profil
   operands[1][0] = std::make_shared<CylinderSurface>(Vector3d(1, 0, 5), z, 6);
   CHECK(solidOfHullOfRevolution(operands) == nullptr);
 }
+
+TEST_CASE("a hull holds each of its operands, whatever they are", "[classify][hull]")
+{
+  // hull() of two unit cubes at x 0..1 and x 3..4, whose hull is the 4 x 1 x 1
+  // box, stated as nothing but the box of its operands' boxes and the operands
+  // themselves. Inside an operand is inside the hull; outside the box is out;
+  // between the two cubes the model says in, but the leaf cannot, and says
+  // nothing. On an operand's face means nothing either: x = 1 is inside the
+  // hull.
+  const auto a = box(Vector3d(0, 0, 0), Vector3d(1, 1, 1));
+  const auto b = box(Vector3d(3, 0, 0), Vector3d(4, 1, 1));
+  const auto hull =
+    SolidTree::enveloping(BoundingBox(Vector3d(0, 0, 0), Vector3d(4, 1, 1)), {a, b}, "hull()");
+  REQUIRE(hull->op() == Op::Enveloped);
+  CHECK(at(hull, 0.5, 0.5, 0.5) == Where::In);
+  CHECK(at(hull, 3.5, 0.5, 0.5) == Where::In);
+  CHECK(at(hull, 2, 0.5, 0.5) == Where::Unknown);
+  CHECK(at(hull, 1, 0.5, 0.5) == Where::Unknown);
+  CHECK(at(hull, 5, 0.5, 0.5) == Where::Out);
+  CHECK(hull->leaves() == 1);
+  CHECK(hull->declaredLeaves() == 0);
+
+  // and it moves with its operands
+  const auto moved = hull->transformed(Transform3d(Eigen::Translation3d(0, 0, 10)));
+  CHECK(at(moved, 0.5, 0.5, 10.5) == Where::In);
+  CHECK(at(moved, 0.5, 0.5, 0.5) == Where::Out);
+
+  // A subtracted hull takes out what its operands hold.
+  const auto slab = box(Vector3d(-1, -1, -1), Vector3d(5, 2, 2));
+  const auto cut = SolidTree::combine(Op::Difference, slab, hull);
+  CHECK(at(cut, 0.5, 0.5, 0.5) == Where::Out);
+  CHECK(at(cut, -0.5, 0.5, 0.5) == Where::In);
+}

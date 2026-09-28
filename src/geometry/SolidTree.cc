@@ -89,6 +89,19 @@ bool SolidTree::extent(BoundingBox& out) const
   }
 }
 
+std::shared_ptr<const SolidTree> SolidTree::enveloping(
+  const BoundingBox& b, std::vector<std::shared_ptr<const SolidTree>> contained, const std::string& what)
+{
+  const auto within = box(b, what);
+  if (within->op_ != Op::Enveloped) return within;
+  std::vector<std::shared_ptr<const SolidTree>> held;
+  for (auto& c : contained) {
+    if (c != nullptr) held.push_back(std::move(c));
+  }
+  return std::shared_ptr<const SolidTree>(
+    new SolidTree(Op::Enveloped, std::move(held), within->solid_, what));
+}
+
 std::shared_ptr<const SolidTree> SolidTree::combine(Op op, std::shared_ptr<const SolidTree> lhs,
                                                     std::shared_ptr<const SolidTree> rhs)
 {
@@ -117,8 +130,16 @@ std::shared_ptr<const SolidTree> SolidTree::transformed(const Transform3d& mat) 
   case Op::Opaque:    return opaque(what_);
   case Op::Declared:  return declared(solid_->transformed(mat), what_);
   case Op::Faceted:   return faceted(what_);
-  case Op::Enveloped: return enveloped(solid_->transformed(mat), what_);
-  default:            break;
+  case Op::Enveloped: {
+    auto solid = solid_->transformed(mat);
+    if (solid == nullptr) return opaque(what_);
+    std::vector<std::shared_ptr<const SolidTree>> held;
+    held.reserve(children_.size());
+    for (const auto& child : children_) held.push_back(child->transformed(mat));
+    return std::shared_ptr<const SolidTree>(
+      new SolidTree(Op::Enveloped, std::move(held), std::move(solid), what_));
+  }
+  default: break;
   }
   std::vector<std::shared_ptr<const SolidTree>> moved;
   moved.reserve(children_.size());
@@ -128,7 +149,8 @@ std::shared_ptr<const SolidTree> SolidTree::transformed(const Transform3d& mat) 
 
 std::size_t SolidTree::leaves() const
 {
-  if (children_.empty()) return 1;
+  // An enveloping leaf's children are solids it contains, not its operands.
+  if (children_.empty() || op_ == Op::Enveloped) return 1;
   std::size_t n = 0;
   for (const auto& child : children_) n += child->leaves();
   return n;
@@ -137,6 +159,7 @@ std::size_t SolidTree::leaves() const
 std::size_t SolidTree::declaredLeaves() const
 {
   if (op_ == Op::Declared) return 1;
+  if (op_ == Op::Enveloped) return 0;
   std::size_t n = 0;
   for (const auto& child : children_) n += child->declaredLeaves();
   return n;

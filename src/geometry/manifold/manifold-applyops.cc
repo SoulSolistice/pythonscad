@@ -50,12 +50,15 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     // them lies within the box that holds them all.
     BoundingBox reach;
     bool reach_known = true;
+    // And the operands' solids themselves: the hull holds each of them.
+    std::vector<std::shared_ptr<const SolidTree>> contained;
     // And whether every operand is one declared primitive: then a hull of
     // coaxial ones is a declared solid of its own, not a box
     // (solidOfHullOfRevolution).
     bool all_primitive = true;
     auto note_reach = [&](const std::shared_ptr<const SolidTree>& tree) {
       all_primitive = all_primitive && tree != nullptr && tree->op() == SolidTree::Op::Declared;
+      contained.push_back(tree);
       BoundingBox b;
       if (tree == nullptr || !tree->extent(b)) reach_known = false;
       else reach.extend(b);
@@ -113,11 +116,12 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     // The hull's own faces, made on what its operands state it makes.
     const auto tagged = ManifoldUtils::withSurfaceTags(hull, stamped);
     // Its solid is a leaf of its own: the hull of exact solids is not a boolean
-    // of them, so nothing beneath it answers for it - but it lies within the box
-    // that holds its operands, where every one of them states where it lies, and
-    // a point outside that box is outside the hull. See SolidTree.h.
+    // of them, so nothing beneath it answers for its boundary - but it lies
+    // within the box that holds its operands, where every one of them states
+    // where it lies, and a point outside that box is outside the hull; and it
+    // holds every operand, so a point inside one is inside it. See SolidTree.h.
     std::shared_ptr<const SolidTree> solid =
-      reach_known ? SolidTree::box(reach, "hull()")
+      reach_known ? SolidTree::enveloping(reach, contained, "hull()")
                   : SolidTree::opaque("hull() of an operand that states no extent");
     if (all_primitive) {
       if (auto exact = solidOfHullOfRevolution(per_operand))

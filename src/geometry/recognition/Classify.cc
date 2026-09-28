@@ -62,9 +62,17 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
   case Op::Declared: return leaf(tree, p);
   case Op::Faceted:
     return of(Where::Unknown, &tree);  // resolved where it became a Manifold
-  // Known only to lie within its envelope: outside it, outside the leaf.
-  case Op::Enveloped: return of(leaf(tree, p).where == Where::Out ? Where::Out : Where::Unknown, &tree);
-  default:            break;
+  // Known to lie within its envelope, and to contain every solid it holds:
+  // outside the one it is out, inside any of the others it is in. On a held
+  // solid's boundary says nothing - the leaf may have material beyond it.
+  case Op::Enveloped: {
+    if (leaf(tree, p).where == Where::Out) return of(Where::Out, &tree);
+    for (const auto& held : tree.children()) {
+      if (classify(*held, p).where == Where::In) return of(Where::In, &tree);
+    }
+    return of(Where::Unknown, &tree);
+  }
+  default: break;
   }
   std::vector<Classification> parts;
   parts.reserve(tree.children().size());
