@@ -32,60 +32,6 @@ namespace {
 constexpr bool EDGE_ALONG_U[4] = {false, false, true, true};
 constexpr bool EDGE_FAR[4] = {false, true, false, true};
 
-/*! Distance from a point to one boundary curve of a patch, by sampling then
- * refining. The curve is degree 2 at most and only boundary vertices are ever
- * tested, so this does not need to be clever. */
-double distanceToBoundary(const BezierPatchSurface& patch, int e, const Vector3d& pt)
-{
-  const std::vector<Vector3d> cp = patch.boundary(EDGE_ALONG_U[e], EDGE_FAR[e]);
-  const std::vector<double> cw = patch.boundaryWeights(EDGE_ALONG_U[e], EDGE_FAR[e]);
-  const bool rational = cw.size() == cp.size();
-  auto at = [&](double t) {
-    // The boundary of a rational patch is a rational curve, so de Casteljau has
-    // to run on (w*P, w) and divide at the end. Evaluating it as a polynomial
-    // curve measures the distance to the parabola through the same control
-    // points, which is 6% of the radius away from the circular arc the mesh
-    // actually sits on - against a tolerance of 1e-7 of the model size. Every
-    // boundary segment of every fillet patch then belongs to no edge, and the
-    // whole fillet is written faceted while nothing anywhere reports an error.
-    std::vector<Vector3d> w = cp;
-    std::vector<double> ww(cp.size(), 1.0);
-    if (rational) {
-      for (std::size_t i = 0; i < cp.size(); i++) {
-        w[i] = cp[i] * cw[i];
-        ww[i] = cw[i];
-      }
-    }
-    for (std::size_t k = w.size(); k > 1; k--) {
-      for (std::size_t i = 0; i + 1 < k; i++) {
-        w[i] = w[i] * (1 - t) + w[i + 1] * t;
-        ww[i] = ww[i] * (1 - t) + ww[i + 1] * t;
-      }
-    }
-    return ww[0] == 0.0 ? w[0] : Vector3d(w[0] / ww[0]);
-  };
-  double best = -1, bt = 0;
-  for (int i = 0; i <= 64; i++) {
-    const double t = i / 64.0;
-    const double d = (at(t) - pt).norm();
-    if (best < 0 || d < best) {
-      best = d;
-      bt = t;
-    }
-  }
-  for (double step = 1.0 / 64; step > 1e-13; step *= 0.5) {
-    for (const double t : {bt - step, bt + step}) {
-      const double c = std::min(1.0, std::max(0.0, t));
-      const double d = (at(c) - pt).norm();
-      if (d < best) {
-        best = d;
-        bt = c;
-      }
-    }
-  }
-  return best;
-}
-
 /*! Which boundary curves of the patch a vertex lies on.
  *
  * By distance to the curve rather than by its parameters, because the
@@ -94,12 +40,14 @@ double distanceToBoundary(const BezierPatchSurface& patch, int e, const Vector3d
  * edge - is the far end of *both* rails. Classifying by parameter put the apex
  * inside one rail's run, so that run spanned two different curves and the edge
  * from the apex to the other rail was about to be replaced by the wrong one. */
-unsigned boundarySet(const BezierPatchSurface& patch, const Vector3d& pt, double tol)
+unsigned boundarySet(const BezierPatchSurface& patch, const Vector3d& pt)
 {
   unsigned mask = 0;
   for (int e = 0; e < 4; e++) {
     if (patch.degenerateAt(EDGE_ALONG_U[e], EDGE_FAR[e])) continue;
-    if (distanceToBoundary(patch, e, pt) <= tol) mask |= 1u << e;
+    // on the curve at machine precision, as its maker drew it - until
+    // 2026-09-28 within 1e-7 of the model's size
+    if (patch.boundaryResidual(EDGE_ALONG_U[e], EDGE_FAR[e], pt).exact()) mask |= 1u << e;
   }
   return mask;
 }
@@ -316,16 +264,35 @@ std::vector<BezierProposal> proposeBezierPatches(const recognition::FacetGraph& 
     // anything. That matters: projection is a Newton solve from a grid of
     // starts, and a filleted cube has thousands of facets and dozens of
     // patches.
+    //
+    // The box holds the patch exactly; what can lie outside it is only the
+    // rounding of a point evaluated on the patch - the forward error the
+    // patch's own residual carries (BezierPatchSurface::signedResidual): de
+    // Casteljau's levels over the largest weighted control point, the weights'
+    // over the largest weight, over the least weight the denominator can reach.
+    // It was 1e-6 of the box's diagonal until 2026-09-28.
     Vector3d lo = bez->net.front(), hi = bez->net.front();
-    for (const auto& p : bez->net) {
-      lo = lo.cwiseMin(p);
-      hi = hi.cwiseMax(p);
+    double largest_wp = 0, largest_p = 0, largest_w = 1, least_w = 1;
+    for (int i = 0; i <= bez->degree_u; i++) {
+      for (int j = 0; j <= bez->degree_v; j++) {
+        const Vector3d& p = bez->control(i, j);
+        const double w = bez->weight(i, j);
+        lo = lo.cwiseMin(p);
+        hi = hi.cwiseMax(p);
+        largest_wp = std::max(largest_wp, (p * w).norm());
+        largest_p = std::max(largest_p, p.norm());
+        largest_w = std::max(largest_w, w);
+        least_w = std::min(least_w, w);
+      }
     }
-    const double slack = 1e-6 * std::max(1.0, (hi - lo).norm());
+    if (!(least_w > 0)) continue;  // a weight that is not positive: no convex hull to box
+    const int levels = 3 * (bez->degree_u + bez->degree_v) + 2;
+    const double slack = (recognition::forwardError(levels + 1, largest_wp) +
+                          largest_p * recognition::forwardError(levels, largest_w)) /
+                           least_w +
+                         recognition::forwardError(1, largest_p);
     lo.array() -= slack;
     hi.array() += slack;
-
-    proposal.extent = (hi - lo).norm();
     for (std::size_t f = 0; f < loops.size(); f++) {
       if (!loop_valid[f] || is_hole[f]) continue;
       bool on = true;
@@ -426,11 +393,8 @@ std::vector<Patch> formBezierPatches(const recognition::FacetGraph& graph,
     const std::vector<int>& cycle = cycles.front();
     // Each *segment* of the boundary is assigned a curve, not each vertex: a
     // segment lies on exactly one, while its endpoints may lie on two.
-    const double curve_tol = 1e-7 * std::max(1.0, proposal->extent);
     std::vector<unsigned> on(cycle.size());
-    for (std::size_t i = 0; i < cycle.size(); i++) {
-      on[i] = boundarySet(*bez, vertices[cycle[i]], curve_tol);
-    }
+    for (std::size_t i = 0; i < cycle.size(); i++) on[i] = boundarySet(*bez, vertices[cycle[i]]);
     bool classified = true;
     for (std::size_t i = 0; i < cycle.size(); i++) {
       const unsigned both = on[i] & on[(i + 1) % cycle.size()];

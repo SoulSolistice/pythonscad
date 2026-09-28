@@ -272,3 +272,39 @@ TEST_CASE("a corner fillet is an octant of a sphere", "[geometry][bezier][fillet
     }
   }
 }
+
+TEST_CASE("a fillet's points are on its patch and its rails at machine precision",
+          "[geometry][bezier][d0]")
+{
+  // The strip FilletNode declares, and the rail points it draws with its own
+  // arithmetic (bez(), above). Until 2026-09-28 a patch had no residual and
+  // membership was 1e-7; now it is the forward error of evaluating the patch
+  // where a point projects - so every drawn point must pass it, and a point
+  // 1e-10 off the patch, far outside that bound, must not.
+  std::mt19937 gen(11);
+  std::uniform_real_distribution<double> unit(-1.0, 1.0);
+  auto rnd = [&] { return unit(gen); };
+  int on_patch = 0, on_rail = 0, off = 0, tested = 0;
+  for (int t = 0; t < 40; t++) {
+    const Vector3d p1(rnd(), rnd(), rnd()), p2(rnd(), rnd(), rnd());
+    const Vector3d a1(rnd(), rnd(), rnd()), b1(rnd(), rnd(), rnd());
+    const Vector3d a2(rnd(), rnd(), rnd()), b2(rnd(), rnd(), rnd());
+    const BezierPatchSurface patch(
+      2, 1, {p1 + a1, p2 + a2, p1, p2, p1 + b1, p2 + b2},
+      {1.0, 1.0, weight(p1 + a1, p1, p1 + b1), weight(p2 + a2, p2, p2 + b2), 1.0, 1.0});
+    for (int i = 0; i <= 8; i++) {
+      const double f = i / 8.0;
+      const Vector3d q = bez(f, p1 + a1, p1, p1 + b1);
+      tested++;
+      on_patch += patch.residual(q).exact() ? 1 : 0;
+      on_rail += patch.boundaryResidual(true, false, q).exact() ? 1 : 0;
+    }
+    Vector3d n;
+    const Vector3d mid = patch.evaluate(0.5, 0.5);
+    REQUIRE(patch.normalAt(mid, n));
+    off += patch.residual(mid + n * 1e-10).exact() ? 0 : 1;
+  }
+  CHECK(on_patch == tested);
+  CHECK(on_rail == tested);
+  CHECK(off == 40);
+}

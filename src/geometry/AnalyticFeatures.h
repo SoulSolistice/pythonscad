@@ -470,7 +470,6 @@ bool runCircle(const Patch& patch, const Patch::Run& run, const std::vector<Vect
 struct BezierProposal {
   std::size_t surface_index = 0;
   std::vector<std::size_t> facets;  // on the patch, in facet order
-  double extent = 0;                // diagonal of the net's box, for curve tolerances
 };
 
 /*! Propose, purely: see BezierProposal. Reads no claim of any pass. */

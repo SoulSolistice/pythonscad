@@ -416,6 +416,104 @@ Vector3d deCasteljauDeriv(const std::vector<Vector3d>& pts, double t)
   return deCasteljau(d, t);
 }
 
+/*! A rational Bezier curve - `weights` empty for a polynomial one - at `t`:
+ * its point, its derivative, and the forward error of the point.
+ *
+ * de Casteljau is n levels of p (1 - t) + q t, each three roundings and 1 - t
+ * once more, and each level a convex combination: so the numerator is off by
+ * at most gamma_{3n+1} of its largest control point, one more for the
+ * weighting, and the denominator by gamma_{3n+1} of its largest weight. The
+ * quotient carries both, in proportion, and one rounding of its own. */
+struct CurveAt {
+  Vector3d point, tangent;
+  double error = 0;
+};
+
+CurveAt rationalCurveAt(const std::vector<Vector3d>& ctrl, const std::vector<double>& weights, double t)
+{
+  const bool rational = weights.size() == ctrl.size();
+  std::vector<Vector3d> num;
+  std::vector<double> den;
+  double largest_num = 0, largest_den = 0;
+  for (std::size_t i = 0; i < ctrl.size(); i++) {
+    const double w = rational ? weights[i] : 1.0;
+    num.push_back(ctrl[i] * w);
+    den.push_back(w);
+    largest_num = std::max(largest_num, num.back().norm());
+    largest_den = std::max(largest_den, std::fabs(w));
+  }
+  const int levels = 3 * (int(ctrl.size()) - 1) + 1;
+  const Vector3d n = deCasteljau(num, t), n_d = deCasteljauDeriv(num, t);
+  const double w = deCasteljau1d(den, t), w_d = deCasteljauDeriv1d(den, t);
+  CurveAt out;
+  out.point = n / w;
+  out.tangent = (n_d - out.point * w_d) / w;
+  const double err_num = recognition::forwardError(levels + (rational ? 1 : 0), largest_num);
+  const double err_den = rational ? recognition::forwardError(levels, largest_den) : 0.0;
+  out.error = (err_num + out.point.norm() * err_den) / std::fabs(w) +
+              recognition::forwardError(rational ? 1 : 0, out.point.norm());
+  return out;
+}
+
+/*! A patch at (u, v): its point, both derivatives, and the forward error of the
+ * point - the curve's bound, with the two directions' levels one after the
+ * other: the rows in v first, then the column of their values in u. */
+struct PatchAt {
+  Vector3d point, du, dv;
+  double error = 0;
+};
+
+PatchAt patchAt(const BezierPatchSurface& patch, double u, double v)
+{
+  std::vector<Vector3d> rows, rows_dv;
+  std::vector<double> rows_w, rows_w_dv;
+  double largest_num = 0, largest_den = 0;
+  for (int i = 0; i <= patch.degree_u; i++) {
+    std::vector<Vector3d> row;
+    std::vector<double> row_w;
+    for (int j = 0; j <= patch.degree_v; j++) {
+      row.push_back(patch.control(i, j) * patch.weight(i, j));
+      row_w.push_back(patch.weight(i, j));
+      largest_num = std::max(largest_num, row.back().norm());
+      largest_den = std::max(largest_den, std::fabs(row_w.back()));
+    }
+    rows.push_back(deCasteljau(row, v));
+    rows_dv.push_back(deCasteljauDeriv(row, v));
+    rows_w.push_back(deCasteljau1d(row_w, v));
+    rows_w_dv.push_back(deCasteljauDeriv1d(row_w, v));
+  }
+  const Vector3d n = deCasteljau(rows, u), n_du = deCasteljauDeriv(rows, u),
+                 n_dv = deCasteljau(rows_dv, u);
+  const double w = deCasteljau1d(rows_w, u), w_du = deCasteljauDeriv1d(rows_w, u),
+               w_dv = deCasteljau1d(rows_w_dv, u);
+  PatchAt out;
+  out.point = n / w;
+  out.du = (n_du - out.point * w_du) / w;
+  out.dv = (n_dv - out.point * w_dv) / w;
+  const bool rational = patch.isRational();
+  const int levels = 3 * (patch.degree_u + patch.degree_v) + 2;
+  const double err_num = recognition::forwardError(levels + (rational ? 1 : 0), largest_num);
+  const double err_den = rational ? recognition::forwardError(levels, largest_den) : 0.0;
+  out.error = (err_num + out.point.norm() * err_den) / std::fabs(w) +
+              recognition::forwardError(rational ? 1 : 0, out.point.norm());
+  return out;
+}
+
+/*! The distance from `p` to a point `at` on a curve or patch whose own error is
+ * `error` and whose parameters were resolved to their last bit, moving along
+ * it at `speed` per unit of parameter: the residual and its bound - the
+ * point's error, the distance's nine roundings, and the last bit of the
+ * parameters times how far that moves the point. */
+recognition::Residual residualAt(const Vector3d& p, const Vector3d& at, double error, double speed,
+                                 double sign)
+{
+  recognition::Residual r;
+  r.value = sign * (p - at).norm();
+  r.bound =
+    error + recognition::forwardError(9, p.norm() + at.norm()) + recognition::forwardError(2, speed);
+  return r;
+}
+
 }  // namespace
 
 BezierPatchSurface::BezierPatchSurface(int degree_u, int degree_v, std::vector<Vector3d> net,
@@ -534,7 +632,7 @@ bool BezierPatchSurface::degenerateAt(bool along_u, bool far) const
 {
   const std::vector<Vector3d> edge = boundary(along_u, far);
   for (const auto& p : edge) {
-    if ((p - edge.front()).norm() > 1e-9) return false;
+    if (p != edge.front()) return false;
   }
   return true;
 }
@@ -606,10 +704,10 @@ bool BezierPatchSurface::project(const Vector3d& pt, double& u, double& v) const
           const double nu = std::min(1.0, std::max(0.0, cu + step[0] * shrink));
           const double nv = std::min(1.0, std::max(0.0, cv + step[1] * shrink));
           if ((evaluate(nu, nv) - pt).squaredNorm() >= here) continue;
-          const bool done = fabs(nu - cu) < 1e-14 && fabs(nv - cv) < 1e-14;
+          // an improvement is a change: this runs until no step improves
           cu = nu;
           cv = nv;
-          stepped = !done;
+          stepped = true;
           break;
         }
         if (!stepped) break;
@@ -623,6 +721,67 @@ bool BezierPatchSurface::project(const Vector3d& pt, double& u, double& v) const
     }
   }
   return best >= 0;
+}
+
+recognition::Residual BezierPatchSurface::signedResidual(const Vector3d& p) const
+{
+  double u = 0, v = 0;
+  if (!project(p, u, v)) return {};
+  const PatchAt at = patchAt(*this, u, v);
+  const Vector3d n = at.du.cross(at.dv);
+  const double sign = (p - at.point).dot(n) < 0 ? -1.0 : 1.0;
+  return residualAt(p, at.point, at.error, at.du.norm() + at.dv.norm(), sign);
+}
+
+bool BezierPatchSurface::closestPoint(const Vector3d& p, Vector3d& out) const
+{
+  double u = 0, v = 0;
+  if (!project(p, u, v)) return false;
+  out = evaluate(u, v);
+  return true;
+}
+
+bool BezierPatchSurface::normalAt(const Vector3d& p, Vector3d& out) const
+{
+  double u = 0, v = 0;
+  if (!project(p, u, v)) return false;
+  const PatchAt at = patchAt(*this, u, v);
+  const Vector3d n = at.du.cross(at.dv);
+  if (!(n.norm() > 0)) return false;  // a degenerate edge: no normal there
+  out = n.normalized();
+  return true;
+}
+
+recognition::Residual BezierPatchSurface::boundaryResidual(bool along_u, bool far,
+                                                           const Vector3d& p) const
+{
+  const std::vector<Vector3d> ctrl = boundary(along_u, far);
+  const std::vector<double> weights = boundaryWeights(along_u, far);
+  // Sampled, then halved around the nearest sample until a step no longer
+  // moves the parameter - its last bit, not a chosen floor.
+  double best = -1, bt = 0;
+  const int samples = 64;
+  for (int i = 0; i <= samples; i++) {
+    const double t = double(i) / samples;
+    const double d = (rationalCurveAt(ctrl, weights, t).point - p).norm();
+    if (best < 0 || d < best) {
+      best = d;
+      bt = t;
+    }
+  }
+  for (double step = 1.0 / samples; bt + step != bt || bt - step != bt; step *= 0.5) {
+    for (const double t : {bt - step, bt + step}) {
+      const double c = std::min(1.0, std::max(0.0, t));
+      const double d = (rationalCurveAt(ctrl, weights, c).point - p).norm();
+      if (d < best) {
+        best = d;
+        bt = c;
+      }
+    }
+    if (!(step > 0)) break;
+  }
+  const CurveAt at = rationalCurveAt(ctrl, weights, bt);
+  return residualAt(p, at.point, at.error, at.tangent.norm(), 1.0);
 }
 
 int BezierPatchSurface::pointMember(std::vector<Vector3d>& vertices, Vector3d pt)

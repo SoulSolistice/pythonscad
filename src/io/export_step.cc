@@ -124,19 +124,6 @@ bool surfaceNormal(const Surface *s, const Vector3d& p, Vector3d& out)
     out = n.normalized();
     return true;
   }
-  if (const auto *patch = dynamic_cast<const BezierPatchSurface *>(s)) {
-    double u = 0, v = 0;
-    if (!patch->project(p, u, v)) return false;
-    const double h = 1e-4;
-    const Vector3d du =
-      patch->evaluate(std::min(1.0, u + h), v) - patch->evaluate(std::max(0.0, u - h), v);
-    const Vector3d dv =
-      patch->evaluate(u, std::min(1.0, v + h)) - patch->evaluate(u, std::max(0.0, v - h));
-    const Vector3d n = du.cross(dv);
-    if (n.norm() < 1e-18) return false;
-    out = n.normalized();
-    return true;
-  }
   return false;
 }
 
@@ -208,20 +195,13 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   // the declarations there. Letting a plane in here would put a corner on its
   // own cap into the three-owner bucket, which places nothing at all.
 
-  // On the surface, exactly: a declared quadric or torus at machine precision
-  // (recognition::onExactly - the forward error of the residual, no chosen
-  // threshold; this was 1e-7 until 2026-09-24 and decided nothing between the
-  // two). A grid answers by its own net's points. A Bezier patch is D1, an
-  // interpolant reached by projection, and keeps the projection's tolerance.
+  // On the surface, exactly: a declared quadric, torus or Bezier patch at
+  // machine precision (recognition::onExactly - the forward error of the
+  // residual, no chosen threshold; 1e-7 for the quadrics until 2026-09-24 and
+  // for the patch until 2026-09-28). A grid answers by its own net's points.
   // See the note above for why not pointMember.
-  const double patch_tol = 1e-7;
   auto runsThrough = [&](const Surface *s, const Vector3d& p) {
     if (const auto *grid = dynamic_cast<const GridSurface *>(s)) return grid->isDeclaredPoint(p);
-    if (const auto *patch = dynamic_cast<const BezierPatchSurface *>(s)) {
-      double u = 0, v = 0;
-      if (!patch->project(p, u, v)) return false;
-      return (patch->evaluate(u, v) - p).norm() <= patch_tol;
-    }
     return recognition::onExactly(s, p);
   };
 

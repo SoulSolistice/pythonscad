@@ -311,9 +311,25 @@ public:
    * weights, so an exporter writing the curve needs them too. */
   [[nodiscard]] std::vector<double> boundaryWeights(bool along_u, bool far) const;
 
-  /*! Closest point on the patch to `pt`, by Newton from a grid of starts.
-   * Returns false when it does not converge. */
+  /*! Closest point on the patch to `pt`, by Newton from a grid of starts,
+   * each run until no step brings it closer - to the last bit of the
+   * parameters, which is what lets the residual below be exact. Returns false
+   * when it does not converge. */
   bool project(const Vector3d& pt, double& u, double& v) const;
+
+  /*! How far `p` is from the patch, signed by the side its normal points to,
+   * and the bound the arithmetic puts on it: the forward error of evaluating
+   * the patch where `p` projects - de Casteljau over the net, weights and
+   * quotient included - of the distance, and of the foot's parameters resolved
+   * to their last bit. What makes membership of a patch a machine-precision
+   * question (recognition/Exact.h) instead of a 1e-7 one. */
+  [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool closestPoint(const Vector3d& p, Vector3d& out) const override;
+  /*! The normal where `p` projects, from the patch's own derivatives. */
+  bool normalAt(const Vector3d& p, Vector3d& out) const override;
+  /*! How far `p` is from one boundary curve of the patch, and the same bound
+   * for that curve - a rational Bezier of the boundary's net and weights. */
+  [[nodiscard]] recognition::Residual boundaryResidual(bool along_u, bool far, const Vector3d& p) const;
 
   /*! The patch has collapsed to a point along one edge, as a corner fillet's
    * apex row has. */
