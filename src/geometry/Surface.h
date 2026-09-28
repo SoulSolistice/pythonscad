@@ -317,12 +317,26 @@ public:
    * when it does not converge. */
   bool project(const Vector3d& pt, double& u, double& v) const;
 
+  /*! The box the patch lies within: its net's, a rational patch's too where
+   * every weight is positive (the convex hull property), widened by the
+   * rounding of evaluating a point on it - de Casteljau's levels over the
+   * largest weighted control point, the weights' over the largest weight,
+   * over the least the denominator can reach. Empty where a weight is not
+   * positive, which gives the patch no hull to box. */
+  [[nodiscard]] BoundingBox hull() const;
+
   /*! How far `p` is from the patch, signed by the side its normal points to,
    * and the bound the arithmetic puts on it: the forward error of evaluating
    * the patch where `p` projects - de Casteljau over the net, weights and
    * quotient included - of the distance, and of the foot's parameters resolved
    * to their last bit. What makes membership of a patch a machine-precision
-   * question (recognition/Exact.h) instead of a 1e-7 one. */
+   * question (recognition/Exact.h) instead of a 1e-7 one.
+   *
+   * Outside hull() the distance to that box, which the distance to the patch
+   * is no less than - enough to say the point is not on it, which is all a
+   * caller there asks, and without projecting: asked of every corner of every
+   * triangle against every record, a projection each is what a fillet's
+   * hundreds of patches cannot afford. */
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   /*! The normal where `p` projects, from the patch's own derivatives. */
@@ -338,6 +352,16 @@ public:
   int degree_u, degree_v;
   std::vector<Vector3d> net;
   std::vector<double> weights;  // empty, or parallel to net
+
+private:
+  /*! hull(), and the boxes of the pieces three halvings each way make of the
+   * patch - each widened by the rounding of evaluating and of halving - worked
+   * out once where the net is made or moved, not on every question asked of a
+   * point. The depth only sets how tight the pieces are, never an answer: any
+   * depth gives a true lower bound. */
+  void boxPieces();
+  BoundingBox hull_;
+  std::vector<BoundingBox> pieces_;
 };
 
 /*! A plane, declared by the model that meant a flat face.

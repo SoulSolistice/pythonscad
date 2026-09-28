@@ -42,12 +42,27 @@ manifold::MeshGL64 withTagProperty(const manifold::MeshGL64& topology,
                                    const std::vector<uint32_t>& tri_tag);
 
 /*! The tag of the one face-declaring record of `surfaces` a triangle lies on
- * wholly at machine precision; 0 where it lies on none, or on several. */
-uint32_t triangleTag(const Vector3d& a, const Vector3d& b, const Vector3d& c,
-                     const std::vector<std::shared_ptr<Surface>>& surfaces);
+ * wholly at machine precision; 0 where it lies on none, or on several. Each
+ * vertex is asked of each record once: a vertex is a corner of several
+ * triangles, and the question has one answer - which matters where asking is a
+ * projection, as it is of a Bezier patch. */
+class TriangleTagger
+{
+public:
+  TriangleTagger(const std::vector<std::shared_ptr<Surface>>& surfaces, std::size_t vertices,
+                 std::function<Vector3d(std::size_t)> point);
+  uint32_t tag(std::size_t a, std::size_t b, std::size_t c);
+
+private:
+  bool on(std::size_t record, std::size_t vertex);
+  const std::vector<std::shared_ptr<Surface>>& surfaces_;
+  std::size_t vertices_;
+  std::function<Vector3d(std::size_t)> point_;
+  std::vector<std::vector<signed char>> asked_;  // per record, per vertex: -1 not yet
+};
 
 /*! `mani` with every untagged triangle tagged with the record of `surfaces`
- * it was made on - see triangleTag - where records are stamped onto geometry
+ * it was made on - see TriangleTagger - where records are stamped onto geometry
  * whose triangles already exist: a declaration over a subtree already a
  * Manifold, a hull. Gives each face record in `surfaces` a tag of its own
  * (stampTags). `mani` itself where nothing new is tagged. */

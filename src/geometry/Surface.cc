@@ -536,6 +536,7 @@ BezierPatchSurface::BezierPatchSurface(int degree_u, int degree_v, std::vector<V
   // is stable under everything that can move the patch.
   this->refpt = this->net.empty() ? Vector3d::Zero() : this->net.front();
   this->normdir = Vector3d(0, 0, 1);
+  boxPieces();
 }
 
 std::shared_ptr<Surface> BezierPatchSurface::clone() const
@@ -550,6 +551,7 @@ bool BezierPatchSurface::transform(const Transform3d& mat)
   // and a shear as well, so there is no similarity test to pass.
   for (auto& p : net) p = mat * p;
   refpt = net.empty() ? Vector3d::Zero() : net.front();
+  boxPieces();
   return true;
 }
 
@@ -637,6 +639,86 @@ bool BezierPatchSurface::degenerateAt(bool along_u, bool far) const
   return true;
 }
 
+namespace {
+
+/*! Newton from (cu, cv) towards the point of `patch` nearest `pt`, each step
+ * taken only where it brings the point closer, until none does - the last bit
+ * of the parameters. Leaves the parameters in (cu, cv). */
+void descend(const BezierPatchSurface& patch, const Vector3d& pt, double& cu, double& cv)
+{
+  const int degree_u = patch.degree_u, degree_v = patch.degree_v;
+  auto control = [&](int i, int j) -> const Vector3d& { return patch.control(i, j); };
+  auto weight = [&](int i, int j) { return patch.weight(i, j); };
+  auto evaluate = [&](double u, double v) { return patch.evaluate(u, v); };
+  for (int iter = 0; iter < 40; iter++) {
+    // The weighted control points and the weights are two polynomial
+    // surfaces, N and W, and the patch is their quotient. Differentiating a
+    // rational patch with the polynomial rule is what a Newton step must not
+    // do: it converges on the wrong point, and pointMember() then rejects
+    // vertices that lie exactly on the surface. For a polynomial patch W is
+    // 1 everywhere and this reduces to the previous arithmetic.
+    std::vector<Vector3d> along_u, dv_u;
+    std::vector<double> w_u, dwv_u;
+    for (int i = 0; i <= degree_u; i++) {
+      std::vector<Vector3d> row;
+      std::vector<double> row_w;
+      for (int j = 0; j <= degree_v; j++) {
+        row.push_back(control(i, j) * weight(i, j));
+        row_w.push_back(weight(i, j));
+      }
+      along_u.push_back(deCasteljau(row, cv));
+      dv_u.push_back(deCasteljauDeriv(row, cv));
+      w_u.push_back(deCasteljau1d(row_w, cv));
+      dwv_u.push_back(deCasteljauDeriv1d(row_w, cv));
+    }
+    const Vector3d n = deCasteljau(along_u, cu);
+    const Vector3d n_du = deCasteljauDeriv(along_u, cu);
+    const Vector3d n_dv = deCasteljau(dv_u, cu);
+    const double w = deCasteljau1d(w_u, cu);
+    const double wu_d = deCasteljauDeriv1d(w_u, cu);
+    const double wv_d = deCasteljau1d(dwv_u, cu);
+    if (w == 0.0) break;
+    // quotient rule, which for W == 1 and its derivatives 0 is the plain one
+    const Vector3d s = n / w;
+    const Vector3d su = (n_du - s * wu_d) / w;
+    const Vector3d sv = (n_dv - s * wv_d) / w;
+    const Vector3d r = s - pt;
+
+    // gradient and Gauss-Newton approximation of the Hessian
+    const Vector2d g(r.dot(su), r.dot(sv));
+    Eigen::Matrix2d h;
+    h << su.dot(su), su.dot(sv), su.dot(sv), sv.dot(sv);
+    h(0, 0) += 1e-12;
+    h(1, 1) += 1e-12;
+    const Vector2d step = h.fullPivLu().solve(-g);
+    if (!step.allFinite()) break;
+    // Every step has to improve the distance, for the reason spelled out in
+    // GridSurface::project: this matrix goes near singular where the two
+    // parameter directions run nearly parallel, and the step it then asks
+    // for lands somewhere else on the patch, where the iteration settles
+    // quite happily. The twenty-five starts around this loop make that cost
+    // a start rather than the answer, which is why it has never been a
+    // defect here - but a start spent is a start not searching, and the
+    // guard is two lines.
+    const double here = r.squaredNorm();
+    bool stepped = false;
+    double shrink = 1.0;
+    for (int back = 0; back < 6; back++, shrink *= 0.5) {
+      const double nu = std::min(1.0, std::max(0.0, cu + step[0] * shrink));
+      const double nv = std::min(1.0, std::max(0.0, cv + step[1] * shrink));
+      if ((evaluate(nu, nv) - pt).squaredNorm() >= here) continue;
+      // an improvement is a change: this runs until no step improves
+      cu = nu;
+      cv = nv;
+      stepped = true;
+      break;
+    }
+    if (!stepped) break;
+  }
+}
+
+}  // namespace
+
 bool BezierPatchSurface::project(const Vector3d& pt, double& u, double& v) const
 {
   // Minimise |S(u,v) - pt|^2 by Newton. A patch this shallow has no local
@@ -647,71 +729,7 @@ bool BezierPatchSurface::project(const Vector3d& pt, double& u, double& v) const
   for (int gi = 0; gi <= 4; gi++) {
     for (int gj = 0; gj <= 4; gj++) {
       double cu = gi / 4.0, cv = gj / 4.0;
-      for (int iter = 0; iter < 40; iter++) {
-        // The weighted control points and the weights are two polynomial
-        // surfaces, N and W, and the patch is their quotient. Differentiating a
-        // rational patch with the polynomial rule is what a Newton step must not
-        // do: it converges on the wrong point, and pointMember() then rejects
-        // vertices that lie exactly on the surface. For a polynomial patch W is
-        // 1 everywhere and this reduces to the previous arithmetic.
-        std::vector<Vector3d> along_u, dv_u;
-        std::vector<double> w_u, dwv_u;
-        for (int i = 0; i <= degree_u; i++) {
-          std::vector<Vector3d> row;
-          std::vector<double> row_w;
-          for (int j = 0; j <= degree_v; j++) {
-            row.push_back(control(i, j) * weight(i, j));
-            row_w.push_back(weight(i, j));
-          }
-          along_u.push_back(deCasteljau(row, cv));
-          dv_u.push_back(deCasteljauDeriv(row, cv));
-          w_u.push_back(deCasteljau1d(row_w, cv));
-          dwv_u.push_back(deCasteljauDeriv1d(row_w, cv));
-        }
-        const Vector3d n = deCasteljau(along_u, cu);
-        const Vector3d n_du = deCasteljauDeriv(along_u, cu);
-        const Vector3d n_dv = deCasteljau(dv_u, cu);
-        const double w = deCasteljau1d(w_u, cu);
-        const double wu_d = deCasteljauDeriv1d(w_u, cu);
-        const double wv_d = deCasteljau1d(dwv_u, cu);
-        if (w == 0.0) break;
-        // quotient rule, which for W == 1 and its derivatives 0 is the plain one
-        const Vector3d s = n / w;
-        const Vector3d su = (n_du - s * wu_d) / w;
-        const Vector3d sv = (n_dv - s * wv_d) / w;
-        const Vector3d r = s - pt;
-
-        // gradient and Gauss-Newton approximation of the Hessian
-        const Vector2d g(r.dot(su), r.dot(sv));
-        Eigen::Matrix2d h;
-        h << su.dot(su), su.dot(sv), su.dot(sv), sv.dot(sv);
-        h(0, 0) += 1e-12;
-        h(1, 1) += 1e-12;
-        const Vector2d step = h.fullPivLu().solve(-g);
-        if (!step.allFinite()) break;
-        // Every step has to improve the distance, for the reason spelled out in
-        // GridSurface::project: this matrix goes near singular where the two
-        // parameter directions run nearly parallel, and the step it then asks
-        // for lands somewhere else on the patch, where the iteration settles
-        // quite happily. The twenty-five starts around this loop make that cost
-        // a start rather than the answer, which is why it has never been a
-        // defect here - but a start spent is a start not searching, and the
-        // guard is two lines.
-        const double here = r.squaredNorm();
-        bool stepped = false;
-        double shrink = 1.0;
-        for (int back = 0; back < 6; back++, shrink *= 0.5) {
-          const double nu = std::min(1.0, std::max(0.0, cu + step[0] * shrink));
-          const double nv = std::min(1.0, std::max(0.0, cv + step[1] * shrink));
-          if ((evaluate(nu, nv) - pt).squaredNorm() >= here) continue;
-          // an improvement is a change: this runs until no step improves
-          cu = nu;
-          cv = nv;
-          stepped = true;
-          break;
-        }
-        if (!stepped) break;
-      }
+      descend(*this, pt, cu, cv);
       const double d = (evaluate(cu, cv) - pt).norm();
       if (best < 0 || d < best) {
         best = d;
@@ -723,9 +741,154 @@ bool BezierPatchSurface::project(const Vector3d& pt, double& u, double& v) const
   return best >= 0;
 }
 
+namespace {
+
+/*! A patch's net in homogeneous form - (w P, w) per control point - rows in u,
+ * columns in v. */
+using HomogeneousNet = std::vector<std::vector<Vector4d>>;
+
+/*! One half of the net, by de Casteljau at 1/2 in u or in v: each level an
+ * average, which rounds once - the sum - and halves exactly. */
+HomogeneousNet halve(const HomogeneousNet& net, bool along_u, bool upper)
+{
+  HomogeneousNet out = net;
+  const std::size_t rows = net.size(), cols = net.front().size();
+  auto split = [&](std::vector<Vector4d> line) {
+    const std::size_t n = line.size();
+    std::vector<Vector4d> lower(n), higher(n);
+    for (std::size_t level = 0; level < n; level++) {
+      lower[level] = line[0];
+      higher[n - 1 - level] = line[n - 1 - level];
+      for (std::size_t i = 0; i + 1 < n - level; i++) line[i] = (line[i] + line[i + 1]) * 0.5;
+    }
+    return upper ? higher : lower;
+  };
+  if (along_u) {
+    for (std::size_t j = 0; j < cols; j++) {
+      std::vector<Vector4d> column(rows);
+      for (std::size_t i = 0; i < rows; i++) column[i] = net[i][j];
+      const std::vector<Vector4d> half = split(column);
+      for (std::size_t i = 0; i < rows; i++) out[i][j] = half[i];
+    }
+  } else {
+    for (std::size_t i = 0; i < rows; i++) out[i] = split(net[i]);
+  }
+  return out;
+}
+
+/*! The boxes of the pieces `levels` halvings in each direction make of the
+ * patch `net` states - each the box of its control points, which the piece
+ * lies within, every weight positive - widened by `pad`. */
+void collectPieces(const HomogeneousNet& net, double pad, int levels, std::vector<BoundingBox>& out)
+{
+  if (levels == 0) {
+    BoundingBox box;
+    for (const auto& row : net) {
+      for (const Vector4d& h : row) box.extend(Vector3d(h.head<3>() / h[3]));
+    }
+    box.min().array() -= pad;
+    box.max().array() += pad;
+    out.push_back(box);
+    return;
+  }
+  for (const bool upper_u : {false, true}) {
+    const HomogeneousNet half_u = halve(net, true, upper_u);
+    for (const bool upper_v : {false, true})
+      collectPieces(halve(half_u, false, upper_v), pad, levels - 1, out);
+  }
+}
+
+}  // namespace
+
+void BezierPatchSurface::boxPieces()
+{
+  hull_ = BoundingBox();
+  pieces_.clear();
+  BoundingBox box;
+  double largest_wp = 0, largest_p = 0, largest_w = 0, least_w = 0;
+  bool first = true;
+  for (int i = 0; i <= degree_u; i++) {
+    for (int j = 0; j <= degree_v; j++) {
+      const Vector3d& p = control(i, j);
+      const double w = weight(i, j);
+      if (!(w > 0)) return;  // no convex hull to box
+      box.extend(p);
+      largest_wp = std::max(largest_wp, (p * w).norm());
+      largest_p = std::max(largest_p, p.norm());
+      largest_w = first ? w : std::max(largest_w, w);
+      least_w = first ? w : std::min(least_w, w);
+      first = false;
+    }
+  }
+  if (first) return;
+  const int levels = 3 * (degree_u + degree_v) + 2;
+  const double pad = (recognition::forwardError(levels + 1, largest_wp) +
+                      largest_p * recognition::forwardError(levels, largest_w)) /
+                       least_w +
+                     recognition::forwardError(1, largest_p);
+  box.min().array() -= pad;
+  box.max().array() += pad;
+  hull_ = box;
+  // and the pieces: one more rounding a halving level, per degree, over the
+  // largest weighted control point, over the least weight
+  const int halvings = 3;
+  const double piece_pad =
+    pad + recognition::forwardError(halvings * (degree_u + degree_v) + 1, largest_wp) / least_w;
+  HomogeneousNet hnet(degree_u + 1, std::vector<Vector4d>(degree_v + 1));
+  for (int i = 0; i <= degree_u; i++) {
+    for (int j = 0; j <= degree_v; j++) hnet[i][j] << control(i, j) * weight(i, j), weight(i, j);
+  }
+  collectPieces(hnet, piece_pad, halvings, pieces_);
+}
+
+BoundingBox BezierPatchSurface::hull() const
+{
+  return hull_;
+}
+
 recognition::Residual BezierPatchSurface::signedResidual(const Vector3d& p) const
 {
-  double u = 0, v = 0;
+  // Off the patch by more than any rounding, proved without projecting: outside
+  // the hull's box, or outside every piece's - the distance to them is a lower
+  // bound on the distance to the patch, which is all "not on" needs.
+  if (!hull_.isEmpty()) {
+    double at_least =
+      hull_.contains(p) ? std::numeric_limits<double>::infinity() : hull_.exteriorDistance(p);
+    if (hull_.contains(p)) {
+      for (const BoundingBox& piece : pieces_) {
+        at_least = std::min(at_least, piece.contains(p) ? 0.0 : piece.exteriorDistance(p));
+        if (at_least == 0) break;
+      }
+    }
+    if (at_least > 0) {
+      recognition::Residual off;
+      off.value = at_least;
+      off.bound = 0;
+      return off;
+    }
+  }
+  // From the nearest of project()'s starts first: a point on the patch
+  // converges from it, and is then on it whatever the other starts would find.
+  // Only a point not on it here needs every start for its distance.
+  double u = 0, v = 0, nearest = std::numeric_limits<double>::infinity();
+  for (int gi = 0; gi <= 4; gi++) {
+    for (int gj = 0; gj <= 4; gj++) {
+      const double d = (evaluate(gi / 4.0, gj / 4.0) - p).norm();
+      if (d < nearest) {
+        nearest = d;
+        u = gi / 4.0;
+        v = gj / 4.0;
+      }
+    }
+  }
+  descend(*this, p, u, v);
+  {
+    const PatchAt at = patchAt(*this, u, v);
+    const double sign = (p - at.point).dot(at.du.cross(at.dv)) < 0 ? -1.0 : 1.0;
+    const recognition::Residual first =
+      residualAt(p, at.point, at.error, at.du.norm() + at.dv.norm(), sign);
+    if (first.exact()) return first;
+  }
   if (!project(p, u, v)) return {};
   const PatchAt at = patchAt(*this, u, v);
   const Vector3d n = at.du.cross(at.dv);

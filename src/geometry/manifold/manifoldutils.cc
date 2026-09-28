@@ -105,11 +105,12 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   // is what is missing, and nothing is guessed.
   const std::vector<std::shared_ptr<Surface>> tagged = stampTags(ps.surfaces);
   const bool carried = ps.surface_tags.size() == ps.indices.size();
+  ManifoldUtils::TriangleTagger tagger(tagged, ps.vertices.size(),
+                                       [&ps](std::size_t v) { return ps.vertices[v]; });
   auto tag_of = [&](size_t face) -> uint32_t {
     if (carried) return ps.surface_tags[face];
     const auto& tri = ps.indices[face];
-    return ManifoldUtils::triangleTag(ps.vertices[tri[0]], ps.vertices[tri[1]], ps.vertices[tri[2]],
-                                      tagged);
+    return tagger.tag(tri[0], tri[1], tri[2]);
   };
   std::vector<uint32_t> tri_tag;
   tri_tag.reserve(ps.indices.size());
@@ -285,15 +286,29 @@ manifold::MeshGL64 withTagProperty(const manifold::MeshGL64& topology,
   return mesh;
 }
 
-uint32_t triangleTag(const Vector3d& a, const Vector3d& b, const Vector3d& c,
-                     const std::vector<std::shared_ptr<Surface>>& surfaces)
+TriangleTagger::TriangleTagger(const std::vector<std::shared_ptr<Surface>>& surfaces,
+                               std::size_t vertices, std::function<Vector3d(std::size_t)> point)
+  : surfaces_(surfaces), vertices_(vertices), point_(std::move(point)), asked_(surfaces.size())
+{
+}
+
+bool TriangleTagger::on(std::size_t record, std::size_t vertex)
+{
+  std::vector<signed char>& asked = asked_[record];
+  if (asked.empty()) asked.assign(vertices_, -1);
+  if (asked[vertex] < 0)
+    asked[vertex] = recognition::onExactly(surfaces_[record].get(), point_(vertex)) ? 1 : 0;
+  return asked[vertex] == 1;
+}
+
+uint32_t TriangleTagger::tag(std::size_t a, std::size_t b, std::size_t c)
 {
   uint32_t found = 0;
   int matches = 0;
-  for (const auto& s : surfaces) {
+  for (std::size_t k = 0; k < surfaces_.size(); k++) {
+    const auto& s = surfaces_[k];
     if (s == nullptr || s->tags.empty() || !s->declaresFace()) continue;
-    if (recognition::onExactly(s.get(), a) && recognition::onExactly(s.get(), b) &&
-        recognition::onExactly(s.get(), c)) {
+    if (on(k, a) && on(k, b) && on(k, c)) {
       found = s->tags.back();
       matches++;
     }
@@ -340,18 +355,18 @@ manifold::Manifold withSurfaceTags(const manifold::Manifold& mani,
   const manifold::MeshGL64 topology = topologyMesh(full);
   std::vector<uint32_t> tri_tag(topology.NumTri(), 0);
   bool added = false;
+  TriangleTagger tagger(surfaces, topology.vertProperties.size() / 3, [&topology](std::size_t v) {
+    return Vector3d(topology.vertProperties[3 * v], topology.vertProperties[3 * v + 1],
+                    topology.vertProperties[3 * v + 2]);
+  });
   for (size_t t = 0; t < tri_tag.size(); t++) {
     if (full.numProp > 3) {
       tri_tag[t] =
         static_cast<uint32_t>(full.vertProperties[full.triVerts[3 * t] * full.numProp + 3] + 0.5);
     }
     if (tri_tag[t] != 0) continue;
-    auto at = [&](int k) {
-      const uint64_t v = topology.triVerts[3 * t + k];
-      return Vector3d(topology.vertProperties[3 * v], topology.vertProperties[3 * v + 1],
-                      topology.vertProperties[3 * v + 2]);
-    };
-    tri_tag[t] = triangleTag(at(0), at(1), at(2), surfaces);
+    tri_tag[t] =
+      tagger.tag(topology.triVerts[3 * t], topology.triVerts[3 * t + 1], topology.triVerts[3 * t + 2]);
     added = added || tri_tag[t] != 0;
   }
   if (!added) return mani;

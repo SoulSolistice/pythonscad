@@ -265,34 +265,12 @@ std::vector<BezierProposal> proposeBezierPatches(const recognition::FacetGraph& 
     // starts, and a filleted cube has thousands of facets and dozens of
     // patches.
     //
-    // The box holds the patch exactly; what can lie outside it is only the
-    // rounding of a point evaluated on the patch - the forward error the
-    // patch's own residual carries (BezierPatchSurface::signedResidual): de
-    // Casteljau's levels over the largest weighted control point, the weights'
-    // over the largest weight, over the least weight the denominator can reach.
-    // It was 1e-6 of the box's diagonal until 2026-09-28.
-    Vector3d lo = bez->net.front(), hi = bez->net.front();
-    double largest_wp = 0, largest_p = 0, largest_w = 1, least_w = 1;
-    for (int i = 0; i <= bez->degree_u; i++) {
-      for (int j = 0; j <= bez->degree_v; j++) {
-        const Vector3d& p = bez->control(i, j);
-        const double w = bez->weight(i, j);
-        lo = lo.cwiseMin(p);
-        hi = hi.cwiseMax(p);
-        largest_wp = std::max(largest_wp, (p * w).norm());
-        largest_p = std::max(largest_p, p.norm());
-        largest_w = std::max(largest_w, w);
-        least_w = std::min(least_w, w);
-      }
-    }
-    if (!(least_w > 0)) continue;  // a weight that is not positive: no convex hull to box
-    const int levels = 3 * (bez->degree_u + bez->degree_v) + 2;
-    const double slack = (recognition::forwardError(levels + 1, largest_wp) +
-                          largest_p * recognition::forwardError(levels, largest_w)) /
-                           least_w +
-                         recognition::forwardError(1, largest_p);
-    lo.array() -= slack;
-    hi.array() += slack;
+    // The box holds the patch exactly, widened by the rounding of a point
+    // evaluated on it (BezierPatchSurface::hull) - 1e-6 of its diagonal until
+    // 2026-09-28.
+    const BoundingBox box = bez->hull();
+    if (box.isEmpty()) continue;  // a weight that is not positive: no convex hull to box
+    const Vector3d lo = box.min(), hi = box.max();
     for (std::size_t f = 0; f < loops.size(); f++) {
       if (!loop_valid[f] || is_hole[f]) continue;
       bool on = true;
