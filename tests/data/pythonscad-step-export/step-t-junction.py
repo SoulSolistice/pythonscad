@@ -22,8 +22,17 @@
 #   face [4, 8, 5] has no area, and is the only reason edge 4-5 is used twice
 #
 # Drop that face without putting vertex 8 back and the cube is not closed.
-# EXPECT: skipped 1 degenerated face - 0 collapsed to fewer than three distinct points, 1 had no area
-# EXPECT: welded 1 T-junction vertex back into 2 edges
+#
+# Since 2026-09-30 it is not dropped at all. The triangle merge asks exact
+# coplanarity, and a face with no area lies exactly on every plane through its
+# line - the top face's and the front face's - so it merges into one of them,
+# and vertex 8 stays on that face's boundary: nothing to skip, nothing to weld.
+# Until then the merge's tolerance let it fall between, and the writer's repair
+# - skip the sliver, weld its vertex back into the edge - was what closed the
+# cube. The repair stays for a sliver no plane holds exactly; this one no
+# longer reaches it, and what the fixture asserts is what always mattered: the
+# cube closed, with its volume.
+# EXPECT-NOT: skipped 1 degenerated face
 # EXPECT-NOT: had no neighbouring edge to weld into
 #
 # A unit cube. The extra vertex at (0.5, 0, 1) is a T-junction on one edge and

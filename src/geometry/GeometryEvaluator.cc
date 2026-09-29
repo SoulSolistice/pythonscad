@@ -24,6 +24,7 @@
 #include "core/RotateExtrudeNode.h"
 #include "core/primitives.h"
 #include "geometry/Surface.h"
+#include "geometry/recognition/Exact.h"
 #include "core/SkinNode.h"
 #include "core/PathExtrudeNode.h"
 #include "core/PullNode.h"
@@ -587,13 +588,31 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
                                         const std::vector<Vector4d> normals,
                                         std::vector<Vector4d>& newNormals, std::vector<int>& faceParents,
                                         const std::vector<Vector3d>& vert,
-                                        const std::vector<uint32_t> *names)
+                                        const std::vector<uint32_t> *names, bool exact_planes,
+                                        const std::vector<char> *on_plane)
 {
   indexedFaceList emptyList;
   std::vector<Vector4d> norm_list;
   std::vector<uint32_t> name_list;  // per bucket, the one name its triangles carry
   std::vector<indexedFaceList> polygons_sorted;
   const double plane_tol = coplanarTolerance(vert);
+  // With exact_planes: per bucket, the first triangle that spans a plane, whose
+  // corners are the plane every other triangle of the bucket is held to.
+  std::vector<IndexedFace> plane_of;
+  auto spans = [&vert](const IndexedFace& t) {
+    if (t.size() < 3) return false;
+    const Vector3d a = vert[t[0]], b = vert[t[1]], c = vert[t[2]];
+    return (b - a).cross(c - a).norm() >
+           recognition::forwardError(
+             9, (a.norm() + b.norm()) * (c - a).norm() + (b - a).norm() * (a.norm() + c.norm()));
+  };
+  auto onPlaneOf = [&vert](const IndexedFace& ref, const IndexedFace& t) {
+    if (ref.size() < 3) return false;
+    for (const int v : t) {
+      if (!recognition::coplanar(vert[ref[0]], vert[ref[1]], vert[ref[2]], vert[v])) return false;
+    }
+    return true;
+  };
   const bool named = names != nullptr && names->size() == polygons.size();
   // sort polygons into buckets of same orientation - and, where the caller
   // keys them, of the same key: the curved record a triangle's maker named it
@@ -606,9 +625,28 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
     const uint32_t name = named ? (*names)[i] : 0;
 
     int norm_ind = -1;
+    const bool has_plane = exact_planes && spans(triangle);
+    const bool plane_named =
+      exact_planes && on_plane != nullptr && i < on_plane->size() && (*on_plane)[i] != 0 && name != 0;
     for (unsigned int j = 0; norm_ind == -1 && j < norm_list.size(); j++) {
-      if (name_list[j] != name) continue;
       const auto& cur = norm_list[j];
+      if (exact_planes) {
+        if (!has_plane) {
+          // No plane and no way to face: any face whose plane holds it exactly.
+          // Measured against the alternative - such triangles in a bucket of
+          // their own, skipped by the writer and welded back - this does
+          // better on lid10 (70 corners off a surface against 101) and keeps
+          // the flagship parts valid, which the alternative did not.
+          if (onPlaneOf(plane_of[j], triangle)) norm_ind = j;
+          continue;
+        }
+        if (name_list[j] != name || cur.head<3>().dot(norm.head<3>()) <= 0) continue;
+        // Named for a declared plane: that record is the plane, and the name
+        // says the triangle is on it. Otherwise its own corners, exactly.
+        if (plane_named || onPlaneOf(plane_of[j], triangle)) norm_ind = j;
+        continue;
+      }
+      if (name_list[j] != name) continue;
       if (cur.head<3>().dot(norm.head<3>()) > 0.99999 &&
           triangleOnPlane(vert, triangle, cur, plane_tol)) {
         norm_ind = j;
@@ -619,6 +657,7 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
       norm_ind = norm_list.size();
       norm_list.push_back(norm);
       name_list.push_back(name);
+      plane_of.push_back(has_plane ? triangle : IndexedFace());
       polygons_sorted.push_back(emptyList);
     }
     polygons_sorted[norm_ind].push_back(triangle);
@@ -633,6 +672,15 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
     for (unsigned int j = 0; j < polygons_sorted.size(); j++) {
       if (j == i) continue;
       if (name_list[j] != name_list[i]) continue;  // a hole of one name goes to that name only
+      if (exact_planes) {
+        // the same plane at machine precision, facing the other way
+        if (!plane_of[j].empty() && onPlaneOf(plane_of[i], plane_of[j]) &&
+            norm_list[j].head<3>().dot(nref) < 0) {
+          i_ = j;
+          break;
+        }
+        continue;
+      }
       if (norm_list[j].head<3>().dot(nref) < -0.999 && fabs(norm_list[j][3] + norm_list[i][3]) < 0.005) {
         i_ = j;
         break;
@@ -652,7 +700,8 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
           polygons_sorted[i_].erase(polygons_sorted[i_].begin() + l);
           k--;
           l--;
-        } else if (triangleOnPlane(vert, hole, norm_list[i], plane_tol) &&
+        } else if ((exact_planes ? onPlaneOf(plane_of[i], hole)
+                                 : triangleOnPlane(vert, hole, norm_list[i], plane_tol)) &&
                    pointInPolygon(vert, poly, hole[0])) {
           // The plane test is not redundant with the search for the opposite
           // bucket above. That search accepts a normal within dot -0.999, which

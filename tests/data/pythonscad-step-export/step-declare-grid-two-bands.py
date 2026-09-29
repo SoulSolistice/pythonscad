@@ -45,9 +45,11 @@ makes it fire.
 # sequence-agnostic*. Tolerated by name until it lands; the test fails the day
 # it is no longer raised.
 # KNOWN-EXPORT-ERROR: split on a boundary the model does not have
-# And on the CGAL backend, a planar face whose bound leaves its plane - open
-# item 33, as in step-band-family.
-# KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
+# Open item 33 - on the CGAL backend, a planar face written with a bound off
+# its plane - was carried here as a KNOWN-EXPORT-ERROR from 2026-09-24 until
+# 2026-09-30, when the triangle merge began asking exact coplanarity: merging
+# within 1e-8 of the model's size had put triangles whose corners were not on
+# one plane into one planar face.
 # At the approximation tier a declared sweep held 3 facets of a cylinder's D0
 # region - their maker declared the cylinder, and the sweep's pass ran first.
 # Fixed 2026-09-29: a D1 proposer takes no facet of another surface's D0 region,

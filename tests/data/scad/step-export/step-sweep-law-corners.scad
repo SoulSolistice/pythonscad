@@ -16,12 +16,11 @@
 // bore - it ends at a vertex: a kernel wants every edge's curve G1, and a C0
 // knot inside one edge is the same fault on a curve.
 //
-// Known systemic defect, the same as step-band-family's and on the same ridge
-// and bore: on the CGAL backend only, a planar face of the faceted tier is
-// written with a bound that leaves its plane by more than the mesh's own
-// coplanarity allows. doc/step-export-wip.md, open item 33. Tolerated by name;
-// the test fails the day it is no longer raised.
-// KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
+// Open item 33 - on the CGAL backend, a planar face written with a bound off
+// its plane - was carried here as a KNOWN-EXPORT-ERROR from 2026-09-24 until
+// 2026-09-30, when the triangle merge began asking exact coplanarity: merging
+// within 1e-8 of the model's size had put triangles whose corners were not on
+// one plane into one planar face.
 //
 // EXPECT: a declared sweep turning a corner along its length was split there into 3 faces
 // EXPECT-NOT: across a corner of its laws

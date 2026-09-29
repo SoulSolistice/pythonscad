@@ -4869,6 +4869,41 @@ proven on the fixtures that still raise it, not on this one. The directive came
 out of step-exchange-never-surrender, as the harness requires, with the reason
 in the fixture.
 
+**Closed 2026-09-30: the merge's tolerance was the bend.** The branch the
+2026-09-24 note did not measure - "a bound bent by something other than the Nef
+conversion" - was mergeTriangles: coplanar meant every corner within 1e-8 of
+the model's size of the first triangle's plane, so triangles not on one plane
+went into one planar face, whose bound then left the plane it was written on.
+The STEP merge now asks exact coplanarity (recognition::coplanar), and a
+triangle named for a declared plane shares that record's plane by the name; no
+run of any fixture raises the error, and the eight directives came out. What it
+costs is recorded under item 41: the faces the tolerance bent were genuinely not
+planar.
+
+### 41. A warped quad is written as near-parallel planes, and its corners cannot be placed
+
+**Opened 2026-09-30**, by exact coplanarity in the merge (item 33). The faces
+the tolerance used to merge were genuinely not planar - on lid10 mostly the
+channel's ramped roof, whose station-to-station quads twist, bent by up to
+2.26e-6 - and written truthfully as separate triangles they meet at tiny
+angles: the corner placement finds no point every near-parallel plane holds,
+and on lid10's approximation tier 70 corners are left off a surface (9 before)
+and 62 plane sections fall back to chords (14). Measured alternatives, both
+worse: triangles with no plane kept apart for the writer to skip and weld, 101
+and 99, with the flagship parts failing. Not a tolerance to restore: a twisted
+quad is a ruled surface, not planes. The roof's faces are labelled for the
+declared grid that sweeps them; where the grid's claim does not take them, the
+root is why, and the closed form a warped quad has is its bilinear patch.
+
+### 42. A faceted polyhedron whose faces are all named states no solid
+
+**Opened 2026-09-30**, with the grid's certified closest point: existence can
+now take a point of a facet named for a declared grid onto the grid (772 on the
+bayonet had "no closest point"), and every one of them is still undecided, for
+the next reason - the polyhedron's leaf of the model's solid states only an
+envelope, never "on a face". A faceted leaf whose every face is named for a
+record states, in principle, the solid those records bound.
+
 ### 34. What the D0 regions report found on its first read, 2026-09-24
 
 `recognition::reportRegions` - each declared surface's D0 region (provenance

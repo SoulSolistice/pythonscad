@@ -64,13 +64,11 @@
 // closed form exists. Tolerated by name; the test fails the day it is no
 // longer raised.
 // KNOWN-EXPORT-ERROR: of a D0 region are left to the tessellation
-// And on the CGAL backend, a planar face whose bound leaves its plane - open
-// item 33, as in step-band-family. It was raised in only some runs until
-// 2026-09-27 (open item 28: four different reports in six identical runs), and
-// carried as intermittent; the Nef conversion numbered the mesh differently
-// each run, and since the exporter numbers it by position the CGAL export is
-// the same every run and raises this in every one.
-// KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
+// Open item 33 - on the CGAL backend, a planar face written with a bound off
+// its plane - was carried here as a KNOWN-EXPORT-ERROR from 2026-09-24 until
+// 2026-09-30, when the triangle merge began asking exact coplanarity: merging
+// within 1e-8 of the model's size had put triangles whose corners were not on
+// one plane into one planar face.
 
 $fn = 64;
 intersection() {

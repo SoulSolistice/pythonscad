@@ -65,14 +65,23 @@ Vector4d calcTriangleNormal(const std::vector<Vector3d>& vertices, const Indexed
 std::vector<Vector4d> calcTriangleNormals(const std::vector<Vector3d>& vertices,
                                           const std::vector<IndexedFace>& indices);
 /*! Merge coplanar triangles into planar faces. Where `names` is given - per
- * triangle, a key for the curved record its maker named it for, 0 for none or
- * a plane - only triangles of one key merge: a chord facet of a curved record
- * is never merged with a triangle not made on it (open item 38, C8; checklist E8). */
+ * triangle, a key for the record its maker named it for, 0 for none - only
+ * triangles of one key merge: a chord facet of a curved record is never merged
+ * with a triangle not made on it (open item 38, C8; checklist E8).
+ * With `exact_planes`, no tolerance decides a plane: triangles named for one
+ * declared plane (`on_plane`, per triangle) share it by that name - the
+ * record is the closed form, and a corner a boolean cut is placed on it later -
+ * and a triangle named for none shares a face only where every corner is on
+ * the plane its first triangle spans at machine precision
+ * (recognition::coplanar). A triangle with no plane joins any face whose plane
+ * holds it exactly. Other callers keep the relative tolerance. */
 std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
                                         const std::vector<Vector4d> normals,
                                         std::vector<Vector4d>& newNormals, std::vector<int>& faceParents,
                                         const std::vector<Vector3d>& vert,
-                                        const std::vector<uint32_t> *names = nullptr);
+                                        const std::vector<uint32_t> *names = nullptr,
+                                        bool exact_planes = false,
+                                        const std::vector<char> *on_plane = nullptr);
 std::vector<IndexedColorFace> mergeTriangles(const std::vector<IndexedColorFace> polygons,
                                              const std::vector<Vector4d> normals,
                                              std::vector<Vector4d>& newNormals,

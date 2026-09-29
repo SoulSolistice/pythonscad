@@ -1034,25 +1034,37 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
 
   std::vector<IndexedFace> indicesNew;
   normals = calcTriangleNormals(ps->vertices, ps->indices);
-  // Merged by the curved record each triangle is named for, as well as by
-  // plane (open item 38, C8): a chord facet of a cylinder is never merged with a
-  // triangle not made on that cylinder. By record, not by tag - one record can
-  // hold several tags, a surface two generators declared - and only a curved
-  // one: a flat face's plane is fixed by its own corners, so a triangle named
-  // for a plane merges with any coplanar triangle as it always did.
+  // Merged by the record each triangle is named for, and with no tolerance
+  // (open item 38, C8):
+  //  - a chord facet of a curved record is never merged with a triangle not
+  //    made on that record;
+  //  - triangles named for one declared plane share it by that name - the
+  //    record is the closed form, and a corner a boolean cut is off another
+  //    triangle's plane by its own rounding, so exact coplanarity between
+  //    triangles is not what decides a plane the model declared;
+  //  - a triangle named for none is held to the plane its face's first
+  //    triangle spans, at machine precision;
+  //  - a triangle with no plane joins any face whose plane holds it exactly.
+  // By record, not tag: one record holds a tag from each declarer. Until
+  // 2026-09-30 coplanar meant within 1e-8 of the model's size, and planar
+  // faces came out with bounds off their own plane (open item 33) - lid10 had
+  // 6 merged faces bent by up to 2.26e-6.
   std::vector<uint32_t> merge_names;
+  std::vector<char> merge_on_plane;  // per triangle: its key is a declared plane's
+  std::vector<char> merge_spans;     // per triangle: it spans a plane
   if (ps->surface_tags.size() == ps->indices.size()) {
-    std::map<uint32_t, uint32_t> curved_of_tag;
+    std::map<uint32_t, uint32_t> curved_of_tag, plane_of_tag;
     for (std::size_t si = 0; si < ps->surfaces.size(); si++) {
       const Surface *s = ps->surfaces[si].get();
-      if (s == nullptr || !s->declaresFace() || dynamic_cast<const PlaneSurface *>(s) != nullptr)
-        continue;
-      for (const uint32_t tag : s->tags) curved_of_tag.emplace(tag, uint32_t(si + 1));
+      if (s == nullptr || !s->declaresFace()) continue;
+      auto& of_tag = dynamic_cast<const PlaneSurface *>(s) != nullptr ? plane_of_tag : curved_of_tag;
+      for (const uint32_t tag : s->tags) of_tag.emplace(tag, uint32_t(si + 1));
     }
     merge_names.reserve(ps->indices.size());
+    merge_on_plane.reserve(ps->indices.size());
+    merge_spans.reserve(ps->indices.size());
     for (std::size_t t = 0; t < ps->indices.size(); t++) {
       const uint32_t tag = ps->surface_tags[t];
-      const auto it = tag == 0 ? curved_of_tag.end() : curved_of_tag.find(tag);
       // A triangle with no plane - its corners on one line, at machine precision
       // - has no interior to be made on anything, and is no facet: its name
       // cannot bear on a planar face. On lid10 such triangles lie along a chord
@@ -1066,11 +1078,19 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
                     recognition::forwardError(9, (a.norm() + b.norm()) * (c - a).norm() +
                                                    (b - a).norm() * (a.norm() + c.norm()));
       }
-      merge_names.push_back(it == curved_of_tag.end() || !has_plane ? 0 : it->second);
+      const auto curved = tag == 0 ? curved_of_tag.end() : curved_of_tag.find(tag);
+      const auto plane = tag == 0 ? plane_of_tag.end() : plane_of_tag.find(tag);
+      uint32_t key = 0;
+      if (has_plane && plane != plane_of_tag.end()) key = plane->second;
+      else if (has_plane && curved != curved_of_tag.end()) key = curved->second;
+      merge_names.push_back(key);
+      merge_on_plane.push_back(has_plane && plane != plane_of_tag.end() ? 1 : 0);
+      merge_spans.push_back(has_plane ? 1 : 0);
     }
   }
   indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, ps->vertices,
-                              merge_names.empty() ? nullptr : &merge_names);
+                              merge_names.empty() ? nullptr : &merge_names, true,
+                              merge_on_plane.empty() ? nullptr : &merge_on_plane);
 
   // Which original made each merged face.
   //
@@ -1151,14 +1171,12 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   }
 
   // What merging made of identity and of planes (item 38, C8), measured and
-  // reported; nothing reads it. The mesh's triangles are merged into the faces
-  // everything downstream calls facets by a normal to 0.99999 and an offset to
-  // 1e-8 of the model's size, asking no identity, and a merged face is then
-  // voted its original and its surface over its boundary, the commonest
-  // answer winning. So a merged face can join two makers' triangles, or two
-  // declared surfaces', and be given one; can mix triangles the positional
-  // tagger gave a record (E8, open item 40) with untagged ones; can be a sliver
-  // with no plane; or can be not flat at all, at machine precision.
+  // reported; nothing reads it. Merging is by record and with no tolerance
+  // (above), so two records in one face, or a record's triangles mixed with
+  // triangles named for none, are 0 by construction and counted to keep them
+  // so; a face can still join two makers' triangles - one plane two solids
+  // share - or be a sliver with no plane, or bend by a corner a boolean cut,
+  // where a declared plane's triangles are merged by its name.
   if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
     // A directed boundary edge names the one triangle it came from.
     std::map<std::pair<int, int>, std::size_t> edge_triangle;
@@ -1182,13 +1200,13 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
         if (it->second < ps->original_ids.size()) origins.insert(ps->original_ids[it->second]);
         if (it->second < merge_names.size()) {
           const uint32_t key = merge_names[it->second];
-          if (key == 0) other = true;
-          else curved.insert(key);
+          if (key != 0) curved.insert(key);
+          else if (merge_spans[it->second] != 0) other = true;  // no plane: no facet, no name
         }
       }
       if (origins.size() > 1) makers++;
-      // two curved records in one planar face, or one mixed with triangles not
-      // made on it: what merging by record rules out (open item 38, C8)
+      // two records in one planar face, or one mixed with triangles named for
+      // none: what merging by record rules out (open item 38, C8)
       if (curved.size() > 1) surfaces++;
       if (other && !curved.empty()) positional++;
       // flat: every corner on the plane of the three spanning most
@@ -1228,7 +1246,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
     LOG(
       "STEP export: merging %1$d planar faces from the mesh's triangles: %2$d join two makers' "
       "triangles, "
-      "%3$d two curved records', %4$d mix a curved record's with others (item 38 C8, E8); %5$d are "
+      "%3$d two records', %4$d mix a record's with unnamed ones (item 38 C8, E8); %5$d are "
       "slivers with no plane, and %6$d are not flat at machine precision, by up to "
       "%7$.2e",
       int(looked), int(makers), int(surfaces), int(positional), int(slivers), int(bent), bent_worst);
