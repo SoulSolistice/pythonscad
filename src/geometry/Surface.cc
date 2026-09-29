@@ -1351,6 +1351,16 @@ bool GridSurface::onSeam(double u, double v) const
   return std::min((at - evaluate(u, 0.0)).norm(), (at - evaluate(u, 1.0)).norm()) <= bound;
 }
 
+bool GridSurface::closestPoint(const Vector3d& p, Vector3d& out) const
+{
+  double u = 0, v = 0;
+  if (!project(p, u, v)) return false;
+  const Vector3d q = evaluate(u, v);
+  if (!((q - p).norm() <= tessellationBound() + evaluationBound())) return false;
+  out = q;
+  return true;
+}
+
 bool GridSurface::envelope(const std::vector<Vector3d>&, BoundingBox& box) const
 {
   // The flat tessellation of the net lies within the net's box, and the

@@ -821,3 +821,37 @@ TEST_CASE("a grid's envelope holds its whole surface, where the surface leaves i
   }
   CHECK(beyond_net);  // the growth is what holds it - the check is not vacuous
 }
+
+TEST_CASE("a grid takes a point of its own facets onto itself, certified, and nothing further",
+          "[surface][grid]")
+{
+  // The arc of the envelope test: every point of the net's own facets - their
+  // corners and middles - is within the grid's closed-form bound of it, and
+  // the point returned is the surface's, evaluated. A point further off than
+  // that bound is not this surface's to answer for.
+  const int rows = 4;
+  std::vector<Vector3d> net;
+  for (int i = 0; i < rows; i++) {
+    const double a = (-30.0 + 60.0 * i / (rows - 1)) * M_PI / 180.0;
+    net.emplace_back(10 * cos(a), 10 * sin(a), 0.0);
+    net.emplace_back(10 * cos(a), 10 * sin(a), 5.0);
+  }
+  const GridSurface grid(rows, 2, net);
+  REQUIRE(grid.interpolated());
+  const double allowed = grid.tessellationBound() + grid.evaluationBound();
+  for (int i = 0; i + 1 < rows; i++) {
+    const Vector3d middle = (grid.at(i, 0) + grid.at(i + 1, 1)) / 2;  // a facet's centre
+    for (const Vector3d& p : {grid.at(i, 0), grid.at(i + 1, 1), middle}) {
+      Vector3d on;
+      REQUIRE(grid.closestPoint(p, on));
+      CHECK((on - p).norm() <= allowed);
+      double u = 0, v = 0;
+      REQUIRE(grid.project(on, u, v));
+      CHECK((grid.evaluate(u, v) - on).norm() <= 1e-9);  // it is the surface's own point
+    }
+  }
+  // Off the surface by more than the bound: no point, however near a
+  // projection comes.
+  Vector3d far;
+  CHECK_FALSE(grid.closestPoint(Vector3d(10 + 10 * allowed + 1.0, 0.0, 2.5), far));
+}

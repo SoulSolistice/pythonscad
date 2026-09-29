@@ -683,6 +683,14 @@ public:
    * stand off the net's flat tessellation (tessellationBound, in closed form)
    * and by the rounding of evaluating it. Every face on it lies there too. */
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
+  /*! The point of the surface where a point near it - a facet's corner or
+   * centre - is taken onto it, certified: evaluate() at the parameters
+   * project() finds, so on the surface up to evaluationBound() in closed form,
+   * and accepted only within tessellationBound() + evaluationBound() of `p` -
+   * the grid's own closed-form bound on how far a facet made on it stands off
+   * it. Nothing is accepted further: a projection that lands there has found
+   * some other fold, and there is no point. D1, as the grid is. */
+  bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   [[nodiscard]] const Vector3d& at(int row, int col) const { return net[row * cols + col]; }
