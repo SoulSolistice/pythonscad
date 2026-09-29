@@ -7,6 +7,8 @@
 #include <memory>
 #include <vector>
 
+#include "geometry/PolySet.h"
+#include "geometry/PolySetUtils.h"
 #include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Seam.h"
 
@@ -257,4 +259,47 @@ TEST_CASE("classifications: each asked in one place, at machine precision", "[su
   // one plane anchored at two of its points, and one a hair above
   CHECK(recognition::samePlane(rim[0], axis, rim[17], -axis));
   CHECK_FALSE(recognition::samePlane(rim[0], axis, turn * Vector3d(0, 0, 5 + 1e-9), axis));
+}
+
+TEST_CASE("a maker's names ride with its polygons into triangles, in step", "[surface][identity]")
+{
+  // Identity said by the maker (checklist E8, open item 40): each polygon names
+  // the record it was made on, and every triangle made from it keeps the name.
+  // Out of step, every triangle after the first polygon lost would name the
+  // wrong surface - so it is carried whole, or not at all.
+  PolySet ps(3);
+  ps.vertices = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
+  ps.indices = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}};  // bottom, top, front: quads
+  ps.surface_tags = {11, 22, 33};
+  const auto tris = PolySetUtils::tessellate_faces(ps);
+  REQUIRE(tris->indices.size() == 6);
+  REQUIRE(tris->surface_tags.size() == tris->indices.size());
+  for (std::size_t t = 0; t < tris->indices.size(); t++) {
+    // every corner of a triangle is on the face its tag names
+    bool bottom = true, top = true, front = true;
+    for (const int v : tris->indices[t]) {
+      bottom = bottom && tris->vertices[std::size_t(v)][2] == 0;
+      top = top && tris->vertices[std::size_t(v)][2] == 1;
+      front = front && tris->vertices[std::size_t(v)][1] == 0;
+    }
+    const uint32_t tag = tris->surface_tags[t];
+    CHECK(((tag == 11 && bottom) || (tag == 22 && top) || (tag == 33 && front)));
+  }
+
+  // a polygon that collapses is removed with its name, and the rest stay in step
+  PolySet collapsing(3);
+  collapsing.vertices = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {1e-12, 0, 0}, {0, 0, 5}, {0, 1, 5}};
+  collapsing.indices = {{0, 3, 1}, {0, 1, 2}, {0, 4, 5}};
+  collapsing.surface_tags = {7, 8, 9};
+  collapsing.quantizeVertices();
+  REQUIRE(collapsing.indices.size() == 2);
+  CHECK(collapsing.surface_tags == std::vector<uint32_t>{8, 9});
+
+  // and names already out of step are dropped, not carried shifted
+  PolySet stale(3);
+  stale.vertices = collapsing.vertices;
+  stale.indices = {{0, 1, 2}, {0, 4, 5}};
+  stale.surface_tags = {1};
+  stale.quantizeVertices();
+  CHECK(stale.surface_tags.empty());
 }

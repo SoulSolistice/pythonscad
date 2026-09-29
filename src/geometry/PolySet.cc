@@ -163,6 +163,8 @@ void PolySet::resize(const Vector3d& newsize, const Eigen::Matrix<bool, 3, 1>& a
 void PolySet::quantizeVertices(std::vector<Vector3d> *pPointsOut)
 {
   const bool has_colors = !this->color_indices.empty();
+  const bool has_tags = this->surface_tags.size() == this->indices.size();
+  if (!has_tags) this->surface_tags.clear();  // out of step already: carried whole or not at all
   Grid3d<unsigned int> grid(GRID_FINE);
   std::vector<unsigned int> polygon_indices;  // Vertex indices in one polygon
   for (size_t i = 0; i < this->indices.size();) {
@@ -187,6 +189,7 @@ void PolySet::quantizeVertices(std::vector<Vector3d> *pPointsOut)
       PRINTD("Removing collapsed polygon due to quantizing");
       this->indices.erase(this->indices.begin() + i);
       if (has_colors) this->color_indices.erase(this->color_indices.begin() + i);
+      if (has_tags) this->surface_tags.erase(this->surface_tags.begin() + i);
     } else {
       i++;
     }

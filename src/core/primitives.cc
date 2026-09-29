@@ -162,6 +162,13 @@ std::unique_ptr<const Geometry> CubeNode::createGeometry() const
     ps->surfaces.push_back(std::make_shared<PlaneSurface>(lo, n));
     ps->surfaces.push_back(std::make_shared<PlaneSurface>(hi, n));
   }
+  // Each face is made on one of them, and the cube says which where it makes
+  // it (checklist E8, open item 40): identity minted by the maker, not read
+  // back off positions later. The records are x lo, x hi, y lo, y hi, z lo, z
+  // hi, and the faces above top, bottom, front, right, back, left.
+  ps->surfaces = stampTags(ps->surfaces);
+  auto tag = [&](int record) { return ps->surfaces[std::size_t(record)]->tags.back(); };
+  ps->surface_tags = {tag(5), tag(4), tag(2), tag(1), tag(3), tag(0)};
 
   // And the solid those six planes bound, which is exactly the box: what says
   // whether a face of it is there after a boolean, where the mesh cannot. See

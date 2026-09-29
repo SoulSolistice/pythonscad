@@ -107,8 +107,10 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   const bool carried = ps.surface_tags.size() == ps.indices.size();
   ManifoldUtils::TriangleTagger tagger(tagged, ps.vertices.size(),
                                        [&ps](std::size_t v) { return ps.vertices[v]; });
+  // A triangle its maker named keeps the name (open item 40, checklist E8);
+  // only one nobody named is asked of its position.
   auto tag_of = [&](size_t face) -> uint32_t {
-    if (carried) return ps.surface_tags[face];
+    if (carried && ps.surface_tags[face] != 0) return ps.surface_tags[face];
     const auto& tri = ps.indices[face];
     return tagger.tag(tri[0], tri[1], tri[2]);
   };

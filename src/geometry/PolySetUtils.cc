@@ -82,6 +82,7 @@ std::unique_ptr<PolySet> tessellate_faces(const PolySet& polyset)
     result->indices = polyset.indices;
     result->color_indices = polyset.color_indices;
     result->colors = polyset.colors;
+    result->surface_tags = polyset.surface_tags;
     return result;
   }
   result->vertices.reserve(polyset.vertices.size());
@@ -93,6 +94,12 @@ std::unique_ptr<PolySet> tessellate_faces(const PolySet& polyset)
   polygons.reserve(polyset.indices.size());
   std::vector<int32_t> polygon_color_indices;
   auto has_colors = !polyset.color_indices.empty();
+  // Identity - the record each polygon's maker made it on (PolySet::surface_tags)
+  // - goes with it to every triangle made from it, as its colour does. Out of
+  // step it would name the wrong surface for every triangle after the first
+  // polygon it lost, so it is carried whole or not at all.
+  std::vector<uint32_t> polygon_tags;
+  const bool has_tags = polyset.surface_tags.size() == polyset.indices.size();
   if (has_colors) {
     assert(polyset.color_indices.size() == polyset.indices.size());
     polygon_color_indices.reserve(polyset.color_indices.size());
@@ -120,6 +127,7 @@ std::unique_ptr<PolySet> tessellate_faces(const PolySet& polyset)
     if (has_colors) {
       polygon_color_indices.push_back(polyset.color_indices[i]);
     }
+    if (has_tags) polygon_tags.push_back(polyset.surface_tags[i]);
     for (const auto& ind : currface) used[ind] = true;
   }
   // remove unreferenced vertices
@@ -149,6 +157,7 @@ std::unique_ptr<PolySet> tessellate_faces(const PolySet& polyset)
       // trivial case - triangles cannot be concave or have holes
       result->indices.push_back({face[0], face[1], face[2]});
       if (has_colors) result->color_indices.push_back(polygon_color_indices[i]);
+      if (has_tags) result->surface_tags.push_back(polygon_tags[i]);
     }
     // Quads seem trivial, but can be concave, and can have degenerate cases.
     // So everything more complex than triangles goes into the general case.
@@ -160,6 +169,7 @@ std::unique_ptr<PolySet> tessellate_faces(const PolySet& polyset)
         for (const auto& t : triangles) {
           result->indices.push_back({t[0], t[1], t[2]});
           if (has_colors) result->color_indices.push_back(polygon_color_indices[i]);
+          if (has_tags) result->surface_tags.push_back(polygon_tags[i]);
         }
       }
     }
