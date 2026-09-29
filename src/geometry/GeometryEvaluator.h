@@ -46,6 +46,7 @@ struct EdgeVal {
   IndexedFace bez1;
   IndexedFace bez2;
   double angle;
+  uint32_t tag = 0;  // the name of the strip's record - its facets are named for it
 };
 
 class PolySetBuilder;

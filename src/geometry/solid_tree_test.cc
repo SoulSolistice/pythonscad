@@ -16,6 +16,7 @@
 #include "core/enums.h"
 #include "geometry/HullOfRevolution.h"
 #include "geometry/PolySet.h"
+#include "geometry/PolySetBuilder.h"
 #include "geometry/Surface.h"
 #include "geometry/manifold/ManifoldGeometry.h"
 #include "geometry/manifold/manifoldutils.h"
@@ -522,4 +523,50 @@ TEST_CASE("the hull of two coaxial cylinders derives the record of every face", 
   CHECK(kinds["plane"] > 0);
   CHECK(kinds["cylinder"] > 0);
   CHECK(kinds["cone"] > 0);
+}
+
+TEST_CASE("a builder names each polygon its maker named, and keeps a tag to one record",
+          "[identity][builder]")
+{
+  // Named as appended: a polygon the builder drops - two corners the same -
+  // takes no name with it and shifts none.
+  PolySetBuilder b;
+  const auto plane = std::make_shared<PlaneSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1));
+  plane->tags.push_back(mintTag());
+  b.addSurface(plane);
+  b.setSurfaceTag(plane->tags.back());
+  b.appendPolygon(std::vector<Vector3d>{{0, 0, 0}, {1, 0, 0}, {1, 1, 0}});
+  b.appendPolygon(std::vector<Vector3d>{{0, 0, 0}, {0, 0, 0}, {1, 1, 0}});  // dropped
+  b.setSurfaceTag(0);
+  b.appendPolygon(std::vector<Vector3d>{{0, 0, 0}, {1, 0, 1}, {1, 1, 1}});
+  const auto ps = b.build();
+  REQUIRE(ps->indices.size() == 2);
+  REQUIRE(ps->surface_tags.size() == 2);
+  CHECK(ps->surface_tags[0] == plane->tags.back());
+  CHECK(ps->surface_tags[1] == 0);
+
+  // Two copies of one named geometry, assembled: each polygon keeps the record
+  // of its own copy - the plane it lies on - so one tag never names two.
+  PolySetBuilder copies;
+  auto moved = std::make_unique<PolySet>(*ps);
+  Transform3d up = Transform3d::Identity();
+  up.translate(Vector3d(0, 0, 5));
+  moved->transform(up, Similarity::by(1.0));
+  copies.appendPolySet(*ps);
+  copies.appendPolySet(*moved);
+  const auto both = copies.build();
+  REQUIRE(both->surface_tags.size() == both->indices.size());
+  std::map<uint32_t, std::vector<const Surface *>> of_tag;
+  for (const auto& r : both->surfaces) {
+    for (const uint32_t t : r->tags) of_tag[t].push_back(r.get());
+  }
+  std::size_t named = 0;
+  for (std::size_t f = 0; f < both->indices.size(); f++) {
+    const uint32_t t = both->surface_tags[f];
+    if (t == 0) continue;
+    REQUIRE(of_tag[t].size() == 1);
+    for (const int v : both->indices[f]) CHECK(of_tag[t].front()->residual(both->vertices[v]).exact());
+    named++;
+  }
+  CHECK(named == 2);
 }

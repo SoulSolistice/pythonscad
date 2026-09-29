@@ -44,6 +44,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -163,6 +164,8 @@ void PolySetBuilder::endPolygon(const Color4f& color)
   // FIXME: Can we move? What would the state of current_polygon_ be after move?
   if (current_polygon_.size() >= 3) {
     indices_.push_back(current_polygon_);
+    tags_.push_back(current_tag_);
+    named_ = named_ || current_tag_ != 0;
 
     if (color.isValid()) {
       if (color_indices_.empty() && indices_.size() > 1) {
@@ -214,16 +217,56 @@ void PolySetBuilder::appendPolySet(const PolySet& ps)
   // Flattening several geometries into one mesh must not lose what they
   // declared: two disjoint cylinders arrive here as a GeometryList, and without
   // this the exporter sees a mesh with no declarations at all.
-  for (const auto& surface : ps.surfaces) addSurface(surface);
+  //
+  // Nor what their makers named (checklist E8): each polygon keeps its name.
+  // A tag names one record, so where one of ps's is already held here by a
+  // different record - two copies of one geometry, placed apart - it is
+  // renamed, in the record and in its polygons alike, as withFreshTags does
+  // where copies meet in a boolean.
+  std::map<uint32_t, uint32_t> renamed;
+  for (const auto& surface : ps.surfaces) {
+    if (surface == nullptr) continue;
+    for (const uint32_t t : surface->tags) {
+      for (const auto& held : surfaces) {
+        if (held == nullptr || held->sameAs(*surface)) continue;
+        if (std::find(held->tags.begin(), held->tags.end(), t) == held->tags.end()) continue;
+        if (renamed.count(t) == 0) renamed[t] = isDerivedTag(t) ? mintDerivedTag() : mintTag();
+      }
+    }
+  }
+  for (const auto& surface : ps.surfaces) {
+    if (surface == nullptr) continue;
+    bool clash = false;
+    for (const uint32_t t : surface->tags) clash = clash || renamed.count(t) != 0;
+    if (!clash) {
+      addSurface(surface);
+      continue;
+    }
+    auto copy = surface->clone();
+    for (auto& t : copy->tags) {
+      const auto it = renamed.find(t);
+      if (it != renamed.end()) t = it->second;
+    }
+    addSurface(copy);
+  }
 
+  const bool named = ps.surface_tags.size() == ps.indices.size();
+  const uint32_t outer_tag = current_tag_;
   reserve(numVertices() + ps.vertices.size(), numPolygons() + ps.indices.size());
-  for (const auto& poly : ps.indices) {
+  for (std::size_t i = 0; i < ps.indices.size(); i++) {
+    const auto& poly = ps.indices[i];
+    current_tag_ = 0;
+    if (named) {
+      const auto it = renamed.find(ps.surface_tags[i]);
+      current_tag_ = it == renamed.end() ? ps.surface_tags[i] : it->second;
+    }
     beginPolygon(poly.size());
     for (const auto& ind : poly) {
       addVertex(ps.vertices[ind]);
     }
     endPolygon();
   }
+  current_tag_ = outer_tag;
 }
 
 void PolySetBuilder::copyVertices(std::vector<Vector3d>& vertices)
@@ -268,6 +311,7 @@ std::unique_ptr<PolySet> PolySetBuilder::build()
   polyset->colors = std::move(colors_);
   polyset->curves = std::move(curves);
   polyset->surfaces = std::move(surfaces);
+  if (named_ && tags_.size() == polyset->indices.size()) polyset->surface_tags = std::move(tags_);
   polyset->setConvexity(convexity_);
   bool is_triangular = true;
   for (const auto& face : polyset->indices) {

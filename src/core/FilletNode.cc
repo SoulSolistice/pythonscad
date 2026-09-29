@@ -261,7 +261,12 @@ void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center,
     const double wu = BezierWeight(net[0], net[3], net[6]);
     const double wv = BezierWeight(net[0], net[1], net[2]);
     std::vector<double> wnet{1.0, wv, 1.0, wu, wu * wv, wu, 1.0, wv, 1.0};
-    builder.addSurface(std::make_shared<BezierPatchSurface>(2, 2, std::move(net), std::move(wnet)));
+    auto patch = std::make_shared<BezierPatchSurface>(2, 2, std::move(net), std::move(wnet));
+    // Minted here, where the corner is drawn: every facet below is made on it
+    // (checklist E8).
+    patch->tags.push_back(mintTag());
+    builder.setSurfaceTag(patch->tags.back());
+    builder.addSurface(patch);
   }
 
   std::vector<int> points;
@@ -298,6 +303,7 @@ void bezier_patch(PolySetBuilder& builder, VertexSnapper& snap, Vector3d center,
     }
     off = off_new;
   }
+  builder.setSurfaceTag(0);
 }
 
 void debug_pt(const char *msg, Vector3d pt)
@@ -872,10 +878,15 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
       // The weights are the ones Bezier() just drew with, one per rail: where
       // the edge is straight and the radius constant the two are equal and the
       // strip is exactly a piece of a cylinder.
-      builder.addSurface(std::make_shared<BezierPatchSurface>(
+      auto strip = std::make_shared<BezierPatchSurface>(
         2, 1, std::vector<Vector3d>{p1 + e_fa1, p2 + e_fa2, p1, p2, p1 + e_fb1, p2 + e_fb2},
         std::vector<double>{1.0, 1.0, BezierWeight(p1 + e_fa1, p1, p1 + e_fb1),
-                            BezierWeight(p2 + e_fa2, p2, p2 + e_fb2), 1.0, 1.0}));
+                            BezierWeight(p2 + e_fa2, p2, p2 + e_fb2), 1.0, 1.0});
+      // Its name, minted with it: the strip's facets, drawn below, are made on
+      // it (checklist E8).
+      strip->tags.push_back(mintTag());
+      e.second.tag = strip->tags.back();
+      builder.addSurface(strip);
       s.pol = e.second.facea;  // laengsseite1
       s.search = e.first.ind1;
       s.replace = {e.second.bez1[0]};
@@ -983,10 +994,12 @@ std::unique_ptr<const Geometry> createFilletInt(std::shared_ptr<const PolySet> p
   for (auto& e : edge_db) {
     if (e.second.sel == 1) {
       // now create the faces
+      builder.setSurfaceTag(e.second.tag);
       for (int i = 0; i < bn - 1; i++) {
         builder.appendPolygon(
           {e.second.bez1[i], e.second.bez1[i + 1], e.second.bez2[i + 1], e.second.bez2[i]});
       }
+      builder.setSurfaceTag(0);
     }
   }
   // add missing 3 corner patches

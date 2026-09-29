@@ -42,6 +42,10 @@ public:
   void copyVertices(std::vector<Vector3f>& vertices);
   void addCurve(std::shared_ptr<Curve> curve);
   void addSurface(std::shared_ptr<Surface> surface);
+  /*! Name every polygon appended from here on for the record carrying `tag`
+   * (Surface::tags), or for none with 0 - the maker's word, which the built
+   * PolySet carries as its surface_tags (checklist E8). */
+  void setSurfaceTag(uint32_t tag) { current_tag_ = tag; }
   void addColor(const Color4f& color);
   void addColorIndex(int idx);  // should be paired with begin/endPolygon()
 
@@ -60,4 +64,8 @@ private:
 
   // Will be initialized by beginPolygon() and cleared by endPolygon()
   IndexedFace current_polygon_;
+  // The name of each polygon kept, in step with indices_ - see setSurfaceTag.
+  std::vector<uint32_t> tags_;
+  uint32_t current_tag_ = 0;
+  bool named_ = false;
 };
