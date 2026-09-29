@@ -323,6 +323,11 @@ std::unique_ptr<const Geometry> SphereNode::createGeometry() const
   // zone of it survives - a hemisphere still has rings even when it no longer
   // has a sphere an exporter can bound.
   auto sphere = std::make_shared<SphereSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), r);
+  // Every polygon of it is made on the sphere - the two flat polar caps too,
+  // which are its facets however flat - and it says so where it makes them
+  // (checklist E8, open item 40).
+  sphere->tags.push_back(mintTag());
+  polyset->surface_tags.assign(polyset->indices.size(), sphere->tags.back());
   polyset->surfaces.push_back(sphere);
   // And the ball it bounds, the solid itself. See SolidTree.h.
   {
@@ -491,9 +496,13 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
   // provenance hands the frustum two walls it does not have - measured on
   // step-declare-cone, see doc/step-export-wip.md, open item 31. A straight
   // cylinder's one record is its wall, a face.
+  // Which record each polygon is made on, as it is declared: an index into
+  // polyset->surfaces, -1 for none (checklist E8, open item 40).
+  int wall_record = -1, bottom_record = -1, top_record = -1;
   if (!cone && !inverted_cone) {
     auto rim1 = std::make_shared<CylinderSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1), r1);
     rim1->evidence_only = r2 != r1;
+    if (r2 == r1) wall_record = int(polyset->surfaces.size());
     polyset->surfaces.push_back(rim1);
     if (r2 != r1) {
       auto rim2 = std::make_shared<CylinderSurface>(Vector3d(0, 0, z2), Vector3d(0, 0, 1), r2);
@@ -508,9 +517,11 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
   // other. Declared, both are stated outright and neither is inferred. An apex
   // has no cap, for the same reason it has no rim.
   if (r1 > 0) {
+    bottom_record = int(polyset->surfaces.size());
     polyset->surfaces.push_back(std::make_shared<PlaneSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1)));
   }
   if (r2 > 0) {
+    top_record = int(polyset->surfaces.size());
     polyset->surfaces.push_back(std::make_shared<PlaneSurface>(Vector3d(0, 0, z2), Vector3d(0, 0, 1)));
   }
 
@@ -533,10 +544,28 @@ std::unique_ptr<const Geometry> CylinderNode::createGeometry() const
   // second*.
   if (r1 != r2 && z2 != z1) {
     const bool at_bottom = r1 >= r2;
+    wall_record = int(polyset->surfaces.size());
     polyset->surfaces.push_back(std::make_shared<ConeSurface>(Vector3d(0, 0, at_bottom ? z1 : z2),
                                                               Vector3d(0, 0, 1), at_bottom ? r1 : r2,
                                                               (r2 - r1) / (z2 - z1)));
   }
+
+  // Each polygon is made on one of them, and the cylinder says which where it
+  // makes it (checklist E8, open item 40): the walls on the wall's record, each
+  // cap on its plane. A slice's two flat sides - the wall polygons that reach
+  // the centre, the first and the last - are made on no record, and say so.
+  polyset->surfaces = stampTags(polyset->surfaces);
+  auto tag_of = [&](int record) -> uint32_t {
+    if (record < 0) return 0;
+    const auto& tags = polyset->surfaces[std::size_t(record)]->tags;
+    return tags.empty() ? 0 : tags.back();
+  };
+  for (int i = 0; i < num_fragments; ++i) {
+    const bool side = this->angle < 360 && (i == 0 || i == num_fragments - 1);
+    polyset->surface_tags.push_back(side ? 0 : tag_of(wall_record));
+  }
+  if (!inverted_cone) polyset->surface_tags.push_back(tag_of(bottom_record));
+  if (!cone) polyset->surface_tags.push_back(tag_of(top_record));
 
   // And the solid: the inside of the wall between the caps - the records just
   // declared as faces, the rims being evidence and no bound. A slice of up to
