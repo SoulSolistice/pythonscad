@@ -98,22 +98,15 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
 
   // Which declared surface each triangle was made on - identity, carried from
   // here through every boolean as a vertex property. See PolySet::surface_tags
-  // and Surface::tags. A triangle this geometry already names keeps its name;
-  // any other is its generator's own, and names the one surface it lies on
-  // wholly at machine precision (checklist E3: a generator's points are on its
-  // own declaration), or none - where it lies on none, or on several, identity
-  // is what is missing, and nothing is guessed.
+  // and Surface::tags. Only its maker says (checklist E8, open item 40): a
+  // triangle nobody named is named nothing, whatever its corners lie on.
+  // Position never stands in for a name - an inscribed cap has every corner on
+  // its cylinder - and until 2026-09-29 the one record a triangle's corners lay
+  // on named it here, which gave step-declare's polyhedron caps to the cylinder
+  // at D0 and wrote an open shell.
   const std::vector<std::shared_ptr<Surface>> tagged = stampTags(ps.surfaces);
   const bool carried = ps.surface_tags.size() == ps.indices.size();
-  ManifoldUtils::TriangleTagger tagger(tagged, ps.vertices.size(),
-                                       [&ps](std::size_t v) { return ps.vertices[v]; });
-  // A triangle its maker named keeps the name (open item 40, checklist E8);
-  // only one nobody named is asked of its position.
-  auto tag_of = [&](size_t face) -> uint32_t {
-    if (carried && ps.surface_tags[face] != 0) return ps.surface_tags[face];
-    const auto& tri = ps.indices[face];
-    return tagger.tag(tri[0], tri[1], tri[2]);
-  };
+  auto tag_of = [&](size_t face) -> uint32_t { return carried ? ps.surface_tags[face] : 0; };
   std::vector<uint32_t> tri_tag;
   tri_tag.reserve(ps.indices.size());
   for (const auto& group : colorToFaceIndices) {
@@ -154,7 +147,7 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
   if (solid->op() == SolidTree::Op::Faceted) {
     std::map<uint32_t, const Surface *> by_tag;
     for (const auto& record : tagged) {
-      if (record == nullptr) continue;
+      if (record == nullptr || !record->declaresFace()) continue;  // a label is no record
       for (const uint32_t t : record->tags) by_tag.emplace(t, record.get());
     }
     solid = ManifoldUtils::facetedEnvelope(
@@ -192,27 +185,40 @@ std::shared_ptr<const SolidTree> facetedEnvelope(const PolySet& ps,
       return SolidTree::opaque(what + ", on a record that states no envelope");
     box.extend(reach);
   }
+  // A curved record on the leaf that no face is named for: a declaration says
+  // the solid is on it, and nobody says which faces. The faces taken as exact
+  // would rule out points it means - a prism inscribed in a declared cylinder
+  // reaches 7.07 where the cylinder reaches 10 - and the record taken for the
+  // faces its corners lie on would be position standing in for a name
+  // (checklist E8). So the leaf states nothing.
+  // Named: one of its tags carried by a face - by tag, since the records a
+  // caller resolves through may be stamped copies of these.
+  std::set<uint32_t> carried;
+  if (ps.surface_tags.size() == ps.indices.size())
+    carried.insert(ps.surface_tags.begin(), ps.surface_tags.end());
+  carried.erase(0);
+  for (const auto& s : ps.surfaces) {
+    if (s == nullptr || !s->declaresFace() || dynamic_cast<const PlaneSurface *>(s.get()) != nullptr)
+      continue;
+    bool named = false;
+    for (const uint32_t t : s->tags) named = named || carried.count(t) != 0;
+    if (!named) return SolidTree::opaque(what + ", under a declaration that names none of its faces");
+  }
   return SolidTree::box(box, what);
 }
 
-std::function<const Surface *(size_t)> recordByPosition(const PolySet& ps)
+std::function<const Surface *(size_t)> recordByName(const PolySet& ps)
 {
   return [&ps](size_t f) -> const Surface * {
-    // The one face-declaring record every corner lies on at machine precision,
-    // as the tag says where one is minted (triangleTag): none, or several, and
-    // the face is its generator's own plane.
-    const Surface *found = nullptr;
-    int matches = 0;
+    // The record its maker named the face for (PolySet::surface_tags), or none
+    // - and a face nobody named is its generator's own plane: a faceted leaf
+    // names every face it made on a record (checklist E8).
+    if (ps.surface_tags.size() != ps.indices.size() || ps.surface_tags[f] == 0) return nullptr;
     for (const auto& s : ps.surfaces) {
-      if (s == nullptr || !s->declaresFace()) continue;
-      bool on = true;
-      for (const int v : ps.indices[f]) on = on && recognition::onExactly(s.get(), ps.vertices[v]);
-      if (on) {
-        found = s.get();
-        matches++;
-      }
+      if (s == nullptr || !s->declaresFace()) continue;  // a label is no record
+      if (std::find(s->tags.begin(), s->tags.end(), ps.surface_tags[f]) != s->tags.end()) return s.get();
     }
-    return matches == 1 ? found : nullptr;
+    return nullptr;
   };
 }
 
@@ -288,36 +294,6 @@ manifold::MeshGL64 withTagProperty(const manifold::MeshGL64& topology,
   return mesh;
 }
 
-TriangleTagger::TriangleTagger(const std::vector<std::shared_ptr<Surface>>& surfaces,
-                               std::size_t vertices, std::function<Vector3d(std::size_t)> point)
-  : surfaces_(surfaces), vertices_(vertices), point_(std::move(point)), asked_(surfaces.size())
-{
-}
-
-bool TriangleTagger::on(std::size_t record, std::size_t vertex)
-{
-  std::vector<signed char>& asked = asked_[record];
-  if (asked.empty()) asked.assign(vertices_, -1);
-  if (asked[vertex] < 0)
-    asked[vertex] = recognition::onExactly(surfaces_[record].get(), point_(vertex)) ? 1 : 0;
-  return asked[vertex] == 1;
-}
-
-uint32_t TriangleTagger::tag(std::size_t a, std::size_t b, std::size_t c)
-{
-  uint32_t found = 0;
-  int matches = 0;
-  for (std::size_t k = 0; k < surfaces_.size(); k++) {
-    const auto& s = surfaces_[k];
-    if (s == nullptr || s->tags.empty() || !s->declaresFace()) continue;
-    if (on(k, a) && on(k, b) && on(k, c)) {
-      found = s->tags.back();
-      matches++;
-    }
-  }
-  return matches == 1 ? found : 0;
-}
-
 manifold::Manifold withFreshTags(const manifold::Manifold& mani,
                                  std::vector<std::shared_ptr<Surface>>& surfaces,
                                  const std::set<uint32_t>& taken)
@@ -332,7 +308,9 @@ manifold::Manifold withFreshTags(const manifold::Manifold& mani,
     for (auto& t : copy->tags) {
       if (taken.count(t) == 0) continue;
       auto it = renamed.find(t);
-      if (it == renamed.end()) it = renamed.emplace(t, mintTag()).first;
+      // A derived name renamed is still derived (mintDerivedTag).
+      if (it == renamed.end())
+        it = renamed.emplace(t, isDerivedTag(t) ? mintDerivedTag() : mintTag()).first;
       t = it->second;
     }
     record = copy;
@@ -346,33 +324,6 @@ manifold::Manifold withFreshTags(const manifold::Manifold& mani,
     if (it != renamed.end()) tag = static_cast<double>(it->second);
   }
   manifold::Manifold out(mesh);
-  return out.Status() == Error::NoError ? out : mani;
-}
-
-manifold::Manifold withSurfaceTags(const manifold::Manifold& mani,
-                                   std::vector<std::shared_ptr<Surface>>& surfaces)
-{
-  surfaces = stampTags(surfaces);
-  const manifold::MeshGL64 full = mani.GetMeshGL64();
-  const manifold::MeshGL64 topology = topologyMesh(full);
-  std::vector<uint32_t> tri_tag(topology.NumTri(), 0);
-  bool added = false;
-  TriangleTagger tagger(surfaces, topology.vertProperties.size() / 3, [&topology](std::size_t v) {
-    return Vector3d(topology.vertProperties[3 * v], topology.vertProperties[3 * v + 1],
-                    topology.vertProperties[3 * v + 2]);
-  });
-  for (size_t t = 0; t < tri_tag.size(); t++) {
-    if (full.numProp > 3) {
-      tri_tag[t] =
-        static_cast<uint32_t>(full.vertProperties[full.triVerts[3 * t] * full.numProp + 3] + 0.5);
-    }
-    if (tri_tag[t] != 0) continue;
-    tri_tag[t] =
-      tagger.tag(topology.triVerts[3 * t], topology.triVerts[3 * t + 1], topology.triVerts[3 * t + 2]);
-    added = added || tri_tag[t] != 0;
-  }
-  if (!added) return mani;
-  manifold::Manifold out(withTagProperty(topology, tri_tag));
   return out.Status() == Error::NoError ? out : mani;
 }
 

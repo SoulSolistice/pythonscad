@@ -33,6 +33,7 @@ struct ReportInputs {
   const std::vector<const SolidTree *> *existence_by = nullptr;  // the leaf behind each verdict
   const std::vector<Open> *existence_open = nullptr;             // why an undecided facet is so
   const std::vector<int32_t> *face_surface = nullptr;  // identity: the surface each was made on
+  const std::vector<char> *face_derived = nullptr;     // whether that name is derived: D1, not D0
 };
 
 /*! A leaf's name for the ledger: what its generator called it, or its kind. */

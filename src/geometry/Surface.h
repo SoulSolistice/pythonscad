@@ -60,10 +60,19 @@ public:
    * elsewhere; where two copies meet in a boolean the right one's are renamed,
    * records and triangles alike (ManifoldUtils::withFreshTags). */
   std::vector<uint32_t> tags;
+  /*! Non-empty on a label record (LabelSurface), which describes no surface:
+   * the word of a maker that knows which of its faces belong together but not
+   * what they are on - `polyhedron(labels = ...)`. It holds the label's tag
+   * until a declaration binds it to a record (`declare_*(faces = ...)`,
+   * bindLabels), and is never a face, so a label nobody binds names nothing
+   * (checklist E8). */
+  std::string label;
   /*! Whether this record declares a face: after stamping, whether any original
-   * owns it; before, whether its generator did not mark it as evidence. */
+   * owns it; before, whether its generator did not mark it as evidence. A
+   * label is never one. */
   [[nodiscard]] bool declaresFace() const
   {
+    if (!label.empty()) return false;
     return !owners.empty() || (witnesses.empty() && !evidence_only);
   }
   virtual void reverse(void);
@@ -169,6 +178,16 @@ bool addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
  * longer matches any facet is harmless, because a record is only ever a hint
  * and the exporter re-checks it against the mesh. Deduplication is here only to
  * stop the list growing without bound through a deep boolean tree. */
+/*! Bind the label records of `list` whose label is in `labels` to `record`:
+ * their tags - which the faces labelled so carry, through every boolean and
+ * transform - become the record's, so each of those faces is named for it
+ * (checklist E8), and the label records go. The record is merged in as
+ * mergeSurfaces would, bound or not: the declaration states it either way.
+ * Returns the labels bound; a label with no record in `list` is not. */
+std::vector<std::string> bindLabels(std::vector<std::shared_ptr<Surface>>& list,
+                                    const std::vector<std::string>& labels,
+                                    std::shared_ptr<Surface> record);
+
 void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
                    const std::vector<std::shared_ptr<Surface>>& from);
 
@@ -183,6 +202,18 @@ void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
 
 /*! A tag no record has had yet - see Surface::tags. */
 [[nodiscard]] uint32_t mintTag();
+
+/*! A tag no record has had yet, naming a facet by *derivation*: its record
+ * follows in closed form from declarations, and no maker stated it - the hull
+ * of solids of revolution, which knows which points it joins and not what they
+ * are on. A facet named by one is D1, never D0 (checklist E8: a D0 declares
+ * its full heritage). The class travels with the tag, through every merge and
+ * copy a tag survives, so a derived name stays derived on whatever record it
+ * ends up naming. */
+[[nodiscard]] uint32_t mintDerivedTag();
+
+/*! Whether `tag` was minted by mintDerivedTag. */
+[[nodiscard]] bool isDerivedTag(uint32_t tag);
 
 /*! The records of `list`, each face a generator declared given an identity tag
  * of its own - see Surface::tags. Copies rather than mutates, as stampOwners.
@@ -382,6 +413,35 @@ private:
  * records of the same plane anchored at different points are the same surface -
  * which is why `sameAs` compares the plane rather than the point, unlike every
  * other subclass here. */
+/*! A label: no surface, only the tag a maker gave a group of its faces - see
+ * Surface::label. Moves with anything, since there is nothing to move, and is
+ * the same record as another only where both are the same label carrying the
+ * same tag. */
+class LabelSurface : public Surface
+{
+public:
+  LabelSurface(std::string name, uint32_t tag)
+  {
+    label = std::move(name);
+    tags.push_back(tag);
+  }
+  [[nodiscard]] std::shared_ptr<Surface> clone() const override
+  {
+    return std::make_shared<LabelSurface>(*this);
+  }
+  bool transform(const Transform3d& /*mat*/, const Similarity& /*similarity*/) override { return true; }
+  [[nodiscard]] bool sameAs(const Surface& other) const override
+  {
+    if (other.label != label) return false;
+    for (const uint32_t t : tags) {
+      for (const uint32_t u : other.tags) {
+        if (t == u) return true;
+      }
+    }
+    return false;
+  }
+};
+
 class PlaneSurface : public Surface
 {
 public:
@@ -619,6 +679,10 @@ public:
   int pointMember(std::vector<Vector3d>& vertices, Vector3d pt) override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat, const Similarity& similarity) override;
+  /*! Where the whole surface lies: its net's box, grown by how far it can
+   * stand off the net's flat tessellation (tessellationBound, in closed form)
+   * and by the rounding of evaluating it. Every face on it lies there too. */
+  bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   [[nodiscard]] const Vector3d& at(int row, int col) const { return net[row * cols + col]; }

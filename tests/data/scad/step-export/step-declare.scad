@@ -9,9 +9,16 @@
 //
 // It was `circle()` here until circles started carrying their radius into the
 // extrusion (see step-extrude-circle.scad). That made this fixture measure two
-// channels at once, so the profile became the same points written by hand: the
-// mesh is identical to the letter, and the declaration below is once again the
-// only thing that could have produced it.
+// channels at once, so the profile became the same points written by hand. That
+// stopped being silent too: `polygon()` names its edges, straight lines - which
+// is the truth about a polygon - and since 2026-09-29 an extrusion names each
+// wall facet by the plane its edge sweeps (open item 40), so the walls were
+// 32 planes by their maker's word, and a declaration around them contradicted
+// it. A declaration fills where the generators said nothing; it does not
+// overrule one that spoke. So the wall is now the one generator that says
+// nothing about its faces, `polyhedron()`, over the same points: the mesh is the
+// same prism, and the declaration below is once again the only thing that
+// could have produced a cylinder.
 //
 // This is the whole of item 5 in miniature. A swept thread or a ramp exists
 // only as a polyhedron the user built, and there is no generator anywhere in
@@ -40,7 +47,16 @@
 // was acted on.
 // ROUNDTRIP: Cylinder=1 Plane=2
 // VOLUME: 6283.1853072
-$fn = 32;
-declare_cylinder(r = 10)
-  linear_extrude(height = 20)
-    polygon([for (i = [0 : 31]) [10 * cos(i * 360 / 32), 10 * sin(i * 360 / 32)]]);
+ring = [for (i = [0 : 31]) [10 * cos(i * 360 / 32), 10 * sin(i * 360 / 32)]];
+declare_cylinder(r = 10, faces = "wall")
+  polyhedron(
+    points = concat([for (p = ring) [p[0], p[1], 0]], [for (p = ring) [p[0], p[1], 20]]),
+    faces = concat(
+      [[for (i = [0 : 31]) i]],                             // bottom, clockwise seen from below
+      [[for (i = [31 : -1 : 0]) i + 32]],                   // top, clockwise seen from above
+      [for (i = [0 : 31]) [i, i + 32, (i + 1) % 32 + 32, (i + 1) % 32]]),  // the 32 walls
+    // Which faces the cylinder is: the walls, by label - the model's word per
+    // face, where the corners alone cannot tell a wall from the caps, whose
+    // corners are on the circle too (checklist E8).
+    labels = concat(["", ""], [for (i = [0 : 31]) "wall"]),
+    convexity = 2);

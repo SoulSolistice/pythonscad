@@ -36,6 +36,7 @@ void StepKernel::BodyBuild::recognise()
     inputs.surfaces = &surfaces;
     inputs.face_origin = &faceOrigin;
     inputs.face_surface = &faceSurface;
+    inputs.face_derived = &faceDerived;
     inputs.owned = &owned;
     inputs.solid_tree = solidTree;
     inputs.model_tol = model_tol;
@@ -57,7 +58,8 @@ void StepKernel::BodyBuild::reportRecognition()
     &rec.existence,
     &rec.existence_by,
     &rec.existence_open,
-    &faceSurface};
+    &faceSurface,
+    &faceDerived};
   recognition::dumpLedger(report_inputs);
   recognition::reportArbitration(report_inputs);
   recognition::reportExistence(report_inputs);

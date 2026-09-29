@@ -43,7 +43,9 @@ enum class ClaimPrecision { DeclaredExact, DeclaredInterpolant, Fitted };
 enum class EvidenceClass {
   Unstated,
   D0,  // declarations alone: a declared point against its surface, float equality
-  D1,  // the model's stations through an interpolant that publishes a band
+  D1,  // derived from declarations, stated by no maker: the model's stations through an
+       // interpolant that publishes a band, or a closed-form consequence of D0 records
+       // (the hull of revolution's faces, mintDerivedTag)
   D2,  // fitted to declarations at a stated tolerance
   D3,  // fitted to the mesh
   D4,  // the tessellation itself: a band, a sagitta, a statistic over facets

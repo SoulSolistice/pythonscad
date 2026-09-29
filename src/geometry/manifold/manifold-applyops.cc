@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <array>
 #include <set>
 #include <vector>
 
@@ -78,10 +79,10 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       } else if (const auto *ps = dynamic_cast<const PolySet *>(chgeom.get())) {
         per_operand.push_back(ps->surfaces);
         mergeSurfaces(surfaces, ps->surfaces);
-        // A polyhedron not yet a Manifold has its faceted statement unresolved:
-        // resolve it here, by position, as its entry would by tag.
+        // A faceted leaf not yet a Manifold has its statement unresolved:
+        // resolve it here by its maker's names, as its entry would by tag.
         const bool faceted = ps->solid_tree && ps->solid_tree->op() == SolidTree::Op::Faceted;
-        note_reach(faceted ? facetedEnvelope(*ps, recordByPosition(*ps), ps->solid_tree->what())
+        note_reach(faceted ? facetedEnvelope(*ps, recordByName(*ps), ps->solid_tree->what())
                            : ps->solid_tree);
         pts.reserve(pts.size() + ps->indices.size() * 3);
         for (const auto& p : ps->indices) {
@@ -112,9 +113,59 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
     const auto hull = manifold::Manifold::Hull(pts);
     std::set<uint32_t> hull_ids;
     if (hull.OriginalID() >= 0) hull_ids.insert(uint32_t(hull.OriginalID()));
-    std::vector<std::shared_ptr<Surface>> stamped = stampOwners(surfaces, hull_ids);
-    // The hull's own faces, made on what its operands state it makes.
-    const auto tagged = ManifoldUtils::withSurfaceTags(hull, stamped);
+    // Its records are stamped, and its faces named by derivation where they can
+    // be: the hull algorithm says which points it joins, not which record a face
+    // is made on, but for coaxial solids of revolution which record each face
+    // lies on follows in closed form from the rings its corners are on
+    // (hullFacetRecords). Derived names (mintDerivedTag) - D1, never D0
+    // (checklist E8). Until 2026-09-29 a face was named by the one record its
+    // corners lay on - position standing in for a name.
+    std::vector<std::shared_ptr<Surface>> stamped = stampTags(stampOwners(surfaces, hull_ids));
+    manifold::Manifold tagged = hull;
+    {
+      const manifold::MeshGL64 topology = ManifoldUtils::topologyMesh(hull.GetMeshGL64());
+      std::vector<Vector3d> verts;
+      for (std::size_t v = 0; v < topology.vertProperties.size() / 3; v++) {
+        verts.emplace_back(topology.vertProperties[3 * v], topology.vertProperties[3 * v + 1],
+                           topology.vertProperties[3 * v + 2]);
+      }
+      std::vector<std::array<std::size_t, 3>> tris;
+      for (std::size_t t = 0; t < topology.NumTri(); t++) {
+        tris.push_back({std::size_t(topology.triVerts[3 * t]), std::size_t(topology.triVerts[3 * t + 1]),
+                        std::size_t(topology.triVerts[3 * t + 2])});
+      }
+      std::vector<std::shared_ptr<Surface>> derived;
+      const std::vector<int> record = hullFacetRecords(per_operand, verts, tris, derived);
+      // Per derived record, the derived tag it gives the kept record describing
+      // the same surface - one name per record, whoever declared it first.
+      std::map<int, uint32_t> tag_of;
+      std::vector<uint32_t> tri_tag(tris.size(), 0);
+      bool any = false;
+      for (std::size_t t = 0; t < record.size(); t++) {
+        const int k = record[t];
+        if (k < 0 || std::size_t(k) >= derived.size()) continue;
+        auto it = tag_of.find(k);
+        if (it == tag_of.end()) {
+          uint32_t tag = 0;
+          for (auto& kept : stamped) {
+            if (kept == nullptr || !kept->declaresFace() || !kept->sameAs(*derived[std::size_t(k)]))
+              continue;
+            auto copy = kept->clone();
+            tag = mintDerivedTag();
+            copy->tags.push_back(tag);
+            kept = copy;
+            break;
+          }
+          it = tag_of.emplace(k, tag).first;
+        }
+        tri_tag[t] = it->second;
+        any = any || it->second != 0;
+      }
+      if (any) {
+        manifold::Manifold named(ManifoldUtils::withTagProperty(topology, tri_tag));
+        if (named.Status() == manifold::Manifold::Error::NoError) tagged = named;
+      }
+    }
     // Its solid is a leaf of its own: the hull of exact solids is not a boolean
     // of them, so nothing beneath it answers for its boundary - but it lies
     // within the box that holds its operands, where every one of them states

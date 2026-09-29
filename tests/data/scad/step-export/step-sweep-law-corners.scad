@@ -80,8 +80,11 @@ module ridge() {
 	declare_sweep(profile = [[0, profileAt(0)], [lead, profileAt(1)], [1 - lead, profileAt(1)],
 	                         [1, profileAt(0)]],
 	              radius = radius, pitch = (height - rootWidth)/turns, turns = turns,
-	              origin = [0, 0, rootWidth/2], stations = n + 1)
-	polyhedron(points = points, faces = faces, convexity = 8);
+	              origin = [0, 0, rootWidth/2], stations = n + 1, faces = "sweep")
+	// Every side face is on the sweep and neither end cap is: said per face.
+	polyhedron(points = points, faces = faces, convexity = 8,
+	           labels = concat([ for (i = [0 : n - 1]) for (j = [0 : np - 1]) for (k = [0, 1]) "sweep" ],
+	                           ["", ""]));
 }
 
 union() {

@@ -447,9 +447,23 @@ void ManifoldGeometry::addSurface(const std::shared_ptr<Surface>& surface)
   std::set<uint32_t> ids = originalIDs_;
   if (ids.empty() && manifold_.OriginalID() >= 0) ids.insert(uint32_t(manifold_.OriginalID()));
   mergeSurfaces(surfaces_, stampOwners({surface}, ids));
-  // And the triangles made on it say so: identity at the declaration, as
-  // where a geometry becomes a Manifold (PolySet::surface_tags).
-  manifold_ = ManifoldUtils::withSurfaceTags(manifold_, surfaces_);
+  // A declaration states a record, not which facets are on it: no triangle is
+  // named for it here (checklist E5, E8). Until 2026-09-29 every unnamed
+  // triangle whose corners lay on it alone was - position standing in for a
+  // name. Its record is stamped, as every face record is.
+  surfaces_ = stampTags(surfaces_);
+}
+
+std::vector<std::string> ManifoldGeometry::bindLabels(const std::vector<std::string>& labels,
+                                                      const std::shared_ptr<Surface>& surface)
+{
+  // Declared by the originals this subtree carries, as addSurface stamps it.
+  std::set<uint32_t> ids = originalIDs_;
+  if (ids.empty() && manifold_.OriginalID() >= 0) ids.insert(uint32_t(manifold_.OriginalID()));
+  const auto stamped = stampOwners({surface}, ids);
+  const auto bound = ::bindLabels(surfaces_, labels, stamped.empty() ? surface : stamped.front());
+  surfaces_ = stampTags(surfaces_);
+  return bound;
 }
 
 void ManifoldGeometry::setColor(const Color4f& c)

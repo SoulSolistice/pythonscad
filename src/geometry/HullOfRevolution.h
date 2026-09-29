@@ -22,8 +22,12 @@
  * axis line, it states nothing - intent it cannot read is not guessed.
  */
 
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <vector>
+
+#include "geometry/linalg.h"
 
 class Surface;
 struct DeclaredSolid;
@@ -42,5 +46,21 @@ std::vector<std::shared_ptr<Surface>> declareHullOfRevolution(
  * bound every edge of the profile. A caller asks this only of operands that are
  * each one declared primitive: records alone would take a cylinder with an
  * undeclared cut for the whole cylinder. */
+/*! Which of the hull's own records (declareHullOfRevolution, returned in
+ * `records`) each triangle of the hull's mesh lies on, derived in closed form,
+ * or -1. A vertex is identified with the ring it is on - a point on a declared
+ * circle, exactly, which a point, having no interior, can be; coaxial rings
+ * share no point. A triangle with every vertex on one ring is in that ring's
+ * plane, the cap at that level where the hull has one; one whose vertices lie
+ * on one edge of the hull's profile, on two or more of its rings, is on that
+ * edge's conic - the hull of coaxial circles joins adjacent ones and nothing
+ * else. Anything else is none. A derivation, not a maker's word: its names are
+ * D1 (mintDerivedTag). Empty where the operands are not coaxial solids of
+ * revolution. */
+std::vector<int> hullFacetRecords(const std::vector<std::vector<std::shared_ptr<Surface>>>& operands,
+                                  const std::vector<Vector3d>& vertices,
+                                  const std::vector<std::array<std::size_t, 3>>& triangles,
+                                  std::vector<std::shared_ptr<Surface>>& records);
+
 std::shared_ptr<const DeclaredSolid> solidOfHullOfRevolution(
   const std::vector<std::vector<std::shared_ptr<Surface>>>& operands);

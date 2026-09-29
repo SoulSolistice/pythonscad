@@ -65,8 +65,11 @@ module ridge() {
 		[ [0, 1, 2, 3] ],
 		[ [steps*np + 3, steps*np + 2, steps*np + 1, steps*np] ]
 	);
-	declare_grid(points = rows, closed = true)
-	polyhedron(points = points, faces = faces, convexity = 8);
+	// Every side face is on the sweep and neither end cap is: said per face.
+	labels = concat([ for (i = [0 : steps - 1]) for (j = [0 : np - 1]) for (k = [0, 1]) "sweep" ],
+	                ["", ""]);
+	declare_grid(points = rows, closed = true, faces = "sweep")
+	polyhedron(points = points, faces = faces, labels = labels, convexity = 8);
 }
 
 // The ridge fused to a wall, which is what makes the sweep a *trimmed* one -

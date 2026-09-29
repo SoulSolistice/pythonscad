@@ -205,13 +205,14 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
   // cut faces are exactly the ones the question is about.
   std::map<int32_t, std::size_t> facets;
   std::map<int32_t, std::vector<std::size_t>> covered, covered_cut;
-  // Whether a whole facet of this original lies on this surface by the
-  // generator's own points - every corner `runsThrough` it, or is a declared
-  // grid point adjacent in the net - asked *before* the facing band below and
-  // with no count. D0: float equality for points the generator emitted on the
-  // surface. What ownership asks of it is only whether the surface is still
-  // *here* for this original; whether the original meant it is identity's
-  // question, not this one's. See the ownership block below.
+  // Whether a whole facet this original's maker named for this surface is
+  // still here - named (PolySet::surface_tags), and every corner `runsThrough`
+  // it, or is a declared grid point adjacent in the net. Presence is heritage,
+  // not position (checklist E8): until 2026-09-29 any whole facet with every
+  // corner on the surface made its original present there, named or not - so
+  // a polyhedron under a declaration was present on it by an inscribed cap.
+  // What ownership asks of it is only whether the surface is still *here* for
+  // this original. See the ownership block below.
   std::map<int32_t, std::vector<char>> present;
   for (std::size_t t = 0; t < ps.indices.size(); t++) {
     const int32_t id = ps.original_ids[t];
@@ -268,6 +269,9 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // surface: then no plane its corners also lie on takes it
       // (recognition::planeTakes, the same rule on the merged mesh).
       bool made_here = false;
+      // A stated name or a derived one (mintDerivedTag): both are heritage, and
+      // ownership asserts no evidence class - corner placement labels none, and
+      // D0 is decided by stated names alone (Provenance::statedOn).
       if (t < ps.surface_tags.size() && ps.surface_tags[t] != 0) {
         const auto& tags = ps.surfaces[j]->tags;
         made_here = std::find(tags.begin(), tags.end(), ps.surface_tags[t]) != tags.end();
@@ -291,10 +295,8 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
           }
         }
         if (!adjacent) continue;
-        if (on.size() == f.size() && !plane_takes) row_present[j] = 1;
-      } else {
-        if (on.size() == f.size() && !plane_takes) row_present[j] = 1;
       }
+      if (on.size() == f.size() && made_here) row_present[j] = 1;
       // Counted for the report as presence is asked.
       if (plane_takes) continue;
       if (on.size() == f.size()) row[j]++;
@@ -1002,6 +1004,18 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
     ps = permutedNumbering(ps, static_cast<unsigned>(std::strtoul(seed, nullptr, 10)));
   }
   ps = canonicalNumbering(ps);
+  // A label no declaration bound (polyhedron(labels = ...), LabelSurface)
+  // describes no surface and names nothing: it goes here, before anything
+  // counts records, so it is neither a surface nor a name to any consumer.
+  if (std::any_of(ps->surfaces.begin(), ps->surfaces.end(),
+                  [](const auto& s) { return s != nullptr && !s->label.empty(); })) {
+    auto unlabelled = std::make_shared<PolySet>(*ps);
+    auto& list = unlabelled->surfaces;
+    list.erase(std::remove_if(list.begin(), list.end(),
+                              [](const auto& s) { return s != nullptr && !s->label.empty(); }),
+               list.end());
+    ps = unlabelled;
+  }
 
   //	printf("export curves: %zu\n",ps->curves.size());
   //	printf("export surfaces: %zu\n",ps->surfaces.size());
@@ -1061,10 +1075,14 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   // original is above, and named by the record in ps->surfaces that holds the
   // tag. kUnknown where no tags were carried; kNone where carried and untagged.
   std::vector<int32_t> faceSurface(indicesNew.size(), recognition::Provenance::kUnknown);
+  // And whether that name is a derivation (mintDerivedTag) rather than a
+  // maker's word: the facet is then D1, never D0 (checklist E8).
+  std::vector<char> faceDerived(indicesNew.size(), 0);
   if (ps->surface_tags.size() == ps->indices.size()) {
     std::map<uint32_t, int32_t> surface_of_tag;
     for (std::size_t si = 0; si < ps->surfaces.size(); si++) {
-      if (ps->surfaces[si] == nullptr) continue;
+      // Only a face record is a name: a label nobody bound names nothing.
+      if (ps->surfaces[si] == nullptr || !ps->surfaces[si]->declaresFace()) continue;
       for (const uint32_t tag : ps->surfaces[si]->tags)
         surface_of_tag.emplace(tag, static_cast<int32_t>(si));
     }
@@ -1092,6 +1110,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
       const auto it = surface_of_tag.find(tag);
       faceSurface[f] =
         tag != 0 && it != surface_of_tag.end() ? it->second : recognition::Provenance::kNone;
+      faceDerived[f] = tag != 0 && it != surface_of_tag.end() && isDerivedTag(tag) ? 1 : 0;
     }
   }
 
@@ -1213,8 +1232,9 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceOrigin, faceSurface, corner_moves, single_owner, owner_split, owned, faceParents,
-                    newNormals, 1e-5, analytic, approximate, corner_owners, ps->solid_tree.get());
+                    faceOrigin, faceSurface, faceDerived, corner_moves, single_owner, owner_split, owned,
+                    faceParents, newNormals, 1e-5, analytic, approximate, corner_owners,
+                    ps->solid_tree.get());
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;

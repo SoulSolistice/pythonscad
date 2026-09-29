@@ -832,8 +832,12 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 	                ? [[0, rAt(0)], [tTaper, rAt(tTaper)], [1, rAt(1)]]
 	                : [[0, rAt(0)], [1, rAt(1)]],
 	              pitch = pitch, turns = turns, origin = [0, 0, zStart],
-	              stations = n + 1)  // the rows above: what the mesh was cut from
-	polyhedron(points = points, faces = faces, convexity = 8);
+	              stations = n + 1,  // the rows above: what the mesh was cut from
+	              faces = "sweep")
+	// Every side face is on the sweep and neither end cap is: said per face.
+	polyhedron(points = points, faces = faces, convexity = 8,
+	           labels = concat([ for (i = [0 : n - 1]) for (j = [0 : np - 1]) for (k = [0, 1]) "sweep" ],
+	                           ["", ""]));
 }
 
 
@@ -903,11 +907,18 @@ module bayonetChannel(rInner, rOuter, lugAngle, zBottom, height, entryRotation,
 	// slots' records, which a different solid made, and nothing saying this one
 	// meant them. The ramped roof and floor are not cylinders and stay as they
 	// are.
+	//
+	// Which faces are which is said per face: profile edge 1 is the inner wall,
+	// edge 3 the outer. The corners alone cannot say it - a face whose corners
+	// all lie on a circle need not be on its cylinder - and only the model's word
+	// makes a face D0 (checklist E8).
+	labels = concat([ for (i = [0 : steps - 1]) for (j = [0 : np - 1]) for (k = [0, 1])
+	                  j == 1 ? "inner" : j == 3 ? "outer" : "" ], ["", ""]);
 	for (i = [0 : starts - 1])
 	rotate([0, 0, i*360/starts])
-	declare_cylinder(r = rOuter)
-	declare_cylinder(r = rInner)
-	polyhedron(points = points, faces = faces, convexity = 8);
+	declare_cylinder(r = rOuter, faces = "outer")
+	declare_cylinder(r = rInner, faces = "inner")
+	polyhedron(points = points, faces = faces, labels = labels, convexity = 8);
 }
 
 

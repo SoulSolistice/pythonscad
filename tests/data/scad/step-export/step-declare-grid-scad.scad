@@ -175,7 +175,10 @@ union() {
 		cylinder(r = radius + wall, h = height);
 		translate([0, 0, -1]) cylinder(r = radius, h = height + 2);
 	}
-	declare_grid(points = rows, closed = true) {
-		polyhedron(points = points, faces = faces, convexity = 8);
+	// Every side face is on the sweep and neither end cap is: said per face.
+	declare_grid(points = rows, closed = true, faces = "sweep") {
+		polyhedron(points = points, faces = faces, convexity = 8,
+		           labels = concat([ for (i = [0 : steps - 1]) for (j = [0 : np - 1]) for (k = [0, 1]) "sweep" ],
+		                           ["", ""]));
 	}
 }

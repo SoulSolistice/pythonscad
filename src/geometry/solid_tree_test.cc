@@ -4,17 +4,22 @@
 // classification built on it later has a structure it can trust.
 #include "geometry/SolidTree.h"
 
+#include <algorithm>
 #include <catch2/catch_all.hpp>
 #include <cmath>
+#include <array>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "core/enums.h"
+#include "geometry/HullOfRevolution.h"
 #include "geometry/PolySet.h"
 #include "geometry/Surface.h"
 #include "geometry/manifold/ManifoldGeometry.h"
 #include "geometry/manifold/manifoldutils.h"
+#include "geometry/recognition/Exact.h"
 
 namespace {
 
@@ -49,6 +54,11 @@ std::unique_ptr<PolySet> cube(const Vector3d& lo, const Vector3d& hi)
   solid->interior = (lo + hi) / 2;
   solid->extent = BoundingBox(lo, hi);
   ps->solid_tree = SolidTree::declared(solid);
+  // Each triangle named for its plane, as cube() names its faces: records
+  // x lo, x hi, y lo, y hi, z lo, z hi.
+  ps->surfaces = stampTags(ps->surfaces);
+  for (const int record : {5, 5, 4, 4, 2, 2, 1, 1, 3, 3, 0, 0})
+    ps->surface_tags.push_back(ps->surfaces[std::size_t(record)]->tags.back());
   return ps;
 }
 
@@ -155,10 +165,10 @@ TEST_CASE("the boolean is carried through Manifold to the exported mesh", "[soli
 
 TEST_CASE("a faceted leaf becomes the envelope its faces span", "[solidtree][envelope]")
 {
-  // A prism over a square inscribed in r = 10, declared a cylinder: its corners
-  // reach only 10 cos 45 = 7.07 along x, but the cylinder its sides are chords
-  // of reaches 10, and so does the envelope - a face taken as exact would put
-  // the solid's edge at 7.07 and rule out points the model has.
+  // A prism over a square inscribed in r = 10, its sides named for the
+  // cylinder they are chords of: its corners reach only 10 cos 45 = 7.07 along
+  // x, but the cylinder reaches 10, and so does the envelope - a face taken as
+  // exact would put the solid's edge at 7.07 and rule out points the model has.
   auto ps = std::make_unique<PolySet>(3);
   for (const double z : {0.0, 5.0}) {
     for (int k = 0; k < 4; k++) {
@@ -170,13 +180,25 @@ TEST_CASE("a faceted leaf becomes the envelope its faces span", "[solidtree][env
                  {3, 0, 4}, {3, 4, 7}, {0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}};
   ps->surfaces.push_back(std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10));
   ps->solid_tree = SolidTree::faceted();
-  const auto tree = manifoldOf(*ps)->toPolySet()->solid_tree;
+  auto named = std::make_unique<PolySet>(*ps);
+  named->surfaces = stampTags(named->surfaces);
+  const uint32_t wall = named->surfaces[0]->tags.back();
+  for (std::size_t f = 0; f < named->indices.size(); f++)
+    named->surface_tags.push_back(f < 8 ? wall : 0);
+  const auto tree = manifoldOf(*named)->toPolySet()->solid_tree;
   REQUIRE(tree->op() == SolidTree::Op::Enveloped);
   BoundingBox box;
   for (const auto& b : tree->solid()->bounds) box.extend(b->refpt);
   CHECK(box.max()[0] == Catch::Approx(10).margin(1e-12));
   CHECK(box.min()[1] == Catch::Approx(-10).margin(1e-12));
   CHECK(box.max()[2] == Catch::Approx(5).margin(1e-12));
+
+  // The same prism with the cylinder declared over it and no face named for
+  // it - a declare_cylinder() around a polyhedron(): which faces the cylinder
+  // covers, nobody says, so the leaf states nothing. Not the corners' box,
+  // which rules out points the declaration means; not the cylinder, which
+  // would be position standing in for a name (checklist E8).
+  CHECK(manifoldOf(*ps)->toPolySet()->solid_tree->op() == SolidTree::Op::Opaque);
 
   // With nothing declared over its faces, a faceted solid lies within its
   // corners' box: a tetrahedron's.
@@ -334,4 +356,170 @@ TEST_CASE("a hull of a polyhedron not yet a Manifold resolves its faces where it
   REQUIRE(hull->getSolidTree()->extent(box));
   CHECK((box.min() - Vector3d(0, 0, 0)).norm() == 0);
   CHECK((box.max() - Vector3d(8, 3, 4)).norm() == 0);
+}
+
+namespace {
+
+/*! A square prism around the z axis whose four sides a model labelled "wall",
+ * as polyhedron(labels = ...) labels them: one tag for the label, carried by
+ * each side, held by a label record - and no face named for any surface. */
+std::unique_ptr<PolySet> labelledPrism(double at_x)
+{
+  auto ps = std::make_unique<PolySet>(3);
+  for (const double z : {0.0, 5.0}) {
+    for (int k = 0; k < 4; k++) {
+      const double a = M_PI / 4 + k * M_PI / 2;
+      ps->vertices.emplace_back(at_x + 10 * std::cos(a), 10 * std::sin(a), z);
+    }
+  }
+  ps->indices = {{0, 1, 5}, {0, 5, 4}, {1, 2, 6}, {1, 6, 5}, {2, 3, 7}, {2, 7, 6},
+                 {3, 0, 4}, {3, 4, 7}, {0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}};
+  const uint32_t wall = mintTag();
+  ps->surfaces.push_back(std::make_shared<LabelSurface>("wall", wall));
+  for (std::size_t f = 0; f < ps->indices.size(); f++) ps->surface_tags.push_back(f < 8 ? wall : 0);
+  ps->solid_tree = SolidTree::faceted();
+  return ps;
+}
+
+/*! Per facet of `ps`, the face record its tag names, or null. */
+std::vector<const Surface *> namedFor(const PolySet& ps)
+{
+  std::vector<const Surface *> out(ps.indices.size(), nullptr);
+  if (ps.surface_tags.size() != ps.indices.size()) return out;
+  for (std::size_t f = 0; f < ps.indices.size(); f++) {
+    for (const auto& r : ps.surfaces) {
+      if (!r->declaresFace()) continue;
+      if (std::find(r->tags.begin(), r->tags.end(), ps.surface_tags[f]) != r->tags.end())
+        out[f] = r.get();
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("a label names nothing until a declaration binds it, and then its faces wherever they go",
+          "[identity][labels]")
+{
+  // Unbound: the label is no record and no name - the faces are named for
+  // nothing, whatever surface their corners lie on (checklist E8).
+  auto ps = labelledPrism(0);
+  CHECK_FALSE(ps->surfaces.front()->declaresFace());
+  for (const Surface *r : namedFor(*manifoldOf(*ps)->toPolySet())) CHECK(r == nullptr);
+
+  // Bound: every labelled face is named for the declared cylinder, through the
+  // Manifold conversion; the caps, unlabelled, for nothing; the label is gone.
+  const auto cylinder = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  REQUIRE(ps->bindLabels({"wall"}, cylinder) == std::vector<std::string>{"wall"});
+  for (const auto& r : ps->surfaces) CHECK(r->label.empty());
+  const auto out = manifoldOf(*ps)->toPolySet();
+  std::size_t walls = 0, caps = 0;
+  for (std::size_t f = 0; f < out->indices.size(); f++) {
+    const Surface *r = namedFor(*out)[f];
+    const bool side =
+      std::fabs(out->vertices[out->indices[f][0]][2] - out->vertices[out->indices[f][1]][2]) > 0 ||
+      std::fabs(out->vertices[out->indices[f][0]][2] - out->vertices[out->indices[f][2]][2]) > 0;
+    if (side) {
+      CHECK(dynamic_cast<const CylinderSurface *>(r) != nullptr);
+      walls++;
+    } else {
+      CHECK(r == nullptr);
+      caps++;
+    }
+  }
+  CHECK(walls == 8);
+  CHECK(caps == 4);
+
+  // A label bound twice binds once: the second finds none, and names nothing.
+  CHECK(ps->bindLabels({"wall"}, cylinder).empty());
+}
+
+TEST_CASE("two copies of one labelled geometry are each named for their own record",
+          "[identity][labels]")
+{
+  // One geometry, labelled once, placed twice and each copy declared a
+  // cylinder of its own - where the copies meet in a union, each face keeps the
+  // record of its own copy: the one whose axis it stands around.
+  auto left = labelledPrism(0);
+  auto right = std::make_unique<PolySet>(*left);  // the same tags: one geometry
+  Transform3d shift = Transform3d::Identity();
+  shift.translate(Vector3d(30, 0, 0));
+  right->transform(shift, Similarity::by(1.0));
+  REQUIRE(
+    left
+      ->bindLabels({"wall"}, std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10))
+      .size() == 1);
+  REQUIRE(right
+            ->bindLabels({"wall"},
+                         std::make_shared<CylinderSurface>(Vector3d(30, 0, 0), Vector3d(0, 0, 1), 10))
+            .size() == 1);
+  const auto both = (*manifoldOf(*left) + *manifoldOf(*right)).toPolySet();
+  std::size_t checked = 0;
+  for (std::size_t f = 0; f < both->indices.size(); f++) {
+    const auto *r = dynamic_cast<const CylinderSurface *>(namedFor(*both)[f]);
+    if (r == nullptr) continue;
+    for (const int v : both->indices[f]) CHECK(r->residual(both->vertices[v]).exact());
+    checked++;
+  }
+  CHECK(checked == 16);
+}
+
+TEST_CASE("the hull of two coaxial cylinders derives the record of every face", "[identity][hull]")
+{
+  // cylinder(r = 10, h = 10) and cylinder(r = 6, h = 14), as their generator
+  // declares them: the wall, and a plane at either end. Their hull's profile
+  // is (0,0) (10,0) (10,10) (6,14) (0,14): a bottom cap, a wall, a cone and a
+  // top cap. Every face of the hull is derived onto one of them in closed form.
+  auto cyl = [](double r, double h) {
+    return std::vector<std::shared_ptr<Surface>>{
+      std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), r),
+      std::make_shared<PlaneSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, -1)),
+      std::make_shared<PlaneSurface>(Vector3d(0, 0, h), Vector3d(0, 0, 1))};
+  };
+  const std::vector<std::vector<std::shared_ptr<Surface>>> operands{cyl(10, 10), cyl(6, 14)};
+  std::vector<manifold::vec3> pts;
+  for (const auto& [r, z] : std::vector<std::pair<double, double>>{{10, 0}, {10, 10}, {6, 0}, {6, 14}}) {
+    for (int k = 0; k < 24; k++) {
+      const double a = 2 * M_PI * k / 24;
+      pts.push_back({r * std::cos(a), r * std::sin(a), z});
+    }
+  }
+  const auto topology = ManifoldUtils::topologyMesh(manifold::Manifold::Hull(pts).GetMeshGL64());
+  std::vector<Vector3d> verts;
+  for (std::size_t v = 0; v < topology.vertProperties.size() / 3; v++) {
+    verts.emplace_back(topology.vertProperties[3 * v], topology.vertProperties[3 * v + 1],
+                       topology.vertProperties[3 * v + 2]);
+  }
+  std::vector<std::array<std::size_t, 3>> tris;
+  for (std::size_t t = 0; t < topology.NumTri(); t++) {
+    tris.push_back({std::size_t(topology.triVerts[3 * t]), std::size_t(topology.triVerts[3 * t + 1]),
+                    std::size_t(topology.triVerts[3 * t + 2])});
+  }
+  std::vector<std::shared_ptr<Surface>> records;
+  const std::vector<int> record = hullFacetRecords(operands, verts, tris, records);
+  REQUIRE(record.size() == tris.size());
+  std::map<std::string, std::size_t> kinds;
+  for (std::size_t t = 0; t < tris.size(); t++) {
+    REQUIRE(record[t] >= 0);  // every face of this hull is derived
+    const Surface *r = records[std::size_t(record[t])].get();
+    for (const std::size_t v : tris[t]) CHECK(recognition::onExactly(r, verts[v]));
+    // An oracle of its own, by where the corners are: flat at one level is a
+    // cap, all at radius 10 the wall, anything else the cone.
+    const double z0 = verts[tris[t][0]][2];
+    bool flat = true, wall = true;
+    for (const std::size_t v : tris[t]) {
+      flat = flat && verts[v][2] == z0;
+      wall = wall && std::fabs(Vector2d(verts[v][0], verts[v][1]).norm() - 10) < 1e-9;
+    }
+    const bool plane = dynamic_cast<const PlaneSurface *>(r) != nullptr;
+    const bool cylinder = dynamic_cast<const CylinderSurface *>(r) != nullptr;
+    const bool cone = dynamic_cast<const ConeSurface *>(r) != nullptr;
+    CHECK(plane == flat);
+    CHECK(cylinder == (!flat && wall));
+    CHECK(cone == (!flat && !wall));
+    kinds[plane ? "plane" : cylinder ? "cylinder" : "cone"]++;
+  }
+  CHECK(kinds["plane"] > 0);
+  CHECK(kinds["cylinder"] > 0);
+  CHECK(kinds["cone"] > 0);
 }

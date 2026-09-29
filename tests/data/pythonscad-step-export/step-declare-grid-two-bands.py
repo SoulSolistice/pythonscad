@@ -57,7 +57,7 @@ import math
 
 
 def ridge(rows, R, pitch, turns, depth, zoff):
-    pts, faces = [], []
+    pts, faces, labels = [], [], []
     for i in range(rows):
         t = i / (rows - 1)
         a = 2 * math.pi * turns * t
@@ -71,10 +71,13 @@ def ridge(rows, R, pitch, turns, depth, zoff):
             c0 = (i + 1) * 4 + (j + 1) % 4
             d0 = (i + 1) * 4 + j
             faces += [[a0, c0, b0], [a0, d0, c0]]
+            labels += ["sweep", "sweep"]  # every side face is on the sweep
     faces += [[0, 1, 2, 3],
               [(rows - 1) * 4 + 3, (rows - 1) * 4 + 2, (rows - 1) * 4 + 1, (rows - 1) * 4]]
+    labels += [None, None]  # the end caps
     grid = [[pts[i * 4 + j] for j in range(4)] for i in range(rows)]
-    return polyhedron(points=pts, faces=faces).declare_grid(points=grid, closed=True)
+    return polyhedron(points=pts, faces=faces, labels=labels).declare_grid(
+        points=grid, closed=True, faces="sweep")
 
 
 coarse = ridge(rows=12, R=20.0, pitch=6.0, turns=0.75, depth=1.0, zoff=1.0)

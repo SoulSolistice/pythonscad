@@ -1664,6 +1664,7 @@ set(CORE_SOURCES
   src/geometry/skin.cc
   src/geometry/linalg.cc
   src/geometry/linear_extrude.cc
+  src/geometry/linear_extrude_internals.cc
   src/geometry/rotate_extrude.cc
   src/geometry/organic_resample.cc
   src/glview/Camera.cc

@@ -604,20 +604,21 @@ PyObject *python_polyhedron(PyObject *self, PyObject *args, PyObject *kwargs)
   DECLARE_INSTANCE();
   auto node = std::make_shared<PolyhedronNode>(instance);
 
-  char *kwlist[] = {"points", "faces", "convexity", "triangles", "colors", NULL};
+  char *kwlist[] = {"points", "faces", "convexity", "triangles", "colors", "labels", NULL};
   PyObject *points = NULL;
   PyObject *faces = NULL;
   int convexity = 2;
   PyObject *triangles = NULL;
   PyObject *colors = NULL;
+  PyObject *labels = NULL;
 
   PyObject *element;
   Vector3d point;
 
   // Accept lists, tuples or NumPy arrays for every array-like argument, so
   // the parse format is plain `O` and the type is validated below.
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iOO", kwlist, &points, &faces, &convexity,
-                                   &triangles, &colors)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|iOOO", kwlist, &points, &faces, &convexity,
+                                   &triangles, &colors, &labels)) {
     PyErr_SetString(PyExc_TypeError,
                     "Error during parsing polyhedron(points, faces, convexity, triangles, colors)");
     return NULL;
@@ -701,6 +702,7 @@ PyObject *python_polyhedron(PyObject *self, PyObject *args, PyObject *kwargs)
         Py_DECREF(fseq);
         if (face.size() >= 3) {
           node->faces.push_back(std::move(face));
+          node->face_source.push_back(int32_t(i));
         } else {
           Py_DECREF(seq);
           PyErr_SetString(PyExc_TypeError, "Polyhedron Face must specify at least 3 indices");
@@ -717,6 +719,34 @@ PyObject *python_polyhedron(PyObject *self, PyObject *args, PyObject *kwargs)
   } else {
     PyErr_SetString(PyExc_TypeError, "Polyhedron faces must be a list of indices");
     return NULL;
+  }
+
+  // `labels`: one per face - a string, or a number read as one; None labels
+  // that face nothing. See PolyhedronNode::labels.
+  if (labels != NULL && labels != Py_None) {
+    if (!python_is_sequence(labels)) {
+      PyErr_SetString(PyExc_TypeError, "Polyhedron labels must be a list, one per face");
+      return NULL;
+    }
+    PyObject *seq = PySequence_Fast(labels, "expected a list of labels");
+    if (seq == NULL) return NULL;
+    const Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
+    for (Py_ssize_t i = 0; i < n; i++) {
+      PyObject *item = PySequence_Fast_GET_ITEM(seq, i);
+      std::string label;
+      if (item != Py_None) {
+        PyObject *text = PyObject_Str(item);
+        if (text == NULL) {
+          Py_DECREF(seq);
+          return NULL;
+        }
+        const char *utf8 = PyUnicode_AsUTF8(text);
+        if (utf8 != NULL) label = utf8;
+        Py_DECREF(text);
+      }
+      node->labels.push_back(std::move(label));
+    }
+    Py_DECREF(seq);
   }
 
   if (colors != NULL && python_is_sequence(colors)) {

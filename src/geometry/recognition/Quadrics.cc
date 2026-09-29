@@ -197,6 +197,12 @@ public:
     // Where identity says the facet was made on another declared surface, no
     // measurement gives it to this one (C9).
     if (provenance_.madeElsewhere(f, surface_index_)) return false;
+    // Derived onto this surface in closed form (the hull of revolution): D1,
+    // which nothing measured vetoes either (C3).
+    if (provenance_.derivedOn(f, surface_index_)) {
+      if (off_out != nullptr) *off_out = off;
+      return true;
+    }
     // Everything else is judged by measurement, D4 - corners exact without
     // identity are the weakest rung, a cap over a bore has every corner on the
     // rim - and the band is what the mesh concedes about where its surface
@@ -336,7 +342,9 @@ std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& grap
       // identity alone says nothing about this facet. Asked of the one
       // definition every claimant reads, recognition::D0Membership.
       proposal.decided.push_back(d0.contains(surface_index, f) ? recognition::EvidenceClass::D0
-                                                               : recognition::EvidenceClass::D4);
+                                 : provenance.derivedOn(f, surface_index)
+                                   ? recognition::EvidenceClass::D1
+                                   : recognition::EvidenceClass::D4);
     }
     out.push_back(std::move(proposal));
   }

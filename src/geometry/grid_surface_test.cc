@@ -789,3 +789,35 @@ TEST_CASE("a declared grid can find a point it evaluated itself", "[surface][gri
   // able to place a point on itself at least that well.
   CHECK(worst <= 1e-7);
 }
+
+TEST_CASE("a grid's envelope holds its whole surface, where the surface leaves its net's box",
+          "[surface][grid]")
+{
+  // An arc of r = 10 over -30..30 degrees with no station at 0: the net's box
+  // stops at 10 cos 10 = 9.85 in x and the surface bulges past it towards 10.
+  // Existence asks the envelope of a face named for the grid; one that stopped
+  // at the net would rule out points the surface has.
+  const int rows = 4;
+  std::vector<Vector3d> net;
+  for (int i = 0; i < rows; i++) {
+    const double a = (-30.0 + 60.0 * i / (rows - 1)) * M_PI / 180.0;
+    net.emplace_back(10 * cos(a), 10 * sin(a), 0.0);
+    net.emplace_back(10 * cos(a), 10 * sin(a), 5.0);
+  }
+  const GridSurface grid(rows, 2, net);
+  REQUIRE(grid.interpolated());
+  BoundingBox net_box;
+  net_box.setEmpty();
+  for (const Vector3d& p : net) net_box.extend(p);
+  BoundingBox box;
+  REQUIRE(grid.envelope({}, box));
+  bool beyond_net = false;
+  for (int iu = 0; iu <= 2000; iu++) {
+    for (const double v : {0.0, 0.5, 1.0}) {
+      const Vector3d p = grid.evaluate(iu / 2000.0, v);
+      CHECK(box.contains(p));
+      beyond_net = beyond_net || !net_box.contains(p);
+    }
+  }
+  CHECK(beyond_net);  // the growth is what holds it - the check is not vacuous
+}

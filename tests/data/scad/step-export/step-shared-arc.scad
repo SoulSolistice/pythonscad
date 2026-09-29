@@ -40,7 +40,10 @@
 // cylinder and 24 on the cone, each made by the hull, which declared both. The
 // cube's planes pass through vertices, not chords (above), so no corner is moved
 // off its surface by the cut, and every one of the 48 is decided by the model.
-// EXPECT: what decided each written facet: 48 D0, 0 D1, 0 D2, 0 D3, 0 D4
+// The 48 are the hull's, named by derivation from the rings their corners are
+// on, not stated by a maker: D1 (checklist E8; D0 by position until
+// 2026-09-29).
+// EXPECT: what decided each written facet: 0 D0, 48 D1, 0 D2, 0 D3, 0 D4
 //
 // The chamfered cylinder above with one quadrant cut away, so exactly three
 // quarters of 6165.8991814.

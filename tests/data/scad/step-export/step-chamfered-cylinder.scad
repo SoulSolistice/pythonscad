@@ -24,10 +24,13 @@
 // EXPECT: 3 analytic surfaces available (2 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 conical)
 // EXPECT: 2 surfaces recognised (0 toroidal, 0 spherical, 1 conical, 0 partial), 64 facets replaced
 //
-// And every one of those 64 is decided by the model: 32 wall facets on the r = 10
-// cylinder and 32 on the cone, each made by the hull, which declared both, with
-// every corner on its surface exactly.
-// EXPECT: what decided each written facet: 64 D0, 0 D1, 0 D2, 0 D3, 0 D4
+// And every one of those 64 is decided by the model - by derivation: 32 wall
+// facets on the r = 10 cylinder and 32 on the cone, which the hull declares
+// in closed form from its operands' profiles and names each face for from the
+// rings its corners are on (hullFacetRecords). A derivation, not a maker's
+// word, so D1: until 2026-09-29 they read D0, the positional tagger having
+// named them by where their corners were (checklist E8).
+// EXPECT: what decided each written facet: 0 D0, 64 D1, 0 D2, 0 D3, 0 D4
 //
 // One original (the hull), two declared cylinders, and only one of them is
 // still here: the r = 8 disc's wall is 0.01 tall and inside the hull's
@@ -39,7 +42,9 @@
 // item 31.
 // Since the hull declares its cone there are three curved declarations, and
 // the one original owns two of them - the r = 10 wall and the cone - and still
-// not the r = 8 disc's.
+// not the r = 8 disc's. By derivation since 2026-09-29: its faces are named for
+// what the rings their corners are on make them, where position named them
+// before.
 // EXPECT: provenance maps 1 of 1 originals onto 2 of 3 declared surfaces
 //
 // The hull's profile is (r=8, z=0) to (r=10, z=2) to (r=10, z=20) - the small

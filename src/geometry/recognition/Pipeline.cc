@@ -71,6 +71,7 @@ struct Context {
   {
     provenance.face_origin = inputs.face_origin;
     provenance.face_surface = inputs.face_surface;
+    provenance.face_derived = inputs.face_derived;
     provenance.owned = inputs.owned;
     provenance.declared = inputs.surfaces->size();
   }

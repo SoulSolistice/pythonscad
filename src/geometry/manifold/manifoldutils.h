@@ -41,31 +41,6 @@ std::vector<size_t> canonicalVertices(const manifold::MeshGL64& mesh);
 manifold::MeshGL64 withTagProperty(const manifold::MeshGL64& topology,
                                    const std::vector<uint32_t>& tri_tag);
 
-/*! The tag of the one face-declaring record of `surfaces` a triangle lies on
- * wholly at machine precision; 0 where it lies on none, or on several. Each
- * vertex is asked of each record once: a vertex is a corner of several
- * triangles, and the question has one answer - which matters where asking is a
- * projection, as it is of a Bezier patch. */
-class TriangleTagger
-{
-public:
-  TriangleTagger(const std::vector<std::shared_ptr<Surface>>& surfaces, std::size_t vertices,
-                 std::function<Vector3d(std::size_t)> point);
-  uint32_t tag(std::size_t a, std::size_t b, std::size_t c);
-
-private:
-  bool on(std::size_t record, std::size_t vertex);
-  const std::vector<std::shared_ptr<Surface>>& surfaces_;
-  std::size_t vertices_;
-  std::function<Vector3d(std::size_t)> point_;
-  std::vector<std::vector<signed char>> asked_;  // per record, per vertex: -1 not yet
-};
-
-/*! `mani` with every untagged triangle tagged with the record of `surfaces`
- * it was made on - see TriangleTagger - where records are stamped onto geometry
- * whose triangles already exist: a declaration over a subtree already a
- * Manifold, a hull. Gives each face record in `surfaces` a tag of its own
- * (stampTags). `mani` itself where nothing new is tagged. */
 /*! `mani` with every tag its records share with `taken` renamed to a fresh
  * one - in the records of `surfaces` and in the tag property of the triangles
  * that carry it, the same renaming in both. What keeps a tag naming one record
@@ -84,13 +59,10 @@ manifold::Manifold withFreshTags(const manifold::Manifold& mani,
 std::shared_ptr<const SolidTree> facetedEnvelope(const PolySet& ps,
                                                  const std::function<const Surface *(size_t)>& record_of,
                                                  const std::string& what);
-/*! Which record a face of `ps` lies on, by position: the one face-declaring
- * record all its corners lie on at machine precision - the rule a tag is
- * minted by - or null. For a PolySet whose tags are not minted yet. */
-std::function<const Surface *(size_t)> recordByPosition(const PolySet& ps);
-
-manifold::Manifold withSurfaceTags(const manifold::Manifold& mani,
-                                   std::vector<std::shared_ptr<Surface>>& surfaces);
+/*! Which record its maker named a face of `ps` for (PolySet::surface_tags),
+ * or null - never by position (checklist E8). For a PolySet not yet a
+ * Manifold. */
+std::function<const Surface *(size_t)> recordByName(const PolySet& ps);
 
 const char *statusToString(manifold::Manifold::Error status);
 

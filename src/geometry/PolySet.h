@@ -61,6 +61,14 @@ public:
    * piece of, whatever its cut corners do. Empty wherever that path was not
    * taken, and then a consumer keeps what it did before. */
   std::vector<uint32_t> surface_tags;
+  /*! Per polygon, the index of the face in the model's own face list that
+   * made it - `polyhedron()`'s `faces` - or empty. What a scoped declaration
+   * names faces by (`declare_*(faces = ...)`, DeclareSurfaceNode::faces): the
+   * model's word about which of its faces are on a record, which only holds
+   * while polygon and face still correspond. `polyhedron()` drops a face it
+   * cannot read, so polygon k is not face k in general. Carried whole or not
+   * at all, as `surface_tags`. */
+  std::vector<int32_t> face_source;
   std::vector<Color4f> colors;
   std::vector<std::shared_ptr<Curve>>
     curves;  // defines vertex connections(edges) which are not straight lines
@@ -90,6 +98,11 @@ public:
   void addSurface(const std::shared_ptr<Surface>& surface) override
   {
     mergeSurfaces(surfaces, {surface});  // a duplicate unites its declarers
+  }
+  std::vector<std::string> bindLabels(const std::vector<std::string>& labels,
+                                      const std::shared_ptr<Surface>& surface) override
+  {
+    return ::bindLabels(surfaces, labels, surface);
   }
 
   bool isConvex() const;

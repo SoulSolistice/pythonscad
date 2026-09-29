@@ -6,11 +6,14 @@
  * doc/step-recognition-design.md, *R0 is region first, and the region is
  * sequence-agnostic*. A facet belongs to a declared surface at D0 when
  *
- *   - its maker owns the surface: declared it as a face and still has a whole
- *     facet on it (Provenance::owns - identity plus presence);
- *   - every corner is on the surface at machine precision (recognition::Exact);
- *   - it does not lie wholly on a declared plane - a cap has every corner on
- *     the rim, and it is a facet of its plane, not of the curved surface.
+ *   - its maker named it for the surface (Provenance::madeOn) - its heritage,
+ *     carried unbroken from where it was made (checklist E8). Nothing unnamed
+ *     stands in: until 2026-09-29 this was *the maker owns the surface and
+ *     every corner is on it*, which gave an inscribed cap - every corner on
+ *     its cylinder - to the cylinder at D0;
+ *   - every corner is on the surface at machine precision (recognition::Exact):
+ *     a generator's points are on its own declaration (E3), and a corner a
+ *     boolean cut is not, which is where a region stops (below).
  *
  * Nothing here is measured against the tessellation and nothing reads a claim,
  * so the regions are the same whatever order anything runs in. A region is one

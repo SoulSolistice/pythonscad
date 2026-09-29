@@ -93,10 +93,41 @@ bool declaredVector(const Parameters& parameters, const char *name,
  * the same body with faceted walls rather than failing. The warning above says
  * what was ignored. */
 std::shared_ptr<AbstractNode> withSurface(const std::shared_ptr<const ModuleInstantiation>& inst,
-                                          const Children& children, std::shared_ptr<Surface> surface)
+                                          const Parameters& parameters, const Children& children,
+                                          std::shared_ptr<Surface> surface)
 {
   auto node = std::make_shared<DeclareSurfaceNode>(inst);
   if (surface) node->surfaces.push_back(std::move(surface));
+  // `faces`: the labels of the faces below here that are on the record - one,
+  // or a list; a number is read as its label. What it cannot read names
+  // nothing - never a guess at which faces were meant.
+  const Value& faces = parameters["faces"];
+  auto label_of = [](const Value& v) -> std::string {
+    if (v.type() == Value::Type::STRING) return v.toString();
+    if (v.type() == Value::Type::NUMBER) return v.toEchoStringNoThrow();
+    return {};
+  };
+  if (faces.type() != Value::Type::UNDEFINED && node->surfaces.empty() == false) {
+    std::vector<std::string> labels;
+    bool readable = true;
+    if (faces.type() == Value::Type::VECTOR) {
+      for (const Value& v : faces.toVector()) {
+        labels.push_back(label_of(v));
+        readable = readable && !labels.back().empty();
+      }
+    } else {
+      labels.push_back(label_of(faces));
+      readable = !labels.back().empty();
+    }
+    if (readable && !labels.empty()) {
+      node->scoped = true;
+      node->labels = std::move(labels);
+    } else {
+      LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
+          "%1$s: faces must be a label or a list of labels, got %2$s - it names no face", inst->name(),
+          faces.toEchoStringNoThrow());
+    }
+  }
   return children.instantiate(node);
 }
 
@@ -104,7 +135,7 @@ std::shared_ptr<AbstractNode> builtin_declare_cylinder(
   const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
 {
   Parameters parameters =
-    Parameters::parse(std::move(arguments), inst->location(), {"r", "d", "center", "axis"});
+    Parameters::parse(std::move(arguments), inst->location(), {"r", "d", "center", "axis", "faces"});
   Vector3d centre(0, 0, 0), axis(0, 0, 1);
   double r = 0;
   std::shared_ptr<Surface> surface;
@@ -113,14 +144,14 @@ std::shared_ptr<AbstractNode> builtin_declare_cylinder(
       declaredVector(parameters, "axis", inst, true, axis)) {
     surface = std::make_shared<CylinderSurface>(centre, axis, r);
   }
-  return withSurface(inst, children, std::move(surface));
+  return withSurface(inst, parameters, children, std::move(surface));
 }
 
 std::shared_ptr<AbstractNode> builtin_declare_sphere(
   const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
 {
   Parameters parameters =
-    Parameters::parse(std::move(arguments), inst->location(), {"r", "d", "center", "axis"});
+    Parameters::parse(std::move(arguments), inst->location(), {"r", "d", "center", "axis", "faces"});
   Vector3d centre(0, 0, 0), axis(0, 0, 1);
   double r = 0;
   std::shared_ptr<Surface> surface;
@@ -129,7 +160,7 @@ std::shared_ptr<AbstractNode> builtin_declare_sphere(
       declaredVector(parameters, "axis", inst, true, axis)) {
     surface = std::make_shared<SphereSurface>(centre, axis, r);
   }
-  return withSurface(inst, children, std::move(surface));
+  return withSurface(inst, parameters, children, std::move(surface));
 }
 
 /*! `declare_cone(r1, r2, h)`, named the way `cylinder()` names the same shape.
@@ -142,7 +173,7 @@ std::shared_ptr<AbstractNode> builtin_declare_cone(
   const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
 {
   Parameters parameters = Parameters::parse(std::move(arguments), inst->location(),
-                                            {"r1", "r2", "h", "d1", "d2", "center", "axis"});
+                                            {"r1", "r2", "h", "d1", "d2", "center", "axis", "faces"});
   Vector3d centre(0, 0, 0), axis(0, 0, 1);
   double r1 = 0, r2 = 0;
   std::shared_ptr<Surface> surface;
@@ -163,14 +194,14 @@ std::shared_ptr<AbstractNode> builtin_declare_cone(
       surface = std::make_shared<ConeSurface>(centre, axis, r1, (r2 - r1) / h);
     }
   }
-  return withSurface(inst, children, std::move(surface));
+  return withSurface(inst, parameters, children, std::move(surface));
 }
 
 std::shared_ptr<AbstractNode> builtin_declare_torus(
   const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
 {
-  Parameters parameters =
-    Parameters::parse(std::move(arguments), inst->location(), {"r_major", "r_minor", "center", "axis"});
+  Parameters parameters = Parameters::parse(std::move(arguments), inst->location(),
+                                            {"r_major", "r_minor", "center", "axis", "faces"});
   Vector3d centre(0, 0, 0), axis(0, 0, 1);
   double r_major = 0, r_minor = 0;
   std::shared_ptr<Surface> surface;
@@ -180,14 +211,14 @@ std::shared_ptr<AbstractNode> builtin_declare_torus(
       declaredVector(parameters, "axis", inst, true, axis)) {
     surface = std::make_shared<TorusSurface>(centre, axis, r_major, r_minor);
   }
-  return withSurface(inst, children, std::move(surface));
+  return withSurface(inst, parameters, children, std::move(surface));
 }
 
 std::shared_ptr<AbstractNode> builtin_declare_grid(
   const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
 {
   Parameters parameters =
-    Parameters::parse(std::move(arguments), inst->location(), {"points", "closed"});
+    Parameters::parse(std::move(arguments), inst->location(), {"points", "closed", "faces"});
   std::shared_ptr<Surface> surface;
 
   // Only the extraction is OpenSCAD's business; what makes a grid a grid is
@@ -236,7 +267,7 @@ std::shared_ptr<AbstractNode> builtin_declare_grid(
       }
     }
   }
-  return withSurface(inst, children, std::move(surface));
+  return withSurface(inst, parameters, children, std::move(surface));
 }
 
 /*! A closed profile, as a vector of [dr, dz] pairs. */
@@ -311,9 +342,9 @@ bool sweepLaws(const Value& radius, const Value& profile, SweepLaws& laws, std::
 std::shared_ptr<AbstractNode> builtin_declare_sweep(
   const std::shared_ptr<const ModuleInstantiation>& inst, Arguments arguments, const Children& children)
 {
-  Parameters parameters =
-    Parameters::parse(std::move(arguments), inst->location(),
-                      {"profile", "radius", "pitch", "turns", "origin", "axis", "ref", "stations"});
+  Parameters parameters = Parameters::parse(
+    std::move(arguments), inst->location(),
+    {"profile", "radius", "pitch", "turns", "origin", "axis", "ref", "stations", "faces"});
   Vector3d origin(0, 0, 0), axis(0, 0, 1), ref(1, 0, 0);
   std::shared_ptr<Surface> surface;
   SweepLaws laws;
@@ -335,7 +366,7 @@ std::shared_ptr<AbstractNode> builtin_declare_sweep(
       LOG(message_group::Warning, inst->location(), parameters.documentRoot(), "%1$s", why);
     }
   }
-  return withSurface(inst, children, std::move(surface));
+  return withSurface(inst, parameters, children, std::move(surface));
 }
 
 }  // namespace

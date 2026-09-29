@@ -1,6 +1,7 @@
 /*! The surfaces a hull of coaxial solids of revolution makes - see
  * HullOfRevolution.h. */
 #include "geometry/HullOfRevolution.h"
+#include "geometry/EdgeIdentity.h"
 
 #include <algorithm>
 #include <cmath>
@@ -151,24 +152,27 @@ bool hullProfile(const std::vector<std::vector<std::shared_ptr<Surface>>>& opera
 
 /*! The hull profile turned: the sweep table says what each edge makes - the
  * cone of a sloped edge, and the planes and cylinders the operands declared. */
-std::vector<std::shared_ptr<Surface>> turned(const Axis& axis, const std::vector<Vector2d>& hull)
+std::vector<std::shared_ptr<Surface>> turned(const Axis& axis, const std::vector<Vector2d>& hull,
+                                             SweptFaces *faces = nullptr)
 {
   Profile2d profile;
   profile.loops.emplace_back();
   for (std::size_t i = 0; i < hull.size(); i++) {
     // Straight by construction: an edge of the convex hull of the rims, which
-    // the hull states as the maker of this profile (E7).
+    // the hull states as the maker of this profile (E7). Named i + 1, so
+    // `faces` says which record each edge turns into.
     ProfileEdge edge;
     edge.a = hull[i];
     edge.b = hull[(i + 1) % hull.size()];
     edge.kind = EdgeKind::Line;
     edge.declared = true;
+    edge.id = EdgeId(i + 1);
     profile.loops.back().push_back(edge);
   }
   Revolution sweep;
   sweep.origin = axis.origin;
   sweep.axis = axis.dir;
-  return revolve(profile, sweep);
+  return revolve(profile, sweep, nullptr, faces);
 }
 
 /*! A unit vector across `dir`. */
@@ -187,6 +191,81 @@ std::vector<std::shared_ptr<Surface>> declareHullOfRevolution(
   std::vector<Vector2d> hull;
   if (!hullProfile(operands, axis, hull)) return {};
   return turned(axis, hull);
+}
+
+std::vector<int> hullFacetRecords(const std::vector<std::vector<std::shared_ptr<Surface>>>& operands,
+                                  const std::vector<Vector3d>& vertices,
+                                  const std::vector<std::array<std::size_t, 3>>& triangles,
+                                  std::vector<std::shared_ptr<Surface>>& records)
+{
+  Axis axis;
+  std::vector<Vector2d> hull;
+  records.clear();
+  if (!hullProfile(operands, axis, hull)) return {};
+  SweptFaces faces;
+  records = turned(axis, hull, &faces);
+  const Vector3d dir = axis.dir.normalized();
+
+  // Each vertex's radius and level about the axis. A few roundings from the
+  // point the operand's generator emitted - the forward error of this.
+  auto rt = [&](const Vector3d& p) {
+    const Vector3d rel = p - axis.origin;
+    const double t = rel.dot(dir);
+    return Vector2d((rel - dir * t).norm(), t);
+  };
+  auto same = [](double u, double v, double scale) {
+    return std::fabs(u - v) <= recognition::forwardError(24, scale);
+  };
+  const auto n = hull.size();
+  // Whether q lies on edge k of the profile, from hull[k] to hull[k + 1]:
+  // on its line and between its ends, each at machine precision.
+  auto onEdge = [&](const Vector2d& q, std::size_t k) {
+    const Vector2d a = hull[k], b = hull[(k + 1) % n];
+    const Vector2d d = b - a, w = q - a;
+    const double scale = (std::fabs(q[0]) + std::fabs(q[1]) + a.norm() + b.norm());
+    if (!same(d[0] * w[1] - d[1] * w[0], 0., scale * d.norm())) return false;
+    const double along = w.dot(d);
+    return along >= -recognition::forwardError(24, scale * d.norm()) &&
+           along <= d.squaredNorm() + recognition::forwardError(24, scale * d.norm());
+  };
+  auto recordOf = [&](std::size_t k) {
+    const auto it = faces.walls.find(EdgeId(k + 1));
+    return it == faces.walls.end() ? -1 : it->second;
+  };
+
+  std::vector<int> out(triangles.size(), -1);
+  for (std::size_t t = 0; t < triangles.size(); t++) {
+    std::vector<Vector2d> rings;
+    for (const std::size_t v : triangles[t]) {
+      if (v >= vertices.size()) {
+        rings.clear();
+        break;
+      }
+      const Vector2d q = rt(vertices[v]);
+      bool known = false;
+      for (const Vector2d& r : rings) {
+        const double scale = std::fabs(q[0]) + std::fabs(q[1]) + std::fabs(r[0]) + std::fabs(r[1]);
+        known = known || (same(q[0], r[0], scale) && same(q[1], r[1], scale));
+      }
+      if (!known) rings.push_back(q);
+    }
+    if (rings.empty()) continue;
+    int found = -1, count = 0;
+    for (std::size_t k = 0; k < n; k++) {
+      const Vector2d a = hull[k], b = hull[(k + 1) % n];
+      bool all = true;
+      for (const Vector2d& q : rings) all = all && onEdge(q, k);
+      if (!all) continue;
+      // One ring: the triangle is in that ring's plane, so only a cap - an edge
+      // at one level - holds it; a ring at a corner of a sloped edge does not.
+      const double scale = std::fabs(a[1]) + std::fabs(b[1]);
+      if (rings.size() == 1 && !same(a[1], b[1], scale)) continue;
+      found = recordOf(k);
+      count++;
+    }
+    if (count == 1) out[t] = found;
+  }
+  return out;
 }
 
 std::shared_ptr<const DeclaredSolid> solidOfHullOfRevolution(

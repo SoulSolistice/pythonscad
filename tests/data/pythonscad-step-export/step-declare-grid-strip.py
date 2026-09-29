@@ -129,7 +129,7 @@ import math
 
 rows, cols = 60, 4
 R, pitch, turns = 20.0, 6.0, 1.5
-pts, faces = [], []
+pts, faces, labels = [], [], []
 for i in range(rows):
     t = i / (rows - 1)
     a = 2 * math.pi * turns * t
@@ -143,9 +143,14 @@ for i in range(rows - 1):
         c0 = (i + 1) * cols + (j + 1) % cols
         d0 = (i + 1) * cols + j
         faces += [[a0, c0, b0], [a0, d0, c0]]
+        # an open profile: the closing edge, from the last point back to the
+        # first, is not on the sweep
+        labels += ["sweep", "sweep"] if j < cols - 1 else [None, None]
 faces += [[0, 1, 2, 3],
           [(rows - 1) * cols + 3, (rows - 1) * cols + 2, (rows - 1) * cols + 1, (rows - 1) * cols]]
 
+labels += [None, None]  # the end caps
 grid = [[pts[i * cols + j] for j in range(cols)] for i in range(rows)]
-ridge = polyhedron(points=pts, faces=faces).declare_grid(points=grid, closed=False)
+ridge = polyhedron(points=pts, faces=faces, labels=labels).declare_grid(
+    points=grid, closed=False, faces="sweep")
 (ridge | cylinder(r=19.2, h=14, fn=96)).show()

@@ -80,6 +80,11 @@ difference() {
     translate([0, 0, z0]) cylinder(r = R, h = H);
     linear_extrude(H + 5) polygon([[0, 0], [2*R, 0], [2*R*cos(20), 2*R*sin(20)]]);
   }
-  declare_cylinder(r = R) declare_cylinder(r = Ri)
-  polyhedron(points = points, faces = faces, convexity = 8);
+  // Profile edge 1 is the inner wall, on r = Ri at every station, and edge 3
+  // the outer wall, on r = R; the floor and the ramped roof are neither. Said
+  // per face, since corners alone would give a cylinder any face inscribed in it.
+  declare_cylinder(r = R, faces = "outer") declare_cylinder(r = Ri, faces = "inner")
+  polyhedron(points = points, faces = faces, convexity = 8,
+             labels = concat([ for (i = [0 : steps - 1]) for (j = [0 : 3]) for (k = [0, 1])
+                               j == 1 ? "inner" : j == 3 ? "outer" : "" ], ["", ""]));
 }

@@ -33,7 +33,8 @@ struct StepKernel::BodyBuild {
             const std::vector<IndexedFace>& faces, const std::vector<std::shared_ptr<Curve>>& curves,
             const std::vector<std::shared_ptr<Surface>>& surfaces,
             const std::vector<int32_t>& faceOrigin, const std::vector<int32_t>& faceSurface,
-            const std::map<int, Vector3d>& cornerMoves, const std::map<int, std::size_t>& singleOwner,
+            const std::vector<char>& faceDerived, const std::map<int, Vector3d>& cornerMoves,
+            const std::map<int, std::size_t>& singleOwner,
             const std::map<int, std::pair<std::size_t, std::size_t>>& ownerSplit,
             const std::map<int32_t, std::vector<std::size_t>>& owned,
             const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals, double tol,
@@ -48,6 +49,7 @@ struct StepKernel::BodyBuild {
       surfaces(surfaces),
       faceOrigin(faceOrigin),
       faceSurface(faceSurface),
+      faceDerived(faceDerived),
       cornerMoves(cornerMoves),
       singleOwner(singleOwner),
       ownerSplit(ownerSplit),
@@ -80,6 +82,8 @@ struct StepKernel::BodyBuild {
    * `surfaces` - identity carried through the booleans (PolySet::surface_tags)
    * - or -1 where that is not known. */
   const std::vector<int32_t>& faceSurface;
+  /*! Per face, whether its name is a derivation (mintDerivedTag): D1, not D0. */
+  const std::vector<char>& faceDerived;
   const std::map<int, Vector3d>& cornerMoves;
   const std::map<int, std::size_t>& singleOwner;
   const std::map<int, std::pair<std::size_t, std::size_t>>& ownerSplit;

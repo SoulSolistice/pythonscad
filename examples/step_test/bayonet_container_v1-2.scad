@@ -810,8 +810,12 @@ module hoseRidge(radius0, slope, taperLength, socketDepth, pitch, ridgeDepth,
 	// with and without this wrapper. It only gives the exporter something to
 	// recognise the swept facets as when the analytic and approximation flags
 	// are both on, where it takes the part from 1137 faces to 652.
-	declare_grid(points = rows, closed = true) {
-		polyhedron(points = points, faces = faces, convexity = 8);
+	//
+	// Every side face is on the sweep and neither end cap is: said per face.
+	declare_grid(points = rows, closed = true, faces = "sweep") {
+		polyhedron(points = points, faces = faces, convexity = 8,
+		           labels = concat([ for (i = [0 : steps - 1]) for (j = [0 : np - 1]) for (k = [0, 1])
+		                             "sweep" ], ["", ""]));
 	}
 }
 
@@ -900,12 +904,19 @@ module bayonetChannel(rInner, rOuter, lugAngle, zBottom, height, entryRotation,
 	// cylinders, a closed form where the grid is an interpolant. Declared as
 	// such, so the walls can be written exactly and the grid keeps the ramped
 	// roof and floor it alone describes.
+	//
+	// Which faces are which is said per face: profile edge 1 is the inner wall,
+	// edge 3 the outer, and the floor and roof between them are the grid's. A
+	// wall face is on the grid too; it is named for its cylinder, the closed
+	// form, which is what "the grid keeps the ramped roof and floor" means.
+	labels = concat([ for (i = [0 : steps - 1]) for (j = [0 : np - 1]) for (k = [0, 1])
+	                  j == 1 ? "inner" : j == 3 ? "outer" : "sweep" ], ["", ""]);
 	for (i = [0 : starts - 1])
 	rotate([0, 0, i*360/starts])
-	declare_cylinder(r = rOuter)
-	declare_cylinder(r = rInner)
-	declare_grid(points = rows, closed = true) {
-		polyhedron(points = points, faces = faces, convexity = 8);
+	declare_cylinder(r = rOuter, faces = "outer")
+	declare_cylinder(r = rInner, faces = "inner")
+	declare_grid(points = rows, closed = true, faces = "sweep") {
+		polyhedron(points = points, faces = faces, labels = labels, convexity = 8);
 	}
 }
 

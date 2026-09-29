@@ -4756,6 +4756,49 @@ not state, now checklist E7, E8 and C9 made universal:
   `polyhedron()` - lid10's and the bayonet's threads - gives no D0 ground until a
   declaration can say which faces it covers (a scoped `declare_*`, open).
   Their surfaces are then recognised at D3, and measured as such.
+- **Landed with it, so that nothing regressed - 2026-09-29.** Measured, the
+  removal alone cost the specimens every D0 facet a silent generator held under
+  a declaration, and a hull's: lid10's threads went to the tessellation in the
+  approximation tier (188 facets), the sweeps lost their two-owner corners
+  (520 on step-declare-grid-two-bands), and hull faces fell to D3. Each got a
+  route with heritage instead of a return to position:
+  - **Labels.** `polyhedron(labels = [...])` names each face's group, the
+    model's word; `declare_*(faces = "label")` binds the label to its record
+    anywhere below it - the label's tag rides the triangles through every
+    boolean, transform and copy, so it generalises beyond one polyhedron under
+    one declaration. An unbound label names nothing (LabelSurface, never a
+    face, stripped at export). The specimens and the fixtures state theirs;
+    a face on a cylinder and on the grid that sweeps it is named for the
+    cylinder, the closed form.
+  - **Derivation, D1.** The hull of coaxial solids of revolution names each
+    face by derivation (hullFacetRecords): a vertex is identified with the
+    declared ring it is on - a point has no interior - and a face on one ring
+    is its cap, on two of one profile edge that edge's conic. Such names are
+    derived tags (mintDerivedTag): D1 in the ledger, never in a D0 region.
+  - **Envelopes.** A declared grid now states its envelope in closed form (its
+    net's box grown by tessellationBound), without which a face named for it
+    made its leaf opaque; and a faceted leaf with a curved record none of its
+    faces is named for states nothing, rather than taking its corners as exact.
+
+  Open, found on the way:
+  - **Ownership includes a derived name.** Presence counts any heritage - a
+    stated name or a derived one - because ownership asserts no evidence
+    class: the corner placement labels none, and D0 is decided by stated
+    names alone. A hull's junction corners are two-owner placed as before, now
+    on records its faces are derived onto. Measured: excluding derived names
+    left 120 more of lid10's corners where the mesh put them, 36 more faces.
+  - **A grid states no closest point** without projecting, so existence leaves
+    a face named for one undecided (772 on the bayonet) - honest, and a gap.
+  - **A wrong label is the model's word.** Labelling a cap as a wall passes
+    every identity check; only geometry (validation, a derived VOLUME) catches
+    it, and the position-against-name error only where the face lies wholly on
+    one other record.
+  - **Not yet named:** hulls that are not of revolution (the lugs' - a hull of
+    ring segments, D3 on the bayonet; on lid10 the lug hull owned cylinder 15
+    by 4 whole and 60 cut facets that position named, and without them 12 more
+    of lid10's faces are written in the approximation tier, its junction
+    corners left where the mesh put them), sweeps' own generators, fillets,
+    text(), roof(), imports.
 - **Identity is minted by the maker (E8) - the original entry.** Where a facet's
   surface is minted (`ManifoldUtils::TriangleTagger`, and `facetedEnvelope`'s
   `record_of`), it is measured: the one face-declaring record a triangle's

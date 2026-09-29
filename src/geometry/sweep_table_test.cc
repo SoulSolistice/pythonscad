@@ -15,6 +15,7 @@
 #include "geometry/HullOfRevolution.h"
 #include "geometry/Surface.h"
 #include "geometry/SweptSurfaces.h"
+#include "geometry/linear_extrude_internals.h"
 #include "geometry/recognition/Exact.h"
 
 namespace {
@@ -582,6 +583,116 @@ TEST_CASE("splitting an outline keeps its edges' names", "[sweep-table][e6]")
   Outline2d unnamed;
   unnamed.vertices = square.vertices;
   CHECK_FALSE(CurveDiscretizer(12.0).splitOutline(unnamed, 0.0, 1.0, 1.0, 1, 12).hasEdgeIds());
+}
+
+namespace {
+
+/*! A square with a circular hole about the origin, every edge named by its
+ * maker: the square's lines, the hole's chords of its arc. */
+Polygon2d squareWithHole()
+{
+  Polygon2d poly;
+  poly.arcs = {Arc2d{Vector2d(0., 0.), 2.}};
+  Outline2d square;
+  square.vertices = {{-5., -5.}, {5., -5.}, {5., 5.}, {-5., 5.}};
+  const EdgeId lines = reserveEdgeIds(4);
+  for (EdgeId i = 0; i < 4; i++) {
+    square.edge_ids.push_back(lines + i);
+    poly.edge_decls[lines + i] = EdgeDecl{EdgeKind::Line, -1};
+  }
+  Outline2d hole;
+  hole.positive = false;
+  VectorOfVector2d ring = sampled(Vector2d(0., 0.), 2., 16);
+  std::reverse(ring.begin(), ring.end());
+  hole.vertices = ring;
+  const EdgeId chords = reserveEdgeIds(16);
+  for (EdgeId i = 0; i < 16; i++) {
+    hole.edge_ids.push_back(chords + i);
+    poly.edge_decls[chords + i] = EdgeDecl{EdgeKind::Arc, 0};
+  }
+  poly.addOutline(square);
+  poly.addOutline(hole);
+  poly.setSanitized(true);
+  return poly;
+}
+
+/*! linear_extrude's own steps over `polyref` - its vertices, its triangles and
+ * the names it gives them - with the records extrude() declares from `poly`. */
+std::unique_ptr<PolySet> extrudedAndNamed(const Polygon2d& poly, const Polygon2d& polyref, int slices,
+                                          double scale)
+{
+  const Vector3d h1(0., 0., 0.), h2(0., 0., 5.);
+  std::vector<Vector3d> vertices;
+  PolygonIndices indices;
+  int stride = 0;
+  LinearExtrudeInternals::prepareVerticesAndIndices(polyref, h1, h2, slices, scale, scale, 0., vertices,
+                                                    indices, stride);
+  std::vector<Color4f> colors{Color4f()};
+  std::vector<int> color_indices(indices.size(), 0);
+  auto ps = LinearExtrudeInternals::assemblePolySetForManifold(
+    polyref, vertices, indices, colors, color_indices, 1, boost::tribool(boost::indeterminate),
+    stride * slices);
+  Extrusion sweep;
+  sweep.base = h1;
+  sweep.height = h2 - h1;
+  sweep.scale_x = sweep.scale_y = scale;
+  SweptFaces faces;
+  ps->surfaces = extrude(classifyProfile(poly), sweep, nullptr, &faces);
+  LinearExtrudeInternals::nameExtrudedFacets(polyref, std::size_t(slices), faces, 0, *ps);
+  return ps;
+}
+
+/*! Every triangle named by the record it is made on, derived here from where
+ * its corners are and not from how it was laid out: the one face record all
+ * three are on exactly - the plane, where they are on a plane and a curved
+ * record both, which only a cap's rim triangle is - and none where they are on
+ * none. Returns how many triangles carry a name. */
+std::size_t checkNames(const PolySet& ps)
+{
+  REQUIRE(ps.surface_tags.size() == ps.indices.size());
+  std::size_t named = 0;
+  for (std::size_t f = 0; f < ps.indices.size(); f++) {
+    std::vector<const Surface *> on, planes;
+    for (const auto& record : ps.surfaces) {
+      if (!record->declaresFace()) continue;
+      bool all = true;
+      for (const int v : ps.indices[f])
+        all = all && recognition::onExactly(record.get(), ps.vertices[std::size_t(v)]);
+      if (!all) continue;
+      on.push_back(record.get());
+      if (dynamic_cast<const PlaneSurface *>(record.get()) != nullptr) planes.push_back(record.get());
+    }
+    uint32_t expected = 0;
+    if (planes.size() == 1) expected = planes[0]->tags.back();
+    else if (on.size() == 1) expected = on[0]->tags.back();
+    else REQUIRE(on.empty());
+    CHECK(ps.surface_tags[f] == expected);
+    if (ps.surface_tags[f] != 0) named++;
+  }
+  return named;
+}
+
+}  // namespace
+
+TEST_CASE("linear_extrude names each triangle by the record it is made on", "[sweep-table][e8]")
+{
+  // Open item 40: a wall by the record its edge sweeps, a cap by its plane. The
+  // cap's triangles along the hole have every corner on the cylinder as well,
+  // which is what position alone could not tell apart.
+  const Polygon2d poly = squareWithHole();
+  const auto straight = extrudedAndNamed(poly, poly, 1, 1.0);
+  CHECK(checkNames(*straight) == straight->indices.size());  // every triangle is made on a record
+
+  // Tapered in three slices, the square's edges split into three pieces each:
+  // the pieces keep their edges' names, and the hole's chords sweep the cone.
+  Polygon2d split;
+  split.addOutline(
+    CurveDiscretizer(12.0).splitOutline(poly.untransformedOutlines()[0], 0.0, 0.5, 0.5, 3, 12));
+  split.addOutline(poly.untransformedOutlines()[1]);
+  split.setSanitized(true);
+  REQUIRE(split.untransformedOutlines()[0].vertices.size() == 12);
+  const auto tapered = extrudedAndNamed(poly, split, 3, 0.5);
+  CHECK(checkNames(*tapered) == tapered->indices.size());
 }
 
 TEST_CASE("an edge name on two records names neither", "[sweep-table][e8]")

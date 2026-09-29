@@ -317,8 +317,42 @@ PyObject *python_oo_color(PyObject *obj, PyObject *args, PyObject *kwargs)
  *
  * Same shape as python_color_core: wrap the child in a node and carry the
  * object's dictionary across. */
-static PyObject *python_declare_core(PyObject *obj, const std::shared_ptr<Surface>& surface)
+/*! `faces`: the labels of the faces below that are on the record - one, or a
+ * sequence; see DeclareSurfaceNode::labels. False with an exception set where
+ * it cannot be read: never a guess at which faces were meant. */
+static bool python_declare_labels(PyObject *faces, std::vector<std::string>& out)
 {
+  if (faces == nullptr || faces == Py_None) return true;
+  auto one = [&out](PyObject *item) {
+    PyObject *text = PyObject_Str(item);
+    if (text == nullptr) return false;
+    const char *utf8 = PyUnicode_AsUTF8(text);
+    const bool ok = utf8 != nullptr && utf8[0] != 0;
+    if (ok) out.emplace_back(utf8);
+    Py_DECREF(text);
+    return ok;
+  };
+  if (PyUnicode_Check(faces) || !python_is_sequence(faces)) {
+    if (one(faces)) return true;
+  } else {
+    PyObject *seq = PySequence_Fast(faces, "expected a list of labels");
+    if (seq == nullptr) return false;
+    bool ok = PySequence_Fast_GET_SIZE(seq) > 0;
+    for (Py_ssize_t i = 0; ok && i < PySequence_Fast_GET_SIZE(seq); i++)
+      ok = one(PySequence_Fast_GET_ITEM(seq, i));
+    Py_DECREF(seq);
+    if (ok) return true;
+  }
+  if (!PyErr_Occurred())
+    PyErr_SetString(PyExc_TypeError, "declare: faces must be a label or a list of labels");
+  return false;
+}
+
+static PyObject *python_declare_core(PyObject *obj, const std::shared_ptr<Surface>& surface,
+                                     PyObject *faces)
+{
+  std::vector<std::string> labels;
+  if (!python_declare_labels(faces, labels)) return nullptr;
   PyObject *child_dict_raw = nullptr;
   PyTypeObject *type = PyOpenSCADObjectType(obj);
   auto child = PyOpenSCADObjectToNodeMulti(obj, &child_dict_raw);
@@ -327,6 +361,8 @@ static PyObject *python_declare_core(PyObject *obj, const std::shared_ptr<Surfac
   DECLARE_INSTANCE();
   auto node = std::make_shared<DeclareSurfaceNode>(instance);
   node->surfaces.push_back(surface);
+  node->scoped = !labels.empty();
+  node->labels = std::move(labels);
   node->children.push_back(child);
 
   PyObject *pyresult = PyOpenSCADObjectFromNode(type, node);
@@ -384,7 +420,7 @@ static bool python_declare_axis(Vector3d& axis, const char *what)
 }
 
 static PyObject *python_declare_cylinder_core(PyObject *obj, double r, double d, PyObject *center,
-                                              PyObject *axis)
+                                              PyObject *axis, PyObject *faces)
 {
   Vector3d c(0, 0, 0), a(0, 0, 1);
   double radius = 0;
@@ -392,11 +428,11 @@ static PyObject *python_declare_cylinder_core(PyObject *obj, double r, double d,
   if (!python_declare_vec3(center, "declare_cylinder center", c)) return nullptr;
   if (!python_declare_vec3(axis, "declare_cylinder axis", a)) return nullptr;
   if (!python_declare_axis(a, "declare_cylinder")) return nullptr;
-  return python_declare_core(obj, std::make_shared<CylinderSurface>(c, a, radius));
+  return python_declare_core(obj, std::make_shared<CylinderSurface>(c, a, radius), faces);
 }
 
 static PyObject *python_declare_sphere_core(PyObject *obj, double r, double d, PyObject *center,
-                                            PyObject *axis)
+                                            PyObject *axis, PyObject *faces)
 {
   Vector3d c(0, 0, 0), a(0, 0, 1);
   double radius = 0;
@@ -404,11 +440,11 @@ static PyObject *python_declare_sphere_core(PyObject *obj, double r, double d, P
   if (!python_declare_vec3(center, "declare_sphere center", c)) return nullptr;
   if (!python_declare_vec3(axis, "declare_sphere axis", a)) return nullptr;
   if (!python_declare_axis(a, "declare_sphere")) return nullptr;
-  return python_declare_core(obj, std::make_shared<SphereSurface>(c, a, radius));
+  return python_declare_core(obj, std::make_shared<SphereSurface>(c, a, radius), faces);
 }
 
 static PyObject *python_declare_torus_core(PyObject *obj, double r_major, double r_minor,
-                                           PyObject *center, PyObject *axis)
+                                           PyObject *center, PyObject *axis, PyObject *faces)
 {
   Vector3d c(0, 0, 0), a(0, 0, 1);
   const double nan = std::numeric_limits<double>::quiet_NaN();
@@ -418,7 +454,7 @@ static PyObject *python_declare_torus_core(PyObject *obj, double r_major, double
   if (!python_declare_vec3(center, "declare_torus center", c)) return nullptr;
   if (!python_declare_vec3(axis, "declare_torus axis", a)) return nullptr;
   if (!python_declare_axis(a, "declare_torus")) return nullptr;
-  return python_declare_core(obj, std::make_shared<TorusSurface>(c, a, major, minor));
+  return python_declare_core(obj, std::make_shared<TorusSurface>(c, a, major, minor), faces);
 }
 
 /*! `declare_cone(r1, r2, h)`, named the way `cylinder()` names the same shape.
@@ -427,7 +463,7 @@ static PyObject *python_declare_torus_core(PyObject *obj, double r_major, double
  * this one and its two wrappers are written out. See the OpenSCAD builtin in
  * DeclareSurfaceNode.cc for why a cone needs a channel of its own at all. */
 static PyObject *python_declare_cone_core(PyObject *obj, double r1, double r2, double h, double d1,
-                                          double d2, PyObject *center, PyObject *axis)
+                                          double d2, PyObject *center, PyObject *axis, PyObject *faces)
 {
   Vector3d c(0, 0, 0), a(0, 0, 1);
   double bottom = 0, top = 0;
@@ -445,31 +481,32 @@ static PyObject *python_declare_cone_core(PyObject *obj, double r1, double r2, d
   if (!python_declare_vec3(center, "declare_cone center", c)) return nullptr;
   if (!python_declare_vec3(axis, "declare_cone axis", a)) return nullptr;
   if (!python_declare_axis(a, "declare_cone")) return nullptr;
-  return python_declare_core(obj, std::make_shared<ConeSurface>(c, a, bottom, (top - bottom) / h));
+  return python_declare_core(obj, std::make_shared<ConeSurface>(c, a, bottom, (top - bottom) / h),
+                             faces);
 }
 
 PyObject *python_declare_cone(PyObject *self, PyObject *args, PyObject *kwargs)
 {
-  char *kwlist[] = {"obj", "r1", "r2", "h", "d1", "d2", "center", "axis", nullptr};
-  PyObject *obj = nullptr, *center = nullptr, *axis = nullptr;
+  char *kwlist[] = {"obj", "r1", "r2", "h", "d1", "d2", "center", "axis", "faces", nullptr};
+  PyObject *obj = nullptr, *center = nullptr, *axis = nullptr, *faces = nullptr;
   const double nan = std::numeric_limits<double>::quiet_NaN();
   double r1 = nan, r2 = nan, h = nan, d1 = nan, d2 = nan;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|dddddOO", kwlist, &obj, &r1, &r2, &h, &d1, &d2,
-                                   &center, &axis))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|dddddOOO", kwlist, &obj, &r1, &r2, &h, &d1, &d2,
+                                   &center, &axis, &faces))
     return nullptr;
-  return python_declare_cone_core(obj, r1, r2, h, d1, d2, center, axis);
+  return python_declare_cone_core(obj, r1, r2, h, d1, d2, center, axis, faces);
 }
 
 PyObject *python_oo_declare_cone(PyObject *obj, PyObject *args, PyObject *kwargs)
 {
-  char *kwlist[] = {"r1", "r2", "h", "d1", "d2", "center", "axis", nullptr};
-  PyObject *center = nullptr, *axis = nullptr;
+  char *kwlist[] = {"r1", "r2", "h", "d1", "d2", "center", "axis", "faces", nullptr};
+  PyObject *center = nullptr, *axis = nullptr, *faces = nullptr;
   const double nan = std::numeric_limits<double>::quiet_NaN();
   double r1 = nan, r2 = nan, h = nan, d1 = nan, d2 = nan;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|dddddOO", kwlist, &r1, &r2, &h, &d1, &d2, &center,
-                                   &axis))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|dddddOOO", kwlist, &r1, &r2, &h, &d1, &d2, &center,
+                                   &axis, &faces))
     return nullptr;
-  return python_declare_cone_core(obj, r1, r2, h, d1, d2, center, axis);
+  return python_declare_cone_core(obj, r1, r2, h, d1, d2, center, axis, faces);
 }
 
 /*! Declare the ordered grid of points a generator swept.
@@ -488,7 +525,7 @@ PyObject *python_oo_declare_cone(PyObject *obj, PyObject *args, PyObject *kwargs
  * Membership is by position, so a facet belongs to the sweep exactly when every
  * corner is a point given here. Facets a boolean created are not, and stay
  * faceted - which is the correct answer, not a limitation. */
-static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int closed)
+static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int closed, PyObject *faces)
 {
   // Extract the shape Python happens to be holding; the rules about what makes
   // it a grid live in GridSurface::fromRows, which the OpenSCAD builtin uses
@@ -527,7 +564,7 @@ static PyObject *python_declare_grid_core(PyObject *obj, PyObject *points, int c
     PyErr_SetString(PyExc_TypeError, why.c_str());
     return nullptr;
   }
-  return python_declare_core(obj, std::move(surface));
+  return python_declare_core(obj, std::move(surface), faces);
 }
 
 /*! A closed profile, as a sequence of (dr, dz) pairs. */
@@ -625,7 +662,7 @@ static bool python_sweep_laws(PyObject *radius, PyObject *profile, SweepLaws& la
 
 static PyObject *python_declare_sweep_core(PyObject *obj, PyObject *profile, PyObject *radius,
                                            double pitch, double turns, PyObject *origin, PyObject *axis,
-                                           PyObject *ref, int stations)
+                                           PyObject *ref, int stations, PyObject *faces)
 {
   // As with declare_grid, only the extraction is language specific; what makes
   // the arguments a sweep is decided in SweepSurface::make, so both front ends
@@ -665,75 +702,82 @@ static PyObject *python_declare_sweep_core(PyObject *obj, PyObject *profile, PyO
     PyErr_SetString(PyExc_TypeError, why.c_str());
     return nullptr;
   }
-  return python_declare_core(obj, std::move(surface));
+  return python_declare_core(obj, std::move(surface), faces);
 }
 
 PyObject *python_declare_sweep(PyObject *self, PyObject *args, PyObject *kwargs)
 {
-  char *kwlist[] = {"obj",    "profile", "radius", "pitch",    "turns",
-                    "origin", "axis",    "ref",    "stations", nullptr};
+  char *kwlist[] = {"obj",  "profile", "radius",   "pitch", "turns", "origin",
+                    "axis", "ref",     "stations", "faces", nullptr};
   PyObject *obj = nullptr, *profile = nullptr, *radius = nullptr, *origin = nullptr, *axis = nullptr,
-           *ref = nullptr;
+           *ref = nullptr, *faces = nullptr;
   double pitch = 0, turns = 0;
   int stations = 0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOOdd|OOOi", kwlist, &obj, &profile, &radius, &pitch,
-                                   &turns, &origin, &axis, &ref, &stations)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOOdd|OOOiO", kwlist, &obj, &profile, &radius, &pitch,
+                                   &turns, &origin, &axis, &ref, &stations, &faces)) {
     return nullptr;
   }
-  return python_declare_sweep_core(obj, profile, radius, pitch, turns, origin, axis, ref, stations);
+  return python_declare_sweep_core(obj, profile, radius, pitch, turns, origin, axis, ref, stations,
+                                   faces);
 }
 
 PyObject *python_oo_declare_sweep(PyObject *obj, PyObject *args, PyObject *kwargs)
 {
-  char *kwlist[] = {"profile", "radius", "pitch", "turns", "origin", "axis", "ref", "stations", nullptr};
-  PyObject *profile = nullptr, *radius = nullptr, *origin = nullptr, *axis = nullptr, *ref = nullptr;
+  char *kwlist[] = {"profile", "radius", "pitch",    "turns", "origin",
+                    "axis",    "ref",    "stations", "faces", nullptr};
+  PyObject *profile = nullptr, *radius = nullptr, *origin = nullptr, *axis = nullptr, *ref = nullptr,
+           *faces = nullptr;
   double pitch = 0, turns = 0;
   int stations = 0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOdd|OOOi", kwlist, &profile, &radius, &pitch, &turns,
-                                   &origin, &axis, &ref, &stations)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOdd|OOOiO", kwlist, &profile, &radius, &pitch, &turns,
+                                   &origin, &axis, &ref, &stations, &faces)) {
     return nullptr;
   }
-  return python_declare_sweep_core(obj, profile, radius, pitch, turns, origin, axis, ref, stations);
+  return python_declare_sweep_core(obj, profile, radius, pitch, turns, origin, axis, ref, stations,
+                                   faces);
 }
 
 PyObject *python_declare_grid(PyObject *self, PyObject *args, PyObject *kwargs)
 {
-  char *kwlist[] = {"obj", "points", "closed", nullptr};
-  PyObject *obj = nullptr, *points = nullptr;
+  char *kwlist[] = {"obj", "points", "closed", "faces", nullptr};
+  PyObject *obj = nullptr, *points = nullptr, *faces = nullptr;
   int closed = 0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|p", kwlist, &obj, &points, &closed)) return nullptr;
-  return python_declare_grid_core(obj, points, closed);
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|pO", kwlist, &obj, &points, &closed, &faces))
+    return nullptr;
+  return python_declare_grid_core(obj, points, closed, faces);
 }
 
 PyObject *python_oo_declare_grid(PyObject *obj, PyObject *args, PyObject *kwargs)
 {
-  char *kwlist[] = {"points", "closed", nullptr};
-  PyObject *points = nullptr;
+  char *kwlist[] = {"points", "closed", "faces", nullptr};
+  PyObject *points = nullptr, *faces = nullptr;
   int closed = 0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|p", kwlist, &points, &closed)) return nullptr;
-  return python_declare_grid_core(obj, points, closed);
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|pO", kwlist, &points, &closed, &faces))
+    return nullptr;
+  return python_declare_grid_core(obj, points, closed, faces);
 }
 
-#define DECLARE_ENTRY(name, first, second)                                                          \
-  PyObject *python_declare_##name(PyObject *self, PyObject *args, PyObject *kwargs)                 \
-  {                                                                                                 \
-    char *kwlist[] = {"obj", first, second, "center", "axis", nullptr};                             \
-    PyObject *obj = nullptr, *center = nullptr, *axis = nullptr;                                    \
-    double a = std::numeric_limits<double>::quiet_NaN();                                            \
-    double b = std::numeric_limits<double>::quiet_NaN();                                            \
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|ddOO", kwlist, &obj, &a, &b, &center, &axis)) \
-      return nullptr;                                                                               \
-    return python_declare_##name##_core(obj, a, b, center, axis);                                   \
-  }                                                                                                 \
-  PyObject *python_oo_declare_##name(PyObject *obj, PyObject *args, PyObject *kwargs)               \
-  {                                                                                                 \
-    char *kwlist[] = {first, second, "center", "axis", nullptr};                                    \
-    PyObject *center = nullptr, *axis = nullptr;                                                    \
-    double a = std::numeric_limits<double>::quiet_NaN();                                            \
-    double b = std::numeric_limits<double>::quiet_NaN();                                            \
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ddOO", kwlist, &a, &b, &center, &axis))        \
-      return nullptr;                                                                               \
-    return python_declare_##name##_core(obj, a, b, center, axis);                                   \
+#define DECLARE_ENTRY(name, first, second)                                                            \
+  PyObject *python_declare_##name(PyObject *self, PyObject *args, PyObject *kwargs)                   \
+  {                                                                                                   \
+    char *kwlist[] = {"obj", first, second, "center", "axis", "faces", nullptr};                      \
+    PyObject *obj = nullptr, *center = nullptr, *axis = nullptr, *faces = nullptr;                    \
+    double a = std::numeric_limits<double>::quiet_NaN();                                              \
+    double b = std::numeric_limits<double>::quiet_NaN();                                              \
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|ddOOO", kwlist, &obj, &a, &b, &center, &axis,   \
+                                     &faces))                                                         \
+      return nullptr;                                                                                 \
+    return python_declare_##name##_core(obj, a, b, center, axis, faces);                              \
+  }                                                                                                   \
+  PyObject *python_oo_declare_##name(PyObject *obj, PyObject *args, PyObject *kwargs)                 \
+  {                                                                                                   \
+    char *kwlist[] = {first, second, "center", "axis", "faces", nullptr};                             \
+    PyObject *center = nullptr, *axis = nullptr, *faces = nullptr;                                    \
+    double a = std::numeric_limits<double>::quiet_NaN();                                              \
+    double b = std::numeric_limits<double>::quiet_NaN();                                              \
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ddOOO", kwlist, &a, &b, &center, &axis, &faces)) \
+      return nullptr;                                                                                 \
+    return python_declare_##name##_core(obj, a, b, center, axis, faces);                              \
   }
 
 DECLARE_ENTRY(cylinder, "r", "d")

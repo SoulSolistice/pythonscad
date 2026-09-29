@@ -1925,7 +1925,21 @@ Response GeometryEvaluator::visit(State& state, const DeclareSurfaceNode& node)
           // Clone: the node outlives this geometry and may be evaluated again,
           // and a record handed out twice would be moved twice by the first
           // transform to reach either copy.
-          for (const auto& surface : node.surfaces) mutableGeom->addSurface(surface->clone());
+          for (const auto& surface : node.surfaces) {
+            if (!node.scoped) {
+              mutableGeom->addSurface(surface->clone());
+              continue;
+            }
+            // Scoped: the faces the model labelled are named for the record.
+            // A label found nowhere below names nothing, and says so.
+            const auto bound = mutableGeom->bindLabels(node.labels, surface->clone());
+            for (const auto& label : node.labels) {
+              if (std::find(bound.begin(), bound.end(), label) != bound.end()) continue;
+              LOG(message_group::Warning, node.modinst->location(), "",
+                  "%1$s: no face below it is labelled \"%2$s\" - it names no face for it",
+                  node.modinst->name(), label);
+            }
+          }
         }
         geom = mutableGeom;
       }

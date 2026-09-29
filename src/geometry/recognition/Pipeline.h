@@ -26,6 +26,7 @@ struct Inputs {
   const std::vector<std::shared_ptr<Surface>> *surfaces = nullptr;  // the model's declarations
   const std::vector<int32_t> *face_origin = nullptr;                // provenance: facet -> original
   const std::vector<int32_t> *face_surface = nullptr;  // provenance: facet -> the surface it was made on
+  const std::vector<char> *face_derived = nullptr;     // whether that name is derived: D1, not D0
   const std::map<int32_t, std::vector<std::size_t>> *owned = nullptr;  // original -> surfaces
   const SolidTree *solid_tree = nullptr;  // the model's boolean over its declared solids, where carried
   double model_tol = 0;

@@ -55,6 +55,16 @@ public:
    * nowhere to put it. */
   virtual void addSurface(const std::shared_ptr<Surface>& /*surface*/) {}
 
+  /*! Attach `surface` and name for it every face labelled one of `labels`
+   * below here (bindLabels). Returns the labels bound; a representation that
+   * carries no labels binds none and attaches the record as addSurface does. */
+  virtual std::vector<std::string> bindLabels(const std::vector<std::string>& /*labels*/,
+                                              const std::shared_ptr<Surface>& surface)
+  {
+    addSurface(surface);
+    return {};
+  }
+
   /*! Move by `mat`, which its maker states `similarity` of (linalg.h): what
    * the declared records need to be moved with it. */
   virtual void transform(const Transform3d& /*mat*/, const Similarity& /*similarity*/)

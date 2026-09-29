@@ -34,6 +34,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -50,6 +51,7 @@
 #include "geometry/Geometry.h"
 #include "geometry/PolySet.h"
 #include "geometry/SolidTree.h"
+#include "geometry/Surface.h"
 #include "geometry/Polygon2d.h"
 #include "geometry/linalg.h"
 #include "utils/calc.h"
@@ -776,6 +778,25 @@ std::unique_ptr<const Geometry> PolyhedronNode::createGeometry() const
   p->setTriangular(is_triangular);
   p->colors = this->colors;
   p->color_indices = this->color_indices;
+  if (this->face_source.size() == this->faces.size()) p->face_source = this->face_source;
+  // Its labels: one tag per label, carried by each face so labelled - through
+  // every boolean, as any tag - and held by a label record until a declaration
+  // binds it. By the model's face index, never the polygon's: a face that could
+  // not be read was dropped, and every later face would otherwise shift.
+  if (!this->labels.empty() && p->face_source.size() == p->indices.size()) {
+    std::map<std::string, uint32_t> tag_of;
+    p->surface_tags.assign(p->indices.size(), 0);
+    for (std::size_t k = 0; k < p->indices.size(); k++) {
+      const auto at = std::size_t(p->face_source[k]);
+      if (at >= this->labels.size() || this->labels[at].empty()) continue;
+      auto it = tag_of.find(this->labels[at]);
+      if (it == tag_of.end()) {
+        it = tag_of.emplace(this->labels[at], mintTag()).first;
+        p->surfaces.push_back(std::make_shared<LabelSurface>(it->first, it->second));
+      }
+      p->surface_tags[k] = it->second;
+    }
+  }
   // Its faces are its solid's own boundary: the points are the model's
   // statement, and each face is exact wherever no record declares it a piece
   // of a curved surface. What that lets the model say of where it is, where it
@@ -789,8 +810,8 @@ static std::shared_ptr<AbstractNode> builtin_polyhedron(
 {
   auto node = std::make_shared<PolyhedronNode>(inst);
 
-  Parameters parameters =
-    Parameters::parse(std::move(arguments), inst->location(), {"points", "faces", "convexity"});
+  Parameters parameters = Parameters::parse(std::move(arguments), inst->location(),
+                                            {"points", "faces", "convexity", "labels"});
 
   if (parameters["points"].type() != Value::Type::VECTOR) {
     LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
@@ -812,6 +833,15 @@ static std::shared_ptr<AbstractNode> builtin_polyhedron(
     }
   }
 
+  // `labels`: one per face - a string, or a number read as one; anything else
+  // labels that face nothing.
+  if (parameters["labels"].type() == Value::Type::VECTOR) {
+    for (const Value& v : parameters["labels"].toVector()) {
+      node->labels.push_back(v.type() == Value::Type::STRING   ? v.toString()
+                             : v.type() == Value::Type::NUMBER ? v.toEchoStringNoThrow()
+                                                               : std::string());
+    }
+  }
   const Value *faces = &parameters["faces"];
   if (faces->type() != Value::Type::VECTOR) {
     LOG(message_group::Warning, inst->location(), parameters.documentRoot(),
@@ -849,6 +879,7 @@ static std::shared_ptr<AbstractNode> builtin_polyhedron(
       // FIXME: Print an error message if < 3 vertices are specified
       if (face.size() >= 3) {
         node->faces.push_back(std::move(face));
+        node->face_source.push_back(int32_t(faceIndex));
       }
     }
     faceIndex++;

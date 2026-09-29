@@ -44,4 +44,13 @@ public:
   }
 
   std::vector<std::shared_ptr<Surface>> surfaces;
+  /*! `faces = "label"` or `["a", "b"]`: the labels (`polyhedron(labels =
+   * ...)`) of the faces below here that the model says are on the record. Each
+   * such face is named for it wherever it has gone - through booleans,
+   * transforms, copies - which is the model's word per face, what a D0 facet
+   * needs (checklist E8). Without it a declaration states the record and names
+   * no face: over a generator that names nothing its surface has no D0 ground,
+   * and over one that named its faces it never overrules that (E5). */
+  std::vector<std::string> labels;
+  bool scoped = false;
 };

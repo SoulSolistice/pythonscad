@@ -83,6 +83,8 @@ public:
   /*! The boolean this solid was built by - see solid_tree_ below. */
   [[nodiscard]] const std::shared_ptr<const SolidTree>& getSolidTree() const { return solid_tree_; }
   void addSurface(const std::shared_ptr<Surface>& surface) override;
+  std::vector<std::string> bindLabels(const std::vector<std::string>& labels,
+                                      const std::shared_ptr<Surface>& surface) override;
 
 private:
   ManifoldGeometry binOp(const ManifoldGeometry& lhs, const ManifoldGeometry& rhs,

@@ -49,7 +49,8 @@ void dumpLedger(const ReportInputs& in)
     AnalyticFeatures::Provenance prov;
     prov.face_origin = &faceOrigin;
     prov.owned = &owned;
-    prov.face_surface = in.face_surface;  // identity - without it planeTakes hears none
+    prov.face_surface = in.face_surface;
+    prov.face_derived = in.face_derived;  // identity - without it planeTakes hears none
     prov.declared = surfaces.size();
     auto fate_name = [](AnalyticFeatures::ClaimFate fate) {
       switch (fate) {
@@ -74,16 +75,18 @@ void dumpLedger(const ReportInputs& in)
     out << "facet\torigin\tconsumed_by\tby\tsurface\tkind\tdeclared\tprecision\tevidence\tfate\t"
            "maker_owns\tmaker_declared\tx\ty\tz\twhy\td0\n";
     // Why a facet is, or is not, D0 on the surface its claim names - the same
-    // three conditions recognition::d0Regions asks, reported one at a time so a
-    // claim outside every region says which one it failed: its maker does not
-    // own the surface, it lies on a declared plane, or a corner is off the
-    // surface - with the worst residual against the machine-precision bound, so
-    // "how far off, and is that arithmetic or geometry" is read, not guessed.
-    const std::vector<char> planar = onDeclaredPlane(FacetGraph(in.mesh), surfaces, surfaces.size());
+    // conditions recognition::d0Regions asks, reported one at a time so a claim
+    // outside every region says which one it failed: nobody named it, its maker
+    // named it for another surface, or a corner is off the surface - with the
+    // worst residual against the machine-precision bound, so "how far off, and
+    // is that arithmetic or geometry" is read, not guessed.
     auto d0_reason = [&](const Claim& c) -> std::string {
       if (c.surface_index >= surfaces.size() || surfaces[c.surface_index] == nullptr) return "fitted";
-      if (!prov.owns(c.facet, c.surface_index)) return "maker does not own";
-      if (planeTakes(planar, prov, c.facet, c.surface_index)) return "on a declared plane";
+      const int made = prov.madeOn(c.facet, c.surface_index);
+      if (made < 0) return "unnamed";
+      if (made == 1 && prov.derivedName(c.facet)) return "derived, D1";
+      if (made == 0)
+        return prov.madeElsewhere(c.facet, c.surface_index) ? "named for another" : "named for none";
       if (c.facet >= loops.size()) return "-";
       double worst = 0, bound = 0;
       bool exact = true;
@@ -764,6 +767,7 @@ void reportArbitration(const ReportInputs& in)
   {
     AnalyticFeatures::Provenance identity;
     identity.face_surface = in.face_surface;
+    identity.face_derived = in.face_derived;
     std::size_t wrong = 0;
     std::map<std::string, std::size_t> by_holder;
     for (std::size_t f = 0; f < loops.size(); f++) {
@@ -814,6 +818,88 @@ void reportArbitration(const ReportInputs& in)
           "that plane (first facet %5$d) - named for a plane %6$s not on (checklist E3, E8)",
           int(off), off == 1 ? "" : "s", off == 1 ? "its" : "their", off == 1 ? "has" : "have",
           int(first), off == 1 ? "it is" : "they are");
+    }
+  }
+
+  // Position against the name (checklist E8): position is evidence, never a
+  // name, but where it contradicts one it is reported. A facet named for one
+  // record whose corners are not all on it at machine precision, and all on
+  // exactly one other declared face, is named for a record it does not lie on
+  // and lies on one it is not named for. Silent where position agrees with
+  // the name, or says nothing, or cannot choose - a cut corner off a curved
+  // record its maker made the facet on is the name's business, not this.
+  if (in.face_surface != nullptr) {
+    std::size_t against = 0, first = 0;
+    std::map<std::string, std::size_t> pairs;
+    for (std::size_t f = 0; f < loops.size() && f < in.face_surface->size(); f++) {
+      const int32_t made = (*in.face_surface)[f];
+      if (made < 0 || std::size_t(made) >= surfaces.size() || surfaces[std::size_t(made)] == nullptr)
+        continue;
+      auto on = [&](const Surface *r) {
+        for (const int v : loops[f])
+          if (!onExactly(r, vertices[std::size_t(v)])) return false;
+        return true;
+      };
+      if (on(surfaces[std::size_t(made)].get())) continue;
+      int holders = 0;
+      std::size_t other = 0;
+      for (std::size_t j = 0; j < surfaces.size(); j++) {
+        if (int32_t(j) == made || surfaces[j] == nullptr || !surfaces[j]->declaresFace()) continue;
+        if (on(surfaces[j].get())) {
+          holders++;
+          other = j;
+        }
+      }
+      if (holders != 1) continue;
+      if (against == 0) first = f;
+      against++;
+      pairs["named for " + std::to_string(made) + ", lying on " + std::to_string(other)]++;
+    }
+    if (against > 0) {
+      LOG(message_group::Export_Error,
+          "STEP export: %1$d facet%2$s named for a record %3$s not on, and lying wholly on exactly "
+          "one other (first facet %4$d) - position contradicts the name (checklist E8)",
+          int(against), against == 1 ? "" : "s", against == 1 ? "it is" : "they are", int(first));
+      for (const auto& kv : pairs) LOG("STEP export:   %1$d %2$s", int(kv.second), kv.first.c_str());
+    }
+  }
+
+  // A D0 conclusion declares its full heritage (checklist E8, the author,
+  // 2026-09-29): every claim labelled D0, and every facet of a D0 region,
+  // carries its maker's name for that very surface. One that does not was
+  // concluded D0 from something else - exact corners, presence, a tag nobody
+  // minted - and position has stood in for a name: an inscribed cap has every
+  // corner on its cylinder.
+  {
+    AnalyticFeatures::Provenance identity;
+    identity.face_surface = in.face_surface;
+    identity.face_derived = in.face_derived;
+    std::set<std::size_t> without;
+    std::map<std::string, std::size_t> by_whom;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      for (const auto *c : features.ledger.claimants(f)) {
+        if (c->evidence != AnalyticFeatures::EvidenceClass::D0 || c->surface_index >= surfaces.size())
+          continue;
+        if (identity.statedOn(f, c->surface_index)) continue;
+        if (without.insert(f).second) by_whom[c->by != nullptr ? c->by : "?"]++;
+      }
+    }
+    if (in.regions != nullptr) {
+      for (const Region& region : *in.regions) {
+        for (const std::size_t f : region.facets) {
+          if (identity.statedOn(f, region.surface_index)) continue;
+          if (without.insert(f).second) by_whom["a D0 region"]++;
+        }
+      }
+    }
+    if (!without.empty()) {
+      LOG(message_group::Export_Error,
+          "STEP export: %1$d facet%2$s held as D0 without %3$s maker's name for the surface - D0 "
+          "concluded from position, not heritage (checklist E8)",
+          int(without.size()), without.size() == 1 ? " is" : "s are",
+          without.size() == 1 ? "its" : "their");
+      for (const auto& kv : by_whom)
+        LOG("STEP export:   %1$d by %2$s", int(kv.second), kv.first.c_str());
     }
   }
 

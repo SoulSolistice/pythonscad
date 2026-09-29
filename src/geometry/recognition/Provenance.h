@@ -47,6 +47,11 @@ struct Provenance {
    * maker became a Manifold through every boolean (PolySet::surface_tags) - or
    * -1 where that is not known. */
   const std::vector<int32_t> *face_surface = nullptr;
+  /*! Per facet, whether the name in `face_surface` is a derivation - its record
+   * follows in closed form from declarations, and no maker stated it
+   * (mintDerivedTag, the hull of revolution). Such a facet is D1, never D0:
+   * a D0 declares its full heritage (checklist E8). Null where not carried. */
+  const std::vector<char> *face_derived = nullptr;
   std::size_t declared = 0;  // surfaces[0, declared) are the model's own
 
   /*! What identity says of `facet` and `surface`: 1 it was made on it, 0 it
@@ -59,6 +64,22 @@ struct Provenance {
     const int32_t made = (*face_surface)[facet];
     if (made == kUnknown) return -1;
     return made == static_cast<int32_t>(surface) ? 1 : 0;
+  }
+  /*! Whether `facet`'s name is a derivation, not a maker's word: D1. */
+  [[nodiscard]] bool derivedName(std::size_t facet) const
+  {
+    return face_derived != nullptr && facet < face_derived->size() && (*face_derived)[facet] != 0;
+  }
+  /*! Whether a maker stated `facet` was made on `surface`: its name, not
+   * derived - the heritage a D0 conclusion declares. */
+  [[nodiscard]] bool statedOn(std::size_t facet, std::size_t surface) const
+  {
+    return madeOn(facet, surface) == 1 && !derivedName(facet);
+  }
+  /*! Whether `facet` is derived, in closed form, to be on `surface`: D1. */
+  [[nodiscard]] bool derivedOn(std::size_t facet, std::size_t surface) const
+  {
+    return madeOn(facet, surface) == 1 && derivedName(facet);
   }
   /*! Whether identity gives `facet` to a declared surface that is not
    * `surface`: carried, and made on another declared record. The one thing C9

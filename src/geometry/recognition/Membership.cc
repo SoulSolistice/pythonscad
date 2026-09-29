@@ -59,7 +59,6 @@ std::vector<Region> d0Regions(const FacetGraph& graph,
   const std::vector<std::vector<int>>& loops = *mesh.loops;
   const std::vector<char>& valid = *mesh.valid;
   const std::vector<char>& is_hole = *mesh.is_hole;
-  const std::vector<char> planar = onDeclaredPlane(graph, surfaces, declared);
 
   std::vector<Region> out;
   for (std::size_t j = 0; j < surfaces.size() && j < declared; j++) {
@@ -71,9 +70,8 @@ std::vector<Region> d0Regions(const FacetGraph& graph,
     }
     std::vector<char> member(loops.size(), 0);
     for (std::size_t f = 0; f < loops.size(); f++) {
-      if (!valid[f] || is_hole[f] || loops[f].size() < 3 || planeTakes(planar, provenance, f, j))
-        continue;
-      if (!provenance.owns(f, j)) continue;
+      if (!valid[f] || is_hole[f] || loops[f].size() < 3) continue;
+      if (!provenance.statedOn(f, j)) continue;  // its heritage - a maker's word - or not D0
       bool exact = true;
       for (const int v : loops[f]) {
         if (!onExactly(s, vertices[v])) {

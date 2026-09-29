@@ -149,8 +149,12 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
   // facet's D0 membership where it has one, otherwise the pass's own evidence -
   // `weaker`, the class of what the band itself measured. See
   // doc/step-design-checklist.md, C4: a rung is as exact as its evidence.
-  auto decided = [d0](std::size_t index, std::size_t f, recognition::EvidenceClass weaker) {
-    return d0 != nullptr && d0->contains(index, f) ? recognition::EvidenceClass::D0 : weaker;
+  auto decided = [d0, identity](std::size_t index, std::size_t f, recognition::EvidenceClass weaker) {
+    if (d0 != nullptr && d0->contains(index, f)) return recognition::EvidenceClass::D0;
+    // derived onto it in closed form (the hull of revolution): D1
+    if (identity != nullptr && identity->derivedOn(f, index) && weaker > recognition::EvidenceClass::D1)
+      return recognition::EvidenceClass::D1;
+    return weaker;
   };
   const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;

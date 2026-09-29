@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <atomic>
+#include <mutex>
+#include <set>
 #include <cmath>
 #include <cstdio>
 #include <cstddef>
@@ -135,6 +137,34 @@ bool addSurfaceUnique(std::vector<std::shared_ptr<Surface>>& list,
   return true;
 }
 
+std::vector<std::string> bindLabels(std::vector<std::shared_ptr<Surface>>& list,
+                                    const std::vector<std::string>& labels,
+                                    std::shared_ptr<Surface> record)
+{
+  std::vector<std::string> bound;
+  if (record == nullptr) return bound;
+  auto named = record->clone();
+  std::vector<std::shared_ptr<Surface>> kept;
+  kept.reserve(list.size());
+  for (const auto& s : list) {
+    const bool wanted = s != nullptr && !s->label.empty() &&
+                        std::find(labels.begin(), labels.end(), s->label) != labels.end();
+    if (!wanted) {
+      kept.push_back(s);
+      continue;
+    }
+    for (const uint32_t t : s->tags) {
+      if (std::find(named->tags.begin(), named->tags.end(), t) == named->tags.end())
+        named->tags.push_back(t);
+    }
+    if (std::find(bound.begin(), bound.end(), s->label) == bound.end()) bound.push_back(s->label);
+  }
+  list = std::move(kept);
+  std::sort(named->tags.begin(), named->tags.end());
+  mergeSurfaces(list, {named});
+  return bound;
+}
+
 void mergeSurfaces(std::vector<std::shared_ptr<Surface>>& into,
                    const std::vector<std::shared_ptr<Surface>>& from)
 {
@@ -216,12 +246,35 @@ std::vector<std::shared_ptr<Surface>> stampOwners(const std::vector<std::shared_
   return out;
 }
 
+namespace {
+std::atomic<uint32_t> next_tag{1};
+std::mutex derived_mutex;
+std::set<uint32_t>& derivedTags()
+{
+  static std::set<uint32_t> tags;
+  return tags;
+}
+}  // namespace
+
 uint32_t mintTag()
 {
   // One counter for the process: a tag is compared only with tags, within one
   // evaluation, and never written anywhere.
-  static std::atomic<uint32_t> next{1};
-  return next++;
+  return next_tag++;
+}
+
+uint32_t mintDerivedTag()
+{
+  const uint32_t tag = next_tag++;
+  const std::lock_guard<std::mutex> lock(derived_mutex);
+  derivedTags().insert(tag);
+  return tag;
+}
+
+bool isDerivedTag(uint32_t tag)
+{
+  const std::lock_guard<std::mutex> lock(derived_mutex);
+  return derivedTags().count(tag) != 0;
 }
 
 std::vector<std::shared_ptr<Surface>> stampTags(const std::vector<std::shared_ptr<Surface>>& list)
@@ -1296,6 +1349,22 @@ bool GridSurface::onSeam(double u, double v) const
   const Vector3d at = evaluate(u, v);
   const double bound = 2 * evaluationBound() + recognition::forwardError(9, 2 * at.norm());
   return std::min((at - evaluate(u, 0.0)).norm(), (at - evaluate(u, 1.0)).norm()) <= bound;
+}
+
+bool GridSurface::envelope(const std::vector<Vector3d>&, BoundingBox& box) const
+{
+  // The flat tessellation of the net lies within the net's box, and the
+  // surface within tessellationBound() of that tessellation - a sound bound in
+  // closed form - and evaluationBound() of what is computed for it. Where the
+  // grid is not interpolated the surface is the tessellation itself.
+  if (net.empty()) return false;
+  box.setEmpty();
+  for (const Vector3d& p : net) box.extend(p);
+  const double grow = tessellationBound() + evaluationBound();
+  if (!std::isfinite(grow)) return false;
+  box.min() -= Vector3d::Constant(grow);
+  box.max() += Vector3d::Constant(grow);
+  return true;
 }
 
 double GridSurface::evaluationBound() const

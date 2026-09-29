@@ -1269,9 +1269,15 @@ TEST_CASE("D0 regions and their representations do not depend on the order of th
 
   auto answer = [&](const std::vector<std::shared_ptr<Surface>>& surfaces) {
     const std::map<int32_t, std::vector<std::size_t>> owned{{1, {0, 1}}};
+    // The wall's 16 facets named for the wall, wherever it stands in the list;
+    // the caps for none.
+    const int32_t at = surfaces[0] == wall ? 0 : 1;
+    std::vector<int32_t> made(mesh.loops->size(), Provenance::kNone);
+    for (std::size_t f = 0; f < 16; f++) made[f] = at;
     Provenance provenance;
     provenance.face_origin = &origin;
     provenance.owned = &owned;
+    provenance.face_surface = &made;
     provenance.declared = surfaces.size();
     const std::vector<recognition::Region> regions =
       recognition::d0Regions(graph, surfaces, 2, provenance);
@@ -1291,12 +1297,14 @@ TEST_CASE("D0 regions and their representations do not depend on the order of th
   CHECK(forward == backward);
 }
 
-// C9: a facet whose maker owns two surfaces, with every corner on both, is a
-// conflict nothing but a declaration can settle. Two cylinders along z pass
-// through the two rulings of wall facet 0 - a quad on two parallel lines lies on
-// a whole family of them - and the guard names that facet and no other. Owned
-// by one original only, the second cylinder has no region and nothing conflicts.
-TEST_CASE("a facet that is D0 on two declared surfaces is a conflict", "[analytic][provenance]")
+// E8: a facet is D0 on the surface its maker named it for, and on no other,
+// though every corner is on both. Two cylinders along z pass through the two
+// rulings of wall facet 0 - a quad on two parallel lines lies on a whole family
+// of them. Until 2026-09-29 D0 was the maker owning the surface with every
+// corner on it, facet 0 was D0 on both, and d0Conflicts named it; by the
+// facet's name it is D0 on the wall alone, and a conflict cannot arise - the
+// guard stays for the day one does. Unnamed, it is D0 on neither.
+TEST_CASE("a facet is D0 on the one surface its maker named it for", "[analytic][provenance]")
 {
   const int fn = 16;
   const double r = 10.0;
@@ -1314,15 +1322,21 @@ TEST_CASE("a facet that is D0 on two declared surfaces is a conflict", "[analyti
   const std::vector<int32_t> origin(mesh.loops->size(), 1);
 
   const std::map<int32_t, std::vector<std::size_t>> owns_both{{1, {0, 1}}};
+  std::vector<int32_t> made(mesh.loops->size(), Provenance::kNone);
+  for (int f = 0; f < fn; f++) made[std::size_t(f)] = 0;  // the wall, named for the wall
   Provenance provenance;
   provenance.face_origin = &origin;
   provenance.owned = &owns_both;
+  provenance.face_surface = &made;
   provenance.declared = surfaces.size();
-  const std::vector<std::size_t> conflicts =
-    recognition::d0Conflicts(recognition::d0Regions(graph, surfaces, 2, provenance));
-  CHECK(conflicts == std::vector<std::size_t>{0});
+  const auto regions = recognition::d0Regions(graph, surfaces, 2, provenance);
+  CHECK(recognition::d0Conflicts(regions).empty());
+  const recognition::D0Membership d0(regions);
+  CHECK(d0.contains(0, 0));
+  CHECK_FALSE(d0.contains(1, 0));  // every corner on it, and not its name
 
-  const std::map<int32_t, std::vector<std::size_t>> owns_one{{1, {0}}};
-  provenance.owned = &owns_one;
-  CHECK(recognition::d0Conflicts(recognition::d0Regions(graph, surfaces, 2, provenance)).empty());
+  // Nobody named it: D0 on neither, whatever its corners lie on.
+  const std::vector<int32_t> unnamed(mesh.loops->size(), Provenance::kUnknown);
+  provenance.face_surface = &unnamed;
+  CHECK(recognition::d0Regions(graph, surfaces, 2, provenance).empty());
 }
