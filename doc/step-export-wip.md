@@ -4512,6 +4512,20 @@ present, never a chosen number:**
   needs checking against that: the quad crosses the cone's axis (corners near
   +-90 degrees), the bound's limit case, and the lean test refuses it there.
   **C1 and C2 are one question, to be settled together, with the author.**
+  **Settled and landed 2026-09-29**, as agreed: D0 ground - a member of the
+  surface's D0 region, identity and exact corners and no plane taking it - is
+  admitted with nothing measured vetoing it (C3); a facet identity gives to
+  another *declared* surface is refused (C9 - not "made on none", which is what
+  a fitted record is for: reading it so refused step-declare-grid-strip's fitted
+  cylinder all its facets, 8 faces became 66, and the census said so at once);
+  everything else is D4 and measured - the lean gate stays there, and the
+  interior test compares against the proven bound, sagitta plus the corners'
+  offset, each sample's depth less its residual's rounding, no quarter and no
+  1e-12 (the bound is attained: a chord's midpoint is exactly one sagitta deep).
+  A first attempt that took "every corner exact" for D0 admitted a prism's caps
+  - corners alone are the weakest rung - and a unit test caught it. lid10: 17 to
+  9 corners left off their face's surface, 79 to 27 faces added by fanning, 8 to
+  0 conic chords left straight, 4 D4 facets fewer on a declared surface.
 - *The grid's four times the median stray.* A statistic over the claim's own
   cut corners; nothing derives it, because what it stands in for is where a cut
   corner belongs - existence steps 5 to 7. Removed by those, not replaced.

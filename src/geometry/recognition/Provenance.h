@@ -60,6 +60,16 @@ struct Provenance {
     if (made == kUnknown) return -1;
     return made == static_cast<int32_t>(surface) ? 1 : 0;
   }
+  /*! Whether identity gives `facet` to a declared surface that is not
+   * `surface`: carried, and made on another declared record. The one thing C9
+   * forbids a claim on - not "made on none", which is where a fitted record is
+   * exactly what the approximation is for, and not silence. */
+  [[nodiscard]] bool madeElsewhere(std::size_t facet, std::size_t surface) const
+  {
+    if (face_surface == nullptr || facet >= face_surface->size()) return false;
+    const int32_t made = (*face_surface)[facet];
+    return made >= 0 && made != static_cast<int32_t>(surface);
+  }
   /*! In `face_surface`: carried, and made on no declared surface. */
   static constexpr int32_t kNone = -1;
   /*! In `face_surface`: not carried. */

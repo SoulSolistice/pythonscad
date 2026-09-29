@@ -55,10 +55,14 @@ class OnQuadric
 {
 public:
   OnQuadric(const Mesh& mesh, const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops,
-            const Surface *surface, double smooth_angle)
+            const Surface *surface, std::size_t surface_index, const Provenance& provenance,
+            const recognition::D0Membership& d0, double smooth_angle)
     : mesh_(mesh),
       edge_loops_(edge_loops),
       surface_(surface),
+      surface_index_(surface_index),
+      provenance_(provenance),
+      d0_(d0),
       smooth_angle_(smooth_angle),
       axial_(dynamic_cast<const AxialSurface *>(surface))
   {
@@ -121,13 +125,14 @@ public:
    * to the corners - which is what the interior test needs, because moving a
    * corner onto the curve where its owners cross changes every dihedral around
    * it. */
-  [[nodiscard]] double sagittaOf(std::size_t f) const
+  [[nodiscard]] double sagittaOf(std::size_t f, double *r_out = nullptr) const
   {
     const std::vector<Vector3d>& vertices = *mesh_.vertices;
     double r = 0;
     for (const int v : (*mesh_.loops)[f]) {
       r = std::max(r, distanceToAxis(vertices[v], base_, axis_));
     }
+    if (r_out != nullptr) *r_out = r;
     return r * (1 - cos(std::min(M_PI, spanOf(f)) / 2));
   }
 
@@ -170,6 +175,34 @@ public:
     if (!(*mesh_.valid)[f] || (*mesh_.is_hole)[f]) return false;
     if (loops[f].size() < 3) return false;
 
+    double off = 0;
+    bool exact = true;
+    for (const int v : loops[f]) {
+      off = std::max(off, offsetAt(vertices[v]));
+      exact = exact && recognition::onExactly(surface_, vertices[v]);
+    }
+    // D0 ground is the D0 rules' to decide, and nothing measured may veto it
+    // (checklist C3): a member of the surface's D0 region - its maker owns the
+    // surface, every corner is on it at machine precision, and no plane takes it
+    // (recognition::d0Regions, which asks identity first). The lean and interior
+    // tests below were a measurement vetoing that, and the interior test never
+    // could: a flat facet with its corners on a cylinder or one nappe of a cone
+    // is at most R_max (1 - cos(span / 2)) inside it - the depth is the
+    // triangle-inequality defect of the corners' radial vectors, which the
+    // bisector bounds.
+    if (d0_.contains(surface_index_, f)) {
+      if (off_out != nullptr) *off_out = off;
+      return true;
+    }
+    // Where identity says the facet was made on another declared surface, no
+    // measurement gives it to this one (C9).
+    if (provenance_.madeElsewhere(f, surface_index_)) return false;
+    // Everything else is judged by measurement, D4 - corners exact without
+    // identity are the weakest rung, a cap over a bore has every corner on the
+    // rim - and the band is what the mesh concedes about where its surface
+    // lies, which only the approximation tier may spend.
+    if (!exact && (!spend_band || off > bandOf(f))) return false;
+
     // A facet across the axis is not on the surface however close its corners
     // fall - a cap over a bore has every vertex on the rim. On a cylinder that
     // is exact: every facet of a prism is parallel to the axis. On a cone it is
@@ -180,17 +213,6 @@ public:
     // One rule: a cylinder's lean is zero, and min(0.99, 1e-6) is its old 1e-6.
     const double lean_of_f = fabs(normals[f].normalized().dot(axis_));
     if (lean_of_f > std::min(0.99, lean_ * 1.05 + 1e-6)) return false;
-    double off = 0;
-    bool exact = true;
-    for (const int v : loops[f]) {
-      off = std::max(off, offsetAt(vertices[v]));
-      exact = exact && recognition::onExactly(surface_, vertices[v]);
-    }
-    // Every corner on the surface at machine precision is what the exact tier
-    // claims: a face that asserts nothing the mesh does not already state.
-    // Otherwise the band is what the mesh concedes about where its surface
-    // lies, and only the approximation tier may spend it.
-    if (!exact && (!spend_band || off > bandOf(f))) return false;
 
     // Corners on the surface are not enough, and the lean test above is not the
     // whole of the guard. A facet that spans a *hole* in the surface has every
@@ -202,16 +224,26 @@ public:
     // At theta = 180 the bore's wall runs so nearly parallel to the cone it
     // pierces that the two normals agree to five degrees, so only the distance
     // separates them - and only if it is asked somewhere other than at the
-    // corners. The quarter allows for a tessellation whose facets are not even
-    // arcs.
-    const double interior_allow = 1.25 * sagittaOf(f) + 1e-12;
+    // corners. How deep a flat facet may lie is proven, not allowed for: its
+    // sagitta over the span its corners cover (see above), deepened by as much
+    // as its corners stand off the surface. The quarter this replaced was for
+    // facets that are not even arcs, which the per-facet span already answers.
+    //
+    // The bound is attained - a chord's midpoint is exactly one sagitta deep -
+    // so it is compared at machine precision: each sample's depth less its own
+    // residual's bound, against the sagitta less nothing but its rounding
+    // (the span's angle, a cosine, a product - counted as the residual's are,
+    // over the radius).
+    double r_max = 0;
+    const double interior_allow = sagittaOf(f, &r_max) + off + recognition::forwardError(12, r_max);
+    auto depth = [&](const Vector3d& p) { return offsetAt(p) - surface_->residual(p).bound; };
     Vector3d centre(0, 0, 0);
     for (const int v : loops[f]) centre += vertices[v];
     centre /= double(loops[f].size());
-    double interior = offsetAt(centre);
+    double interior = depth(centre);
     for (std::size_t i = 0; i < loops[f].size() && interior <= interior_allow; i++) {
       const Vector3d mid = (vertices[loops[f][i]] + vertices[loops[f][(i + 1) % loops[f].size()]]) / 2;
-      interior = std::max(interior, offsetAt(mid));
+      interior = std::max(interior, depth(mid));
     }
     if (interior > interior_allow) return false;
     if (off_out != nullptr) *off_out = off;
@@ -222,6 +254,9 @@ private:
   const Mesh& mesh_;
   const std::map<EdgeKey, std::vector<std::size_t>>& edge_loops_;
   const Surface *surface_ = nullptr;
+  std::size_t surface_index_ = 0;
+  const Provenance& provenance_;
+  const recognition::D0Membership& d0_;
   double smooth_angle_ = 0;
   const AxialSurface *axial_ = nullptr;
   Vector3d axis_{0, 0, 1}, base_{0, 0, 0};
@@ -264,7 +299,8 @@ std::vector<QuadricProposal> proposeQuadrics(const recognition::FacetGraph& grap
     // this cylinder could be the surface of, and a facet outside it belongs to
     // something else. That, the lean and the interior test are OnQuadric, which
     // the band pass asks the same question of.
-    const OnQuadric on_quadric(mesh, graph.edgeLoops(), surface.get(), smooth_angle);
+    const OnQuadric on_quadric(mesh, graph.edgeLoops(), surface.get(), surface_index, provenance, d0,
+                               smooth_angle);
     QuadricProposal proposal;
     proposal.surface_index = surface_index;
     for (std::size_t f = 0; f < loops.size(); f++) {
