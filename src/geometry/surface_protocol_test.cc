@@ -247,6 +247,13 @@ TEST_CASE("classifications: each asked in one place, at machine precision", "[su
   CHECK_FALSE(recognition::onLine(origin, axis, turn * Vector3d(1e-10, 0, 37)));
   CHECK(recognition::sameLine(origin, axis, turn * Vector3d(0, 0, 37), -axis));
 
+  // four points of one turned plane, one a hair off it, and three on a line
+  // that state no plane at all
+  CHECK(recognition::coplanar(rim[0], rim[9], rim[21], rim[30]));
+  CHECK(recognition::coplanar(rim[0], rim[9], rim[21], turn * Vector3d(3, -4, 5)));
+  CHECK_FALSE(recognition::coplanar(rim[0], rim[9], rim[21], turn * Vector3d(3, -4, 5 + 1e-9)));
+  CHECK_FALSE(recognition::coplanar(origin, turn * Vector3d(0, 0, 1), turn * Vector3d(0, 0, 2), rim[0]));
+
   // one plane anchored at two of its points, and one a hair above
   CHECK(recognition::samePlane(rim[0], axis, rim[17], -axis));
   CHECK_FALSE(recognition::samePlane(rim[0], axis, turn * Vector3d(0, 0, 5 + 1e-9), axis));

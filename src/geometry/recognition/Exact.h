@@ -139,6 +139,25 @@ inline bool samePoint(const Vector3d& p, const Vector3d& q)
   return (p - q).norm() <= forwardError(9, p.norm() + q.norm());
 }
 
+/*! Whether `p` is on the plane through `a`, `b` and `c`, at machine precision:
+ * the orientation determinant (b - a) x (c - a) . (p - a) against its forward
+ * error - each difference rounded relative to the points it subtracts (3 each),
+ * a cross product and a dot (14) - bounded over the magnitudes each factor
+ * multiplies. Three points on a line state no plane: false. */
+inline bool coplanar(const Vector3d& a, const Vector3d& b, const Vector3d& c, const Vector3d& p)
+{
+  const Vector3d u = b - a, v = c - a, w = p - a;
+  const double det = u.cross(v).dot(w);
+  const double scale = (a.norm() + b.norm()) * v.norm() * w.norm() +
+                       u.norm() * (a.norm() + c.norm()) * w.norm() +
+                       u.norm() * v.norm() * (a.norm() + p.norm());
+  if (!(u.cross(v).norm() >
+        forwardError(9, (a.norm() + b.norm()) * v.norm() + u.norm() * (a.norm() + c.norm())))) {
+    return false;
+  }
+  return fabs(det) <= forwardError(23, scale);
+}
+
 /*! Whether `p` is on the line through `origin` along `dir`, at machine
  * precision: a normalisation, 9; a difference, a dot, a scale, a difference, a
  * norm, 20 - over |p| + |origin|. */

@@ -4575,6 +4575,21 @@ present, never a chosen number:**
   0.9999; `EmitPlanarFaces`, 1e-8 of the extent): whether two facets are one
   plane is exact where their corners are the model's - coplanarity at machine
   precision, by the orientation of four points against its forward error.
+  **Moved 2026-09-29: it is the forward path, not import.** `mergeTriangles`
+  builds the faces every recogniser, the ledger and identity call facets, for
+  every export and both tiers, asking no identity, and then votes each face its
+  original and its surface by the commonest answer over its boundary. Measured
+  over the corpus (the export's own report line, "merging N planar faces..."):
+  lid10 has 12 faces joining two makers' triangles, 4 of them two *different*
+  declared surfaces', 12 mixing triangles the positional tagger gave a record
+  with untagged ones, 15 slivers with no plane, and 6 faces not flat at machine
+  precision - one maker, no declared surface, corners up to 2.26e-6 off their
+  own plane, 18 times the uncertainty the file declares; the bayonet and
+  step-partial-cylinder join makers on one surface only (a union of coplanar
+  faces, legitimate) and mix positional tags; every other export is clean. The
+  rule it wants: triangles merge where identity agrees and their corners are
+  coplanar at machine precision (`recognition::coplanar`); it goes with item 40,
+  which gives identity to merge by.
 - *Measured ownership* (60 degrees, `least = 3`): reports only, against the
   carried ownership that replaced it; to be deleted, not refined. **Deleted
   2026-09-28**, with its comparison report and `surfaceNormal` (a finite
@@ -4696,7 +4711,18 @@ not state, now checklist E7, E8 and C9 made universal:
   one whose corners lie exactly on a declared cylinder is tagged the
   cylinder's). Refusing the conics locally is refuted (code 17 42 to 198 on
   lid10, 2026-09-21).
-- **Identity is minted by the maker (E8) - open, not started.** Where a facet's
+- **Identity is minted by the maker (E8) - open, next.** The mechanism exists:
+  a PolySet that arrives with `surface_tags` keeps them through the Manifold
+  conversion, and only untagged geometry falls to the positional tagger - but
+  no generator writes them. So each generator (the primitives through
+  PolySetBuilder, the extrusions, the revolve, sweeps, fillets, text(), hull,
+  roof) states per triangle which of its records it made the triangle on, and
+  mints those records' tags as it makes them; the positional tagger stays the
+  fallback for geometry nobody named - polyhedra, imports. With it, merging
+  asks identity too (item 38, C8): 12 of lid10's merged faces mix triangles the
+  tagger gave a curved record by position with untagged flat ones, and 4 join
+  two declared surfaces.
+- **Identity is minted by the maker (E8) - the original entry.** Where a facet's
   surface is minted (`ManifoldUtils::TriangleTagger`, and `facetedEnvelope`'s
   `record_of`), it is measured: the one face-declaring record a triangle's
   corners lie on, and nothing where two hold it - so a chord facet of a patch

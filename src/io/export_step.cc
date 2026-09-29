@@ -1095,6 +1095,103 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
     }
   }
 
+  // What merging made of identity and of planes (item 38, C8), measured and
+  // reported; nothing reads it. The mesh's triangles are merged into the faces
+  // everything downstream calls facets by a normal to 0.99999 and an offset to
+  // 1e-8 of the model's size, asking no identity, and a merged face is then
+  // voted its original and its surface over its boundary, the commonest
+  // answer winning. So a merged face can join two makers' triangles, or two
+  // declared surfaces', and be given one; can mix triangles the positional
+  // tagger gave a record (E8, open item 40) with untagged ones; can be a sliver
+  // with no plane; or can be not flat at all, at machine precision.
+  if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
+    // A directed boundary edge names the one triangle it came from.
+    std::map<std::pair<int, int>, std::size_t> edge_triangle;
+    for (std::size_t t = 0; t < ps->indices.size(); t++) {
+      const IndexedFace& tri = ps->indices[t];
+      for (std::size_t i = 0; i < tri.size(); i++)
+        edge_triangle[{tri[i], tri[(i + 1) % tri.size()]}] = t;
+    }
+    std::map<uint32_t, const Surface *> record_of_tag;
+    for (const auto& sf : ps->surfaces) {
+      if (sf == nullptr) continue;
+      for (const uint32_t tag : sf->tags) record_of_tag.emplace(tag, sf.get());
+    }
+    std::size_t looked = 0, makers = 0, surfaces = 0, positional = 0, slivers = 0, bent = 0;
+    double bent_worst = 0;
+    for (std::size_t f = 0; f < indicesNew.size(); f++) {
+      const IndexedFace& poly = indicesNew[f];
+      if (poly.size() < 3) continue;
+      looked++;
+      std::set<int32_t> origins;
+      std::set<uint32_t> tags;
+      bool untagged = false;
+      for (std::size_t i = 0; i < poly.size(); i++) {
+        const auto it = edge_triangle.find({poly[i], poly[(i + 1) % poly.size()]});
+        if (it == edge_triangle.end()) continue;
+        if (it->second < ps->original_ids.size()) origins.insert(ps->original_ids[it->second]);
+        if (it->second < ps->surface_tags.size()) {
+          const uint32_t tag = ps->surface_tags[it->second];
+          if (tag == 0) untagged = true;
+          else tags.insert(tag);
+        }
+      }
+      if (origins.size() > 1) makers++;
+      // the declared surfaces the boundary names, one per geometric surface
+      std::vector<const Surface *> distinct;
+      for (const uint32_t tag : tags) {
+        const auto it = record_of_tag.find(tag);
+        if (it == record_of_tag.end()) continue;
+        bool seen = false;
+        for (const Surface *d : distinct) seen = seen || d->sameAs(*it->second);
+        if (!seen) distinct.push_back(it->second);
+      }
+      if (distinct.size() > 1) surfaces++;
+      if (untagged && !tags.empty()) positional++;
+      // flat: every corner on the plane of the three spanning most
+      const Vector3d a = ps->vertices[poly[0]];
+      std::size_t ib = 1, ic = 2;
+      double widest = -1;
+      for (std::size_t i = 1; i + 1 < poly.size(); i++) {
+        for (std::size_t j = i + 1; j < poly.size(); j++) {
+          const double area = (ps->vertices[poly[i]] - a).cross(ps->vertices[poly[j]] - a).norm();
+          if (area > widest) {
+            widest = area;
+            ib = i;
+            ic = j;
+          }
+        }
+      }
+      const Vector3d b = ps->vertices[poly[ib]], c = ps->vertices[poly[ic]];
+      const Vector3d n = (b - a).cross(c - a);
+      if (!(n.norm() > recognition::forwardError(9, (a.norm() + b.norm()) * (c - a).norm() +
+                                                      (b - a).norm() * (a.norm() + c.norm())))) {
+        slivers++;  // three corners on a line: no plane to be flat in
+        continue;
+      }
+      bool flat = true;
+      double off = 0;
+      for (const int v : poly) {
+        if (!recognition::coplanar(a, b, c, ps->vertices[v])) {
+          flat = false;
+          off = std::max(off, fabs((ps->vertices[v] - a).dot(n.normalized())));
+        }
+      }
+      if (!flat) {
+        bent++;
+        bent_worst = std::max(bent_worst, off);
+      }
+    }
+    LOG(
+      "STEP export: merging %1$d planar faces from the mesh's triangles: %2$d join two makers' "
+      "triangles, "
+      "%3$d two declared surfaces', %4$d mix triangles the positional tagger gave a record with "
+      "untagged "
+      "ones (E8); %5$d are slivers with no plane, and %6$d are not flat at machine precision, by up to "
+      "%7$.2e",
+      int(looked), int(makers), int(surfaces), int(positional), int(slivers), int(bent), bent_worst);
+  }
+
   StepKernel sk;
 
   // newNormals holds the outward normal of each merged face; without it the
