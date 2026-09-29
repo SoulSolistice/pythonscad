@@ -4711,17 +4711,51 @@ not state, now checklist E7, E8 and C9 made universal:
   one whose corners lie exactly on a declared cylinder is tagged the
   cylinder's). Refusing the conics locally is refuted (code 17 42 to 198 on
   lid10, 2026-09-21).
-- **Identity is minted by the maker (E8) - open, next.** The mechanism exists:
-  a PolySet that arrives with `surface_tags` keeps them through the Manifold
-  conversion, and only untagged geometry falls to the positional tagger - but
-  no generator writes them. So each generator (the primitives through
-  PolySetBuilder, the extrusions, the revolve, sweeps, fillets, text(), hull,
-  roof) states per triangle which of its records it made the triangle on, and
-  mints those records' tags as it makes them; the positional tagger stays the
-  fallback for geometry nobody named - polyhedra, imports. With it, merging
-  asks identity too (item 38, C8): 12 of lid10's merged faces mix triangles the
-  tagger gave a curved record by position with untagged flat ones, and 4 join
-  two declared surfaces.
+- **Identity is minted by the maker (E8) - landing.** The channel carries a
+  maker's names through triangulation and the Manifold conversion
+  (52b505b24); `cube()`, `cylinder()` and `sphere()` name every polygon
+  (52b505b24, ee3f88072); a profile edge split for extrusion keeps its name
+  (3236a289b). Next: the extrusions, the revolve, sweeps, fillets, text(),
+  hull, roof. With it, merging asks identity too (item 38, C8): 12 of lid10's
+  merged faces mix triangles the tagger gave a curved record by position with
+  untagged flat ones, and 4 join two declared surfaces.
+- **Nothing unnamed stands in for D0 - 2026-09-29, the author.** "Unnamed may
+  never step in for a D0 declaration"; "by definition a D0 must declare its
+  full heritage or something is wrong." The positional tagger is **not** a
+  fallback for identity: geometry nobody named carries no identity, and its
+  facets are below D0. Found by `step-declare`: once `linear_extrude` named its
+  walls, the fixture's hand-written `polygon()` - which truthfully names 32
+  straight edges - contradicted the `declare_cylinder` around it. Settled with
+  the author: a declaration fills where the generators said nothing and never
+  overrules a maker's name (E5), so the fixture moved to `polyhedron()`, the
+  generator that says nothing. There the cylinder's D0 region took the two
+  caps - 32-gons inscribed in the circle, every corner on the cylinder exactly,
+  and D0 membership was *the declaration owns the original, every corner on
+  the surface* - and the export was an open shell (66 edges used by one face).
+  No closed form tells an inscribed cap from a wall facet: parallel to the
+  axis fails a twisted tessellation, and what remains is size, a threshold.
+  Only a name decides.
+
+  Audit of every D0 conclusion and every identity minted:
+
+  | where | what it rests on | status |
+  | --- | --- | --- |
+  | `cube()`, `cylinder()`, `sphere()` (`surface_tags`) | the maker's name | heritage |
+  | `ManifoldUtils::TriangleTagger`, at the conversion | position: the one record a triangle's corners lie on | remove - an unnamed triangle stays unnamed |
+  | `ManifoldUtils::withSurfaceTags` - `declare_*` over a Manifold, `hull()` | position, as above | remove - a declaration states a record; the hull names what it knows, or nothing |
+  | `ManifoldUtils::recordByPosition` - the hull's operand envelopes | position | replace with the carried name; a faceted leaf with an unnamed curved face states no envelope |
+  | `recognition::d0Regions` | owner + every corner exact + not a plane's | require the facet's name; exact corners stay as E3's consistency check |
+  | presence / `Provenance::owns` (`export_step.cc`) | a whole facet of the owner's lying on the surface, by position | a facet named by the record is still in the mesh |
+  | the recognisers' `onExactly` (Bands, Quadrics, Representation) | geometry of a corner or rim | not identity; reaches D0 only through `D0Membership` |
+  | declared planes (`onDeclaredPlane`, `planeTakes`, planar faces written on a declared plane) | a flat face's own corners | not an identity question: two records hold a non-degenerate flat face only if they are one plane |
+
+  Order: the revolve names its facets (so the turned parts keep D0 across the
+  change), then the positional minting and the positional D0 go, then
+  `linear_extrude` names its facets with `step-declare` on `polyhedron()`.
+  Consequence to expect and not to paper over: a `declare_*` around a
+  `polyhedron()` - lid10's and the bayonet's threads - gives no D0 ground until a
+  declaration can say which faces it covers (a scoped `declare_*`, open).
+  Their surfaces are then recognised at D3, and measured as such.
 - **Identity is minted by the maker (E8) - the original entry.** Where a facet's
   surface is minted (`ManifoldUtils::TriangleTagger`, and `facetedEnvelope`'s
   `record_of`), it is measured: the one face-declaring record a triangle's
