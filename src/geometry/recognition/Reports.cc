@@ -787,6 +787,36 @@ void reportArbitration(const ReportInputs& in)
     }
   }
 
+  // A name on a plane, held to the plane (checklist E3, E8): a boolean cuts a
+  // flat facet within its own plane, so every corner of a facet its maker named
+  // on a declared plane - cut corners too - lies on that plane at machine
+  // precision. A corner off it means the name is wrong: the facet was named for
+  // a plane it is not on, the misattribution the check above cannot see, since
+  // a planar face is written by the writer and claimed by no recogniser. Planes
+  // only: a piece of a chord split for extrusion, or a corner a boolean cut, is
+  // off a curved record its maker truly made it on.
+  if (in.face_surface != nullptr) {
+    std::size_t off = 0, first = 0;
+    for (std::size_t f = 0; f < loops.size() && f < in.face_surface->size(); f++) {
+      const int32_t made = (*in.face_surface)[f];
+      if (made < 0 || std::size_t(made) >= surfaces.size()) continue;
+      const Surface *plane = surfaces[std::size_t(made)].get();
+      if (dynamic_cast<const PlaneSurface *>(plane) == nullptr) continue;
+      bool on = true;
+      for (const int v : loops[f]) on = on && onExactly(plane, vertices[std::size_t(v)]);
+      if (on) continue;
+      if (off == 0) first = f;
+      off++;
+    }
+    if (off > 0) {
+      LOG(message_group::Export_Error,
+          "STEP export: %1$d facet%2$s named by %3$s maker for a declared plane %4$s a corner off "
+          "that plane (first facet %5$d) - named for a plane %6$s not on (checklist E3, E8)",
+          int(off), off == 1 ? "" : "s", off == 1 ? "its" : "their", off == 1 ? "has" : "have",
+          int(first), off == 1 ? "it is" : "they are");
+    }
+  }
+
   // Checklist C3, enforced: a claim of a weaker evidence class may not hold a
   // facet one of a stronger class also claimed - neither as the admission that
   // let it in nor as the veto that kept the stronger out, and not by running
