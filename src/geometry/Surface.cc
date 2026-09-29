@@ -1151,6 +1151,69 @@ void GridSurface::buildSpline()
     for (int i = 0; i < m; i++) poles[std::size_t(i) * cols + j] = sol.row(i).transpose();
   }
 
+  // How far this surface can stand off the facets that approximate it, bounded
+  // in closed form - see tessellationBound(), and tessellationBand() below for
+  // the figure membership still asks.
+  //
+  // Membership is asked about facets, and a facet's middle sits somewhere
+  // inside a cell, where the flat triangles covering it stand off the smooth
+  // surface by more than a chord midpoint does - measured once at the cell
+  // centre as 0.000271 where the middles were 0.000373 out, which refused every
+  // facet of a twisted extrusion. It was then sampled, three points a cell each
+  // way: a statistic, a lower bound on what it stood for.
+  //
+  // The surface is linear across the columns (evaluate), and so is a cell's
+  // bilinear patch, so within a cell their difference is a blend of the two
+  // column curves' differences from their chords; the triangles fall inside
+  // that patch by half the cell's warp, exactly. And a column curve less its
+  // chord is a cubic polynomial on every knot span - so on each piece of a
+  // station interval between knots it has a Bezier form, recovered exactly
+  // from four of its values, and by the convex hull property no point of the
+  // piece is further from the chord than its furthest control point.
+  bound = 0;
+  const int segs = vspans();
+  std::vector<double> deviation(std::size_t(m - 1) * std::size_t(cols), 0.0);
+  for (int j = 0; j < cols; j++) {
+    const double v =
+      segs > 0 ? double(j) / segs : 0.0;  // column j exactly: evaluate's blend weight is 0
+    for (int i = 0; i + 1 < m; i++) {
+      std::vector<double> cuts{t[i]};
+      for (const double k : uknots) {
+        if (k > t[i] && k < t[i + 1] && k != cuts.back()) cuts.push_back(k);
+      }
+      cuts.push_back(t[i + 1]);
+      double dev = 0;
+      for (std::size_t c = 0; c + 1 < cuts.size(); c++) {
+        Vector3d f[4];
+        for (int k = 0; k < 4; k++) {
+          const double u = cuts[c] + (cuts[c + 1] - cuts[c]) * k / 3.0;
+          const double s = (u - t[i]) / (t[i + 1] - t[i]);
+          f[k] = evaluate(u, v) - (at(i, j) * (1 - s) + at(i + 1, j) * s);
+        }
+        // the cubic through f at 0, 1/3, 2/3, 1, in Bezier form
+        const Vector3d b1 = (-5 * f[0] + 18 * f[1] - 9 * f[2] + 2 * f[3]) / 6;
+        const Vector3d b2 = (2 * f[0] - 9 * f[1] + 18 * f[2] - 5 * f[3]) / 6;
+        dev = std::max({dev, f[0].norm(), b1.norm(), b2.norm(), f[3].norm()});
+      }
+      deviation[std::size_t(i) * std::size_t(cols) + std::size_t(j)] = dev;
+    }
+  }
+  for (int i = 0; i + 1 < m; i++) {
+    if (segs < 1) {
+      bound = std::max(bound, deviation[std::size_t(i) * std::size_t(cols)]);
+      continue;
+    }
+    for (int j = 0; j < segs; j++) {
+      const int j2 = (j + 1) % cols;
+      const Vector3d p00 = at(i, j), p10 = at(i + 1, j);
+      const Vector3d p11 = at(i + 1, j2), p01 = at(i, j2);
+      const double warp = (p00 - p10 + p11 - p01).norm() / 2;
+      const double column = std::max(deviation[std::size_t(i) * std::size_t(cols) + std::size_t(j)],
+                                     deviation[std::size_t(i) * std::size_t(cols) + std::size_t(j2)]);
+      bound = std::max(bound, column + warp / 2);
+    }
+  }
+
   // How far this surface stands off the facets that approximate it: the widest
   // gap between the interpolant and the chords through the points it was built
   // from. See tessellationBand() for why membership needs it.
@@ -1176,7 +1239,6 @@ void GridSurface::buildSpline()
   // bilinear patch through its corners - which is what a flat tessellation of
   // it is - plus half the warp, the amount by which either triangulation of a
   // non-planar quad falls inside that patch.
-  const int segs = vspans();
   const double samples[3] = {1.0 / 6, 0.5, 5.0 / 6};
   for (int j = 0; j < segs; j++) {
     const int j2 = (j + 1) % cols;

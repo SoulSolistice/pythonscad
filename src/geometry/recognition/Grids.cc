@@ -66,7 +66,11 @@ std::vector<GridProposal> proposeGrids(const recognition::FacetGraph& graph,
       lo = lo.cwiseMin(p);
       hi = hi.cwiseMax(p);
     }
-    const double slack = grid->tessellationBand() + 1e-6 * std::max(1.0, (hi - lo).norm());
+    // The surface is within its bound of the flat tessellation, and that within
+    // the net's box; the rounding of evaluating it is all that is left. The
+    // sampled band and 1e-6 of the extent until 2026-09-29 - a box that could
+    // leave out a facet of the surface.
+    const double slack = grid->tessellationBound() + grid->evaluationBound();
     lo.array() -= slack;
     hi.array() += slack;
     for (std::size_t f = 0; f < loops.size(); f++) {

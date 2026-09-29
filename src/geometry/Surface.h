@@ -664,20 +664,33 @@ public:
    * indistinguishable from the declared surface at the resolution the model was
    * tessellated at, which is the most any mesh can say. */
   [[nodiscard]] double tessellationBand() const { return band; }
+  /*! How far this surface can stand off the flat tessellation of its net, in
+   * closed form: per cell, the column curves' departure from their chords - a
+   * cubic on every knot span, bounded by its Bezier form's convex hull - and
+   * half the cell's warp. A sound upper bound, which is what a sifting box
+   * needs, and loose by up to a third where the hull overreads a bump. Not
+   * what membership asks: an upper bound admits facets further off than any
+   * facet of the sweep can be, and tessellationBand() - sampled, three points
+   * a cell each way, a statistic - stays membership's figure until the sweep's
+   * facets are its own by identity (open item 40). */
+  [[nodiscard]] double tessellationBound() const { return bound; }
 
-  /*! The tolerance membership is answered at: the tessellation band, floored
-   * so that a grid whose interpolant is exact - a sweep along a straight line,
-   * where the cubic reproduces the stations and the band is zero - does not end
-   * up asking for equality to the last bit. Every caller deciding whether a
-   * point is on this surface uses this, or two of them disagree about the same
-   * point. */
   /*! Whether a cubic was actually fitted along the sweep. False when the grid
    * was too short for one, or when its stations repeat and leave no parameter -
    * in which case `evaluate` walks the declared points linearly, which is the
    * mesh again. */
   [[nodiscard]] bool interpolated() const { return !poles.empty(); }
 
-  [[nodiscard]] double membershipTolerance() const { return std::max(band, 1e-7); }
+  /*! The tolerance membership is answered at: the tessellation band, and the
+   * rounding of evaluating the surface, which is all that is left where the
+   * interpolant is exact - a sweep along a straight line, where the cubic
+   * reproduces the stations and the band is zero. It was floored at 1e-7 until
+   * 2026-09-29. Every caller deciding whether a point is on this surface uses
+   * this, or two of them disagree about the same point. */
+  [[nodiscard]] double membershipTolerance() const { return band + evaluationBound(); }
+  /*! How far an evaluation of this surface can be off by its own rounding:
+   * the forward error of `evaluate` over the largest point it combines. */
+  [[nodiscard]] double evaluationBound() const;
 
   /*! Whether `pt` is one of the points the generator emitted, at machine
    * precision (recognition::samePoint) - no projection, no tolerance to
@@ -739,9 +752,6 @@ protected:
    * point one with a net point is in its bucket or a neighbour, and is then
    * asked exactly. Rebuilt whenever the points move. */
   void reindex();
-  /*! How far an evaluation of this surface can be off by its own rounding:
-   * the forward error of `evaluate` over the largest point it combines. */
-  [[nodiscard]] double evaluationBound() const;
   /*! How many spans the profile has across it. One more than the number of
    * columns has gaps between them when the profile is declared closed, because
    * the strip from the last column back to the first is part of the sweep. */
@@ -759,6 +769,7 @@ protected:
   std::vector<double> uknots;   // clamped, averaged; empty when rows < 4
   std::vector<Vector3d> poles;  // rows * cols, parallel to net
   double band = 0;              // see tessellationBand()
+  double bound = 0;             // see tessellationBound()
 };
 
 /*! A profile swept along a helix, declared as the shape rather than as points.

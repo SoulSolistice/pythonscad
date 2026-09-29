@@ -4533,6 +4533,20 @@ present, never a chosen number:**
   deviation from its bilinear tessellation has a bound in closed form from the
   net's second differences; the band should be that bound, and the sifting box
   padded by it and the rounding, not 1e-6 of the extent.
+  **Landed in part 2026-09-29, and split on purpose.** The bound exists in closed
+  form (`GridSurface::tessellationBound`): the surface is linear across its
+  columns and so is a cell's bilinear patch, so their difference is a blend of
+  the column curves' departures from their chords - a cubic on every knot span,
+  bounded by its Bezier form's convex hull - plus half the warp. The sifting box
+  takes it with the evaluation rounding (was the sampled band and 1e-6 of the
+  extent - a box that could leave a facet of the surface out). Membership does
+  not: an upper bound admits facets further off than any facet of the sweep can
+  be - measured, 16 to 28% over the sampled band on the grid fixtures, and
+  step-declare-grid-two-bands took three more facets 0.70 off - and admitting
+  what is not the sweep's is misattribution. So membership keeps the sampled
+  band, a statistic, named as one, until the sweep's facets are its own by
+  identity (item 40) and what is left is cut facets (existence steps 5 to 7).
+  Its 1e-7 floor is the evaluation rounding now.
 - *The fitted route's 1e-7* (`Bands.cc`, fits matched to measured rims). A fit
   knows how well it fits: match at the fit's own residual.
 - *The fits* (`Fits.cc`). The eigenvalue ratios (1e-6: the normals lie in a

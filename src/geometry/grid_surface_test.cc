@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -254,6 +255,38 @@ TEST_CASE("a grid too short for a cubic still reports the surface it is", "[surf
   }
 }
 
+TEST_CASE("a grid's bound covers its column curves, not samples of them", "[surface][grid]")
+{
+  // A profile translated along z: every cell is a flat parallelogram, so the
+  // warp is zero and the band is the column curve's own departure from its
+  // chords - greatest mid-interval, where sampling a piece at its thirds reads
+  // it 12% short. The surface is the column curve swept straight, so its
+  // distance from the net's chords is that departure exactly, and the band has
+  // to cover it at every u, not at chosen ones.
+  const int rows = 8;
+  std::vector<Vector3d> net;
+  for (int i = 0; i < rows; i++) {
+    const double a = 0.5 * M_PI * i / (rows - 1);
+    net.emplace_back(10 * cos(a), 10 * sin(a), 0.0);
+    net.emplace_back(10 * cos(a), 10 * sin(a), 5.0);
+  }
+  const GridSurface grid(rows, 2, net);
+  REQUIRE(grid.interpolated());
+  double worst = 0;
+  for (int iu = 0; iu <= 20000; iu++) {
+    const Vector3d p = grid.evaluate(iu / 20000.0, 0.0);
+    double best = std::numeric_limits<double>::infinity();
+    for (int i = 0; i + 1 < rows; i++) {
+      const Vector3d a = grid.at(i, 0), b = grid.at(i + 1, 0);
+      const double t = std::clamp((p - a).dot(b - a) / (b - a).squaredNorm(), 0.0, 1.0);
+      best = std::min(best, (a + (b - a) * t - p).norm());
+    }
+    worst = std::max(worst, best);
+  }
+  CHECK(worst > 0);
+  CHECK(worst <= grid.tessellationBound());
+}
+
 TEST_CASE("a profile declared closed has a surface over its closing strip", "[surface][grid]")
 {
   // The strip from the last column back to the first is part of the sweep and
@@ -278,6 +311,59 @@ TEST_CASE("a profile declared closed has a surface over its closing strip", "[su
   }
   GridSurface open(rows, cols, net);
   GridSurface closed(rows, cols, net, true);
+
+  SECTION("the bound covers the surface everywhere, not only where the band sampled it")
+  {
+    // Every point of the surface lies within its tessellation band of a flat
+    // tessellation of the net, whichever diagonal each cell is split along -
+    // the band is a bound in closed form (a column piece less its chord in
+    // Bezier form, and half the warp), not a statistic over samples.
+    auto closest = [](const Vector3d& p, const Vector3d& a, const Vector3d& b, const Vector3d& c) {
+      // Ericson, Real-Time Collision Detection, 5.1.5
+      const Vector3d ab = b - a, ac = c - a, ap = p - a;
+      const double d1 = ab.dot(ap), d2 = ac.dot(ap);
+      if (d1 <= 0 && d2 <= 0) return a;
+      const Vector3d bp = p - b;
+      const double d3 = ab.dot(bp), d4 = ac.dot(bp);
+      if (d3 >= 0 && d4 <= d3) return b;
+      const double vc = d1 * d4 - d3 * d2;
+      if (vc <= 0 && d1 >= 0 && d3 <= 0) return Vector3d(a + ab * (d1 / (d1 - d3)));
+      const Vector3d cp = p - c;
+      const double d5 = ab.dot(cp), d6 = ac.dot(cp);
+      if (d6 >= 0 && d5 <= d6) return c;
+      const double vb = d5 * d2 - d1 * d6;
+      if (vb <= 0 && d2 >= 0 && d6 <= 0) return Vector3d(a + ac * (d2 / (d2 - d6)));
+      const double va = d3 * d6 - d5 * d4;
+      if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+        return Vector3d(b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))));
+      }
+      const double den = 1 / (va + vb + vc);
+      return Vector3d(a + ab * (vb * den) + ac * (vc * den));
+    };
+    const double band = closed.tessellationBound();
+    REQUIRE(band > 0);
+    for (const bool other_diagonal : {false, true}) {
+      double worst = 0;
+      for (int iu = 0; iu <= 240; iu++) {
+        for (int iv = 0; iv < 16 * cols; iv++) {
+          const Vector3d p = closed.evaluate(iu / 240.0, iv / (16.0 * cols));
+          double best = std::numeric_limits<double>::infinity();
+          for (int i = 0; i + 1 < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+              const int j2 = (j + 1) % cols;
+              const Vector3d p00 = closed.at(i, j), p10 = closed.at(i + 1, j);
+              const Vector3d p11 = closed.at(i + 1, j2), p01 = closed.at(i, j2);
+              const Vector3d q1 = other_diagonal ? closest(p, p00, p10, p01) : closest(p, p00, p10, p11);
+              const Vector3d q2 = other_diagonal ? closest(p, p10, p11, p01) : closest(p, p00, p11, p01);
+              best = std::min({best, (q1 - p).norm(), (q2 - p).norm()});
+            }
+          }
+          worst = std::max(worst, best);
+        }
+      }
+      CHECK(worst <= band);
+    }
+  }
 
   SECTION("a net point is found wherever it is carried, and a point beside it is not")
   {
