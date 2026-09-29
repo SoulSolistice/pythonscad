@@ -49,6 +49,7 @@ void dumpLedger(const ReportInputs& in)
     AnalyticFeatures::Provenance prov;
     prov.face_origin = &faceOrigin;
     prov.owned = &owned;
+    prov.face_surface = in.face_surface;  // identity - without it planeTakes hears none
     prov.declared = surfaces.size();
     auto fate_name = [](AnalyticFeatures::ClaimFate fate) {
       switch (fate) {
@@ -752,6 +753,78 @@ void reportArbitration(const ReportInputs& in)
         "precise than one that also covered them (the best that lost is %4$s), and %5$d are a tie "
         "between recognisers of equal precision, which nothing decides but the order they run in",
         int(checked), int(features.ledger.contested()), int(misheld), kind, int(features.ledger.tied()));
+    }
+  }
+
+  // Misattribution, enforced: a facet held on a surface when identity says its
+  // maker made it on another declared one - whatever evidence the holder had,
+  // declared record or fitted. The worst defect this exporter can write: it is
+  // valid geometry on the wrong surface, and nothing downstream can tell. Asked
+  // of every honoured claim, not only of the D0 regions (reportRegions).
+  {
+    AnalyticFeatures::Provenance identity;
+    identity.face_surface = in.face_surface;
+    std::size_t wrong = 0;
+    std::map<std::string, std::size_t> by_holder;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      for (const auto *c : features.ledger.claimants(f)) {
+        if (c->fate != AnalyticFeatures::ClaimFate::Honoured || c->surface_index >= surfaces.size())
+          continue;
+        if (!identity.madeElsewhere(f, c->surface_index)) continue;
+        wrong++;
+        by_holder[c->by != nullptr ? c->by : "?"]++;
+        break;
+      }
+    }
+    if (wrong > 0) {
+      LOG(message_group::Export_Error,
+          "STEP export: %1$d facet%2$s held on a surface other than the declared one %3$s maker made "
+          "%4$s on - misattributed (checklist C9, B5)",
+          int(wrong), wrong == 1 ? " is" : "s are", wrong == 1 ? "its" : "their",
+          wrong == 1 ? "it" : "them");
+      for (const auto& kv : by_holder)
+        LOG("STEP export:   %1$d by %2$s", int(kv.second), kv.first.c_str());
+    }
+  }
+
+  // Checklist C3, enforced: a claim of a weaker evidence class may not hold a
+  // facet one of a stronger class also claimed - neither as the admission that
+  // let it in nor as the veto that kept the stronger out, and not by running
+  // first either. Asked of the ledger per facet: the honoured claim's class
+  // against every claim that lost there. Where it happens a measurement
+  // decided D0-D2 ground, and the rule that refused the stronger claim is named.
+  {
+    using AnalyticFeatures::ClaimFate;
+    using AnalyticFeatures::EvidenceClass;
+    std::size_t weaker = 0;
+    std::map<std::string, std::size_t> by_rule;
+    for (std::size_t f = 0; f < loops.size(); f++) {
+      const auto claims = features.ledger.claimants(f);
+      EvidenceClass held = EvidenceClass::Unstated;
+      for (const auto *c : claims) {
+        if (c->fate != ClaimFate::Honoured || c->evidence == EvidenceClass::Unstated) continue;
+        if (held == EvidenceClass::Unstated || c->evidence < held) held = c->evidence;
+      }
+      if (held == EvidenceClass::Unstated) continue;
+      const AnalyticFeatures::Claim *stronger = nullptr;
+      for (const auto *c : claims) {
+        if (c->fate == ClaimFate::Honoured || c->evidence == EvidenceClass::Unstated) continue;
+        if (c->evidence < held && (stronger == nullptr || c->evidence < stronger->evidence))
+          stronger = c;
+      }
+      if (stronger == nullptr) continue;
+      weaker++;
+      by_rule[std::string(stronger->by != nullptr ? stronger->by : "?") + " lost to D" +
+              std::to_string(int(held) - 1) + ": " + (stronger->why != nullptr ? stronger->why : "?")]++;
+    }
+    if (weaker > 0) {
+      LOG(message_group::Export_Error,
+          "STEP export: %1$d facet%2$s held by a claim of a weaker evidence class than one that also "
+          "claimed %3$s - a measurement decided D0-D2 ground (checklist C3)",
+          int(weaker), weaker == 1 ? " is" : "s are", weaker == 1 ? "it" : "them");
+      for (const auto& kv : by_rule) {
+        LOG("STEP export:   %1$d: %2$s", int(kv.second), kv.first.c_str());
+      }
     }
   }
 }

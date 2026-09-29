@@ -51,13 +51,19 @@ standing off the chords by about that band, in the direction it should.
 # The ROUNDTRIP-APPROX line is unchanged, and that is the point of it. OpenCASCADE
 # was already splitting these faces on read and reporting the split numbers, so
 # what the exporter writes now is what a kernel was making of it all along.
-# One facet is refused first, as in step-declare-grid.py: its corner is further
-# off the fit than four times this claim's typical 0.0221.
-# EXPECT: 1 facets of the sweep are left faceted: a corner of each is further off the fit
-# EXPECT: 2 declared sweeps cover 240 facets over 1 boundary cycle
+# Two facets within the sweep's band were made by the cylinder's own solid
+# (original 3, which declares the cylinder; the sweep's is original 1): until
+# 2026-09-29 the sweep proposed them anyway, held one and had the other refused
+# by the four-times-the-median rule, and the exporter's misattribution check
+# found both. The sweep takes nothing identity gives to another declared
+# surface now, so neither is its facet, one is written on the cylinder, and no
+# facet of the sweep is refused.
+# EXPECT: 2 facets within a declared sweep's band were made on another declared surface, and left to it
+# EXPECT-NOT: facets of the sweep are left faceted: a corner of each is further off the fit
+# EXPECT: 2 declared sweeps cover 239 facets over 1 boundary cycle
 # EXPECT: the region is a strip, whose boundary stays inside the surface's rectangle
 # EXPECT-NOT: declared sweeps written as one face each
-# APPROX: 2 declared sweeps written as one face each, replacing 240 facets
+# APPROX: 2 declared sweeps written as one face each, replacing 239 facets
 # How far the fitted surface strays *between* the stations it was
 # interpolated through, which is the only place it can. A cubic passes
 # through its data exactly, so measuring at the data says nothing; what
@@ -69,7 +75,7 @@ standing off the chords by about that band, in the direction it should.
 # EXPECT: the fitted sweep passes within 0.0609 of the middle of every facet it claims, against a tessellation band of 0.1290
 # as in step-declare-grid.py, the facet the sweep refuses is claimed here instead: 290 rather than 289.
 # The same facets in two faces rather than nine - see the census below.
-# APPROX: 2 trimmed quadrics written as one face each, replacing 290 facets
+# APPROX: 2 trimmed quadrics written as one face each, replacing 291 facets
 # APPROX: 1 face round its axis between two rims closed by a seam along a ruling
 #
 # What a kernel makes of each export: the declared strip survives as a surface.

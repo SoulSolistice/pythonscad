@@ -42,7 +42,8 @@ namespace AnalyticFeatures {
  * every corner on the sweep and the centroid on it too; evidence D1 for a
  * declared sweep, D3 for one the approximation recovered. */
 std::vector<GridProposal> proposeGrids(const recognition::FacetGraph& graph,
-                                       const std::vector<std::shared_ptr<Surface>>& surfaces)
+                                       const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                       const Provenance& provenance, const recognition::D0Membership& d0)
 {
   const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
@@ -123,6 +124,19 @@ std::vector<GridProposal> proposeGrids(const recognition::FacetGraph& graph,
         }
         stray = std::max(stray, (grid->evaluate(vu, vv) - vertices[v]).norm());
       }
+      // D0 ground of another declared surface is that surface's, whichever pass
+      // runs first: the facet is on this sweep only to its tessellation band.
+      if (!d0.surfacesOf(f).empty()) {
+        proposal.d0_elsewhere++;
+        continue;
+      }
+      // And a facet identity gives to another declared surface is that one's,
+      // whatever band it also lies within (C9) - the misattribution the
+      // exporter's own check found here on 2026-09-29.
+      if (provenance.madeElsewhere(f, surface_index)) {
+        proposal.made_elsewhere++;
+        continue;
+      }
       proposal.facets.push_back(f);
       proposal.miss.push_back(miss);
       proposal.u.push_back(pu);
@@ -141,7 +155,7 @@ std::vector<Patch> recogniseGridPatches(const recognition::FacetGraph& graph,
                                         std::size_t declared_count)
 {
   return formGridPatches(graph, surfaces, consumed, report, ledger, declared_count,
-                         proposeGrids(graph, surfaces));
+                         proposeGrids(graph, surfaces, Provenance(), recognition::D0Membership()));
 }
 
 std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
@@ -159,6 +173,8 @@ std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
   std::vector<Patch> patches;
   std::vector<char> taken(loops.size(), 0);
   std::size_t corners_only = 0;               // every corner on the sweep, the middle not
+  std::size_t d0_elsewhere = 0;               // on the sweep and D0 ground of another surface
+  std::size_t made_elsewhere = 0;             // on the sweep and made on another declared surface
   double worst_claimed = 0.0;                 // the furthest a *claimed* facet's middle strays
   double claim_band = 0.0;                    // the allowance it was measured against
   double worst_at_u = 0.0;                    // and where along the sweep it happened
@@ -204,6 +220,8 @@ std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
     }
     if (proposal == nullptr) continue;
     corners_only += proposal->corners_only;
+    d0_elsewhere += proposal->d0_elsewhere;
+    made_elsewhere += proposal->made_elsewhere;
     worst_miss = std::max(worst_miss, proposal->worst_miss);
     missed_against = std::max(missed_against, proposal->missed_against);
     for (std::size_t k = 0; k < proposal->facets.size(); k++) {
@@ -558,6 +576,18 @@ std::vector<Patch> formGridPatches(const recognition::FacetGraph& graph,
       format("the fitted sweep passes within %.4f of the middle of every facet it claims, against a "
              "tessellation band of %.4f - worst at %.0f%% along the sweep",
              worst_claimed, claim_band, worst_at_u * 100.0));
+  }
+  if (d0_elsewhere > 0) {
+    report.push_back(
+      format("%d facets on a declared sweep are D0 ground of another declared surface, "
+             "and left to it",
+             int(d0_elsewhere)));
+  }
+  if (made_elsewhere > 0) {
+    report.push_back(
+      format("%d facets within a declared sweep's band were made on another declared "
+             "surface, and left to it",
+             int(made_elsewhere)));
   }
   if (corners_only > 0) {
     // Worth a line of its own: it is the difference between the facets a

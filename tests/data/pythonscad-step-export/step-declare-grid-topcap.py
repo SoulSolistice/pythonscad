@@ -34,8 +34,10 @@ derivations; they are not repeated.
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
 # EXPECT: a declared 60x4 cubic sweep claims 349 facets whole, 184 cut across it, within its tessellation band of 0.1290
 # EXPECT-NOT: declared sweeps written as one face each
-# APPROX: 2 declared sweeps written as one face each, replacing 299 facets
-# APPROX: 1 trimmed quadric written as one face each, replacing 231 facets
+# APPROX: 2 declared sweeps written as one face each, replacing 298 facets
+# APPROX: 1 trimmed quadric written as one face each, replacing 232 facets
+# (one facet more on the cylinder than before 2026-09-29: its maker is the
+# cylinder's solid, and the sweep no longer takes it - see step-declare-grid.py)
 # APPROX: 1 face round its axis between two rims closed by a seam along a ruling
 #
 # The cap survives as one face. Written as an assertion of its own because the

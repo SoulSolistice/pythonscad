@@ -470,11 +470,18 @@ bool runCircle(const Patch& patch, const Patch::Run& run, const std::vector<Vect
 struct BezierProposal {
   std::size_t surface_index = 0;
   std::vector<std::size_t> facets;  // on the patch, in facet order
+  std::size_t d0_elsewhere = 0;     // on the patch, and D0 ground of another surface - left to it
+  std::size_t made_elsewhere = 0;   // on the patch, and made on another declared surface - left to it
 };
 
-/*! Propose, purely: see BezierProposal. Reads no claim of any pass. */
+/*! Propose, purely: see BezierProposal. Reads no claim of any pass; `d0` is a
+ * function of the mesh, the declarations and provenance, and a facet in
+ * another surface's D0 region is not proposed - D1 does not take D0 ground
+ * (checklist C1, C5), whichever pass runs first. */
 std::vector<BezierProposal> proposeBezierPatches(const recognition::FacetGraph& graph,
-                                                 const std::vector<std::shared_ptr<Surface>>& surfaces);
+                                                 const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                                 const Provenance& provenance,
+                                                 const recognition::D0Membership& d0);
 
 /*! Find the facets which lie on each declared Bezier patch.
  *
@@ -511,11 +518,15 @@ struct GridProposal {
   std::vector<double> stray;        // worst corner off the fit, parallel
   std::size_t corners_only = 0;     // every corner on the sweep, the middle not
   double worst_miss = 0, missed_against = 0;
+  std::size_t d0_elsewhere = 0;    // on the sweep, and D0 ground of another surface - left to it
+  std::size_t made_elsewhere = 0;  // on the sweep, and made on another declared surface - left to it
 };
 
-/*! Propose, purely: see GridProposal. Reads no claim of any pass. */
+/*! Propose, purely: see GridProposal, and proposeBezierPatches for `d0`. */
 std::vector<GridProposal> proposeGrids(const recognition::FacetGraph& graph,
-                                       const std::vector<std::shared_ptr<Surface>>& surfaces);
+                                       const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                       const Provenance& provenance,
+                                       const recognition::D0Membership& d0);
 
 /*! Find the facets which lie on each declared grid, and split their boundaries.
  *
@@ -625,7 +636,8 @@ Result recogniseSurfacesOfRevolution(const Mesh& mesh,
 Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
                                      std::size_t declared_count,
-                                     const recognition::D0Membership *d0 = nullptr);
+                                     const recognition::D0Membership *d0 = nullptr,
+                                     const Provenance *identity = nullptr);
 
 /*! An arbitrary unit vector perpendicular to `norm`. */
 Vector3d perpendicular(const Vector3d& norm);

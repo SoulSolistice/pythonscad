@@ -245,7 +245,9 @@ bool runCircle(const Patch& patch, const Patch::Run& run, const std::vector<Vect
  * it reads the graph and the surfaces and no claim of any pass. Membership is
  * every corner on the patch; evidence D1. */
 std::vector<BezierProposal> proposeBezierPatches(const recognition::FacetGraph& graph,
-                                                 const std::vector<std::shared_ptr<Surface>>& surfaces)
+                                                 const std::vector<std::shared_ptr<Surface>>& surfaces,
+                                                 const Provenance& provenance,
+                                                 const recognition::D0Membership& d0)
 {
   const Mesh& mesh = graph.mesh();
   const std::vector<Vector3d>& vertices = *mesh.vertices;
@@ -290,6 +292,15 @@ std::vector<BezierProposal> proposeBezierPatches(const recognition::FacetGraph& 
         }
       }
       if (!on) continue;
+      // D0 ground of another declared surface is that surface's (see Grids.cc).
+      if (!d0.surfacesOf(f).empty()) {
+        proposal.d0_elsewhere++;
+        continue;
+      }
+      if (provenance.madeElsewhere(f, surface_index)) {  // C9, see Grids.cc
+        proposal.made_elsewhere++;
+        continue;
+      }
       proposal.facets.push_back(f);
     }
     out.push_back(std::move(proposal));
@@ -303,8 +314,9 @@ std::vector<Patch> recogniseBezierPatches(const recognition::FacetGraph& graph,
                                           std::vector<std::string>& report, ClaimLedger *ledger,
                                           std::size_t declared_count)
 {
-  return formBezierPatches(graph, surfaces, consumed, report, ledger, declared_count,
-                           proposeBezierPatches(graph, surfaces));
+  return formBezierPatches(
+    graph, surfaces, consumed, report, ledger, declared_count,
+    proposeBezierPatches(graph, surfaces, Provenance(), recognition::D0Membership()));
 }
 
 std::vector<Patch> formBezierPatches(const recognition::FacetGraph& graph,
@@ -321,6 +333,23 @@ std::vector<Patch> formBezierPatches(const recognition::FacetGraph& graph,
 
   std::vector<Patch> patches;
   std::vector<char> taken(loops.size(), 0);
+  std::size_t d0_elsewhere = 0, made_elsewhere = 0;
+  for (const auto& p : proposals) {
+    d0_elsewhere += p.d0_elsewhere;
+    made_elsewhere += p.made_elsewhere;
+  }
+  if (made_elsewhere > 0) {
+    report.push_back(
+      format("%d facets on a declared Bezier patch were made on another declared "
+             "surface, and left to it",
+             int(made_elsewhere)));
+  }
+  if (d0_elsewhere > 0) {
+    report.push_back(
+      format("%d facets on a declared Bezier patch are D0 ground of another declared "
+             "surface, and left to it",
+             int(d0_elsewhere)));
+  }
 
   for (std::size_t surface_index = 0; surface_index < surfaces.size(); surface_index++) {
     const auto& surface = surfaces[surface_index];

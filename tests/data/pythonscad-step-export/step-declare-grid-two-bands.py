@@ -48,11 +48,10 @@ makes it fire.
 # And on the CGAL backend, a planar face whose bound leaves its plane - open
 # item 33, as in step-band-family.
 # KNOWN-EXPORT-ERROR: assert a plane one of their own bounds is not in
-# And at the approximation tier a declared sweep holds 3 facets of a cylinder's
-# D0 region - their maker declared the cylinder, and the sweep's pass ran first:
-# the grant between claimants is still pass order, not provenance. Handover
-# section 6, "provenance in the grant".
-# KNOWN-EXPORT-ERROR: held for a different surface than the one their maker declared them on
+# At the approximation tier a declared sweep held 3 facets of a cylinder's D0
+# region - their maker declared the cylinder, and the sweep's pass ran first.
+# Fixed 2026-09-29: a D1 proposer takes no facet of another surface's D0 region,
+# whichever pass runs first, and the marking announced it.
 from pythonscad import *
 import math
 

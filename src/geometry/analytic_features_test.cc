@@ -1238,8 +1238,8 @@ TEST_CASE("proposals do not depend on what is held or on the order proposers run
   // the proposal is the same, field for field.
   const Result bands = recogniseSurfacesOfRevolution(graph, surfaces, 1e-6, surfaces.size());
   CHECK(!bands.bands.empty());
-  const std::vector<GridProposal> grids = proposeGrids(graph, surfaces);
-  const std::vector<BezierProposal> beziers = proposeBezierPatches(graph, surfaces);
+  const std::vector<GridProposal> grids = proposeGrids(graph, surfaces, provenance, no_d0);
+  const std::vector<BezierProposal> beziers = proposeBezierPatches(graph, surfaces, provenance, no_d0);
   const std::vector<QuadricProposal> again =
     proposeQuadrics(graph, surfaces, provenance, no_d0, smooth, false);
   CHECK(grids.empty());

@@ -4655,6 +4655,33 @@ not state, now checklist E7, E8 and C9 made universal:
   column and ownership presence let a declared plane take any facet wholly on it,
   before asking what its maker made it on. Now one rule, `recognition::planeTakes`,
   in all three. **Open:** the arbiter's grant is still pass order.
+- **Misattribution, surveyed and enforced 2026-09-29.** Every honoured claim
+  is now held against identity by an `EXPORT-ERROR` ("misattributed"), and the
+  first survey with it found one culprit in five exports: the sweep proposer,
+  which never asked identity, held facets whose maker made them on another
+  declared surface (one in each of step-declare-grid, -strip, -topcap, two each
+  on lid10 and the bayonet, approximation tier). Every proposer now refuses
+  such a facet. The same facets had read as C3 violations - the sweep's claim
+  "declined" by the four-times-the-median rule and a D4 quadric face holding
+  them - and both errors went together: the D4 face was on the facets' own
+  surface, and the sweep had no business proposing them.
+- **The conics cut by a chord plane, chased 2026-09-29**
+  (`scripts/step-diagnostics/conic-chord-origin.py`). PromoteCurves counts
+  "facets of something curved" by a 30 degree normal test with a finite
+  difference, so its figure (51 on lid10) is a measurement; the file holds 14
+  such edges on lid10 and 11 on f04, and on both every plane beside one is a
+  declared sweep's facet, not the quadric's (corners 0.28 to 1.7 off it),
+  declined by the grid pass's four-times-the-median rule. Five whys: the sweep
+  facet is declined because a cut corner of it is off the fit; the corner is
+  off because the boolean cut the two tessellations and nothing states where a
+  cut corner belongs; so the facet is written as its plane, and the quadric's
+  boundary with it as the quadric cut by that chord plane - the wrong curve,
+  where the model has the sweep-bore crossing. Root: existence steps 5 to 7
+  (the corner where the surfaces that exist there meet) and E8 (the sweep's
+  triangles tagged by the sweep - today the tagger cannot tag them at all, and
+  one whose corners lie exactly on a declared cylinder is tagged the
+  cylinder's). Refusing the conics locally is refuted (code 17 42 to 198 on
+  lid10, 2026-09-21).
 - **Identity is minted by the maker (E8) - open, not started.** Where a facet's
   surface is minted (`ManifoldUtils::TriangleTagger`, and `facetedEnvelope`'s
   `record_of`), it is measured: the one face-declaring record a triangle's

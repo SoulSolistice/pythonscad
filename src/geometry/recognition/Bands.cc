@@ -142,7 +142,8 @@ void settleSeams(std::vector<Band>& bands, const std::vector<Vector3d>& vertices
 
 Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
                                      const std::vector<std::shared_ptr<Surface>>& surfaces, double tol,
-                                     std::size_t declared_count, const recognition::D0Membership *d0)
+                                     std::size_t declared_count, const recognition::D0Membership *d0,
+                                     const Provenance *identity)
 {
   // What decided a claim of this pass on `f` for the surface at `index`: the
   // facet's D0 membership where it has one, otherwise the pass's own evidence -
@@ -459,7 +460,11 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
       // below run, and it matches fitted records only.
       // Whether identity puts `f` in the D0 region of a declared surface and
       // not in `record`'s: its maker made it on another surface.
+      // Identity first, as the maker states it (C9); the D0 regions besides,
+      // which also hold facets whose maker owns a surface without having tagged
+      // them.
       auto made_elsewhere = [&](std::size_t record, std::size_t f) {
+        if (identity != nullptr && identity->madeElsewhere(f, record)) return true;
         if (d0 == nullptr) return false;
         const std::vector<std::size_t> of = d0->surfacesOf(f);
         return !of.empty() && std::find(of.begin(), of.end(), record) == of.end();
@@ -680,7 +685,9 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
               return false;
             }
           }
-          return true;
+          // A fit takes nothing its maker made on a declared surface: an index
+          // past every declared one names none, so this asks "made on any" (C9).
+          return identity == nullptr || !identity->madeElsewhere(f, surfaces.size());
         };
         {
           std::size_t which = 0, which_top = 0;

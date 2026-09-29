@@ -158,7 +158,7 @@ void runBands(Context& ctx)
   // makes those two cases look identical - silence.
   if (surfaces.empty()) LOG("STEP export: no analytic surfaces were declared");
   features = AnalyticFeatures::recogniseSurfacesOfRevolution(graph, surfaces, model_tol, surfaces.size(),
-                                                             &ctx.d0);
+                                                             &ctx.d0, &ctx.provenance);
 }
 
 /*! The fit stage, under the approximation flag: surfaces the model did not
@@ -302,8 +302,8 @@ void runFits(Context& ctx)
       // Re-run with the fits in hand. Cheaper than threading them through the
       // pass that has already run, and it means a fitted surface goes through
       // exactly the checks a declared one does.
-      features = AnalyticFeatures::recogniseSurfacesOfRevolution(graph, effective, model_tol,
-                                                                 surfaces.size(), &ctx.d0);
+      features = AnalyticFeatures::recogniseSurfacesOfRevolution(
+        graph, effective, model_tol, surfaces.size(), &ctx.d0, &ctx.provenance);
       std::size_t lost = 0, demoted = 0;
       const std::vector<char> rerun_held = ctx.arbiter.held();
       for (std::size_t f = 0; f < exact_consumed.size() && f < rerun_held.size(); f++) {
@@ -384,8 +384,9 @@ void runPropose(Context& ctx)
 {
   const FacetGraph& graph = ctx.graph;
   const std::vector<std::shared_ptr<Surface>>& effective = ctx.effective;
-  ctx.bezier_proposals = AnalyticFeatures::proposeBezierPatches(graph, effective);
-  ctx.grid_proposals = AnalyticFeatures::proposeGrids(graph, effective);
+  ctx.bezier_proposals =
+    AnalyticFeatures::proposeBezierPatches(graph, effective, ctx.provenance, ctx.d0);
+  ctx.grid_proposals = AnalyticFeatures::proposeGrids(graph, effective, ctx.provenance, ctx.d0);
   ctx.quadric_proposals = AnalyticFeatures::proposeQuadrics(graph, effective, ctx.provenance, ctx.d0,
                                                             ctx.smooth_angle, ctx.in.approximate);
   for (const auto& proposal : ctx.quadric_proposals) {

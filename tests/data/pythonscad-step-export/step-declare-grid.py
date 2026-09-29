@@ -88,16 +88,18 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # EXPECT: a declared 60x4 cubic sweep claims 349 facets whole, 184 cut across it, within its tessellation band of 0.1290
 # EXPECT: 49 facets have every corner on the sweep and their middle off it
 # EXPECT: a sweep closing around its profile was cut into 2 faces, so that no face crosses the surface's seam
-# One facet of the claim is refused before this: a corner of it is further off
-# the fit than four times what this claim is typically off by. See
-# recogniseGridPatches - a cubic interpolates its own stations, so only a corner
-# a boolean made can be off the surface at all, and one that is off by an order
-# more than its neighbours is where the fit gave up rather than where it is
-# merely approximate.
-# EXPECT: 1 facets of the sweep are left faceted: a corner of each is further off the fit
-# EXPECT: 2 declared sweeps cover 299 facets over 1 boundary cycle, split into 402 runs of up to 7 mesh edges, 0 unresolved
+# Two facets within the sweep's band were made by the cylinder's own solid
+# (original 3, which declares the cylinder; the sweep's is original 1): until
+# 2026-09-29 the sweep proposed them anyway, held one and had the other refused
+# by the four-times-the-median rule, and the exporter's misattribution check
+# found both. The sweep takes nothing identity gives to another declared
+# surface now, so neither is its facet, one is written on the cylinder, and no
+# facet of the sweep is refused.
+# EXPECT: 2 facets within a declared sweep's band were made on another declared surface, and left to it
+# EXPECT-NOT: facets of the sweep are left faceted: a corner of each is further off the fit
+# EXPECT: 2 declared sweeps cover 298 facets over 1 boundary cycle, split into 403 runs of up to 6 mesh edges, 0 unresolved
 # EXPECT-NOT: declared sweeps written as one face each
-# APPROX: 2 declared sweeps written as one face each, replacing 299 facets
+# APPROX: 2 declared sweeps written as one face each, replacing 298 facets
 # How far the fitted surface strays *between* the stations it was
 # interpolated through, which is the only place it can. A cubic passes
 # through its data exactly, so measuring at the data says nothing; what
@@ -113,7 +115,7 @@ average normal displacement of about 0.02, against a tessellation band of 0.1290
 # the pieces the boolean left were five faces - edges the model does not have
 # (checklist D1).
 # the one facet the sweep refuses is on a declared cylinder too, so it is not lost - it is claimed here instead, which is why this is 231 and not 230.
-# APPROX: 1 trimmed quadric written as one face each, replacing 231 facets
+# APPROX: 1 trimmed quadric written as one face each, replacing 232 facets
 # APPROX: 1 face round its axis between two rims closed by a seam along a ruling
 # EXPECT: its facets lie over 2 of the profile's 4 spans - the region is a strip, whose boundary stays inside the surface's rectangle
 #
