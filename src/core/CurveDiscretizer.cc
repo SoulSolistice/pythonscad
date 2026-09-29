@@ -153,7 +153,6 @@ std::optional<int> CurveDiscretizer::getCircularSegmentCount(double r, double an
   return std::max(1, static_cast<int>(std::ceil(result)));
 }
 
-
 std::optional<int> CurveDiscretizer::getCircularSegmentCountAlt(double r, double angle_degrees) const
 {
   // getCircularSegmentCount creates absolutely too less segments.
@@ -164,7 +163,7 @@ std::optional<int> CurveDiscretizer::getCircularSegmentCountAlt(double r, double
       std::isnan(angle_degrees))
     return {};
 
-  double  result =  std::max(fn, std::max(360.0 / fa, r * 2 * M_PI*angle_degrees/360.0 / fs));
+  double result = std::max(fn, std::max(360.0 / fa, r * 2 * M_PI * angle_degrees / 360.0 / fs));
   return std::max(1, static_cast<int>(std::ceil(result)));
 }
 
@@ -371,12 +370,24 @@ std::optional<int> CurveDiscretizer::getDiagonalSlices(double delta_sqr, double 
 // Insert vertices for segments interpolated between v0 and v1.
 // The last vertex (t==1) is not added here to avoid duplicate vertices,
 // since it will be the first vertex of the *next* edge.
-void add_segmented_edge(Outline2d& o, const Vector2d& v0, const Vector2d& v1, unsigned int edge_segments)
+// The edge from v0 to v1 in `edge_segments` pieces, each named `id` where the
+// source outline named its edges: a piece of an edge is still the edge its
+// maker made (checklist E6), and splitting must not lose that.
+void add_segmented_edge(Outline2d& o, const Vector2d& v0, const Vector2d& v1, unsigned int edge_segments,
+                        const EdgeId *id)
 {
   for (unsigned int j = 0; j < edge_segments; ++j) {
     double t = static_cast<double>(j) / edge_segments;
     o.vertices.push_back((1 - t) * v0 + t * v1);
+    if (id != nullptr) o.edge_ids.push_back(*id);
   }
+}
+
+// The name of edge i of `o` - from vertex i to vertex i + 1 - or null where
+// its maker named none.
+const EdgeId *nameOf(const Outline2d& o, std::size_t i)
+{
+  return o.hasEdgeIds() ? &o.edge_ids[i] : nullptr;
 }
 
 // While total outline segments < fn, increment segment_count for edge with largest
@@ -471,7 +482,7 @@ Outline2d splitOutlineByFn(const Outline2d& o, const double twist, const double 
   v0 = o.vertices[0];
   for (size_t i = 1; i <= num_vertices; ++i) {
     Vector2d v1 = o.vertices[i % num_vertices];
-    add_segmented_edge(o2, v0, v1, segment_counts[i - 1]);
+    add_segmented_edge(o2, v0, v1, segment_counts[i - 1], nameOf(o, i - 1));
     v0 = v1;
   }
 
@@ -505,7 +516,7 @@ Outline2d splitOutlineByFs(const Outline2d& o, const double twist, const double 
         max_edgelen = std::max(max_edgelen, edgelen);
       }
       auto edge_segments = static_cast<unsigned int>(std::ceil(max_edgelen / fs));
-      add_segmented_edge(o2, v0, v1, edge_segments);
+      add_segmented_edge(o2, v0, v1, edge_segments, nameOf(o, i - 1));
       v0 = v1;
     }
   } else {  // uniform scaling
@@ -514,7 +525,7 @@ Outline2d splitOutlineByFs(const Outline2d& o, const double twist, const double 
       Vector2d v1 = o.vertices[i % num_vertices];
       unsigned int edge_segments =
         static_cast<unsigned int>(std::ceil((v1 - v0).norm() * max_scale / fs));
-      add_segmented_edge(o2, v0, v1, edge_segments);
+      add_segmented_edge(o2, v0, v1, edge_segments, nameOf(o, i - 1));
       v0 = v1;
     }
   }

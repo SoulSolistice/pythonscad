@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 
+#include "core/CurveDiscretizer.h"
 #include "geometry/ClipperUtils.h"
 #include "geometry/HullOfRevolution.h"
 #include "geometry/Surface.h"
@@ -551,4 +552,32 @@ TEST_CASE("Profile2d: a profile states every edge only where its makers named th
   decls[first] = EdgeDecl{EdgeKind::Arc, -1};
   CHECK_FALSE(
     statesEveryEdge(classifyProfile({ring}, {Arc2d{Vector2d(0., 0.), 10.}}, {}, {ids}, &decls)));
+}
+
+TEST_CASE("splitting an outline keeps its edges' names", "[sweep-table][e6]")
+{
+  // linear_extrude splits a profile's edges where it twists, scales unevenly or
+  // is asked for segments; a piece of an edge is still the edge its maker made,
+  // and the walls built on the pieces are named by it (open item 40).
+  Outline2d square;
+  square.vertices = {{0., 0.}, {10., 0.}, {10., 10.}, {0., 10.}};
+  const EdgeId first = reserveEdgeIds(4);
+  square.edge_ids = {first, first + 1, first + 2, first + 3};
+  const Outline2d split = CurveDiscretizer(12.0).splitOutline(square, 0.0, 1.0, 1.0, 1, 12);
+  REQUIRE(split.vertices.size() > square.vertices.size());
+  REQUIRE(split.hasEdgeIds());
+  for (std::size_t i = 0; i < split.vertices.size(); i++) {
+    // each piece lies along the edge it is named by
+    const Vector2d a = split.vertices[i], b = split.vertices[(i + 1) % split.vertices.size()];
+    const std::size_t k = std::size_t(split.edge_ids[i] - first);
+    REQUIRE(k < 4);
+    const Vector2d p0 = square.vertices[k], p1 = square.vertices[(k + 1) % 4];
+    const Vector2d d = p1 - p0;
+    CHECK(fabs(d[0] * (a[1] - p0[1]) - d[1] * (a[0] - p0[0])) == 0);
+    CHECK(fabs(d[0] * (b[1] - p0[1]) - d[1] * (b[0] - p0[0])) == 0);
+  }
+  // and an outline nobody named stays unnamed, not named by accident
+  Outline2d unnamed;
+  unnamed.vertices = square.vertices;
+  CHECK_FALSE(CurveDiscretizer(12.0).splitOutline(unnamed, 0.0, 1.0, 1.0, 1, 12).hasEdgeIds());
 }
