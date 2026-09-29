@@ -4,6 +4,7 @@
 // needs a node, a mesh or a backend.
 #include "geometry/Profile2d.h"
 
+#include <algorithm>
 #include <catch2/catch_all.hpp>
 #include <cmath>
 #include <memory>
@@ -14,6 +15,7 @@
 #include "geometry/HullOfRevolution.h"
 #include "geometry/Surface.h"
 #include "geometry/SweptSurfaces.h"
+#include "geometry/recognition/Exact.h"
 
 namespace {
 
@@ -580,4 +582,81 @@ TEST_CASE("splitting an outline keeps its edges' names", "[sweep-table][e6]")
   Outline2d unnamed;
   unnamed.vertices = square.vertices;
   CHECK_FALSE(CurveDiscretizer(12.0).splitOutline(unnamed, 0.0, 1.0, 1.0, 1, 12).hasEdgeIds());
+}
+
+TEST_CASE("an edge name on two records names neither", "[sweep-table][e8]")
+{
+  // Two edges of different walls carrying one name: the sweep cannot say which
+  // record the name means, and must not pick one.
+  const VectorOfVector2d square{{0., 0.}, {10., 0.}, {10., 10.}, {0., 10.}};
+  const EdgeId first = reserveEdgeIds(3);
+  EdgeDecls decls;
+  for (EdgeId i = 0; i < 3; i++) decls[first + i] = EdgeDecl{EdgeKind::Line, -1};
+  const Profile2d profile =
+    classifyProfile({square}, {}, {}, {{first, first, first + 1, first + 2}}, &decls);
+  Extrusion sweep;
+  sweep.height = Vector3d(0., 0., 5.);
+  SweptFaces faces;
+  const auto surfaces = extrude(profile, sweep, nullptr, &faces);
+  REQUIRE(faces.walls.count(first) == 1);
+  CHECK(faces.walls.at(first) == -1);
+  REQUIRE(faces.walls.count(first + 1) == 1);
+  CHECK(faces.walls.at(first + 1) >= 0);
+  CHECK(faces.near_end >= 0);
+  CHECK(faces.far_end >= 0);
+  CHECK(faces.near_end != faces.far_end);
+}
+
+TEST_CASE("revolve says which record each edge's wall and each end face is made on", "[sweep-table][e8]")
+{
+  // The stepped tube (lines: a floor, walls, a taper) and a torus's chords,
+  // turned a quarter: every named edge's wall is a record that holds the edge's
+  // two ends turned to any angle, exactly; the start plane holds the profile at
+  // the start and the end plane at the end. Derived from where the points go,
+  // not from which row of the table made the record.
+  const Arc2d ring{Vector2d(30., 8.), 3.};
+  const Profile2d profile = declared({kSteppedTube, sampled(Vector2d(30., 8.), 3., 12)}, {ring}, {});
+  Revolution sweep;
+  sweep.start = 10.;
+  sweep.angle = 90.;
+  SweptFaces faces;
+  const auto surfaces = revolve(profile, sweep, nullptr, &faces);
+  auto turned = [](const Vector2d& p, double degrees) {
+    const double a = degrees * M_PI / 180.0;
+    return Vector3d(p[0] * cos(a), p[0] * sin(a), p[1]);
+  };
+  std::size_t walls = 0;
+  for (const auto& loop : profile.loops) {
+    for (const ProfileEdge& e : loop) {
+      REQUIRE(e.id != 0);
+      REQUIRE(faces.walls.count(e.id) == 1);
+      const int k = faces.walls.at(e.id);
+      if (k < 0) continue;  // an edge along the axis turns into nothing
+      walls++;
+      const Surface *record = surfaces[std::size_t(k)].get();
+      CHECK(record->declaresFace());
+      for (const double at : {10., 40., 100.}) {
+        CHECK(recognition::onExactly(record, turned(e.a, at)));
+        CHECK(recognition::onExactly(record, turned(e.b, at)));
+      }
+    }
+  }
+  CHECK(walls == profile.loops[0].size() + profile.loops[1].size());
+  REQUIRE(faces.near_end >= 0);
+  REQUIRE(faces.far_end >= 0);
+  const Surface *start = surfaces[std::size_t(faces.near_end)].get();
+  const Surface *end = surfaces[std::size_t(faces.far_end)].get();
+  for (const auto& p : kSteppedTube) {
+    CHECK(recognition::onExactly(start, turned(p, 10.)));
+    CHECK(recognition::onExactly(end, turned(p, 100.)));
+  }
+  CHECK_FALSE(recognition::onExactly(start, turned(kSteppedTube[0], 100.)));
+
+  // A full turn has no end faces.
+  sweep.start = 0.;
+  sweep.angle = 360.;
+  SweptFaces whole;
+  (void)revolve(profile, sweep, nullptr, &whole);
+  CHECK(whole.near_end == -1);
+  CHECK(whole.far_end == -1);
 }

@@ -158,7 +158,7 @@ VectorOfVector2d alterprofile(VectorOfVector2d vertices, double scalex, double s
  * which is exactly how a screw thread is built, so this is not a corner case.
  */
 static void declareSurfacesOfRevolution(const RotateExtrudeNode& node, const Polygon2d& poly,
-                                        PolySet& polyset)
+                                        PolySet& polyset, SweptFaces& faces, std::size_t& first_record)
 {
   // And its solid, where the revolution can state it - see
   // declareExtrudedSurfaces: named edges, recorded curves, no station unlike
@@ -178,10 +178,48 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node, const Pol
   sweep.start = node.start;
   sweep.angle = node.angle;
   bool every_curve = false;
-  for (auto& surface : revolve(profile, sweep, &every_curve)) {
+  first_record = polyset.surfaces.size();
+  for (auto& surface : revolve(profile, sweep, &every_curve, &faces)) {
     polyset.surfaces.push_back(std::move(surface));
   }
   if (every_curve && statesEveryEdge(profile)) polyset.solid_tree = SolidTree::faceted(node.toString());
+}
+
+/*! Name each triangle by the record it is made on (checklist E8, open item
+ * 40): a wall by the record its profile edge turns into, looked up by the
+ * edge's name, which `wall_edges` holds for each wall triangle as it was
+ * emitted; each end face of a partial turn by its plane. A wall whose edge
+ * nobody named, or whose record the turn did not make, is named nothing - and
+ * so are the end faces of a piece that is not the whole turn, whose ends are
+ * not the turn's ends.
+ *
+ * The end faces follow the walls: the first half on the ring the turn starts
+ * from, the second on the ring it ends on (assemblePolySetForManifold). Where
+ * the count does not come out so, every name would land on the wrong
+ * triangle, and none is given. */
+static void nameRevolvedFacets(PolySet& polyset, const std::vector<EdgeId>& wall_edges,
+                               const SweptFaces& faces, std::size_t first_record, bool whole_turn)
+{
+  polyset.surfaces = stampTags(polyset.surfaces);
+  auto tag_of = [&](int record) -> uint32_t {
+    if (record < 0) return 0;
+    const std::size_t at = first_record + std::size_t(record);
+    if (at >= polyset.surfaces.size()) return 0;
+    const auto& tags = polyset.surfaces[at]->tags;
+    return tags.empty() ? 0 : tags.back();
+  };
+  const std::size_t walls = wall_edges.size();
+  if (walls > polyset.indices.size() || (polyset.indices.size() - walls) % 2 != 0) return;
+  std::vector<uint32_t> tags;
+  tags.reserve(polyset.indices.size());
+  for (const EdgeId id : wall_edges) {
+    const auto it = id == 0 ? faces.walls.end() : faces.walls.find(id);
+    tags.push_back(it == faces.walls.end() ? 0 : tag_of(it->second));
+  }
+  const std::size_t ends = (polyset.indices.size() - walls) / 2;
+  tags.insert(tags.end(), ends, whole_turn ? tag_of(faces.near_end) : 0);
+  tags.insert(tags.end(), ends, whole_turn ? tag_of(faces.far_end) : 0);
+  polyset.surface_tags = std::move(tags);
 }
 
 std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const Polygon2d& poly,
@@ -219,6 +257,9 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   std::vector<Color4f> colors;
   indices.reserve(slice_stride * num_rings * 2);  // sides + endcaps if needed
   color_indices.reserve(slice_stride * num_rings * 2);
+  // Per wall triangle kept, the name of the profile edge it was made from.
+  std::vector<EdgeId> wall_edges;
+  wall_edges.reserve(slice_stride * num_rings * 2);
 
   for (unsigned int j = fragstart; j <= fragend; ++j) {
     Vector3d dv = node.v * j / fragments;
@@ -318,6 +359,7 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
       assert(outline.vertices.size() > 2);
       int color_ind = colors.size();
       colors.push_back(outline.color.unpaintedIfFullyTransparent());  // TODO effizienter
+      EdgeId edge = 0;  // the edge the triangles below are made from
       // Welded through canonical, and a triangle whose corners are no longer
       // distinct is not emitted - that is the whole of the fix. The colour of a
       // facet follows the facet, so it is pushed per triangle kept rather than
@@ -329,10 +371,12 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
         if (a == b || b == c || a == c) return;
         indices.push_back({a, b, c});
         color_indices.push_back(color_ind);
+        wall_edges.push_back(edge);
       };
       for (size_t i = 1; i <= outline.vertices.size(); ++i) {
         const int curr_idx = curr_outline + (i % outline.vertices.size());
         const int prev_idx = curr_outline + i - 1;
+        edge = outline.hasEdgeIds() ? outline.edge_ids[i - 1] : 0;
         if (flip_faces) {
           add(prev_slice + prev_idx, curr_slice + curr_idx, prev_slice + curr_idx);
           add(curr_slice + curr_idx, prev_slice + prev_idx, curr_slice + prev_idx);
@@ -352,7 +396,11 @@ std::unique_ptr<PolySet> rotatePolygonSub(const RotateExtrudeNode& node, const P
   auto result = assemblePolySetForManifold(poly, vertices, indices, colors, color_indices, closed,
                                            node.convexity, slice_stride * num_sections, flip_faces);
   if (result != nullptr) {
-    declareSurfacesOfRevolution(node, poly, *result);
+    SweptFaces faces;
+    std::size_t first_record = 0;
+    declareSurfacesOfRevolution(node, poly, *result, faces, first_record);
+    nameRevolvedFacets(*result, wall_edges, faces, first_record,
+                       fragstart == 0 && fragend == std::size_t(fragments));
   }
   return result;
 }

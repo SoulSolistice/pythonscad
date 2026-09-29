@@ -41,6 +41,7 @@ Profile2d classifyProfile(const std::vector<VectorOfVector2d>& loops, std::vecto
           e.kind = it->second.kind;
           e.record = it->second.record;
           e.declared = true;
+          e.id = ids[l][i];
           edges.push_back(e);
           continue;
         }

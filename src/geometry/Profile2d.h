@@ -45,6 +45,9 @@ struct ProfileEdge {
   /*! Whether the maker said what this edge is, rather than its ends being
    * measured against the records. */
   bool declared = false;
+  /*! The name its maker gave it, where it is declared; 0 otherwise. What a
+   * sweep's facets are named by (SweptFaces). */
+  EdgeId id = 0;
 };
 
 /*! Every edge of every closed outline, classified, together with the records the

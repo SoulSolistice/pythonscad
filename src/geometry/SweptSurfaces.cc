@@ -13,6 +13,18 @@ namespace {
 using recognition::forwardError;
 using Surfaces = std::vector<std::shared_ptr<Surface>>;
 
+/*! Add `surface` as addSurfaceUnique does, and say where the record it is made
+ * on is kept: its own place, or its twin's - the first record describing the
+ * same surface, which is the one addSurfaceUnique gave its declarers to. */
+int addKept(Surfaces& out, const std::shared_ptr<Surface>& surface)
+{
+  addSurfaceUnique(out, surface);
+  for (std::size_t i = 0; i < out.size(); i++) {
+    if (out[i] != nullptr && out[i]->sameAs(*surface)) return int(i);
+  }
+  return -1;
+}
+
 // ---------------------------------------------------------------------------
 // Revolution
 // ---------------------------------------------------------------------------
@@ -50,18 +62,21 @@ struct RevolutionRecords {
 
   Vector3d at(double level) const { return sweep.origin + sweep.axis * level; }
 
-  void cylinder(const Vector2d& p, bool face)
+  /*! The cylinder of radius p.x, and where its record is kept; -1 where the
+   * one kept is evidence another radius put there and this one is too. */
+  int cylinder(const Vector2d& p, bool face)
   {
     auto record = std::make_shared<CylinderSurface>(at(p[1]), sweep.axis, p[0]);
     record->evidence_only = !face;
     for (const double r : radii) {
       if (same(r, p[0])) {
-        if (face) addSurfaceUnique(out, record);  // upgrades the kept record to a face
-        return;
+        if (face) return addKept(out, record);  // upgrades the kept record to a face
+        return -1;
       }
     }
     radii.push_back(p[0]);
-    addSurfaceUnique(out, record);
+    const int kept = addKept(out, record);
+    return face ? kept : -1;
   }
 };
 
@@ -82,7 +97,7 @@ void revolveVertex(const Vector2d& p, RevolutionRecords& records)
  *
  * Only a straight edge: a chord of a curve sweeps a piece of that curve's
  * surface, which the curve's record declares (revolveArc). */
-void revolveLine(const ProfileEdge& e, RevolutionRecords& records)
+int revolveLine(const ProfileEdge& e, RevolutionRecords& records)
 {
   const Vector2d& a = e.a;
   const Vector2d& b = e.b;
@@ -90,15 +105,12 @@ void revolveLine(const ProfileEdge& e, RevolutionRecords& records)
     // A plane at the level the profile puts it - the model's own number, where
     // one fitted to the mesh moves with the tessellation and with whatever a
     // boolean leaves behind. Or, with the radius unchanged too, no edge at all.
-    if (!same(a[0], b[0])) {
-      addSurfaceUnique(records.out,
-                       std::make_shared<PlaneSurface>(records.at(a[1]), records.sweep.axis));
-    }
-    return;
+    if (same(a[0], b[0])) return -1;
+    return addKept(records.out, std::make_shared<PlaneSurface>(records.at(a[1]), records.sweep.axis));
   }
   if (same(a[0], b[0])) {
-    if (a[0] > 0) records.cylinder(a, true);  // a wall, on that cylinder - a face of this solid
-    return;
+    // a wall, on that cylinder - a face of this solid; on the axis, nothing
+    return a[0] > 0 ? records.cylinder(a, true) : -1;
   }
   // Anchored at the wider end, as cylinder(r1, r2) anchors its own
   // (primitives.cc). Until 2026-09-24 a sloped edge declared its end circles
@@ -107,24 +119,24 @@ void revolveLine(const ProfileEdge& e, RevolutionRecords& records)
   // 2026-09-25 one reaching the axis declared nothing (doc/step-export-wip.md,
   // *Inferred where a declaration was possible*, item 4).
   const Vector2d& wide = a[0] >= b[0] ? a : b;
-  addSurfaceUnique(records.out, std::make_shared<ConeSurface>(records.at(wide[1]), records.sweep.axis,
-                                                              wide[0], (b[0] - a[0]) / (b[1] - a[1])));
+  return addKept(records.out, std::make_shared<ConeSurface>(records.at(wide[1]), records.sweep.axis,
+                                                            wide[0], (b[0] - a[0]) / (b[1] - a[1])));
 }
 
 /*! A circle in the profile sweeps a sphere where its centre is on the axis, and
  * a ring torus where the whole circle is off it. Whether it declared one. */
-bool revolveArc(const Arc2d& arc, RevolutionRecords& records)
+bool revolveArc(const Arc2d& arc, RevolutionRecords& records, int& face)
 {
   if (!(arc.r > 0)) return false;  // a point
   const Vector2d centre(arc.centre[0], arc.centre[1]);
   if (centre[0] == 0) {
-    addSurfaceUnique(records.out,
-                     std::make_shared<SphereSurface>(records.at(centre[1]), records.sweep.axis, arc.r));
+    face = addKept(records.out,
+                   std::make_shared<SphereSurface>(records.at(centre[1]), records.sweep.axis, arc.r));
     return true;
   }
   if (centre[0] > arc.r) {
-    addSurfaceUnique(records.out, std::make_shared<TorusSurface>(records.at(centre[1]),
-                                                                 records.sweep.axis, centre[0], arc.r));
+    face = addKept(records.out, std::make_shared<TorusSurface>(records.at(centre[1]), records.sweep.axis,
+                                                               centre[0], arc.r));
     return true;
   }
   // An arc reaching the axis without being centred on it sweeps a horn or a
@@ -210,14 +222,14 @@ struct StationMap {
 
 /*! The two caps: the profile's plane at either end. A far cap scaled to nothing
  * is a point, and has no face. */
-void extrudeCaps(const StationMap& map, Surfaces& out)
+void extrudeCaps(const StationMap& map, Surfaces& out, int& near, int& far)
 {
   const Vector3d n = map.normal();
   if (n.isZero()) return;
   if (!std::isfinite(map.sweep.scale_x) || !std::isfinite(map.sweep.scale_y)) return;
-  addSurfaceUnique(out, std::make_shared<PlaneSurface>(map.sweep.base, n));
+  near = addKept(out, std::make_shared<PlaneSurface>(map.sweep.base, n));
   if (map.sweep.scale_x != 0. || map.sweep.scale_y != 0.) {
-    addSurfaceUnique(out, std::make_shared<PlaneSurface>(map.sweep.base + map.sweep.height, n));
+    far = addKept(out, std::make_shared<PlaneSurface>(map.sweep.base + map.sweep.height, n));
   }
 }
 
@@ -225,26 +237,26 @@ void extrudeCaps(const StationMap& map, Surfaces& out)
  * corners - a plane, where the far edge is parallel to the near one. S(1) sends
  * the edge's direction u to (sx u_x, sy u_y), parallel to u exactly when
  * (sx - sy) u_x u_y = 0: an even scale, or an edge along either axis. */
-void extrudeLine(const ProfileEdge& e, const StationMap& map, Surfaces& out)
+int extrudeLine(const ProfileEdge& e, const StationMap& map, Surfaces& out)
 {
-  if (!map.affine()) return;  // a twist turns the far edge: no patch of any degree
+  if (!map.affine()) return -1;  // a twist turns the far edge: no patch of any degree
   const Vector2d u = e.b - e.a;
-  if (u[0] == 0 && u[1] == 0) return;  // no edge
+  if (u[0] == 0 && u[1] == 0) return -1;  // no edge
   const Vector3d a0 = map.at(e.a, 0), b0 = map.at(e.b, 0), a1 = map.at(e.a, 1), b1 = map.at(e.b, 1);
   const bool parallel = map.sweep.scale_x == map.sweep.scale_y || u[0] == 0 || u[1] == 0;
   if (parallel) {
     const Vector3d wall = (b0 - a0).cross(a1 - a0);
-    if (wall.norm() < 1e-12) return;  // the far edge on the near one's line: no wall
-    addSurfaceUnique(out, std::make_shared<PlaneSurface>(a0, Vector3d(wall.normalized())));
-    return;
+    if (wall.norm() < 1e-12) return -1;  // the far edge on the near one's line: no wall
+    return addKept(out, std::make_shared<PlaneSurface>(a0, Vector3d(wall.normalized())));
   }
   // v varies fastest: each corner as a pair, where it starts and where it goes
   out.push_back(std::make_shared<BezierPatchSurface>(1, 1, std::vector<Vector3d>{a0, a1, b0, b1}));
+  return int(out.size()) - 1;
 }
 
 /*! A Bezier segment, swept by an affine map: the (n, 1) patch whose control net
  * is the segment's own control points at either end. */
-bool extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
+bool extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out, int& face)
 {
   if (!map.affine()) return false;
   if (bez.degree < 2 || bez.degree > 3) return false;
@@ -256,6 +268,7 @@ bool extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
     net.push_back(map.at(p, 1));
   }
   out.push_back(std::make_shared<BezierPatchSurface>(bez.degree, 1, std::move(net)));
+  face = int(out.size()) - 1;
   return true;
 }
 
@@ -271,25 +284,25 @@ bool extrudeBezier(const Bezier2d& bez, const StationMap& map, Surfaces& out)
  * The cone is a face; the two end circles are evidence, the rims the band pass
  * identifies it by. */
 bool extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const StationMap& map,
-                  Surfaces& out);
+                  Surfaces& out, int& face);
 
-bool extrudeArc(const Arc2d& arc, const StationMap& map, Surfaces& out)
+bool extrudeArc(const Arc2d& arc, const StationMap& map, Surfaces& out, int& face)
 {
   if (!(arc.r > 0)) return false;
-  return extrudeConic(Vector2d(arc.centre), Vector2d(arc.r, 0.), Vector2d(0., arc.r), map, out);
+  return extrudeConic(Vector2d(arc.centre), Vector2d(arc.r, 0.), Vector2d(0., arc.r), map, out, face);
 }
 
 /*! An ellipse in the profile, swept: the circle's derivation, since a circle is
  * the ellipse whose semi-diameters are two perpendicular radii. */
-bool extrudeEllipse(const Ellipse2d& el, const StationMap& map, Surfaces& out)
+bool extrudeEllipse(const Ellipse2d& el, const StationMap& map, Surfaces& out, int& face)
 {
-  return extrudeConic(Vector2d(el.centre), Vector2d(el.u), Vector2d(el.v), map, out);
+  return extrudeConic(Vector2d(el.centre), Vector2d(el.u), Vector2d(el.v), map, out, face);
 }
 
 /*! The conic centre + u cos t + v sin t in the profile, swept. Whether it
- * declared the surface the conic sweeps. */
+ * declared the surface the conic sweeps, and `face` where it is kept. */
 bool extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const StationMap& map,
-                  Surfaces& out)
+                  Surfaces& out, int& face)
 {
   // a circle: u and v two perpendicular radii of one length
   const bool circle = u.norm() == v.norm() && u.dot(v) == 0;
@@ -314,7 +327,7 @@ bool extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const
     auto elliptic = std::make_shared<EllipticCylinderSurface>(c0, d, L * Vector3d(u[0], u[1], 0.),
                                                               L * Vector3d(v[0], v[1], 0.));
     if (!elliptic->usable()) return false;
-    addSurfaceUnique(out, elliptic);
+    face = addKept(out, elliptic);
     return true;
   }
   if (!circle || !similar || !along_normal)
@@ -323,13 +336,13 @@ bool extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const
   const double r0 = u.norm() * scale, r1 = u.norm() * scale * map.sweep.scale_x;
   if (!(r1 >= 0) || !std::isfinite(r1)) return false;
   if (r1 == r0) {
-    addSurfaceUnique(out, std::make_shared<CylinderSurface>(c0, axis, r0));
+    face = addKept(out, std::make_shared<CylinderSurface>(c0, axis, r0));
     return true;
   }
   // Anchored at the wider end, as every cone here is.
   const bool near_wider = r0 >= r1;
-  addSurfaceUnique(out, std::make_shared<ConeSurface>(near_wider ? c0 : c1, axis, near_wider ? r0 : r1,
-                                                      (r1 - r0) / len));
+  face = addKept(out, std::make_shared<ConeSurface>(near_wider ? c0 : c1, axis, near_wider ? r0 : r1,
+                                                    (r1 - r0) / len));
   auto rim = [&](const Vector3d& at, double r) {
     if (!(r > 0)) return;
     auto record = std::make_shared<CylinderSurface>(at, axis, r);
@@ -343,6 +356,22 @@ bool extrudeConic(const Vector2d& c, const Vector2d& u, const Vector2d& v, const
 
 }  // namespace
 
+/*! The face the sweep made of record `k` of one kind, or none where it made
+ * none. */
+static int faceOf(const std::vector<int>& of_kind, int k)
+{
+  return k >= 0 && std::size_t(k) < of_kind.size() ? of_kind[std::size_t(k)] : -1;
+}
+
+/*! Name `edge`'s wall `wall`, where its maker named the edge: a name two edges
+ * carry that sweep different records names neither - see SweptFaces. */
+static void nameWall(SweptFaces& made, const ProfileEdge& edge, int wall)
+{
+  if (edge.id == 0) return;
+  const auto [it, fresh] = made.walls.emplace(edge.id, wall);
+  if (!fresh && it->second != wall) it->second = -1;
+}
+
 /*! Whether an edge of `profile` is a chord of record `index` of kind `kind`. */
 static bool chordOf(const Profile2d& profile, EdgeKind kind, std::size_t index)
 {
@@ -355,9 +384,10 @@ static bool chordOf(const Profile2d& profile, EdgeKind kind, std::size_t index)
 }
 
 std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Revolution& sweep,
-                                              bool *every_curve)
+                                              bool *every_curve, SweptFaces *faces)
 {
   RevolutionRecords records{sweep, {}, {}};
+  SweptFaces made;
   bool all = true;
   for (const auto& loop : profile.loops) {
     for (const ProfileEdge& edge : loop) {
@@ -365,11 +395,21 @@ std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Re
       // A line its maker declared. An unnamed edge is Line by default only, and
       // a default declares nothing: it would put a plane under facets a maker
       // made on something else (E6).
-      if (edge.declared && edge.kind == EdgeKind::Line) revolveLine(edge, records);
+      if (edge.declared && edge.kind == EdgeKind::Line) nameWall(made, edge, revolveLine(edge, records));
     }
   }
+  std::vector<int> arc_face(profile.arcs.size(), -1);
   for (std::size_t k = 0; k < profile.arcs.size(); k++) {
-    if (!revolveArc(profile.arcs[k], records) && chordOf(profile, EdgeKind::Arc, k)) all = false;
+    if (!revolveArc(profile.arcs[k], records, arc_face[k]) && chordOf(profile, EdgeKind::Arc, k))
+      all = false;
+  }
+  // A chord of an arc is made on the arc's surface; of a curve this table has
+  // no surface for, on none.
+  for (const auto& loop : profile.loops) {
+    for (const ProfileEdge& edge : loop) {
+      if (!edge.declared || edge.kind == EdgeKind::Line) continue;
+      nameWall(made, edge, edge.kind == EdgeKind::Arc ? faceOf(arc_face, edge.record) : -1);
+    }
   }
   // A Bezier or an ellipse turned about an axis makes no surface this table has.
   for (std::size_t k = 0; k < profile.beziers.size(); k++) {
@@ -384,39 +424,57 @@ std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Re
   // plane, standing at one end of the turn and containing the axis, so its
   // normal is perpendicular to that plane and the axis both.
   if (fabs(sweep.angle) < 360) {
+    int *end = &made.near_end;
     for (const double at : {sweep.start, sweep.start + sweep.angle}) {
       const double rad = at * M_PI / 180.0;
-      addSurfaceUnique(records.out,
-                       std::make_shared<PlaneSurface>(sweep.origin, Vector3d(-sin(rad), cos(rad), 0)));
+      *end = addKept(records.out,
+                     std::make_shared<PlaneSurface>(sweep.origin, Vector3d(-sin(rad), cos(rad), 0)));
+      end = &made.far_end;
     }
   }
+  if (faces != nullptr) *faces = std::move(made);
   return std::move(records.out);
 }
 
 std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Extrusion& sweep,
-                                              bool *every_curve)
+                                              bool *every_curve, SweptFaces *faces)
 {
   const StationMap map(sweep);
   Surfaces out;
   bool all = true;
+  std::vector<int> arc_face(profile.arcs.size(), -1), ellipse_face(profile.ellipses.size(), -1),
+    bezier_face(profile.beziers.size(), -1);
   for (std::size_t k = 0; k < profile.arcs.size(); k++) {
-    if (!extrudeArc(profile.arcs[k], map, out) && chordOf(profile, EdgeKind::Arc, k)) all = false;
+    if (!extrudeArc(profile.arcs[k], map, out, arc_face[k]) && chordOf(profile, EdgeKind::Arc, k))
+      all = false;
   }
   for (std::size_t k = 0; k < profile.ellipses.size(); k++) {
-    if (!extrudeEllipse(profile.ellipses[k], map, out) && chordOf(profile, EdgeKind::Ellipse, k))
+    if (!extrudeEllipse(profile.ellipses[k], map, out, ellipse_face[k]) &&
+        chordOf(profile, EdgeKind::Ellipse, k))
       all = false;
   }
   for (std::size_t k = 0; k < profile.beziers.size(); k++) {
-    if (!extrudeBezier(profile.beziers[k], map, out) && chordOf(profile, EdgeKind::Bezier, k))
+    if (!extrudeBezier(profile.beziers[k], map, out, bezier_face[k]) &&
+        chordOf(profile, EdgeKind::Bezier, k))
       all = false;
   }
   if (every_curve != nullptr) *every_curve = all;
-  extrudeCaps(map, out);
+  SweptFaces made;
+  extrudeCaps(map, out, made.near_end, made.far_end);
   for (const auto& loop : profile.loops) {
     for (const ProfileEdge& edge : loop) {
-      if (edge.declared && edge.kind == EdgeKind::Line) extrudeLine(edge, map, out);  // see revolve
+      if (!edge.declared) continue;  // see revolve: an unnamed edge declares nothing, and names nothing
+      int wall = -1;
+      switch (edge.kind) {
+      case EdgeKind::Line:    wall = extrudeLine(edge, map, out); break;
+      case EdgeKind::Arc:     wall = faceOf(arc_face, edge.record); break;
+      case EdgeKind::Ellipse: wall = faceOf(ellipse_face, edge.record); break;
+      case EdgeKind::Bezier:  wall = faceOf(bezier_face, edge.record); break;
+      }
+      nameWall(made, edge, wall);
     }
   }
+  if (faces != nullptr) *faces = std::move(made);
   return out;
 }
 

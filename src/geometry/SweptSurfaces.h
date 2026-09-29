@@ -21,6 +21,7 @@
  * welds, the caps' tessellation. Only *what surfaces the sweep makes* lives here.
  */
 
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -40,12 +41,16 @@ struct Revolution {
   double start = 0., angle = 360.;
 };
 
+struct SweptFaces;
+
 /*! The surfaces `profile` makes turned about `sweep`'s axis. Where asked,
  * `every_curve` says whether every curved record an edge of the profile is a
  * chord of turned into a surface here - what a caller needs before it states
- * that every face of the sweep is a plane or on a record (SolidTree::faceted). */
+ * that every face of the sweep is a plane or on a record (SolidTree::faceted) -
+ * and `faces` which of them each face is made on: the ends of a partial turn
+ * are its first and its last plane. */
 std::vector<std::shared_ptr<Surface>> revolve(const Profile2d& profile, const Revolution& sweep,
-                                              bool *every_curve = nullptr);
+                                              bool *every_curve = nullptr, SweptFaces *faces = nullptr);
 
 /*! A profile carried along a straight line, scaled towards the far end. */
 struct Extrusion {
@@ -57,10 +62,25 @@ struct Extrusion {
   double twist = 0.;                  //!< degrees, over the whole height
 };
 
+/*! Which record each face of a sweep is made on, each an index into the
+ * surfaces the sweep returned, or -1 where it made none: for every edge its
+ * maker named, the record the edge's wall is made on, by the edge's name; and
+ * the plane of the end face the sweep starts from and of the one it ends on.
+ *
+ * What a generator names its facets by (checklist E8, open item 40), so it is
+ * identity and not position. A wall is made on the record its edge sweeps - a
+ * piece of a chord split for extrusion as well, whose split corners are inside
+ * the curve: it is still a piece of the chord's wall. A name two edges carry
+ * that sweep different records names none, rather than one of them. */
+struct SweptFaces {
+  std::map<EdgeId, int> walls;
+  int near_end = -1, far_end = -1;
+};
+
 /*! The surfaces `profile` makes extruded by `sweep`; `every_curve` as for
- * revolve(). */
+ * revolve(). Where asked, `faces` says which of them each face is made on. */
 std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Extrusion& sweep,
-                                              bool *every_curve = nullptr);
+                                              bool *every_curve = nullptr, SweptFaces *faces = nullptr);
 
 /*! The surfaces a roof over `profile` makes. Both roof methods raise a point by
  * its distance to the nearest feature of the profile - the straight skeleton's
