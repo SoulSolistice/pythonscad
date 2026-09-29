@@ -4715,10 +4715,22 @@ not state, now checklist E7, E8 and C9 made universal:
   maker's names through triangulation and the Manifold conversion
   (52b505b24); `cube()`, `cylinder()` and `sphere()` name every polygon
   (52b505b24, ee3f88072); a profile edge split for extrusion keeps its name
-  (3236a289b). Next: the extrusions, the revolve, sweeps, fillets, text(),
-  hull, roof. With it, merging asks identity too (item 38, C8): 12 of lid10's
-  merged faces mix triangles the tagger gave a curved record by position with
-  untagged flat ones, and 4 join two declared surfaces.
+  (3236a289b); linear_extrude and rotate_extrude name walls and caps
+  (ac31bb5a0, 6d40e701a); PolySetBuilder carries names and fillet() names its
+  strips and corners (9f488f198); text() is named through linear_extrude, its
+  Bezier edges' walls. **Merging asks identity (item 38, C8), 2026-09-30:**
+  triangles merge into a planar face only with the same key - the curved
+  record their maker named them for, or none. By record, not tag (one record
+  holds a tag from each declarer), and not for planes, whose plane is fixed by
+  their corners - which holds only while coplanarity is exact, the other half
+  of C8, still a tolerance of 1e-8 of the diagonal. A triangle with no plane
+  has no key: lid10's 12 faces that "mixed" a curved record's triangles with
+  others turned out to be zero-area triangles along a chord of the socket's
+  wall; keyed apart, they became faces of no area and opened the shell
+  (scripts/step-diagnostics/open-edges.py found them). Measured neutral on all
+  120 exports. Left: roof() (straight skeleton faces are planes and need no
+  name; the Voronoi roof's cones would, and the writer cannot yet write their
+  parabolic bounds), a hull not of revolution, imports.
 - **Nothing unnamed stands in for D0 - 2026-09-29, the author.** "Unnamed may
   never step in for a D0 declaration"; "by definition a D0 must declare its
   full heritage or something is wrong." The positional tagger is **not** a

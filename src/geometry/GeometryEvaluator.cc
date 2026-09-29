@@ -586,19 +586,28 @@ static bool triangleOnPlane(const std::vector<Vector3d>& vert, const IndexedFace
 std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
                                         const std::vector<Vector4d> normals,
                                         std::vector<Vector4d>& newNormals, std::vector<int>& faceParents,
-                                        const std::vector<Vector3d>& vert)
+                                        const std::vector<Vector3d>& vert,
+                                        const std::vector<uint32_t> *names)
 {
   indexedFaceList emptyList;
   std::vector<Vector4d> norm_list;
+  std::vector<uint32_t> name_list;  // per bucket, the one name its triangles carry
   std::vector<indexedFaceList> polygons_sorted;
   const double plane_tol = coplanarTolerance(vert);
-  // sort polygons into buckets of same orientation
+  const bool named = names != nullptr && names->size() == polygons.size();
+  // sort polygons into buckets of same orientation - and, where the caller
+  // keys them, of the same key: the curved record a triangle's maker named it
+  // for, so a chord facet never merges with a triangle not made on that record
+  // (open item 38, C8). Until 2026-09-30 identity was voted over a merged
+  // face's boundary afterwards.
   for (unsigned int i = 0; i < polygons.size(); i++) {
     Vector4d norm = normals[i];
     const IndexedFace& triangle = polygons[i];
+    const uint32_t name = named ? (*names)[i] : 0;
 
     int norm_ind = -1;
     for (unsigned int j = 0; norm_ind == -1 && j < norm_list.size(); j++) {
+      if (name_list[j] != name) continue;
       const auto& cur = norm_list[j];
       if (cur.head<3>().dot(norm.head<3>()) > 0.99999 &&
           triangleOnPlane(vert, triangle, cur, plane_tol)) {
@@ -609,6 +618,7 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
     if (norm_ind == -1) {
       norm_ind = norm_list.size();
       norm_list.push_back(norm);
+      name_list.push_back(name);
       polygons_sorted.push_back(emptyList);
     }
     polygons_sorted[norm_ind].push_back(triangle);
@@ -622,6 +632,7 @@ std::vector<IndexedFace> mergeTriangles(const std::vector<IndexedFace> polygons,
     Vector3d nref = norm_list[i].head<3>();
     for (unsigned int j = 0; j < polygons_sorted.size(); j++) {
       if (j == i) continue;
+      if (name_list[j] != name_list[i]) continue;  // a hole of one name goes to that name only
       if (norm_list[j].head<3>().dot(nref) < -0.999 && fabs(norm_list[j][3] + norm_list[i][3]) < 0.005) {
         i_ = j;
         break;

@@ -1034,7 +1034,43 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
 
   std::vector<IndexedFace> indicesNew;
   normals = calcTriangleNormals(ps->vertices, ps->indices);
-  indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, ps->vertices);
+  // Merged by the curved record each triangle is named for, as well as by
+  // plane (open item 38, C8): a chord facet of a cylinder is never merged with a
+  // triangle not made on that cylinder. By record, not by tag - one record can
+  // hold several tags, a surface two generators declared - and only a curved
+  // one: a flat face's plane is fixed by its own corners, so a triangle named
+  // for a plane merges with any coplanar triangle as it always did.
+  std::vector<uint32_t> merge_names;
+  if (ps->surface_tags.size() == ps->indices.size()) {
+    std::map<uint32_t, uint32_t> curved_of_tag;
+    for (std::size_t si = 0; si < ps->surfaces.size(); si++) {
+      const Surface *s = ps->surfaces[si].get();
+      if (s == nullptr || !s->declaresFace() || dynamic_cast<const PlaneSurface *>(s) != nullptr)
+        continue;
+      for (const uint32_t tag : s->tags) curved_of_tag.emplace(tag, uint32_t(si + 1));
+    }
+    merge_names.reserve(ps->indices.size());
+    for (std::size_t t = 0; t < ps->indices.size(); t++) {
+      const uint32_t tag = ps->surface_tags[t];
+      const auto it = tag == 0 ? curved_of_tag.end() : curved_of_tag.find(tag);
+      // A triangle with no plane - its corners on one line, at machine precision
+      // - has no interior to be made on anything, and is no facet: its name
+      // cannot bear on a planar face. On lid10 such triangles lie along a chord
+      // of the socket's wall where it meets a plane; keyed apart they became
+      // faces of no area, and the shell opened where they were dropped.
+      bool has_plane = false;
+      const IndexedFace& tri = ps->indices[t];
+      if (tri.size() >= 3) {
+        const Vector3d a = ps->vertices[tri[0]], b = ps->vertices[tri[1]], c = ps->vertices[tri[2]];
+        has_plane = (b - a).cross(c - a).norm() >
+                    recognition::forwardError(9, (a.norm() + b.norm()) * (c - a).norm() +
+                                                   (b - a).norm() * (a.norm() + c.norm()));
+      }
+      merge_names.push_back(it == curved_of_tag.end() || !has_plane ? 0 : it->second);
+    }
+  }
+  indicesNew = mergeTriangles(ps->indices, normals, newNormals, faceParents, ps->vertices,
+                              merge_names.empty() ? nullptr : &merge_names);
 
   // Which original made each merged face.
   //
@@ -1131,11 +1167,6 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
       for (std::size_t i = 0; i < tri.size(); i++)
         edge_triangle[{tri[i], tri[(i + 1) % tri.size()]}] = t;
     }
-    std::map<uint32_t, const Surface *> record_of_tag;
-    for (const auto& sf : ps->surfaces) {
-      if (sf == nullptr) continue;
-      for (const uint32_t tag : sf->tags) record_of_tag.emplace(tag, sf.get());
-    }
     std::size_t looked = 0, makers = 0, surfaces = 0, positional = 0, slivers = 0, bent = 0;
     double bent_worst = 0;
     for (std::size_t f = 0; f < indicesNew.size(); f++) {
@@ -1143,30 +1174,23 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
       if (poly.size() < 3) continue;
       looked++;
       std::set<int32_t> origins;
-      std::set<uint32_t> tags;
-      bool untagged = false;
+      std::set<uint32_t> curved;  // the curved records its triangles are named for
+      bool other = false;         // a triangle named for none of them
       for (std::size_t i = 0; i < poly.size(); i++) {
         const auto it = edge_triangle.find({poly[i], poly[(i + 1) % poly.size()]});
         if (it == edge_triangle.end()) continue;
         if (it->second < ps->original_ids.size()) origins.insert(ps->original_ids[it->second]);
-        if (it->second < ps->surface_tags.size()) {
-          const uint32_t tag = ps->surface_tags[it->second];
-          if (tag == 0) untagged = true;
-          else tags.insert(tag);
+        if (it->second < merge_names.size()) {
+          const uint32_t key = merge_names[it->second];
+          if (key == 0) other = true;
+          else curved.insert(key);
         }
       }
       if (origins.size() > 1) makers++;
-      // the declared surfaces the boundary names, one per geometric surface
-      std::vector<const Surface *> distinct;
-      for (const uint32_t tag : tags) {
-        const auto it = record_of_tag.find(tag);
-        if (it == record_of_tag.end()) continue;
-        bool seen = false;
-        for (const Surface *d : distinct) seen = seen || d->sameAs(*it->second);
-        if (!seen) distinct.push_back(it->second);
-      }
-      if (distinct.size() > 1) surfaces++;
-      if (untagged && !tags.empty()) positional++;
+      // two curved records in one planar face, or one mixed with triangles not
+      // made on it: what merging by record rules out (open item 38, C8)
+      if (curved.size() > 1) surfaces++;
+      if (other && !curved.empty()) positional++;
       // flat: every corner on the plane of the three spanning most
       const Vector3d a = ps->vertices[poly[0]];
       std::size_t ib = 1, ic = 2;
@@ -1204,9 +1228,8 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
     LOG(
       "STEP export: merging %1$d planar faces from the mesh's triangles: %2$d join two makers' "
       "triangles, "
-      "%3$d two declared surfaces', %4$d mix triangles the positional tagger gave a record with "
-      "untagged "
-      "ones (E8); %5$d are slivers with no plane, and %6$d are not flat at machine precision, by up to "
+      "%3$d two curved records', %4$d mix a curved record's with others (item 38 C8, E8); %5$d are "
+      "slivers with no plane, and %6$d are not flat at machine precision, by up to "
       "%7$.2e",
       int(looked), int(makers), int(surfaces), int(positional), int(slivers), int(bent), bent_worst);
   }
