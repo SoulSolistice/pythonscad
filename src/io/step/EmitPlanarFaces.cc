@@ -130,7 +130,7 @@ void StepKernel::BodyBuild::emitPlanarFaces()
         if (dp < declared_plane_index.size() && declared_plane_index[dp] < decl_written.size()) {
           decl_written[declared_plane_index[dp]] = 1;
         }
-        if (i < facet_class.size()) facet_class[i] = 1;
+        if (i < facet_class.size()) facet_class[i] = recognition::kDeclaredPlane;
         // Keep the mesh's sense: a declaration says which plane, not which way
         // the face looks out of it.
         norm = declared.second.dot(norm) > 0 ? declared.second : Vector3d(-declared.second);

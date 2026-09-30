@@ -65,6 +65,21 @@ void reportExistence(const ReportInputs& in);
  * two surfaces at once, which neither provenance nor membership can decide. */
 void reportRepresentations(const ReportInputs& in);
 
+/*! What wrote a facet, as the declaration census counts it (`facet_class`). */
+enum FacetClass : unsigned char {
+  kTessellated = 0,      // a plane of its own corners, a fan, or nothing at all
+  kDeclaredPlane = 1,    // a planar face on the declared plane its maker named it for
+  kDeclaredSurface = 2,  // held by a claim for a declared curved surface
+  kFitted = 3,           // held by a claim for a surface the approximation fitted
+  kUnnamed = 4,          // held by a claim that names no surface: malformed
+};
+
+/*! The class of a facet an honoured claim holds, read off the surface the claim
+ * names: one of the `declared_count` the model declared, a surface fitted past
+ * them, or `std::size_t(-1)`, none at all - which is a malformed claim and not
+ * a fit (open item 39, R28). */
+FacetClass heldClass(std::size_t surface_index, std::size_t declared_count);
+
 /*! The declaration census: is everything that could be exact written as exact,
  * per declaration and per facet, and why not where it is not. `decl_written`
  * and `facet_class` arrive holding what the writer's planes stand on. Ends by

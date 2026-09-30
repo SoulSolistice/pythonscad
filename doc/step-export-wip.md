@@ -5065,6 +5065,17 @@ from coming back - landed with the fix and mutation-checked (F2).
   The whole normal's sign is settled now, on the rounded normal's first nonzero
   component. *Test:* `tests/hole-nesting-check-mutations.py`, the check's first
   calibration - it fails on the old key, and on one that tells windings apart.
+- **R28 - the census's malformed-claim error could never fire. Fixed
+  2026-09-30.** `Reports.cc` counts a facet held by an honoured claim that
+  names no surface - `surface_index` `std::size_t(-1)`, the ledger's "cannot
+  name one" - as an EXPORT-ERROR, because the census cannot tell a declaration
+  from a fit on it. Nothing ever gave a facet that class: the classification
+  tested only "inside the declarations or not", and filed the unnamed claim as
+  a fit, from the commit that wrote the error (`57a7994bc`). One function now
+  reads the class off the surface a claim names, `recognition::heldClass`, with
+  the classes named (`FacetClass`). No export of the 120 has such a claim.
+  *Test:* `reports_test.cc` - an unnamed claim is `kUnnamed`, not `kFitted`;
+  with that branch removed it fails.
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

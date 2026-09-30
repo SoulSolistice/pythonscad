@@ -574,8 +574,9 @@ struct StepKernel::BodyBuild {
   // *a declaration that is not taken is a bug report* makes a defect to
   // explain. See doc/step-rungs.md, *How to read a result*.
   std::vector<char> decl_written = std::vector<char>(surfaces.size(), 0);
-  // What class actually wrote each facet: 0 the tessellation, 1 a declared
-  // plane, 2 a declared curved surface, 3 a surface the approximation fitted.
+  // What class actually wrote each facet - recognition::FacetClass: the
+  // tessellation, a declared plane, a declared curved surface, a surface the
+  // approximation fitted, or a claim naming none.
   // Per facet and not per declaration, because "a face stands on this
   // declaration" cannot see a declaration that kept one facet of a hundred,
   // and cannot see ground a fit took.

@@ -948,6 +948,17 @@ void reportArbitration(const ReportInputs& in)
   }
 }
 
+FacetClass heldClass(std::size_t surface_index, std::size_t declared_count)
+{
+  // Past the declarations is a surface the approximation fitted: a facet held
+  // under one is D3 ground however exact the mesh under it happens to be, and
+  // if a declaration owned it then a measurement has displaced a declaration.
+  // No surface at all is neither - the census cannot tell a declaration from a
+  // fit on it, and says so rather than count it as either.
+  if (surface_index == std::size_t(-1)) return kUnnamed;
+  return surface_index < declared_count ? kDeclaredSurface : kFitted;
+}
+
 void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approximate,
                              std::vector<char>& decl_written, std::vector<unsigned char>& facet_class,
                              const std::vector<int32_t>& written_on)
@@ -1012,16 +1023,9 @@ void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approxi
       if (features.consumed[f] == 0) continue;
       for (const auto *claim : features.ledger.claimants(f)) {
         if (!claim->honoured()) continue;
-        if (claim->surface_index < decl_written.size()) {
-          decl_written[claim->surface_index] = 1;
-          if (f < facet_class.size()) facet_class[f] = 2;
-        } else if (f < facet_class.size()) {
-          // Past `surfaces` is a surface the approximation fitted. A facet held
-          // under one is D3 ground however exact the mesh under it happens to
-          // be, and if a declaration owned it then a measurement has displaced
-          // a declaration.
-          facet_class[f] = 3;
-        }
+        const FacetClass held = heldClass(claim->surface_index, decl_written.size());
+        if (held == kDeclaredSurface) decl_written[claim->surface_index] = 1;
+        if (f < facet_class.size()) facet_class[f] = held;
         break;
       }
     }
@@ -1156,11 +1160,11 @@ void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approxi
       for (std::size_t f = 0; f < facet_class.size() && f < loops.size(); f++) {
         if (!loop_valid[f] || loop_is_hole[f]) continue;
         switch (facet_class[f]) {
-        case 1:  by_plane++; break;
-        case 2:  by_declared++; break;
-        case 3:  by_fit++; break;
-        case 4:  unnamed++; break;
-        default: by_mesh++; break;
+        case kDeclaredPlane:   by_plane++; break;
+        case kDeclaredSurface: by_declared++; break;
+        case kFitted:          by_fit++; break;
+        case kUnnamed:         unnamed++; break;
+        default:               by_mesh++; break;
         }
       }
       LOG(
@@ -1211,7 +1215,7 @@ void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approxi
         std::map<std::string, std::size_t> reasons;
         for (std::size_t f = 0; f < facet_class.size() && f < loops.size(); f++) {
           if (!loop_valid[f] || loop_is_hole[f]) continue;
-          if (facet_class[f] != 0 && facet_class[f] != 3) continue;
+          if (facet_class[f] != kTessellated && facet_class[f] != kFitted) continue;
           below++;
           const AnalyticFeatures::Claim *best = nullptr;
           auto rank = [](ClaimFate fate) {
@@ -1357,7 +1361,7 @@ void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approxi
           if (dynamic_cast<const PlaneSurface *>(own) != nullptr) {
             // A planar face stands on a declared plane only if its every corner
             // is on it - so on this one, if on any (EmitPlanarFaces).
-            if (facet_class[f] == 1) {
+            if (facet_class[f] == kDeclaredPlane) {
               on_own = true;
               for (const int v : loops[f]) on_own = on_own && onExactly(own, vertices[std::size_t(v)]);
             }
@@ -1370,11 +1374,11 @@ void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approxi
           }
           if (exists == Exists::Undecided) undecided++;
           const int32_t wrote = f < written_on.size() ? written_on[f] : -1;
-          if (wrote >= 0 || facet_class[f] == 1) {
+          if (wrote >= 0 || facet_class[f] == kDeclaredPlane) {
             elsewhere++;
-          } else if (facet_class[f] == 3) {
+          } else if (facet_class[f] == kFitted) {
             fitted++;
-          } else if (facet_class[f] == 2) {
+          } else if (facet_class[f] == kDeclaredSurface) {
             unwritten++;  // held by an honoured claim, and no face was written
           } else {
             // A boolean cuts a flat facet within its own plane, so a facet named
@@ -1388,7 +1392,7 @@ void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approxi
           // its only route.
           // Held and never written, it is the holder that answers for it.
           const AnalyticFeatures::Claim *best = nullptr;
-          const bool held = facet_class[f] == 2 && wrote < 0;
+          const bool held = facet_class[f] == kDeclaredSurface && wrote < 0;
           for (const auto *claim : features.ledger.claimants(f)) {
             if (claim->honoured() != held || (!held && claim->surface_index != std::size_t(s))) continue;
             if (best == nullptr) best = claim;
