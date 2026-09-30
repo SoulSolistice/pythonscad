@@ -4973,6 +4973,16 @@ from coming back - landed with the fix and mutation-checked (F2).
   renumbered in file order, since the ids carry gaps where entities were made and
   not written. *Test:* it reports those 87 files between the two runs, and 0
   between runs that write the same file (r18 and r19).
+- **R23 - the shells were ordered by the union-find's roots. Fixed 2026-09-30.**
+  `shellFaces` grouped the faces into connected shells and wrote them in the
+  order of each component's root - the face the union happened to leave there,
+  which depends on the order edges were linked in, not on anything the model or
+  the file states. Found by `compare --data` when the shells were first read
+  off the B-rep's own coedges: the same two shells, swapped, in
+  `step-extrude-refusals` (both tiers). Now in the order of each shell's first
+  face, which is a function of the face order alone. *Test:*
+  `brep::connectedShells`' own - two cubes, their faces interleaved, come out in
+  the order of their first face.
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

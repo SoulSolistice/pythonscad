@@ -164,10 +164,16 @@ std::vector<std::vector<std::size_t>> StepKernel::BodyBuild::shellFaces() const
       if (a != b) component[a] = b;
     }
   }
-  std::map<int, std::vector<std::size_t>> by_root;  // keyed by a face index: deterministic
-  for (std::size_t i = 0; i < sfaces.size(); i++) by_root[uf_find(component, int(i))].push_back(i);
+  // In the order of each shell's first face. Which face the union left as a
+  // component's root is how its edges happened to be linked, not an order
+  // anything states (open item 39, R23).
+  std::map<int, std::size_t> shell_of_root;  // lookup only
   std::vector<std::vector<std::size_t>> out;
-  for (auto& kv : by_root) out.push_back(std::move(kv.second));
+  for (std::size_t i = 0; i < sfaces.size(); i++) {
+    const auto it = shell_of_root.emplace(uf_find(component, int(i)), out.size()).first;
+    if (it->second == out.size()) out.emplace_back();
+    out[it->second].push_back(i);
+  }
   return out;
 }
 
