@@ -218,6 +218,8 @@ brep::Body step::mirrorBrep(const std::vector<StepKernel::Face *>& sfaces,
       out.surface = source->second.record;
       out.facets = source->second.facets;
       out.evidence = source->second.evidence;
+      out.plane_from_corners = source->second.plane_from_corners;
+      out.record_evidence = source->second.record_evidence;
     }
     out.same_sense = face->dir;
     out.form = surfaceOf(face->surface);

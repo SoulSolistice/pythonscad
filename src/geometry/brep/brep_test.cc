@@ -51,6 +51,7 @@ void planarFace(Body& body, std::map<std::pair<std::size_t, std::size_t>, std::s
   face.form = brep::Plane{{p0, n, (body.vertices[cycle[1]].point - p0).normalized()}};
   face.loops.push_back(loop);
   face.evidence = EvidenceClass::D0;
+  face.record_evidence = EvidenceClass::D0;
   body.faces.push_back(face);
 }
 
@@ -102,6 +103,7 @@ Body cylinder()
   wall.surface = std::make_shared<CylinderSurface>(Vector3d::Zero(), z, 1.0);
   wall.form = brep::Cylinder{brep::Frame{}, 1.0};
   wall.evidence = EvidenceClass::D0;
+  wall.record_evidence = EvidenceClass::D0;
   // Round the bottom, up the seam, back round the top, down the seam.
   wall.loops.push_back({{Coedge{0, true, std::nullopt}, Coedge{2, true, std::nullopt},
                          Coedge{1, false, std::nullopt}, Coedge{2, false, std::nullopt}},
@@ -110,11 +112,13 @@ Body cylinder()
   bottom.surface = std::make_shared<PlaneSurface>(Vector3d::Zero(), Vector3d(-z));
   bottom.form = brep::Plane{{Vector3d::Zero(), Vector3d(-z), Vector3d::UnitX()}};
   bottom.evidence = EvidenceClass::D0;
+  bottom.record_evidence = EvidenceClass::D0;
   bottom.loops.push_back({{Coedge{0, false, std::nullopt}}, true});
   brep::Face top;
   top.surface = std::make_shared<PlaneSurface>(Vector3d(0, 0, 1), z);
   top.form = brep::Plane{{Vector3d(0, 0, 1), z, Vector3d::UnitX()}};
   top.evidence = EvidenceClass::D0;
+  top.record_evidence = EvidenceClass::D0;
   top.loops.push_back({{Coedge{1, true, std::nullopt}}, true});
   body.faces = {wall, bottom, top};
   body.shells.push_back({{0, 1, 2}, true});
@@ -398,14 +402,14 @@ TEST_CASE("a stated fit is D2, a stated boundary D1, and a weaker face weakens i
   body.edges[1].curve.form = spline;
   body.edges[1].curve.stated_exact = true;
   body.edges[2].curve.form = spline;  // stated nothing: not certifiable, the tessellation's
-  body.faces[5].evidence = EvidenceClass::D4;
+  body.faces[5].record_evidence = EvidenceClass::D4;
   brep::stateClasses(body);
   CHECK(body.edges[0].evidence == EvidenceClass::D2);
   CHECK(body.edges[0].curve.carrier_error == 1e-8);
   CHECK(body.edges[1].evidence == EvidenceClass::D1);
   CHECK(body.edges[2].evidence == EvidenceClass::D4);
   CHECK(std::isnan(body.edges[2].curve.carrier_error));
-  // Face 5, x = 1, now D4: every edge it uses is D4 however exact.
+  // Face 5's record, x = 1, now D4: every edge on it is D4 however exact.
   for (const auto& c : body.faces[5].loops[0].coedges)
     CHECK(body.edges[c.edge].evidence == EvidenceClass::D4);
 }
@@ -426,4 +430,125 @@ TEST_CASE("a record nothing can ask is not a record the entity is off", "[brep]"
   CHECK(t.edges_unasked == 4);     // and its four edges
   CHECK(t.vertices[std::size_t(EvidenceClass::D4)] == 4);
   CHECK(t.vertices[std::size_t(EvidenceClass::D1)] == 4);
+}
+
+// ---- what fixes a vertex, and planes taken from their corners -------------
+//
+// A vertex needs three independent records and no more: the best three it lies
+// on decide it, not every face that touches it. A plane taken from its own
+// corners is as good as the best three that span it - and cannot lift itself.
+
+namespace {
+
+/*! Add to `body` a face on `record` over the edges `ring` - pairs of vertex
+ * indices, each an edge made for it - and return its index. A face bolted on
+ * for a class test: the shell is not asked to close. */
+std::size_t addFace(Body& body, std::shared_ptr<const Surface> record,
+                    const std::vector<std::pair<std::size_t, std::size_t>>& ring, EvidenceClass evidence,
+                    bool from_corners)
+{
+  brep::Loop loop;
+  for (const auto& e : ring) {
+    brep::Edge edge;
+    edge.start = e.first;
+    edge.end = e.second;
+    edge.curve.form = brep::Line{};
+    body.edges.push_back(edge);
+    loop.coedges.push_back(Coedge{body.edges.size() - 1, true, std::nullopt});
+  }
+  brep::Face face;
+  face.surface = std::move(record);
+  face.form = brep::Plane{};
+  face.loops.push_back(loop);
+  face.evidence = evidence;
+  face.record_evidence = evidence;
+  face.plane_from_corners = from_corners;
+  body.faces.push_back(face);
+  return body.faces.size() - 1;
+}
+
+}  // namespace
+
+TEST_CASE("a vertex is as good as the best three records fixing it, not the weakest face at it",
+          "[brep]")
+{
+  // Corner 7, (1,1,1), fixed by x = 1, y = 1, z = 1, all D0. A fourth face
+  // through it on the plane x + y + z = 3, D4, weakens nothing it does not need.
+  Body body = cube();
+  const double t = 1 / std::sqrt(3.0);
+  addFace(body, std::make_shared<PlaneSurface>(Vector3d(1, 1, 1), Vector3d(t, t, t)), {{7, 7}},
+          EvidenceClass::D4, false);
+  brep::stateClasses(body);
+  CHECK(body.vertices[7].evidence == EvidenceClass::D1);
+}
+
+TEST_CASE("a plane through determined corners is determined", "[brep]")
+{
+  // A triangle across corners 5, 6 and 7 of the cube, on the plane its corners
+  // are on - z = 1. Each corner is fixed by three of the cube's D0 planes
+  // without it, so the triangle is spanned by D1 corners: D1.
+  Body body = cube();
+  const std::size_t tri =
+    addFace(body, std::make_shared<PlaneSurface>(Vector3d(1, 0, 1), Vector3d::UnitZ()),
+            {{5, 7}, {7, 6}, {6, 5}}, EvidenceClass::D4, true);
+  brep::stateClasses(body);
+  CHECK(body.faces[tri].evidence == EvidenceClass::D1);
+}
+
+TEST_CASE("a plane taken from its corners does not lift itself", "[brep]")
+{
+  // The cube's top made a plane from its own corners. Each top corner is on
+  // two side planes and the top: fixed only with the top's help, and the top
+  // only with theirs. Nothing outside the pair determines either - the height
+  // was the tessellation's - so both stay D4: the least fixpoint, from D4 up.
+  Body body = cube();
+  body.faces[1].plane_from_corners = true;
+  brep::stateClasses(body);
+  CHECK(body.faces[1].evidence == EvidenceClass::D4);
+  for (const std::size_t v : {4, 5, 6, 7}) CHECK(body.vertices[v].evidence == EvidenceClass::D4);
+  for (const std::size_t v : {0, 1, 2, 3}) CHECK(body.vertices[v].evidence == EvidenceClass::D1);
+}
+
+TEST_CASE("a plane taken from its corners with a corner off it is not determined", "[brep]")
+{
+  // The triangle across 5, 6 and 7 again, on a plane a hair above z = 1: its
+  // corners are not on it, so it asserts a plane they are not in.
+  Body body = cube();
+  const std::size_t tri =
+    addFace(body, std::make_shared<PlaneSurface>(Vector3d(1, 0, 1 + 1e-9), Vector3d::UnitZ()),
+            {{5, 7}, {7, 6}, {6, 5}}, EvidenceClass::D4, true);
+  brep::stateClasses(body);
+  CHECK(body.faces[tri].evidence == EvidenceClass::D4);
+}
+
+TEST_CASE("a parabola far along its arm is on its cone, and not on one opened a hair wider", "[brep]")
+{
+  // The cone x^2 + y^2 = z^2 cut by z = x + 1, parallel to a generator: the
+  // parabola y^2 = 2x + 1. In the plane, with X = (1,0,1)/sqrt(2) along its
+  // axis from the vertex (-1/2, 0, 1/2), it is s = w^2 / sqrt(2) - so focal
+  // distance f = sqrt(2)/4 - and the frame's normal is (1,0,-1)/sqrt(2). An
+  // edge from u = 20 to u = 21 lies far outside any fixed sample range.
+  const double h = std::sqrt(0.5), f = std::sqrt(2.0) / 4;
+  const brep::Frame frame{Vector3d(-0.5, 0, 0.5), Vector3d(h, 0, -h), Vector3d(h, 0, h)};
+  const brep::CurveForm arc = brep::Conic{brep::Conic::Kind::Parabola, frame, f, 0};
+  const Vector3d x = frame.ref, y = frame.axis.cross(frame.ref);
+  auto at = [&](double u) { return Vector3d(frame.origin + x * (f * u * u) + y * (2 * f * u)); };
+  const auto cone = std::make_shared<ConeSurface>(Vector3d(0, 0, 1), Vector3d::UnitZ(), 1.0, 1.0);
+  CHECK(brep::curveOn(arc, at(20), at(21), cone.get()));
+  const auto wider =
+    std::make_shared<ConeSurface>(Vector3d(0, 0, 1), Vector3d::UnitZ(), 1.0, 1.0 + 1e-9);
+  CHECK_FALSE(brep::curveOn(arc, at(20), at(21), wider.get()));
+}
+
+TEST_CASE("a corner rests on its records, not on how a band admitted a face's facets", "[brep]")
+{
+  // The cube with one face admitted by the tessellation band - membership D4 -
+  // on a declared record, D0. Its corners are where three declared records
+  // cross, whatever admitted the facets: D1.
+  Body body = cube();
+  body.faces[5].evidence = EvidenceClass::D4;
+  brep::stateClasses(body);
+  for (const std::size_t v : {1, 3, 5, 7}) CHECK(body.vertices[v].evidence == EvidenceClass::D1);
+  for (const auto& c : body.faces[5].loops[0].coedges)
+    CHECK(body.edges[c.edge].evidence == EvidenceClass::D1);
 }

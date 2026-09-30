@@ -95,7 +95,8 @@ int32_t StepKernel::BodyBuild::surfaceIndexOf(const Surface *record) const
 
 void StepKernel::BodyBuild::registerFace(const Face *face, std::shared_ptr<const Surface> record,
                                          std::vector<std::size_t> facets,
-                                         std::optional<recognition::EvidenceClass> evidence)
+                                         std::optional<recognition::EvidenceClass> evidence,
+                                         bool plane_from_corners)
 {
   using recognition::EvidenceClass;
   // The weakest class its facets' honoured claims state: a patch of D0 members
@@ -117,7 +118,20 @@ void StepKernel::BodyBuild::registerFace(const Face *face, std::shared_ptr<const
       weakest = std::max(weakest, here);
     }
   }
-  face_source[face] = FaceSource{std::move(record), std::move(facets), evidence ? *evidence : weakest};
+  // And what the record itself is, which is a different fact: a maker's record
+  // is D0 and one every name on which is derived D1 (mintDerivedTag); a fit, a
+  // record the model never stated, D3; a plane from corners D4 until the B-rep
+  // finds its corners determine it (brep::stateClasses).
+  EvidenceClass record_class = EvidenceClass::D3;
+  if (plane_from_corners) {
+    record_class = EvidenceClass::D4;
+  } else if (surfaceIndexOf(record.get()) >= 0) {
+    bool all_derived = !record->tags.empty();
+    for (const uint32_t tag : record->tags) all_derived = all_derived && isDerivedTag(tag);
+    record_class = all_derived ? EvidenceClass::D1 : EvidenceClass::D0;
+  }
+  face_source[face] = FaceSource{std::move(record), std::move(facets), evidence ? *evidence : weakest,
+                                 plane_from_corners, record_class};
 }
 
 StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)

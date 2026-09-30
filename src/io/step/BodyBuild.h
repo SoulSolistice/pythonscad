@@ -592,7 +592,8 @@ struct StepKernel::BodyBuild {
    * states it - a planar face, which no recogniser claims. */
   void registerFace(const Face *face, std::shared_ptr<const Surface> record,
                     std::vector<std::size_t> facets,
-                    std::optional<recognition::EvidenceClass> evidence = std::nullopt);
+                    std::optional<recognition::EvidenceClass> evidence = std::nullopt,
+                    bool plane_from_corners = false);
   /*! The entry of `surfaces` that is `record`, or -1: a fitted record, or a
    * plane derived from a face's corners. */
   [[nodiscard]] int32_t surfaceIndexOf(const Surface *record) const;
@@ -602,6 +603,7 @@ struct StepKernel::BodyBuild {
     std::vector<std::shared_ptr<const Surface>>(faces.size());
   std::vector<recognition::EvidenceClass> plane_evidence =
     std::vector<recognition::EvidenceClass>(faces.size(), recognition::EvidenceClass::Unstated);
+  std::vector<char> plane_from_corners = std::vector<char>(faces.size(), 0);
   struct SectionMiss {
     double tilt, offset;
   };

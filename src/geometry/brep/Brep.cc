@@ -1,6 +1,8 @@
-/*! The neutral B-rep's topology check - see Brep.h. */
+/*! The neutral B-rep's structural check, and the classes of its vertices and
+ * edges - see Brep.h. */
 #include "geometry/brep/Brep.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -126,6 +128,132 @@ ClassTally stateClasses(Body& body)
     }
   }
 
+  // What each vertex's faces say of it, fixed by geometry: which records hold
+  // it exactly, with their normals there; which cannot be asked; which say no.
+  struct Holding {
+    std::size_t face;
+    Vector3d normal;
+  };
+  std::vector<std::vector<Holding>> held(body.vertices.size());
+  std::vector<char> declared(body.vertices.size(), 0), off(body.vertices.size(), 0),
+    unasked(body.vertices.size(), 0);
+  for (std::size_t v = 0; v < body.vertices.size(); v++) {
+    const Vector3d& p = body.vertices[v].point;
+    for (const std::size_t f : faces_at[v]) {
+      const Surface *s = body.faces[f].surface.get();
+      if (const auto *grid = dynamic_cast<const GridSurface *>(s)) {
+        if (grid->isDeclaredPoint(p)) declared[v] = 1;
+      }
+      // A record with no closed-form residual - a grid, a Bezier patch - cannot
+      // be asked; one that can and says no has the vertex off its face.
+      if (s == nullptr || algebraicDegree(s) == 0) {
+        unasked[v] = 1;
+        continue;
+      }
+      if (!s->residual(p).exact()) {
+        off[v] = 1;
+        continue;
+      }
+      double value = 0;
+      Vector3d grad;
+      if (AnalyticFeatures::surfaceImplicit(s, p, value, grad, nullptr) && grad.norm() > 0) {
+        held[v].push_back({f, grad.normalized()});
+      }
+    }
+  }
+  // Three normals independent at the point: their triple product against its
+  // forward error - three normalisations, a cross product and a dot over unit
+  // vectors.
+  auto independent = [](const Vector3d& a, const Vector3d& b, const Vector3d& c) {
+    return std::fabs(a.cross(b).dot(c)) > recognition::forwardError(41, 1.0);
+  };
+  // A vertex's class: D0 declared, else the best independent triple of the
+  // records holding it - the weakest class among the three, at least D1 - else
+  // D4.
+  auto vertexClass = [&](std::size_t v) {
+    if (declared[v]) return EvidenceClass::D0;
+    const auto& h = held[v];
+    EvidenceClass best = EvidenceClass::D4;
+    for (std::size_t i = 0; i < h.size(); i++) {
+      for (std::size_t j = i + 1; j < h.size(); j++) {
+        for (std::size_t k = j + 1; k < h.size(); k++) {
+          if (!independent(h[i].normal, h[j].normal, h[k].normal)) continue;
+          const EvidenceClass needs =
+            weaker(EvidenceClass::D1, weaker(body.faces[h[i].face].record_evidence,
+                                             weaker(body.faces[h[j].face].record_evidence,
+                                                    body.faces[h[k].face].record_evidence)));
+          best = std::min(best, needs);
+        }
+      }
+    }
+    return best;
+  };
+  // The least fixpoint over the planes taken from their own corners.
+  std::vector<std::vector<std::size_t>> corners(body.faces.size());
+  for (std::size_t f = 0; f < body.faces.size(); f++) {
+    if (!body.faces[f].plane_from_corners) continue;
+    // A plane from its own corners is its corners' - as a record, and as what
+    // admits the face to it - and starts at the bottom of the fixpoint.
+    body.faces[f].record_evidence = EvidenceClass::D4;
+    body.faces[f].evidence = EvidenceClass::D4;
+    std::set<std::size_t> seen;
+    for (const Loop& loop : body.faces[f].loops) {
+      for (const Coedge& c : loop.coedges) {
+        if (c.edge >= body.edges.size()) continue;
+        for (const std::size_t v : {body.edges[c.edge].start, body.edges[c.edge].end}) {
+          if (v < body.vertices.size() && seen.insert(v).second) corners[f].push_back(v);
+        }
+      }
+    }
+  }
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (std::size_t f = 0; f < body.faces.size(); f++) {
+      Face& face = body.faces[f];
+      if (!face.plane_from_corners || face.surface == nullptr) continue;
+      // Every corner on the plane, or the face asserts one its corner is not in.
+      bool all_on = !corners[f].empty();
+      for (const std::size_t v : corners[f])
+        all_on = all_on && face.surface->residual(body.vertices[v].point).exact();
+      if (!all_on) continue;
+      // The best spanning three: the two strongest distinct corners, then the
+      // first off their line - every corner before it is on that line, so no
+      // other pair reaches a stronger third.
+      std::vector<std::pair<EvidenceClass, std::size_t>> ranked;
+      for (const std::size_t v : corners[f]) ranked.emplace_back(vertexClass(v), v);
+      std::sort(ranked.begin(), ranked.end());
+      const Vector3d *a = nullptr, *b = nullptr;
+      EvidenceClass spans = EvidenceClass::D4;
+      bool spanned = false;
+      for (const auto& r : ranked) {
+        const Vector3d& p = body.vertices[r.second].point;
+        if (a == nullptr) {
+          a = &p;
+        } else if (b == nullptr) {
+          if ((p - *a).norm() > recognition::forwardError(9, a->norm() + p.norm())) b = &p;
+        } else if ((*b - *a).cross(p - *a).norm() >
+                   recognition::forwardError(18, (a->norm() + b->norm()) * (a->norm() + p.norm()))) {
+          spans = r.first;
+          spanned = true;
+          break;
+        }
+      }
+      if (!spanned) continue;
+      const EvidenceClass now = weaker(EvidenceClass::D1, spans);
+      if (now < face.record_evidence) {
+        face.record_evidence = now;
+        face.evidence = now;  // a plane from corners is admitted by what spans it
+        changed = true;
+      }
+    }
+  }
+  for (std::size_t v = 0; v < body.vertices.size(); v++) {
+    body.vertices[v].evidence = vertexClass(v);
+    if (off[v]) tally.vertices_off++;
+    else if (unasked[v] && !declared[v]) tally.vertices_unasked++;
+    tally.vertices[std::size_t(body.vertices[v].evidence)]++;
+  }
+
   for (std::size_t e = 0; e < body.edges.size(); e++) {
     Edge& edge = body.edges[e];
     if (std::holds_alternative<std::monostate>(edge.curve.form) || edge.start >= body.vertices.size() ||
@@ -136,7 +264,7 @@ ClassTally stateClasses(Body& body)
     EvidenceClass faces = EvidenceClass::D0;
     bool certified = !faces_of_edge[e].empty(), shown_off = false, unasked = false;
     for (const std::size_t f : faces_of_edge[e]) {
-      faces = weaker(faces, body.faces[f].evidence);
+      faces = weaker(faces, body.faces[f].record_evidence);
       if (edge.curve.stated_exact) continue;
       const Surface *s = body.faces[f].surface.get();
       if (!certifiable(edge.curve.form, s)) {
@@ -162,57 +290,6 @@ ClassTally stateClasses(Body& body)
     tally.edges[std::size_t(edge.evidence)]++;
   }
 
-  for (std::size_t v = 0; v < body.vertices.size(); v++) {
-    Vertex& vertex = body.vertices[v];
-    const Vector3d& p = vertex.point;
-    bool declared = false, on_all = !faces_at[v].empty(), shown_off = false, unasked = false;
-    EvidenceClass faces = EvidenceClass::D0;
-    std::vector<Vector3d> normals;
-    for (const std::size_t f : faces_at[v]) {
-      const Surface *s = body.faces[f].surface.get();
-      faces = weaker(faces, body.faces[f].evidence);
-      if (const auto *grid = dynamic_cast<const GridSurface *>(s)) {
-        if (grid->isDeclaredPoint(p)) declared = true;
-      }
-      // A record with no closed-form residual - a grid, a Bezier patch - cannot
-      // be asked; one that can and says no has the corner off its face.
-      if (s == nullptr || algebraicDegree(s) == 0) {
-        on_all = false;
-        unasked = true;
-        continue;
-      }
-      if (!s->residual(p).exact()) {
-        on_all = false;
-        shown_off = true;
-        continue;
-      }
-      double value = 0;
-      Vector3d grad;
-      if (AnalyticFeatures::surfaceImplicit(s, p, value, grad, nullptr) && grad.norm() > 0) {
-        normals.push_back(grad.normalized());
-      }
-    }
-    // Three normals independent at the point: the largest triple product over
-    // them, against its forward error - three normalisations, a cross product
-    // and a dot over unit vectors.
-    bool determined = false;
-    for (std::size_t i = 0; i < normals.size() && !determined; i++) {
-      for (std::size_t j = i + 1; j < normals.size() && !determined; j++) {
-        for (std::size_t k = j + 1; k < normals.size() && !determined; k++) {
-          determined =
-            std::fabs(normals[i].cross(normals[j]).dot(normals[k])) > recognition::forwardError(41, 1.0);
-        }
-      }
-    }
-    // A declared point a neighbour's record does not hold is still off that
-    // face: the maker's point, and a face that disagrees with it.
-    if (shown_off) tally.vertices_off++;
-    else if (unasked && !declared) tally.vertices_unasked++;
-    vertex.evidence = declared               ? EvidenceClass::D0
-                      : on_all && determined ? weaker(EvidenceClass::D1, faces)
-                                             : EvidenceClass::D4;
-    tally.vertices[std::size_t(vertex.evidence)]++;
-  }
   return tally;
 }
 
@@ -270,6 +347,8 @@ std::vector<std::string> check(const Body& body)
             std::to_string(net->degree_u) + " by " + std::to_string(net->degree_v));
     }
     if (face.evidence == EvidenceClass::Unstated) say(name("face", f) + " states no evidence class");
+    if (face.record_evidence == EvidenceClass::Unstated)
+      say(name("face", f) + " states no class for its record");
     std::size_t outer = 0;
     for (std::size_t l = 0; l < face.loops.size(); l++) {
       const Loop& loop = face.loops[l];

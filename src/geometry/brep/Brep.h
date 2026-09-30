@@ -224,6 +224,10 @@ struct Loop {
  * `evidence` is what decided that the face stands on its surface: the weakest
  * class among its members, so a patch of D0 facets and D4 additions is D4 - the
  * honest answer, and the one a writer choosing what to write exactly needs.
+ * `record_evidence` is a different fact: what the surface itself is - D0 a
+ * maker's record, D1 a derived one, D3 a fit, a plane from corners as good as
+ * they are. A vertex or an edge on the face rests on the record, never on which
+ * facets a band admitted to it; the two are one fact each.
  * `facets` are the mesh facets the face was written over. */
 struct Face {
   std::shared_ptr<const Surface> surface;
@@ -232,7 +236,12 @@ struct Face {
   double carrier_error = 0;
   std::vector<Loop> loops;
   EvidenceClass evidence = EvidenceClass::Unstated;
+  EvidenceClass record_evidence = EvidenceClass::Unstated;
   std::vector<std::size_t> facets;
+  // Set where `surface` is the plane through the face's own corners rather
+  // than a record anyone stated: then the face is as good as the corners that
+  // span it, and stateClasses decides how good that is.
+  bool plane_from_corners = false;
 };
 
 /*! A connected set of faces, indices into `Body::faces`. Closed, it bounds a
@@ -285,26 +294,35 @@ struct ClassTally {
  *
  * An edge whose carrier is certified on the record of every face using it
  * (curveOn), or stated exact by its maker, is D1 - a closed-form consequence -
- * or its faces' weakest class if that is weaker; one whose carrier is a stated
+ * or its records' weakest class if that is weaker; one whose carrier is a stated
  * fit (`carrier_error` > 0) is D2 at best; any other is D4, a carrier off a face
  * it bounds, with `carrier_error` NaN - not measured.
  *
  * A vertex a maker declared - a point of a declared grid's net - is D0. One
- * exactly on the records of every face it bounds, three of them with normals
- * independent there, is determined: D1 at best. One on fewer, or off one, has
- * freedom the tessellation decided: D4. Faces' classes are what registerFace
- * stated; this reads them and writes nothing else. */
+ * exactly on three records with normals independent there is determined, and
+ * as good as the best such three - the weakest class it *needs*, not every face
+ * that touches it (doc/step-rungs.md, determinacy): D1 at best. One fixed by no
+ * three has freedom the tessellation decided: D4. A face that does not hold a
+ * vertex it bounds is counted off; the vertex keeps the class what fixes it
+ * gives it.
+ *
+ * A face whose plane is its own corners' (`plane_from_corners`) is as good as
+ * the best three non-collinear corners spanning it, provided every corner is
+ * on that plane - and its corners may rest on it in turn. So the classes are
+ * the least fixpoint from D4 upward: a derived plane starts D4, nothing it
+ * props up can lift it, and classes only ever improve. It is the record's
+ * class every rule here reads (`record_evidence`), never the face's membership
+ * class; every other record's is what its maker stated, read and never written. */
 ClassTally stateClasses(Body& body);
 
 /*! What is wrong with a body's structure, one line per defect, empty when
  * nothing is: an index out of range; an edge with no curve, or a B-spline whose
  * knots do not fit its control points; a loop that does not close, a coedge
  * ending where the next does not start; a face on no surface, carried by no
- * form, or with more than one outer loop; a spline surface whose knots do not
- * fit its net; in a closed shell an edge not used exactly twice in opposite
- * directions; a face in no shell or in two; and any entity whose evidence class
- * is unstated. Structure only - whether a vertex lies on its edges' curves and
- * an edge on its faces' surfaces is geometry, and asked elsewhere. */
+ * form, with more than one outer loop, or stating no class for its record; a spline surface whose knots
+ * do not fit its net; in a closed shell an edge not used exactly twice in opposite directions; a face in
+ * no shell or in two; and any entity whose evidence class is unstated. Structure only - whether a vertex
+ * lies on its edges' curves and an edge on its faces' surfaces is geometry, and asked elsewhere. */
 std::vector<std::string> check(const Body& body);
 
 }  // namespace brep

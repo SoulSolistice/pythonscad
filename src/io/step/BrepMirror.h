@@ -29,6 +29,8 @@ struct FaceSource {
   std::shared_ptr<const Surface> record;
   std::vector<std::size_t> facets;
   recognition::EvidenceClass evidence = recognition::EvidenceClass::Unstated;
+  bool plane_from_corners = false;  // see brep::Face
+  recognition::EvidenceClass record_evidence = recognition::EvidenceClass::Unstated;
 };
 
 /*! What an edge's maker states about its carrier, where it states anything:

@@ -136,7 +136,10 @@ void StepKernel::BodyBuild::emitPlanarFaces()
         break;
       }
     }
-    if (record == nullptr) record = std::make_shared<PlaneSurface>(on_plane, norm);
+    if (record == nullptr) {
+      record = std::make_shared<PlaneSurface>(on_plane, norm);
+      plane_from_corners[i] = 1;
+    }
     plane_record[i] = record;
     plane_evidence[i] = decided;
     Vector3d ref(0, 0, 0);

@@ -4683,9 +4683,10 @@ at most 2d unless it contains it, so d + 1 points of a line and 2d + 1 of a
 conic on the surface at machine precision prove the curve is; each point is
 asked against the record's residual bound plus the forward error of computing
 the point from the carrier, which that bound does not state. A vertex exactly on
-the records of all its faces, three of them with independent normals, is
-determined (D1); a declared grid point is D0; any other has freedom the
-tessellation decided (D4). The verdict is three-valued: on, off, or not askable
+three records with independent normals is determined, as good as the best such
+three (D1 at best); a declared grid point is D0; any other has freedom the
+tessellation decided (D4). (As first landed, a vertex was held to every face at
+it - corrected below.) The verdict is three-valued: on, off, or not askable
 (a grid, a Bezier patch, a spline carrier) - "not askable" is counted apart and
 never reported as off. Only two statements come from creation sites: a crossing
 fit's own error (`DecideCrossingRuns`, per part, not the running maximum) and a
@@ -4699,19 +4700,45 @@ On step-declare-grid, a clean fixture, one corner 2.68e-12 off its cylinder:
 far inside any kernel's tolerance, a thousand ulps outside the machine's -
 R5's 1e-12 solve, measured.
 
-Owed by this step's own design, and named: a planar face on the plane of its
-own corners is D4 until its corners state their class - and now they do. A
-plane through determined corners is determined, but a corner's class reads its
-faces' and a derived plane's reads its corners', so it wants a fixpoint, not a
-guess. Until then most D4 edges on clean fixtures are certified on both
-surfaces and weakened only by that. And a D2 edge's stated error is R16's sample.
-And the certificate's own reach: for exact zeros it is a proof, and at machine
-precision it bounds the residual up to the interpolation's amplification over
-the range sampled - the edge's own segment for a line, the whole curve for a
-circle or an ellipse. A hyperbola or a parabola is sampled over t in [-1, 1],
-which need not contain the edge's own parameters; it wants sampling between the
-edge's ends. *Test:* a parabola edge far out along its arm, off the surface there
-and not at t in [-1, 1].
+Owed by 2b's own design, and settled the day after it landed:
+
+- **The vertex rule was wrong, and it was mine.** 2b made a vertex no better than
+  *every* face at it. The determinacy rule is the weakest class it *needs*: three
+  independent records fix a point, and a fourth, weaker face through it
+  weakens nothing - it is off, or it is not. A vertex now takes the best
+  independent triple of the records holding it. The old rule was exactly what
+  kept a plane through determined corners from ever being determined: its own
+  D4 face dragged its corners down.
+- **Planes taken from their corners are determined where their corners are.** A
+  face whose plane is its own corners' (`plane_from_corners`) is as good as the
+  best three non-collinear corners spanning it, provided every corner is on it;
+  the classes are the least fixpoint from D4 upward - a derived plane starts D4,
+  nothing it props up can lift it, classes only improve. The best spanning three
+  is found greedily and exactly: the two strongest distinct corners, then the
+  first off their line - every corner before it is on that line.
+- **Refuted: hyperbolas and parabolas wanting their edge's own range.** For
+  exact zeros the certificate is an identity, and at machine precision each
+  sample is held to a bound that scales with its own magnitude, while a real
+  departure - a cone of another opening - is a relative one, as large near the
+  vertex as far out. So the samples' range is immaterial, and the test kept as
+  the guard says so: a parabola edge at u = 20 to 21 on the cone it lies on is
+  certified with samples in [-1, 1], and on a cone opened by 1e-9 it is refused.
+
+- **And a second error of the same kind, found by measuring the first fix.** The
+  fixpoint moved 3 exports of 120, each by one edge, and step-exact-trim - every
+  surface declared, every corner exactly on three declared records - still read
+  96 of 128 corners D4. The rules read a *face's* class: what admitted its facets,
+  which at the approximation tier is the tessellation band for a declared
+  cylinder. A corner does not rest on how facets were admitted; it rests on the
+  record. Two facts, fused: a face now carries `record_evidence` beside
+  `evidence` - D0 a maker's record, D1 one every name on which is derived, D3 a
+  fit, a plane from corners what its corners make it - and vertices and edges
+  read only that. step-exact-trim: 64 of 128 corners determined, all 161 edges
+  D1; the band family 67 D1 and 18 D2 edges where it had 3 and 0; lid10 595 D1
+  and 15 D2 where it had 415 and 0. What stays D4 is honestly the tessellation's:
+  a corner on two records only, where along their crossing the mesh put it.
+
+A D2 edge's stated error remains R16's sample.
 
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
@@ -4870,6 +4897,15 @@ from coming back - landed with the fix and mutation-checked (F2).
   point was certified; on a grid, its envelope. *Test:* a unit case whose
   deviation peaks between samples - the certified value at least what dense
   sampling finds, which today's is not.
+- **R17 - an edge of no length is written with an invented direction.**
+  `create_line_edge_curve` (`StepKernel.cc`) guards a zero-length edge with an
+  absolute 1e-12 and writes `DIRECTION(1,0,0)` of magnitude 1 - a fabricated
+  curve for an edge that should not exist. It is reachable: vertices are merged
+  by exact position after the corners move (`get_vertex`), so an edge can run
+  from a vertex to itself. The guard keeps a DIRECTION from being malformed and
+  papers over the defect behind it. *Test:* a contract rule in `brep::check` - a
+  line from a vertex to itself - planted in a unit test, so every export's mirror
+  says whether any file carries one.
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

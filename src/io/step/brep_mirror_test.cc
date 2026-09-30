@@ -74,8 +74,11 @@ void cube(Graph& g, int reversed_face = -1)
     auto *face = new K::Face(g.ents, bounds,
                              new K::Plane(g.ents, g.axis(at[c[0]], n, (at[c[1]] - at[c[0]]))), true);
     g.faces.push_back(face);
-    g.sources[face] =
-      step::FaceSource{std::make_shared<PlaneSurface>(at[c[0]], n), {f}, recognition::EvidenceClass::D0};
+    g.sources[face] = step::FaceSource{std::make_shared<PlaneSurface>(at[c[0]], n),
+                                       {f},
+                                       recognition::EvidenceClass::D0,
+                                       false,
+                                       recognition::EvidenceClass::D0};
   }
 }
 
