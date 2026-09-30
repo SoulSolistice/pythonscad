@@ -96,6 +96,14 @@ export_part() {
     *.scad|*.py) args=("$part") ;;
     *) echo "unknown part: $part (lid10 | bayonet | f02 | f04 | <file.scad>)" >&2; return 2 ;;
   esac
+  # A fixture's ENABLE: lines, as tests/stepexportsanitytest.py reads them: an
+  # experimental module the model is built from. Without them the model is an
+  # empty top level object, and the roof fixtures were measured as nothing -
+  # "roof is not enabled" - from the day they were written until 2026-09-30.
+  local feature
+  while read -r feature; do
+    [ -n "$feature" ] && args+=("--enable=$feature")
+  done < <(sed -n 's/.*[^-A-Za-z0-9_]ENABLE:[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "${args[0]}")
   local name="${part##*/}"; name="${name%.*}"
   local target="$out/$name.stp" log="$out/$name.log"
   local exact="$out/$name-exact.stp" exact_log="$out/$name-exact.log"
