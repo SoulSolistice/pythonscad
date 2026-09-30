@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -655,6 +656,13 @@ struct StepKernel::BodyBuild {
    * a loop that is not written cannot take the curve, and the curve is then the
    * mesh's chords on both sides - and the one the planar writer walks by. */
   [[nodiscard]] bool boundWritten(std::size_t loop) const;
+  /*! Whether planar face `face` is flat where it stands with its corners at
+   * `at`: every corner, its holes' too, on the declared plane the face was made
+   * on - the first its unmoved corners lie on - or all on one plane where it
+   * was made on none, at machine precision (recognition::allCoplanar). What the
+   * writer holds a face to, asked before a move is applied and of every face a
+   * fan replaces (open item 39, R2, R3). */
+  [[nodiscard]] bool flatWhereItStands(std::size_t face, const std::function<Vector3d(int)>& at) const;
 
   // What a planar loop gives up to a curve an analytic face writes along it.
   /*! One run of loop edges replaced by a single arc. */

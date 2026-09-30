@@ -62,16 +62,22 @@
 // EDGES: Circle=2
 //
 // With the approximation flag the corner placement moves 46 corners onto the
-// exact cylinder, by at most 0.0582. Two of the planes beside the band would be
-// bent by that move, so the writer fans each into triangles rather than letting
-// a planar face stop being planar - which is a deliberate mechanism, not a loss:
-// APPROX: 2 faces that keep a plane fanned into triangles to follow them, adding 2 faces
+// exact cylinder, by at most 0.0582. Among them are the corners of the two
+// clipped facets where the flat cuts them: each clipped facet is bounded by two
+// vertical rulings, one on the 32-gon and one on the flat, and both corners of
+// the second are moved onto the same vertical line - where the flat meets the
+// cylinder. A face bounded by two vertical lines is flat wherever they are, so
+// the move tilts each of those planes and bends neither, and both stay whole:
+// APPROX-NOT: fanned into triangles to follow them
 // APPROX: approximation found nothing left to fit
 //
-// so the plane count goes 5 to 7 and the cylinder count does not move. A rising
-// plane count is not by itself a regression; this is what one looks like when it
-// is the placement doing its job, and it is worth having a fixture that says so.
-// ROUNDTRIP-APPROX: Cylinder=1 Plane=7
+// so the plane count is the exact tier's, and the cylinder count does not
+// move. Until 2026-09-30 the veto measured each face against the mesh's normal
+// through a moved corner, called the two tilted planes bent, and fanned each
+// into two triangles: Plane=7, and this fixture said that was the placement
+// doing its job. It was a fan for a bend the faces did not have (open item 39,
+// R2), and the writer now reports one as an EXPORT-ERROR.
+// ROUNDTRIP-APPROX: Cylinder=1 Plane=5
 // EDGES-APPROX: Circle=2
 //
 // **No VOLUME, and the reason is the point of the fixture.** The exported solid

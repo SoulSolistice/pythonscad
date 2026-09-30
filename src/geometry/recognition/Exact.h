@@ -190,6 +190,24 @@ inline bool allCoplanar(const std::vector<Vector3d>& points)
   return true;
 }
 
+/*! Whether a planar face with these `corners` - its holes' included - is flat
+ * where it stands: every one on the declared plane through `origin` across
+ * `normal` where the face was made on one (both given), or all on one plane
+ * where it was made on none. A face whose corners all moved alike off its
+ * declared plane is still coplanar and no longer where it stands, which the
+ * mesh's normal through a moved corner could not see (open item 39, R3). */
+inline bool flatWhereItStands(const std::vector<Vector3d>& corners, const Vector3d *origin,
+                              const Vector3d *normal)
+{
+  if (origin != nullptr && normal != nullptr) {
+    for (const Vector3d& p : corners) {
+      if (!onPlane(*origin, *normal, p)) return false;
+    }
+    return true;
+  }
+  return allCoplanar(corners);
+}
+
 /*! Whether `p` is on the line through `origin` along `dir`, at machine
  * precision: a normalisation, 9; a difference, a dot, a scale, a difference, a
  * norm, 20 - over |p| + |origin|. */

@@ -299,6 +299,36 @@ TEST_CASE("a face's corners are on one plane, or one is off it, at machine preci
     {Vector3d(0, 0, 0), Vector3d(1, 1, 1), Vector3d(2, 2, 2), Vector3d(5, 5, 5)}));
 }
 
+TEST_CASE("a face on a declared plane is flat where it stands, not wherever its corners went",
+          "[surface][identity]")
+{
+  // A square on the declared plane z = 5 of a turned frame. Its corners all
+  // moved 0.1 along the plane's normal are still on one plane - and no longer
+  // on the one the face was made on: it has left it. The veto measured against
+  // the mesh's normal through a moved corner, and passed exactly this (open
+  // item 39, R3). A corner moved within the plane has left nothing.
+  Transform3d turn = Transform3d::Identity();
+  turn.rotate(Eigen::AngleAxisd(0.3, Vector3d(1, 2, 3).normalized()));
+  turn.pretranslate(Vector3d(100, -70, 120));
+  const Vector3d origin = turn * Vector3d(0, 0, 5);
+  const Vector3d normal = turn.linear() * Vector3d(0, 0, 1);
+  std::vector<Vector3d> square;
+  for (const auto& xy : {Vector2d(0, 0), Vector2d(40, 0), Vector2d(40, 40), Vector2d(0, 40)})
+    square.push_back(turn * Vector3d(xy[0], xy[1], 5));
+  CHECK(recognition::flatWhereItStands(square, &origin, &normal));
+
+  std::vector<Vector3d> carried = square;
+  for (auto& p : carried) p += 0.1 * normal;
+  CHECK(recognition::allCoplanar(carried));
+  CHECK_FALSE(recognition::flatWhereItStands(carried, &origin, &normal));
+  // on no declared plane, the same corners are flat where they are
+  CHECK(recognition::flatWhereItStands(carried, nullptr, nullptr));
+
+  std::vector<Vector3d> slid = square;
+  slid[2] = turn * Vector3d(47, 43, 5);
+  CHECK(recognition::flatWhereItStands(slid, &origin, &normal));
+}
+
 TEST_CASE("a maker's names ride with its polygons into triangles, in step", "[surface][identity]")
 {
   // Identity said by the maker (checklist E8, open item 40): each polygon names

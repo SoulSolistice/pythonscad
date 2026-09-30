@@ -137,30 +137,19 @@ void StepKernel::BodyBuild::applyCornerMoves()
         // plane - the conic it lands on lies in it - so its face is not bent at
         // all, and assuming otherwise declined the whole of step-cut-cone for a
         // move that could not have touched it.
-        // Against the plane the *face* will assert, which is the outer loop's -
-        // its point and its normal, exactly as written below - and over every
-        // corner that face carries, its holes included.
         //
-        // Measuring each loop against its own plane is not the same thing and
-        // lets this through: two loops coplanar in the mesh drift apart by a
-        // fraction of the move, and a hole's far corner is then off the outer
-        // loop's plane by that drift times the face's extent. On
-        // step-declare-grid-two-bands that put a corner 1.73e-07 off a disc of
-        // radius 19.2 - outside OpenCASCADE's own Precision::Confusion, so the
-        // face asserted a plane its corner was not on, while every loop was
-        // within 1e-9 of its own.
-        const Vector3d& p0 = at_moved(loops[i][0]);
-        double out_of_plane = 0;
-        for (const int w : loops[i]) {
-          out_of_plane = std::max(out_of_plane, fabs((at_moved(w) - p0).dot(loop_normals[i])));
-        }
-        for (std::size_t j = 0; j < loops.size(); j++) {
-          if (!loop_valid[j] || consumed[j] || parents[j] != int(i)) continue;
-          for (const int w : loops[j]) {
-            out_of_plane = std::max(out_of_plane, fabs((at_moved(w) - p0).dot(loop_normals[i])));
-          }
-        }
-        if (out_of_plane <= 1e-9) continue;
+        // Asked as the writer asks what it writes (flatWhereItStands): over
+        // every corner the face carries, its holes included - measuring each
+        // loop against its own plane let a hole drift 1.73e-07 off a disc of
+        // radius 19.2 on step-declare-grid-two-bands - against the declared
+        // plane the face was made on where there is one, and otherwise whether
+        // the corners are on one plane at all. Until 2026-09-30 it was asked
+        // against the mesh's normal through a moved corner, within 1e-9: that
+        // called a face the moves had tilted whole and left flat bent, and
+        // fanned it for a bend it did not have - 41 faces over the measured
+        // exports - and could not see a face whose every corner moved alike off
+        // its declared plane (open item 39, R2, R3).
+        if (flatWhereItStands(i, at_moved)) continue;
         // Bent, and a bent polygon is written as triangles instead of being left
         // alone: a triangle is planar wherever its corners are.
         //

@@ -155,6 +155,26 @@ bool StepKernel::BodyBuild::boundWritten(std::size_t loop) const
          outer_written(std::size_t(parents[loop]));
 }
 
+bool StepKernel::BodyBuild::flatWhereItStands(std::size_t face,
+                                              const std::function<Vector3d(int)>& at) const
+{
+  std::vector<int> corners(loops[face].begin(), loops[face].end());
+  for (std::size_t j = 0; j < face_cnt; j++) {
+    if (loop_valid[j] && !consumed[j] && parents[j] == int(face))
+      corners.insert(corners.end(), loops[j].begin(), loops[j].end());
+  }
+  std::vector<Vector3d> points;
+  points.reserve(corners.size());
+  for (const int w : corners) points.push_back(at(w));
+  // The declared plane the face was made on: the first its unmoved corners lie
+  // on, as the writer chooses one.
+  for (const auto& declared : declared_planes) {
+    if (!recognition::onPlane(declared.first, declared.second, mesh_vertices, loops[face])) continue;
+    return recognition::flatWhereItStands(points, &declared.first, &declared.second);
+  }
+  return recognition::flatWhereItStands(points, nullptr, nullptr);
+}
+
 StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)
 {
   if (step_verts[ind] == nullptr) {

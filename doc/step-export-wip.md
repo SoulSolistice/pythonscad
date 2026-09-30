@@ -4814,43 +4814,55 @@ from coming back - landed with the fix and mutation-checked (F2).
   `step-plane-by-position` - two cubes and a `polyhedron()` block whose top,
   bottom, front and back lie on the cubes' planes: 12 faces on a declared plane,
   4 by position alone. With position counted as the name again it fails.
-- **R2 - one property, two tolerances, neither the machine's.** "Every corner of
-  a planar face is in the plane it asserts" is vetoed at an absolute 1e-9
-  (`CornersApply.cc`) and checked at 1e-8 of the part (`mesh_coplanar_tol`,
-  `EmitPlanarFaces.cc`, reported by `AssembleFaces.cc`). The check's own comment
-  justifies 1e-8 by the merge's bucketing and lid10's 2.26e-6 warped quads; both
-  premises are false since `d45fb5638`. One predicate at machine precision
-  (`recognition::onPlane` / `coplanar`) - C2. Two more classification tolerances
-  of the same kind in `PlaneSections.cc`: `coplanarStretches` groups a
-  boundary's vertices into planes at a relative 1e-9, and `sectionTiltFloor`
-  falls back to 1e-6 for a surface that states no lean. (The file's other small
-  numbers guard divisions against a singular solve; they decide no membership.)
-  *Test:* once it is one function, a unit test - a corner 1e-10 off a plane at
-  100 mm is off it, one within the forward error is on - so no second tolerance
-  can stand beside it unnoticed. **The writer's half, 2026-09-30.**
-  `recognition::allCoplanar` is the one predicate - every corner against the
-  plane of a spanning three, by `coplanar` - and the writer's check asks it, or
-  `onPlane` of the declared plane a face stands on; `mesh_coplanar_tol` is gone.
-  Measured first: over all 16203 planar faces of the 128 exports the tolerance
-  and the predicate agreed on every one, so the change is neutral, proven by
-  `compare --data`. The test above is `surface_protocol_test.cc`'s. **The veto's
-  half is measured and waits for its own step:** the old veto never passes a
-  face the predicate calls bent - R3's face carried off its plane is reached by
-  no export - but it calls 41 faces bent that the predicate finds flat, on
-  lid10, f04, the bayonet, step-partial-cylinder and
-  step-region-beyond-the-band. Some are triangles the veto skips a line later
-  anyway; the rest are faces the moves tilted whole and left flat, fanned into
-  triangles today for a bend they do not have. Asking the predicate there
-  changes files, so it is a behavioural step with its own measure.
-  `coplanarStretches` and `sectionTiltFloor` in `PlaneSections.cc` remain.
-- **R3 - the bend veto re-anchors at a moved corner.** `CornersApply.cc` measures
-  out-of-plane against the mesh's normal through `at_moved(loops[i][0])`, so a
-  face whose corners all move the same distance along its normal is not "bent" -
-  it is carried off its plane, and off a declared one, unseen. For a face on a
-  declared plane the question is whether every corner stays on that plane; for
-  any other, whether the final corners are coplanar.
-  *Test:* a unit test on the extracted bend test - a face's corners all moved 0.1
-  along its normal has left its plane, a corner moved within it has not.
+- **R2 - one property, two tolerances, neither the machine's. Fixed 2026-09-30,
+  but for `PlaneSections.cc`.** "Every corner of a planar face is in the plane
+  it asserts" is vetoed at an absolute 1e-9 (`CornersApply.cc`) and checked at
+  1e-8 of the part (`mesh_coplanar_tol`, `EmitPlanarFaces.cc`, reported by
+  `AssembleFaces.cc`). The check's own comment justifies 1e-8 by the merge's
+  bucketing and lid10's 2.26e-6 warped quads; both premises are false since
+  `d45fb5638`. One predicate at machine precision (`recognition::onPlane` /
+  `coplanar`) - C2. Two more classification tolerances of the same kind in
+  `PlaneSections.cc`: `coplanarStretches` groups a boundary's vertices into
+  planes at a relative 1e-9, and `sectionTiltFloor` falls back to 1e-6 for a
+  surface that states no lean. (The file's other small numbers guard divisions
+  against a singular solve; they decide no membership.) *Test:* once it is one
+  function, a unit test - a corner 1e-10 off a plane at 100 mm is off it, one
+  within the forward error is on - so no second tolerance can stand beside it
+  unnoticed. **The writer's half, 2026-09-30.** `recognition::allCoplanar` is
+  the one predicate - every corner against the plane of a spanning three, by
+  `coplanar` - and the writer's check asks it, or `onPlane` of the declared
+  plane a face stands on; `mesh_coplanar_tol` is gone. Measured first: over all
+  16203 planar faces of the 128 exports the tolerance and the predicate agreed
+  on every one, so the change is neutral, proven by `compare --data`. The test
+  above is `surface_protocol_test.cc`'s. **The veto's half, 2026-09-30.**
+  `applyCornerMoves` asks the same question before a move is applied
+  (`BodyBuild::flatWhereItStands`, over `recognition::flatWhereItStands`): every
+  corner on the declared plane the face was made on, or all on one plane. The
+  old veto never passed a face the predicate calls bent, and called 41 bent that
+  it finds flat; of those, the faces actually fanned were 8 on
+  step-partial-cylinder and 2 on step-region-beyond-the-band - the latter two
+  each bounded by two vertical rulings the moves kept vertical, tilted and not
+  bent; all ten flat by the predicate - and they are written whole now (34 faces
+  to 26, and 8 to 6). The rest were triangles or faces refused outright. A fan
+  written for a face whose corners are on its plane is an EXPORT-ERROR
+  (`emitCornerFans`), and step-region-beyond-the-band, whose comment had called
+  the two fans the placement doing its job, states Plane=5 in both tiers and
+  that nothing is fanned. *Test:* with the old veto both fixtures fail on that
+  error. `coplanarStretches` and `sectionTiltFloor` in `PlaneSections.cc`
+  remain.
+- **R3 - the bend veto re-anchors at a moved corner. Fixed 2026-09-30.**
+  `CornersApply.cc` measures out-of-plane against the mesh's normal through
+  `at_moved(loops[i][0])`, so a face whose corners all move the same distance
+  along its normal is not "bent" - it is carried off its plane, and off a
+  declared one, unseen. For a face on a declared plane the question is whether
+  every corner stays on that plane; for any other, whether the final corners are
+  coplanar. *Test:* a unit test on the extracted bend test - a face's corners
+  all moved 0.1 along its normal has left its plane, a corner moved within it
+  has not. The veto asks R2's predicate now, which asks a face made on a
+  declared plane whether its corners are still on it; reached by no export
+  measured. The test is `surface_protocol_test.cc`'s: a square on a declared
+  plane, every corner moved 0.1 along its normal, is coplanar and no longer
+  where it stands.
 - **R4 - chord or face is told by angle, three times, two ways.**
   `placeOnMeshPlanes` (`CornersOnMeshPlanes.cc`), `keepExactSurfaces`
   (`CornersKeepExact.cc`) and the plane sections' facet test (`PlaneSections.cc`,

@@ -5,9 +5,24 @@
 #include <map>
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
+#include "utils/printutils.h"
 
 void StepKernel::BodyBuild::emitCornerFans()
 {
+  // A face is fanned for a bend, and only for one: every face here must have a
+  // corner off the plane it stands on, as the writer asks it. One that has none
+  // could have been written whole, and a fan in its place is a boundary the
+  // model does not have (open item 39, R2).
+  std::size_t fanned_flat = 0;
+  for (const auto& sc : split_for_corners) {
+    if (flatWhereItStands(sc.first, [&](int v) { return vertices[v]; })) fanned_flat++;
+  }
+  if (fanned_flat > 0) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d planar face%2$s fanned into triangles though every corner is on the plane "
+        "%3$s on - a fan for a bend the face does not have",
+        int(fanned_flat), fanned_flat == 1 ? "" : "s", fanned_flat == 1 ? "it stands" : "they stand");
+  }
   for (const auto& sc : split_for_corners) {
     const std::size_t i = sc.first;
     for (const auto& corner : sc.second) {
