@@ -40,11 +40,6 @@
 // by name; the test fails the day either is no longer raised.
 // KNOWN-EXPORT-ERROR: of a D0 region are left to the tessellation
 // KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
-//
-// R25 is not fixed yet: the ring reported as a facet whose position
-// contradicts its name, in both tiers. Tolerated by name; the test fails the
-// day it is no longer raised.
-// KNOWN-EXPORT-ERROR: position contradicts the name
 
 $fn = 64;
 difference() {

@@ -832,6 +832,9 @@ void reportArbitration(const ReportInputs& in)
     std::size_t against = 0, first = 0;
     std::map<std::string, std::size_t> pairs;
     for (std::size_t f = 0; f < loops.size() && f < in.face_surface->size(); f++) {
+      // A hole is not a facet: its ring lies on whatever cut it, which says
+      // nothing about the surface of the face it bounds (open item 39, R25).
+      if (!loop_valid[f] || loop_is_hole[f]) continue;
       const int32_t made = (*in.face_surface)[f];
       if (made < 0 || std::size_t(made) >= surfaces.size() || surfaces[std::size_t(made)] == nullptr)
         continue;

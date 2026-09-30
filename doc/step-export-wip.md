@@ -5032,6 +5032,15 @@ from coming back - landed with the fix and mutation-checked (F2).
   part built to reach it broke `brep::check` in 17 places. *Test:*
   `step-hole-in-a-fanned-facet` - a radial bore through the facet of
   step-cap-meets-wall that is fanned; with the hole judged alone again it fails.
+- **R25 - the position-against-name check read a hole as a facet. Fixed
+  2026-09-30.** `Reports.cc`: a facet named for one record whose corners all
+  lie on exactly one other is reported as contradicting its name (E8), and the
+  loop walked every loop, holes included. A hole's ring lies on whatever cut it,
+  so a hole in a chord facet - named for the cylinder its face approximates,
+  lying on the bore - was reported in both tiers. The plane check just above it
+  keeps its holes: every corner of a face named on a declared plane, a hole's
+  too, has to be on that plane. *Test:* the same fixture; with holes read again
+  it fails on the EXPORT-ERROR.
 - **R26 - a curve handed to a hole nothing writes. Fixed 2026-09-30.** An
   analytic face hands the planar loop across it the curve it bounds itself
   with - a band's rim, an arc, a plane section, a Bezier run - and the fans,
