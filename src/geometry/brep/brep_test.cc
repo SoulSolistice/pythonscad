@@ -47,6 +47,7 @@ void planarFace(Body& body, std::map<std::pair<std::size_t, std::size_t>, std::s
     (body.vertices[cycle[1]].point - p0).cross(body.vertices[cycle[2]].point - p0).normalized();
   brep::Face face;
   face.surface = std::make_shared<PlaneSurface>(p0, n);
+  face.form = brep::Plane{{p0, n, (body.vertices[cycle[1]].point - p0).normalized()}};
   face.loops.push_back(loop);
   face.evidence = EvidenceClass::D0;
   body.faces.push_back(face);
@@ -98,7 +99,7 @@ Body cylinder()
 
   brep::Face wall;
   wall.surface = std::make_shared<CylinderSurface>(Vector3d::Zero(), z, 1.0);
-  wall.frame = brep::Frame{};
+  wall.form = brep::Cylinder{brep::Frame{}, 1.0};
   wall.evidence = EvidenceClass::D0;
   // Round the bottom, up the seam, back round the top, down the seam.
   wall.loops.push_back({{Coedge{0, true, std::nullopt}, Coedge{2, true, std::nullopt},
@@ -106,10 +107,12 @@ Body cylinder()
                         true});
   brep::Face bottom;
   bottom.surface = std::make_shared<PlaneSurface>(Vector3d::Zero(), Vector3d(-z));
+  bottom.form = brep::Plane{{Vector3d::Zero(), Vector3d(-z), Vector3d::UnitX()}};
   bottom.evidence = EvidenceClass::D0;
   bottom.loops.push_back({{Coedge{0, false, std::nullopt}}, true});
   brep::Face top;
   top.surface = std::make_shared<PlaneSurface>(Vector3d(0, 0, 1), z);
+  top.form = brep::Plane{{Vector3d(0, 0, 1), z, Vector3d::UnitX()}};
   top.evidence = EvidenceClass::D0;
   top.loops.push_back({{Coedge{1, true, std::nullopt}}, true});
   body.faces = {wall, bottom, top};
@@ -232,15 +235,38 @@ TEST_CASE("an edge states its curve, and a spline's knots fit its points", "[bre
   CHECK(says(defects, "edge 6's B-spline has 2 weights for 4 control points"));
 }
 
+TEST_CASE("a spline surface's knots fit its net", "[brep]")
+{
+  Body body = cube();
+  // Bilinear over a 2 by 2 net: knots 0 and 1, each twice in each direction.
+  brep::SplineSurface net;
+  net.degree_u = net.degree_v = 1;
+  net.points = {{Vector3d(0, 0, 0), Vector3d(0, 1, 0)}, {Vector3d(1, 0, 0), Vector3d(1, 1, 0)}};
+  net.knots_u = net.knots_v = {0, 1};
+  net.mults_u = net.mults_v = {2, 2};
+  body.faces[0].form = net;
+  CHECK(brep::check(body).empty());
+  net.mults_v = {1, 2};
+  body.faces[0].form = net;
+  CHECK(says(brep::check(body),
+             "face 0's spline surface does not fit its knots: a 2 by 2 net of degree 1 by 1"));
+  net.mults_v = {2, 2};
+  net.points[1].pop_back();
+  body.faces[0].form = net;
+  CHECK(says(brep::check(body), "a 2 by 2 ragged net"));
+}
+
 TEST_CASE("a face stands on a surface, a loop has coedges, and a face is in one shell", "[brep]")
 {
   Body body = cube();
   body.faces[1].surface = nullptr;
+  body.faces[5].form = std::monostate{};
   body.faces[2].loops[0].coedges.clear();
   body.shells[0].faces.push_back(3);
   body.shells.push_back({{4}, false});
   const auto defects = brep::check(body);
   CHECK(says(defects, "face 1 stands on no surface"));
+  CHECK(says(defects, "face 5 is carried by no form"));
   CHECK(says(defects, "face 2, loop 0 is empty"));
   CHECK(says(defects, "face 3 is listed twice in shell 0"));
   CHECK(says(defects, "face 4 is in two shells"));

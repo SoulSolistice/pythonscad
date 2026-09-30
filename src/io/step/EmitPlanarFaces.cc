@@ -102,10 +102,26 @@ void StepKernel::BodyBuild::emitPlanarFaces()
       }
     }
     Vector3d on_plane = vertices[loop[0]];
+    // The record the plane is written on, and what decided it: the model's own
+    // plane where the face lies in one - D0 where its triangles are named for
+    // it, D1 where only its position says so (open item 39, R1) - and otherwise
+    // the plane its corners are on, which is as good as they are: D4 until the
+    // corners state their own class.
+    using recognition::EvidenceClass;
+    std::shared_ptr<const Surface> record;
+    EvidenceClass decided = EvidenceClass::D4;
     {
       for (std::size_t dp = 0; dp < declared_planes.size(); dp++) {
         const auto& declared = declared_planes[dp];
         if (!recognition::onPlane(declared.first, declared.second, vertices, loop)) continue;
+        if (dp < declared_plane_index.size() && declared_plane_index[dp] < surfaces.size()) {
+          const std::size_t si = declared_plane_index[dp];
+          record = surfaces[si];
+          const bool named = i < faceSurface.size() && faceSurface[i] == int32_t(si);
+          decided = !named                                          ? EvidenceClass::D1
+                    : i < faceDerived.size() && faceDerived[i] != 0 ? EvidenceClass::D1
+                                                                    : EvidenceClass::D0;
+        }
         if (dp < declared_plane_index.size() && declared_plane_index[dp] < decl_written.size()) {
           decl_written[declared_plane_index[dp]] = 1;
         }
@@ -120,6 +136,9 @@ void StepKernel::BodyBuild::emitPlanarFaces()
         break;
       }
     }
+    if (record == nullptr) record = std::make_shared<PlaneSurface>(on_plane, norm);
+    plane_record[i] = record;
+    plane_evidence[i] = decided;
     Vector3d ref(0, 0, 0);
     double ref_len = 0;
     for (int j = 0; j < n; j++) {
@@ -192,6 +211,17 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     &rec.existence_open,
     &faceSurface,
     &faceDerived};
+  // Where each facet's written face stands, read from the faces the writers
+  // registered - the curved ones, all made by now.
+  std::vector<int32_t> written_on(face_cnt, -1);
+  for (const Face *face : sfaces_extra) {
+    const auto source = face_source.find(face);
+    if (source == face_source.end()) continue;
+    const int32_t s = surfaceIndexOf(source->second.record.get());
+    for (const std::size_t f : source->second.facets) {
+      if (f < written_on.size()) written_on[f] = s;
+    }
+  }
   recognition::reportDeclarationCensus(report_inputs, analytic, approximate, decl_written, facet_class,
-                                       facet_written_on);
+                                       written_on);
 }

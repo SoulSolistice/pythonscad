@@ -26,6 +26,12 @@
  *   `carrier_error` says how far it strays: zero, or the file's uncertainty,
  *   stated rather than hidden. A second copy of the surfaces on the curve
  *   would be a second thing to keep true.
+ * - **A face is its record; its form is how it is carried.** The record is the
+ *   surface the face is exactly on - declared, derived or fitted. The form is
+ *   what a writer encodes: a plane or quadric in a frame, or a spline net - and
+ *   for a declared sweep the net depends on choices the record does not make,
+ *   where the seam goes among them. So a face carries both, as an edge carries
+ *   its topology and its curve.
  * - **Topology by index, never by address.** Entities live in the body's
  *   vectors and refer to each other by position, so a body copies, compares and
  *   iterates the same way on every run (checklist F9) - the STEP writer's one
@@ -122,6 +128,49 @@ struct BSpline2 {
 };
 using PCurve = std::variant<Line2, BSpline2>;
 
+/*! How a face's surface is carried. The elementary ones in `frame`: a plane
+ * through its origin normal to its axis; a cylinder, cone, sphere or torus
+ * about its axis, with the parameter's zero along `ref`. A cone's `r` is its
+ * radius in the plane of the frame's origin and `half_angle` its opening; a
+ * torus's `r` is the major radius and `r_minor` the tube's. */
+struct Plane {
+  Frame frame;
+};
+struct Cylinder {
+  Frame frame;
+  double r = 0;
+};
+struct Cone {
+  Frame frame;
+  double r = 0, half_angle = 0;
+};
+struct Sphere {
+  Frame frame;
+  double r = 0;
+};
+struct Torus {
+  Frame frame;
+  double r = 0, r_minor = 0;
+};
+/*! A tensor-product B-spline: `points[u][v]`, `weights` empty or one per
+ * point, and each direction's distinct knots with their multiplicities. */
+struct SplineSurface {
+  int degree_u = 0, degree_v = 0;
+  std::vector<std::vector<Vector3d>> points;
+  std::vector<std::vector<double>> weights;
+  std::vector<double> knots_u, knots_v;
+  std::vector<int> mults_u, mults_v;
+};
+/*! A curve swept along a straight line: an elliptic cylinder is its ellipse
+ * swept along its axis. */
+struct Extrusion {
+  CurveForm curve;
+  Vector3d direction = Vector3d::UnitZ();  // the sweep, with its length
+};
+/*! `std::monostate` is no surface at all, which check() names. */
+using SurfaceForm =
+  std::variant<std::monostate, Plane, Cylinder, Cone, Sphere, Torus, SplineSurface, Extrusion>;
+
 /*! A point of the solid's boundary. `mesh_vertex` is the mesh's vertex it was
  * placed from, or -1 for a point the mesh never had - a seam's end made where a
  * ruling meets a rim. */
@@ -163,9 +212,10 @@ struct Loop {
 
 /*! A bounded piece of a surface. `surface` is the record it lies on - declared,
  * derived or fitted, as its evidence class says - and `same_sense` whether its
- * outward normal is the surface's own. `frame` is the parameterisation a
- * writer measures the face's pcurves in, where the face carries any; a
- * surface's record states the surface, not where its parameter starts.
+ * outward normal is the surface's own. `form` is how it is carried, and the
+ * parameterisation its pcurves are measured in; `carrier_error` how far the
+ * form strays from the record - zero where the form is the record's own, a
+ * fit's worst where the record has no form a writer can encode.
  * `evidence` is what decided that the face stands on its surface: the weakest
  * class among its members, so a patch of D0 facets and D4 additions is D4 - the
  * honest answer, and the one a writer choosing what to write exactly needs.
@@ -173,7 +223,8 @@ struct Loop {
 struct Face {
   std::shared_ptr<const Surface> surface;
   bool same_sense = true;
-  std::optional<Frame> frame;
+  SurfaceForm form;
+  double carrier_error = 0;
   std::vector<Loop> loops;
   EvidenceClass evidence = EvidenceClass::Unstated;
   std::vector<std::size_t> facets;
@@ -197,8 +248,9 @@ struct Body {
 /*! What is wrong with a body's structure, one line per defect, empty when
  * nothing is: an index out of range; an edge with no curve, or a B-spline whose
  * knots do not fit its control points; a loop that does not close, a coedge
- * ending where the next does not start; a face on no surface, or with more than
- * one outer loop; in a closed shell an edge not used exactly twice in opposite
+ * ending where the next does not start; a face on no surface, carried by no
+ * form, or with more than one outer loop; a spline surface whose knots do not
+ * fit its net; in a closed shell an edge not used exactly twice in opposite
  * directions; a face in no shell or in two; and any entity whose evidence class
  * is unstated. Structure only - whether a vertex lies on its edges' curves and
  * an edge on its faces' surfaces is geometry, and asked elsewhere. */

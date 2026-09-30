@@ -611,6 +611,8 @@ public:
     int degree_u = 0, degree_v = 0;
     std::vector<std::vector<Point *>> net;     // net[u][v]
     std::vector<std::vector<double>> weights;  // empty for a polynomial patch
+    std::vector<double> knots_u, knots_v;      // empty for a Bezier - see setKnots
+    std::vector<int> mults_u, mults_v;
 
   private:
     static std::string int_list(const std::vector<int>& v)
@@ -639,9 +641,6 @@ public:
         "(" + std::to_string(degree_v + 1) + "," + std::to_string(degree_v + 1) + ")";
       return mult_u + "," + mult_v + ",(0.,1.),(0.,1.)";
     }
-
-    std::vector<double> knots_u, knots_v;  // empty for a Bezier
-    std::vector<int> mults_u, mults_v;
   };
 
   /*! One boundary curve of such a patch: a row or a column of its net. */

@@ -16,12 +16,15 @@
 #include <set>
 #include <tuple>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/Surface.h"
+#include "geometry/brep/Brep.h"
 #include "geometry/recognition/Pipeline.h"
+#include "io/step/BrepMirror.h"
 #include "io/step/BoundaryCycles.h"
 #include "io/step/CornerLadder.h"
 #include "io/step/CrossingRuns.h"
@@ -448,6 +451,19 @@ struct StepKernel::BodyBuild {
    * of our own file - and the report lines for what the emitters counted. */
   void checkAndReport();
 
+  /*! The file's faces grouped into shells, as indices into `sfaces`: one per
+   * connected component, faces that share an edge being one body. What
+   * writeShells writes and the B-rep mirrors, asked in one place. */
+  [[nodiscard]] std::vector<std::vector<std::size_t>> shellFaces() const;
+  /*! The B-rep the file holds, read off the entities the phases made (open item
+   * 39, step 2): the bridge while the phases still build STEP entities, and
+   * what the translator that replaces them is proven against. Faces carry what
+   * registerFace recorded; vertices and edges no class yet. */
+  [[nodiscard]] brep::Body mirrorBrep() const;
+  /*! brep::check over the mirror: the structure the file asserts, held to the
+   * neutral B-rep's contract - an EXPORT-ERROR where it breaks it. */
+  void checkBrep() const;
+
   /*! The faces as closed shells - one per connected component, since a
    * CLOSED_SHELL has to be connected - each a MANIFOLD_SOLID_BREP, and the
    * product structure and contexts around them. */
@@ -561,13 +577,28 @@ struct StepKernel::BodyBuild {
   // declaration" cannot see a declaration that kept one facet of a hundred,
   // and cannot see ground a fit took.
   std::vector<unsigned char> facet_class = std::vector<unsigned char>(faces.size(), 0);
-  // Per facet, the entry of `surfaces` a face the file holds stands on and
-  // covers it with, or -1. Set where each writer pushes its face (wroteFace),
-  // not where a claim was honoured: a writer that finds no boundary for a
-  // patch writes nothing, and its facets are still claimed.
-  std::vector<int32_t> facet_written_on = std::vector<int32_t>(faces.size(), -1);
-  void wroteFace(const std::vector<std::size_t>& facets, const Surface *surface);
-  void wroteFace(const std::vector<std::size_t>& facets, int32_t surface_index);
+  // What each face the file holds stands for, registered where the face is
+  // made rather than inferred from it afterwards: the record it is on, the
+  // facets it covers, and the class that decided it. The one channel the
+  // named-facet census and the B-rep both read (open item 39). Keyed by the
+  // face for lookup only; faces are walked in `sfaces` order, never this map's.
+  using FaceSource = step::FaceSource;
+  std::map<const Face *, FaceSource> face_source;
+  /*! Register `face`, just made, as standing on `record` over `facets`. Its
+   * class is the weakest its facets' honoured claims state, unless the caller
+   * states it - a planar face, which no recogniser claims. */
+  void registerFace(const Face *face, std::shared_ptr<const Surface> record,
+                    std::vector<std::size_t> facets,
+                    std::optional<recognition::EvidenceClass> evidence = std::nullopt);
+  /*! The entry of `surfaces` that is `record`, or -1: a fitted record, or a
+   * plane derived from a face's corners. */
+  [[nodiscard]] int32_t surfaceIndexOf(const Surface *record) const;
+  // Per planar loop, the record its plane is written on and the class that
+  // decided it - filled by emitPlanarFaces, registered by assembleFaces.
+  std::vector<std::shared_ptr<const Surface>> plane_record =
+    std::vector<std::shared_ptr<const Surface>>(faces.size());
+  std::vector<recognition::EvidenceClass> plane_evidence =
+    std::vector<recognition::EvidenceClass>(faces.size(), recognition::EvidenceClass::Unstated);
   struct SectionMiss {
     double tilt, offset;
   };

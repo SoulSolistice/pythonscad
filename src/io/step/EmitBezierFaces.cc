@@ -145,7 +145,7 @@ void StepKernel::BodyBuild::emitBezierFaces()
         outward = radial.dot(mesh_normal) > 0;
       } else {
         double u = 0.5, v = 0.5;
-        const_cast<BezierPatchSurface *>(bez)->project(vertices[facet[0]], u, v);
+        bez->project(vertices[facet[0]], u, v);
         const double h = 1e-6;
         const Vector3d du =
           bez->evaluate(std::min(1.0, u + h), v) - bez->evaluate(std::max(0.0, u - h), v);
@@ -158,7 +158,7 @@ void StepKernel::BodyBuild::emitBezierFaces()
     auto edge_loop = new EdgeLoop(entities, loop);
     std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
-    wroteFace(patch.facets, patch.surface.get());
+    registerFace(sfaces_extra.back(), patch.surface, patch.facets);
     face_edges_extra.push_back(face_edges_here);
   }
 }

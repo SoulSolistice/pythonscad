@@ -39,6 +39,17 @@ void StepKernel::BodyBuild::emitBands()
         break;
       }
     }
+    // The record the face stands on: the declaration its walls are claimed for,
+    // the zone it closes, or - a band on a fitted surface - the surface its own
+    // rims make, as its writer below builds it.
+    std::shared_ptr<const Surface> record =
+      claimed >= 0           ? std::shared_ptr<const Surface>(surfaces[claimed])
+      : band.zone != nullptr ? band.zone
+      : band.isCone()
+        ? std::shared_ptr<const Surface>(std::make_shared<ConeSurface>(
+            band.base, band.axis, band.r_bottom, (band.r_top - band.r_bottom) / band.height))
+        : std::shared_ptr<const Surface>(
+            std::make_shared<CylinderSurface>(band.base, band.axis, band.r_bottom));
     const auto *whole_torus = dynamic_cast<const TorusSurface *>(band.zone.get());
     if (whole_torus != nullptr && band.seam_bottom != band.seam_top) whole_torus = nullptr;
     if (const auto *tor = whole_torus) {
@@ -83,7 +94,7 @@ void StepKernel::BodyBuild::emitBands()
       std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
       sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
       face_edges_extra.push_back({edge_major, edge_meridian});
-      wroteFace(covered, claimed);
+      registerFace(sfaces_extra.back(), record, covered);
       continue;
     }
 
@@ -141,7 +152,7 @@ void StepKernel::BodyBuild::emitBands()
         std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
         sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
         face_edges_extra.push_back({edge_seam});
-        wroteFace(covered, claimed);
+        registerFace(sfaces_extra.back(), record, covered);
         continue;
       }
     }
@@ -390,6 +401,6 @@ void StepKernel::BodyBuild::emitBands()
     // a bore - where the material is outside it - is the opposite sense.
     sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
     face_edges_extra.push_back(face_edges_here);
-    wroteFace(covered, claimed);
+    registerFace(sfaces_extra.back(), record, covered);
   }
 }

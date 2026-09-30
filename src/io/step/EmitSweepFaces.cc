@@ -335,7 +335,7 @@ void StepKernel::BodyBuild::emitSweepFaces()
     }
 
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
-    wroteFace(patch.facets, patch.surface.get());
+    registerFace(sfaces_extra.back(), patch.surface, patch.facets);
     face_edges_extra.push_back(face_edges_here);
   }
 }

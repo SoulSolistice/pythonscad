@@ -4664,6 +4664,17 @@ and ISO 10303 writes it so); an edge's surfaces are stated once, by the faces
 that use it, not copied onto its curve; an unset curve is `std::monostate` and
 named, not a default line; a face's class is the weakest of its members'.
 
+**Step 2a, landed 2026-09-30**: every face is registered where it is made
+(`BodyBuild::registerFace`, `step::FaceSource` - its record, facets and class),
+and `step::mirrorBrep` reads the B-rep the file holds off the finished entities;
+`brep::check` holds it to the contract on every export, an `EXPORT-ERROR` where
+it breaks - on none of the 120 measured. A face gained a surface *form* beside
+its record, since a sweep's net depends on the writer's seam, which the record
+does not decide. Vertices and edges state no class yet - on lid10 1589 and 2342,
+counted - which is step 2b's to close, at their creation sites. Then 2c: a
+translator writes STEP from the B-rep, proven by `compare` against the entities
+the phases make today, and the phases move over one by one.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral
@@ -4686,7 +4697,11 @@ from coming back - landed with the fix and mutation-checked (F2).
   `EmitPlanarFaces.cc`, reported by `AssembleFaces.cc`). The check's own comment
   justifies 1e-8 by the merge's bucketing and lid10's 2.26e-6 warped quads; both
   premises are false since `d45fb5638`. One predicate at machine precision
-  (`recognition::onPlane` / `coplanar`) - C2.
+  (`recognition::onPlane` / `coplanar`) - C2. Two more classification
+  tolerances of the same kind in `PlaneSections.cc`: `coplanarStretches` groups a
+  boundary's vertices into planes at a relative 1e-9, and `sectionTiltFloor`
+  falls back to 1e-6 for a surface that states no lean. (The file's other small
+  numbers guard divisions against a singular solve; they decide no membership.)
   *Test:* once it is one function, a unit test - a corner 1e-10 off a plane at
   100 mm is off it, one within the forward error is on - so no second tolerance
   can stand beside it unnoticed.
@@ -4698,11 +4713,13 @@ from coming back - landed with the fix and mutation-checked (F2).
   any other, whether the final corners are coplanar.
   *Test:* a unit test on the extracted bend test - a face's corners all moved 0.1
   along its normal has left its plane, a corner moved within it has not.
-- **R4 - chord or face is told by angle, twice, two ways.** `placeOnMeshPlanes`
-  (`CornersOnMeshPlanes.cc`) and `keepExactSurfaces` (`CornersKeepExact.cc`)
-  both probe 1e-4 along a facet's normal and compare the surface's give against
-  a threshold - cos(pi/6) in one, 0.5 in the other - so a plane reading between
-  them is a chord to one pass and a face to the other. The first says of itself
+- **R4 - chord or face is told by angle, three times, two ways.**
+  `placeOnMeshPlanes` (`CornersOnMeshPlanes.cc`), `keepExactSurfaces`
+  (`CornersKeepExact.cc`) and the plane sections' facet test (`PlaneSections.cc`,
+  "the declared curved surface this plane is a facet of") all probe 1e-4 along a
+  facet's normal and compare the surface's give against a threshold - cos(pi/6)
+  in two, 0.5 in the other - so a plane reading between them is a chord to one
+  pass and a face to another. The first says of itself
   "an inference standing in for something the model knew: a declared plane would
   make this a lookup". Since item 40 it is one: a facet named for the surface
   being placed on is its chord, one named for a plane record is a face on that
@@ -4730,6 +4747,89 @@ from coming back - landed with the fix and mutation-checked (F2).
   *Test:* built with the fix, since the case it needs is the one the fix makes
   askable: a maker's corner on a declared plane that a weaker candidate would
   move, which must stay where its maker put it.
+- **R7 - the file's resolution is a chosen number.** `resolution()`
+  (`WriteShells.cc`) is 1e-9 times the part's size, "a chosen number itself",
+  and it is what the file declares as its uncertainty and what every fitted curve
+  is held to. It should be the forward error of placing a corner at that size -
+  what the machine can say, not what was picked. *Test:* a unit test on the
+  derivation, at two sizes a decade apart.
+- **R8 - fan triangles dropped in silence.** `EmitCornerFans.cc` skips a
+  triangle under `area_eps` and one winding against its polygon - "a bug rather
+  than a case to paper over", its comment says, and then drops it, which opens the
+  shell with nothing said. *Test:* the mirror's closed-shell check (step 2)
+  names the edge used once; planted with a dropped fan triangle.
+- **R9 - "does this polygon have a plane?" asked two ways.** The merge decides
+  it at machine precision; `MeshLoops.cc` and the fans by `area_eps`, an absolute
+  1e-12, whatever the part's size - and `model_tol` falls back to a silent 1e-5.
+  *Test:* a unit test on the one predicate once both ask it: a sliver on a
+  1000 mm part whose area is above 1e-12 and below the forward error.
+- **R10 - a face's surface read back out of the file.** `promoteCurves`
+  rebuilds a `ConeSurface` or `CylinderSurface` from the STEP entity just written
+  - axis, radius, `tan(half_angle)` - instead of the face's record: a
+  re-derivation with rounding in place of the declaration, identity lost. The
+  registry step 2 adds (`registerFace`) carries each face's record; read it.
+  The same pass's latent twin: `declared_planes` admits fitted planes, and the
+  planar writer would count a face on one "on a declared plane" - unreachable
+  only because no recogniser fits a plane. *Test:* R11's fixture, whose curves
+  must be the declared records' exactly.
+- **R11 - "on the surface already" within `model_tol`.** `promoteCurves` leaves a
+  chord straight when its midpoint is within `tol` (1e-5 by default) of the
+  quadric - off it by up to a hundred times OpenCASCADE's own 1e-7 - and promotes
+  an arc between ends up to `tol` apart in height, a circle missing its own
+  endpoints: SOLIDWORKS codes 17 and 7, at machine-checkable sizes. C2. *Test:* a
+  natural fixture - `step-partial-cylinder` at `$fn` 1024, whose chords sag
+  4.7e-6, below the tolerance: every edge on its cylinder at machine precision.
+- **R12 - a vertex off its own edge's curve is only a warning.** `checkAndReport`
+  measures SOLIDWORKS fault code 7 against the uncertainty the file declares and
+  says so as an `EXPORT-WARNING`; a systemic defect is an `EXPORT-ERROR`. It also
+  walks every entity, dead ones included, so it can count an edge the file does
+  not hold. It fires on none of the 120 measured exports, so as an error it costs
+  no directive and only protects. *Test:* planted - a vertex moved off its edge -
+  and the walk taken from the mirror, which holds only what is written.
+- **R13 - the plane that cuts a quadric is found by position, and a chord
+  qualifies.** `decideSections` (`DecideSections.cc`) takes a declared plane
+  where a neighbouring loop's corners lie on one, and otherwise the loop's own
+  mesh plane - including a loop named for *another curved surface*, which is not
+  a cutting plane but a chord of that surface. The report counts the result as
+  "facets of something curved, so the conic is the wrong curve" (open item 26):
+  lid10, the bayonet, f04 and step-cap-meets-wall. With names both are lookups:
+  a loop named for a plane record is that plane, exactly; one named for a curved
+  record meets this one along their crossing, a crossing curve, never a conic.
+  *Test:* step-cap-meets-wall, which shows it today, asserting that no conic is
+  cut by a facet of something curved.
+- **R14 - a second decider after the one arbiter.** `placeOnOwnQuadric`
+  (`CornersOnOwnQuadric.cc`) runs after the corner arbiter, on exactly the
+  corners it left where the mesh put them - often because no candidate satisfied
+  every face there - and projects each onto its own face's quadric by nearest
+  point. That satisfies one face and ignores the others meeting there, whose
+  planes then bend and are fanned; the projection keeps every freedom the
+  tessellation left, so the corner is D4 while the report says "placed"; and
+  "nothing else holds it" is decided by position (on another declared surface
+  within 1e-9, grids excepted), R6's pattern. Recognition has one arbiter; this
+  is a second, overruling the first by a weaker rule. It is where item 41's stray
+  corners on cylinder 12 were written from. *Test:* the design's phantom-sliver
+  coupon (`examples/step_test/phantom-sliver.scad`), parked outside the suite for
+  exactly this corner, 0.103 off its face - it joins the suite with its derived
+  volume when this is fixed.
+- **R15 - "the move keeps the corner on its faces", judged by the band.**
+  `checkMovesStayOnFaces` (`CornersStayOnFaces.cc`) accepts a moved corner
+  anywhere within `declaredBand(s)` of a face's surface - up to its sagitta, D4
+  standing in for "on it" - while the arbiter asks the same property at machine
+  precision, "against the surface as written, not against the band the
+  declaration publishes". And it refuses a move only where it made things worse
+  (`after > before`), so a corner already beyond the allowance is never asked
+  about. *Test:* one predicate with the arbiter's, unit-tested - a corner half a
+  band off its surface is off it.
+- **R16 - a crossing curve's fit is a sample, not a bound.**
+  `intersectionArcError` (`CrossingArc.cc`) evaluates the Bezier at 4 x degree - 1
+  interior parameters and returns the worst distance found there; that becomes
+  the curve's `crossing_fit`, "fitted to within ... of both", which the file then
+  declares every curve held to. The worst can lie between samples. On a quadric a
+  certificate is closed form - the implicit composed with the Bezier is a
+  polynomial in t whose Bernstein coefficients bound it, as the grid's closest
+  point was certified; on a grid, its envelope. *Test:* a unit case whose
+  deviation peaks between samples - the certified value at least what dense
+  sampling finds, which today's is not.
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

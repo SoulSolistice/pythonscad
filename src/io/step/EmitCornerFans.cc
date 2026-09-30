@@ -51,6 +51,10 @@ void StepKernel::BodyBuild::emitCornerFans()
       bounds.push_back(new FaceBound(entities, new EdgeLoop(entities, oriented), true, true));
       sfaces_extra.push_back(new Face(entities, bounds, new Plane(entities, axis), true));
       face_edges_extra.push_back(edges_here);
+      // A triangle of a polygon the placement bent, on the plane its corners
+      // are on: as good as they are, D4 until they state their own class.
+      registerFace(sfaces_extra.back(), std::make_shared<PlaneSurface>(vertices[tri[0]], tn), {i},
+                   recognition::EvidenceClass::D4);
     }
   }
 }

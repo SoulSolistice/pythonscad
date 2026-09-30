@@ -29,24 +29,10 @@ void StepKernel::BodyBuild::writeShells()
   // A CLOSED_SHELL has to be a single connected shell, so split disconnected
   // bodies into one MANIFOLD_SOLID_BREP each instead of stuffing all of them
   // into one shell that can never close.
-  std::vector<int> component(sfaces.size(), 0);
-  for (std::size_t i = 0; i < sfaces.size(); i++) component[i] = int(i);
-  std::map<EdgeCurve *, int> edge_owner;
-  for (std::size_t i = 0; i < face_edges.size(); i++) {
-    for (auto *edge : face_edges[i]) {
-      auto it = edge_owner.find(edge);
-      if (it == edge_owner.end()) {
-        edge_owner.emplace(edge, int(i));
-        continue;
-      }
-      const int a = uf_find(component, it->second);
-      const int b = uf_find(component, int(i));
-      if (a != b) component[a] = b;
-    }
-  }
-  std::map<int, std::vector<Face *>> shell_faces;
-  for (std::size_t i = 0; i < sfaces.size(); i++) {
-    shell_faces[uf_find(component, int(i))].push_back(sfaces[i]);
+  std::vector<std::vector<Face *>> shell_faces;
+  for (const auto& shell : shellFaces()) {
+    shell_faces.emplace_back();
+    for (const std::size_t i : shell) shell_faces.back().push_back(sfaces[i]);
   }
 
   // units and the file's uncertainty
@@ -80,7 +66,7 @@ void StepKernel::BodyBuild::writeShells()
   // build the model
   std::vector<ManifoldSolid *> solids;
   for (auto& shell : shell_faces) {
-    auto closed_shell = new Shell(entities, shell.second);
+    auto closed_shell = new Shell(entities, shell);
     closed_shell->isOpen = false;
     solids.push_back(new ManifoldSolid(entities, 0, closed_shell));
   }

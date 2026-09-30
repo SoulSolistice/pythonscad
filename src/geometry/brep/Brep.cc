@@ -6,6 +6,19 @@
 
 namespace brep {
 
+namespace {
+
+/*! n control points of degree p want n + p + 1 knots, with multiplicities. */
+bool knotsFit(std::size_t points, int degree, const std::vector<double>& knots,
+              const std::vector<int>& mults)
+{
+  int counted = 0;
+  for (const int m : mults) counted += m;
+  return knots.size() == mults.size() && counted == int(points) + degree + 1;
+}
+
+}  // namespace
+
 std::vector<std::string> check(const Body& body)
 {
   std::vector<std::string> out;
@@ -25,15 +38,14 @@ std::vector<std::string> check(const Body& body)
     if (edge.evidence == EvidenceClass::Unstated) say(name("edge", e) + " states no evidence class");
     if (std::holds_alternative<std::monostate>(edge.curve.form)) say(name("edge", e) + " has no curve");
     if (const auto *spline = std::get_if<BSpline>(&edge.curve.form)) {
-      // A clamped spline of n control points and degree p has n + p + 1 knots,
-      // counted with their multiplicities.
-      int counted = 0;
-      for (const int m : spline->mults) counted += m;
-      const int wanted = int(spline->points.size()) + spline->degree + 1;
-      if (spline->knots.size() != spline->mults.size() || counted != wanted)
+      if (!knotsFit(spline->points.size(), spline->degree, spline->knots, spline->mults)) {
+        int counted = 0;
+        for (const int m : spline->mults) counted += m;
         say(name("edge", e) + "'s B-spline has " + std::to_string(spline->points.size()) +
             " control points of degree " + std::to_string(spline->degree) + " and " +
-            std::to_string(counted) + " knots, not " + std::to_string(wanted));
+            std::to_string(counted) + " knots, not " +
+            std::to_string(int(spline->points.size()) + spline->degree + 1));
+      }
       if (!spline->weights.empty() && spline->weights.size() != spline->points.size())
         say(name("edge", e) + "'s B-spline has " + std::to_string(spline->weights.size()) +
             " weights for " + std::to_string(spline->points.size()) + " control points");
@@ -48,6 +60,18 @@ std::vector<std::string> check(const Body& body)
   for (std::size_t f = 0; f < body.faces.size(); f++) {
     const Face& face = body.faces[f];
     if (face.surface == nullptr) say(name("face", f) + " stands on no surface");
+    if (std::holds_alternative<std::monostate>(face.form))
+      say(name("face", f) + " is carried by no form");
+    if (const auto *net = std::get_if<SplineSurface>(&face.form)) {
+      const std::size_t rows = net->points.size(), cols = rows > 0 ? net->points.front().size() : 0;
+      bool rect = true;
+      for (const auto& row : net->points) rect = rect && row.size() == cols;
+      if (!rect || !knotsFit(rows, net->degree_u, net->knots_u, net->mults_u) ||
+          !knotsFit(cols, net->degree_v, net->knots_v, net->mults_v))
+        say(name("face", f) + "'s spline surface does not fit its knots: a " + std::to_string(rows) +
+            " by " + std::to_string(cols) + (rect ? "" : " ragged") + " net of degree " +
+            std::to_string(net->degree_u) + " by " + std::to_string(net->degree_v));
+    }
     if (face.evidence == EvidenceClass::Unstated) say(name("face", f) + " states no evidence class");
     std::size_t outer = 0;
     for (std::size_t l = 0; l < face.loops.size(); l++) {

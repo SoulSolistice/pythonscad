@@ -75,28 +75,49 @@ void StepKernel::BodyBuild::run()
 
   promoteCurves();
 
+  checkBrep();
+
   checkAndReport();
 
   writeShells();
 }
 
-void StepKernel::BodyBuild::wroteFace(const std::vector<std::size_t>& facets, const Surface *surface)
+int32_t StepKernel::BodyBuild::surfaceIndexOf(const Surface *record) const
 {
-  int32_t index = -1;
-  for (std::size_t i = 0; i < surfaces.size() && index < 0; i++) {
-    if (surfaces[i].get() == surface) index = int32_t(i);
+  for (std::size_t i = 0; i < surfaces.size(); i++) {
+    if (surfaces[i].get() == record) return int32_t(i);
   }
-  for (std::size_t i = 0; i < surfaces.size() && index < 0 && surface != nullptr; i++) {
-    if (surfaces[i] != nullptr && surfaces[i]->sameAs(*surface)) index = int32_t(i);
+  for (std::size_t i = 0; i < surfaces.size() && record != nullptr; i++) {
+    if (surfaces[i] != nullptr && surfaces[i]->sameAs(*record)) return int32_t(i);
   }
-  wroteFace(facets, index);
+  return -1;
 }
 
-void StepKernel::BodyBuild::wroteFace(const std::vector<std::size_t>& facets, int32_t surface_index)
+void StepKernel::BodyBuild::registerFace(const Face *face, std::shared_ptr<const Surface> record,
+                                         std::vector<std::size_t> facets,
+                                         std::optional<recognition::EvidenceClass> evidence)
 {
-  for (const std::size_t f : facets) {
-    if (f < facet_written_on.size()) facet_written_on[f] = surface_index;
+  using recognition::EvidenceClass;
+  // The weakest class its facets' honoured claims state: a patch of D0 members
+  // and D4 additions is D4. A facet no honoured claim holds leaves the face
+  // unstated, which the B-rep's check names.
+  EvidenceClass weakest = EvidenceClass::D0;
+  if (!evidence) {
+    for (const std::size_t f : facets) {
+      EvidenceClass here = EvidenceClass::Unstated;
+      for (const auto *claim : features.ledger.claimants(f)) {
+        if (!claim->honoured()) continue;
+        here = claim->evidence;
+        break;
+      }
+      if (here == EvidenceClass::Unstated) {
+        weakest = EvidenceClass::Unstated;
+        break;
+      }
+      weakest = std::max(weakest, here);
+    }
   }
+  face_source[face] = FaceSource{std::move(record), std::move(facets), evidence ? *evidence : weakest};
 }
 
 StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)

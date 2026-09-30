@@ -20,6 +20,7 @@ void StepKernel::BodyBuild::assembleFaces()
     }
     sfaces.push_back(new Face(entities, singface, planes[i], true));
     face_edges.push_back(edges);
+    registerFace(sfaces.back(), plane_record[i], {i}, plane_evidence[i]);
   }
 
   if (planes_off_plane > 0) {
