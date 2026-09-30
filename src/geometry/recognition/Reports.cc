@@ -945,8 +945,9 @@ void reportArbitration(const ReportInputs& in)
   }
 }
 
-void reportDeclarationCensus(const ReportInputs& in, bool analytic, std::vector<char>& decl_written,
-                             std::vector<unsigned char>& facet_class)
+void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approximate,
+                             std::vector<char>& decl_written, std::vector<unsigned char>& facet_class,
+                             const std::vector<int32_t>& written_on)
 {
   [[maybe_unused]] const AnalyticFeatures::Result& features = in.features;
   [[maybe_unused]] const std::vector<std::shared_ptr<Surface>>& surfaces = in.surfaces;
@@ -1292,6 +1293,136 @@ void reportDeclarationCensus(const ReportInputs& in, bool analytic, std::vector<
               "STEP export:   %1$d facets are held by a claim that states no evidence class - the claim "
               "is malformed; see AnalyticFeatures::EvidenceClass",
               int(by_class[0]));
+        }
+      }
+      // **Named D0, and written on its surface - the check at the end.** A
+      // facet its maker named for a declared surface is D0 by that heritage
+      // (checklist E8), whole or cut: a boolean moves where a corner is, never
+      // which surface the facet was made on (B7). So once every writer that
+      // stands a face on a declaration has run - which is here - each such
+      // facet is in a face written on that surface, or the export has left D0
+      // ground behind (B6), whatever the reason: declined, refused, held by a
+      // fit, left to the tessellation. The D0 regions' own check
+      // (reportRegions) asks this of whole facets only, and before the writer;
+      // this asks it of every named facet, of what was written: `written_on`,
+      // set where each writer pushed a face - not the honoured claim, since a
+      // writer that finds no boundary for a patch writes nothing and its facets
+      // stay claimed.
+      //
+      // Not asked, each for its own reason and counted: a derived name is D1,
+      // not D0; a phantom is a facet whose surface the model has no face of
+      // there (B10, its own error); and a declared sweep in the exact tier is
+      // refused by the author's choice of flags, not by a defect. A facet the
+      // model's boolean leaves undecided is asked like any other, and counted.
+      {
+        std::size_t named = 0, written = 0, cut = 0, whole = 0, fitted = 0, elsewhere = 0, unwritten = 0,
+                    undecided = 0, phantom = 0, by_flag = 0;
+        std::map<std::string, std::size_t> reasons;
+        // Whole or cut is decided where the regions are, before any corner
+        // moved: asked here, of the vertices the writer placed, a cut facet
+        // whose corners were put on its surface reads as whole.
+        const D0Membership d0(in.regions != nullptr ? *in.regions : std::vector<Region>{});
+        auto kind_of = [](const Surface *sf) {
+          return dynamic_cast<const CylinderSurface *>(sf) != nullptr ? "cylinder"
+                 : dynamic_cast<const ConeSurface *>(sf) != nullptr   ? "cone"
+                 : dynamic_cast<const SphereSurface *>(sf) != nullptr ? "sphere"
+                 : dynamic_cast<const TorusSurface *>(sf) != nullptr  ? "torus"
+                 : dynamic_cast<const GridSurface *>(sf) != nullptr   ? "sweep"
+                 : dynamic_cast<const PlaneSurface *>(sf) != nullptr  ? "plane"
+                                                                      : "surface";
+        };
+        for (std::size_t f = 0; f < loops.size() && f < facet_class.size(); f++) {
+          if (!loop_valid[f] || loop_is_hole[f]) continue;
+          if (in.face_surface == nullptr || f >= in.face_surface->size()) continue;
+          const int32_t s = (*in.face_surface)[f];
+          if (s < 0 || std::size_t(s) >= surfaces.size() || surfaces[s] == nullptr) continue;
+          if (in.face_derived != nullptr && f < in.face_derived->size() && (*in.face_derived)[f] != 0)
+            continue;
+          const Exists exists =
+            in.existence != nullptr && f < in.existence->size() ? (*in.existence)[f] : Exists::NotAsked;
+          if (exists == Exists::Phantom) {
+            phantom++;
+            continue;
+          }
+          const Surface *own = surfaces[s].get();
+          if (!approximate && dynamic_cast<const GridSurface *>(own) != nullptr) {
+            by_flag++;
+            continue;
+          }
+          named++;
+          bool on_own = false;
+          if (dynamic_cast<const PlaneSurface *>(own) != nullptr) {
+            // A planar face stands on a declared plane only if its every corner
+            // is on it - so on this one, if on any (EmitPlanarFaces).
+            if (facet_class[f] == 1) {
+              on_own = true;
+              for (const int v : loops[f]) on_own = on_own && onExactly(own, vertices[std::size_t(v)]);
+            }
+          } else {
+            on_own = f < written_on.size() && written_on[f] == s;
+          }
+          if (on_own) {
+            written++;
+            continue;
+          }
+          if (exists == Exists::Undecided) undecided++;
+          const int32_t wrote = f < written_on.size() ? written_on[f] : -1;
+          if (wrote >= 0 || facet_class[f] == 1) {
+            elsewhere++;
+          } else if (facet_class[f] == 3) {
+            fitted++;
+          } else if (facet_class[f] == 2) {
+            unwritten++;  // held by an honoured claim, and no face was written
+          } else {
+            // A boolean cuts a flat facet within its own plane, so a facet named
+            // for a plane is never cut; a curved one is whole where its region
+            // holds it.
+            const bool flat = dynamic_cast<const PlaneSurface *>(own) != nullptr;
+            (flat || d0.contains(std::size_t(s), f) ? whole : cut)++;
+          }
+          // Its own surface's most telling claim, as the census above takes it;
+          // a plane is claimed by no recogniser - the writer's planar faces are
+          // its only route.
+          // Held and never written, it is the holder that answers for it.
+          const AnalyticFeatures::Claim *best = nullptr;
+          const bool held = facet_class[f] == 2 && wrote < 0;
+          for (const auto *claim : features.ledger.claimants(f)) {
+            if (claim->honoured() != held || (!held && claim->surface_index != std::size_t(s))) continue;
+            if (best == nullptr) best = claim;
+          }
+          const std::string which = std::string(kind_of(own)) + " " + std::to_string(int(s)) + ", ";
+          reasons[which +
+                  (best != nullptr && held ? std::string(best->by != nullptr ? best->by : "something") +
+                                               " holds it, and its writer wrote no face"
+                   : best != nullptr ? std::string(best->by != nullptr ? best->by : "something") + ": " +
+                                         (best->why != nullptr ? best->why : "no reason recorded")
+                   : dynamic_cast<const PlaneSurface *>(own) != nullptr
+                     ? std::string("written on no planar face of its plane")
+                     : std::string("claimed by nothing for it"))]++;
+        }
+        if (named + phantom + by_flag > 0) {
+          LOG(
+            "STEP export: %1$d facets named by their maker for a declared surface - D0 by heritage, "
+            "whole or cut: %2$d written on it; not asked, %3$d phantoms and %4$d on a declared sweep "
+            "this tier does not write",
+            int(named), int(written), int(phantom), int(by_flag));
+        }
+        if (named > written) {
+          LOG(message_group::Export_Error,
+              "STEP export: %1$d facets named by their maker for a declared surface are not written on "
+              "it - %2$d left to the tessellation (%3$d cut, a corner off the surface; %4$d whole), "
+              "%5$d on a fitted surface, %6$d on another, %7$d claimed by a face never written; %8$d "
+              "of them where the model's boolean is undecided (checklist B6, B7, E8)",
+              int(named - written), int(cut + whole), int(cut), int(whole), int(fitted), int(elsewhere),
+              int(unwritten), int(undecided));
+          std::vector<std::pair<std::size_t, std::string>> ranked;
+          for (const auto& kv : reasons) ranked.emplace_back(kv.second, kv.first);
+          std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+            return a.first != b.first ? a.first > b.first : a.second < b.second;
+          });
+          for (std::size_t i = 0; i < ranked.size() && i < 6; i++) {
+            LOG("STEP export:   %1$d %2$s", int(ranked[i].first), ranked[i].second);
+          }
         }
       }
     }

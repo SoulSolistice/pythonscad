@@ -143,6 +143,19 @@
 // volume window is a poor way to lock in a boundary and EDGES-APPROX is a good
 // one: two errors of opposite sign look like accuracy.
 // VOLUME-APPROX: 5298.405619
+//
+// Every facet its maker named for a declared surface is D0 by that heritage,
+// whole or cut, and has to end in a face written on that surface (checklist
+// B6, B7, E8). A facet a boolean cut is not in its surface's D0 region yet -
+// the region holds whole facets only - so nothing proposes it at the exact
+// tier, and at the approximation tier a statistic over the tessellation
+// refuses it (C3). Measured 2026-09-29:
+//   exact tier, 28 facets (28 cut): 20 on cylinder 0 (claimed by nothing for it); 8 on cylinder 3
+//     (claimed by nothing for it)
+// Tolerated by name until cut facets join their region and no statistic
+// vetoes a named facet (doc/step-export-wip.md, open item 34); the test
+// fails the day it is no longer raised.
+// KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
 $fn = 32;
 difference() {
 	cylinder(r = 10, h = 20);

@@ -408,6 +408,7 @@ void StepKernel::BodyBuild::emitQuadricFaces()
 
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
     face_edges_extra.push_back(face_edges_here);
+    wroteFace(patch.facets, patch.surface.get());
   }
 }
 

@@ -87,6 +87,8 @@ struct Band {
    * See `capsClosePoles()` for what has to hold before this is set: the gap the
    * cap spans has to be the one the tessellation leaves, not one a boolean cut. */
   bool pole_closed = false;
+  // The two polar caps, where `pole_closed`: facets of the face beside `walls`.
+  std::vector<std::size_t> caps;
 
   /*! Whether the record this band answers to is one the *model* declared, as
    * against one the approximation fitted. The caller passes its declarations as

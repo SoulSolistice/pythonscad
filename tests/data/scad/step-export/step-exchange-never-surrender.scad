@@ -59,6 +59,22 @@
 // fixed it: the binary before raises it on every run, the one after on none. So
 // item 33 depends on which vertex a loop meets first, and it stands on the
 // fixtures that still name it. If it comes back here, the test fails on it.
+//
+// Every facet its maker named for a declared surface is D0 by that heritage,
+// whole or cut, and has to end in a face written on that surface (checklist
+// B6, B7, E8). A facet a boolean cut is not in its surface's D0 region yet -
+// the region holds whole facets only - so nothing proposes it at the exact
+// tier, and at the approximation tier a statistic over the tessellation
+// refuses it (C3). Measured 2026-09-29:
+//   approximation tier, 4 facets (4 cut): 3 on cylinder 3 (a quadric face: the region's worst
+//     corner strays further than the region's tessellation band); 1 on cylinder 3 (a quadric face:
+//     reaches further round the axis than four times this claim's median span)
+//   exact tier, 5 facets (5 cut): 4 on cylinder 3 (claimed by nothing for it); 1 on cylinder 10
+//     (claimed by nothing for it)
+// Tolerated by name until cut facets join their region and no statistic
+// vetoes a named facet (doc/step-export-wip.md, open item 34); the test
+// fails the day it is no longer raised.
+// KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
 $fn = 24;
 R = 30; Ri = 24; H = 30;
 z0 = 8; h = 8; ramp = 3;

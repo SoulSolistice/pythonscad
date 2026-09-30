@@ -27,6 +27,18 @@ void StepKernel::BodyBuild::emitBands()
     // corner of a revolved profile, which sweeps a quarter of a torus - is a
     // ring like any other band: two rim circles and one seam, written by the
     // generic path below with a ToroidalSurface under it.
+    // What the band's face covers, and the declaration it stands on: its
+    // walls' claim names it, since a band's own surface is built from its rims.
+    std::vector<std::size_t> covered = band.walls;
+    covered.insert(covered.end(), band.caps.begin(), band.caps.end());
+    int32_t claimed = -1;
+    if (!band.walls.empty()) {
+      for (const auto *claim : features.ledger.claimants(band.walls.front())) {
+        if (!claim->honoured() || claim->surface_index >= surfaces.size()) continue;
+        claimed = int32_t(claim->surface_index);
+        break;
+      }
+    }
     const auto *whole_torus = dynamic_cast<const TorusSurface *>(band.zone.get());
     if (whole_torus != nullptr && band.seam_bottom != band.seam_top) whole_torus = nullptr;
     if (const auto *tor = whole_torus) {
@@ -71,6 +83,7 @@ void StepKernel::BodyBuild::emitBands()
       std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
       sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
       face_edges_extra.push_back({edge_major, edge_meridian});
+      wroteFace(covered, claimed);
       continue;
     }
 
@@ -128,6 +141,7 @@ void StepKernel::BodyBuild::emitBands()
         std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
         sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
         face_edges_extra.push_back({edge_seam});
+        wroteFace(covered, claimed);
         continue;
       }
     }
@@ -376,5 +390,6 @@ void StepKernel::BodyBuild::emitBands()
     // a bore - where the material is outside it - is the opposite sense.
     sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
     face_edges_extra.push_back(face_edges_here);
+    wroteFace(covered, claimed);
   }
 }

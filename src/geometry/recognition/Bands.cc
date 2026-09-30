@@ -1599,6 +1599,8 @@ Result recogniseSurfacesOfRevolution(const recognition::FacetGraph& graph,
         merged.outward = outward;
         merged.zone = surface;
         merged.pole_closed = pole_closed;
+        merged.caps =
+          pole_closed ? std::vector<std::size_t>{cap_low, cap_high} : std::vector<std::size_t>{};
         claim_for_zone(walls, surface,
                        pole_closed ? std::set<std::size_t>{cap_low, cap_high} : std::set<std::size_t>{});
         // The caps are the face's now, so they stop being faces of their own.

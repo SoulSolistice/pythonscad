@@ -80,6 +80,25 @@ void StepKernel::BodyBuild::run()
   writeShells();
 }
 
+void StepKernel::BodyBuild::wroteFace(const std::vector<std::size_t>& facets, const Surface *surface)
+{
+  int32_t index = -1;
+  for (std::size_t i = 0; i < surfaces.size() && index < 0; i++) {
+    if (surfaces[i].get() == surface) index = int32_t(i);
+  }
+  for (std::size_t i = 0; i < surfaces.size() && index < 0 && surface != nullptr; i++) {
+    if (surfaces[i] != nullptr && surfaces[i]->sameAs(*surface)) index = int32_t(i);
+  }
+  wroteFace(facets, index);
+}
+
+void StepKernel::BodyBuild::wroteFace(const std::vector<std::size_t>& facets, int32_t surface_index)
+{
+  for (const std::size_t f : facets) {
+    if (f < facet_written_on.size()) facet_written_on[f] = surface_index;
+  }
+}
+
 StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)
 {
   if (step_verts[ind] == nullptr) {

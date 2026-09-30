@@ -29,6 +29,18 @@
 // 2026-09-30, when the triangle merge began asking exact coplanarity: merging
 // within 1e-8 of the model's size had put triangles whose corners were not on
 // one plane into one planar face.
+//
+// Every facet its maker named for a declared surface is D0 by that heritage,
+// whole or cut, and has to end in a face written on that surface (checklist
+// B6, B7, E8). A facet a boolean cut is not in its surface's D0 region yet -
+// the region holds whole facets only - so nothing proposes it at the exact
+// tier, and at the approximation tier a statistic over the tessellation
+// refuses it (C3). Measured 2026-09-29:
+//   exact tier, 138 facets (138 cut): 138 on cylinder 3 (claimed by nothing for it)
+// Tolerated by name until cut facets join their region and no statistic
+// vetoes a named facet (doc/step-export-wip.md, open item 34); the test
+// fails the day it is no longer raised.
+// KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
 FN = 32;
 
 ridgeDepth = 2;

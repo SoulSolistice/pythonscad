@@ -158,6 +158,7 @@ void StepKernel::BodyBuild::emitBezierFaces()
     auto edge_loop = new EdgeLoop(entities, loop);
     std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
+    wroteFace(patch.facets, patch.surface.get());
     face_edges_extra.push_back(face_edges_here);
   }
 }

@@ -80,6 +80,19 @@ def export(binary, source, target, yield_surface=None):
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
+def known_export_errors(path):
+    """The fixture's own `KNOWN-EXPORT-ERROR: <text>` lines, read as
+    stepexportsanitytest.py reads them."""
+    import re
+    found = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.search(r"(?<![-\w])KNOWN-EXPORT-ERROR:\s*(.+?)\s*$", line)
+            if m:
+                found.append(" ".join(m.group(1).split()))
+    return found
+
+
 def measure(path):
     from OCP.STEPControl import STEPControl_Reader
     from OCP.IFSelect import IFSelect_RetDone
@@ -127,7 +140,12 @@ def main():
             print("FAIL %-6s export exited %d" % (name, code), file=sys.stderr)
             print(output, file=sys.stderr)
             return 1
-        errors = [ln for ln in output.splitlines() if "EXPORT-ERROR" in ln]
+        # A defect the fixture is known to carry, and names, does not stop the
+        # measurement: stopping here would change what this WILL_FAIL test fails
+        # on without a word, which is how a fix or a regression goes unseen.
+        known = known_export_errors(os.path.join(ROOT, args.source))
+        errors = [ln for ln in output.splitlines()
+                  if "EXPORT-ERROR" in ln and not any(k in ln for k in known)]
         if errors:
             print("FAIL %-6s the exporter reported an error" % name, file=sys.stderr)
             for ln in errors:

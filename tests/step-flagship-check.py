@@ -113,9 +113,24 @@ KNOWN_EXPORT_ERRORS = {
     # r 78.2073 near z 88, which the file writes as the mesh's, not the model's
     # solid. doc/step-recognition-design.md, *Existence is a D0 question too*;
     # checklist B10.
+    #
+    # And named facets not written on their surface (checklist B6, B7, E8): a
+    # facet its maker named is D0 by that heritage, cut or whole, and a statistic
+    # over the tessellation refuses the cut ones (C3) - lid10 80 on cylinders 12
+    # and 15, the bayonet 18 on its hose sweep, measured 2026-09-29.
+    # doc/step-export-wip.md, open item 34.
     "lid10": ["split on a boundary the model does not have",
-              "made on a declared surface where the model's solid has no face"],
-    "bayonet": ["split on a boundary the model does not have"],
+              "made on a declared surface where the model's solid has no face",
+              "facets named by their maker for a declared surface are not written on it"],
+    "bayonet": ["split on a boundary the model does not have",
+                "facets named by their maker for a declared surface are not written on it"],
+    # The band family away from the FN = 32 its fixture exports at, where the
+    # approximation tier loses none: 8, 40, 30 and 144 cut facets at FN 24, 48,
+    # 64 and 96, measured 2026-09-30 - the reason this suite exists.
+    "band-fn024": ["facets named by their maker for a declared surface are not written on it"],
+    "band-fn048": ["facets named by their maker for a declared surface are not written on it"],
+    "band-fn064": ["facets named by their maker for a declared surface are not written on it"],
+    "band-fn096": ["facets named by their maker for a declared surface are not written on it"],
 }
 
 STRICT_MUST_NOT_SAY = [

@@ -180,7 +180,18 @@ void StepKernel::BodyBuild::emitPlanarFaces()
   }
 
   const recognition::ReportInputs report_inputs{
-    features, surfaces, recognition::Mesh{&vertices, &loops, &loop_valid, &loop_is_hole, &loop_normals},
-    faceOrigin, owned};
-  recognition::reportDeclarationCensus(report_inputs, analytic, decl_written, facet_class);
+    features,
+    surfaces,
+    recognition::Mesh{&vertices, &loops, &loop_valid, &loop_is_hole, &loop_normals},
+    faceOrigin,
+    owned,
+    &rec.d0_regions,
+    &rec.d0_representations,
+    &rec.existence,
+    &rec.existence_by,
+    &rec.existence_open,
+    &faceSurface,
+    &faceDerived};
+  recognition::reportDeclarationCensus(report_inputs, analytic, approximate, decl_written, facet_class,
+                                       facet_written_on);
 }

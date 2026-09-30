@@ -84,6 +84,18 @@ chords: spread over the ridge's roughly 1280 square units of surface that is an
 average normal displacement of about 0.02, against a tessellation band of 0.1290
 - inside what the mesh leaves open, which is the whole claim being made.
 """
+
+# Every facet its maker named for a declared surface is D0 by that heritage,
+# whole or cut, and has to end in a face written on that surface (checklist
+# B6, B7, E8). A facet a boolean cut is not in its surface's D0 region yet -
+# the region holds whole facets only - so nothing proposes it at the exact
+# tier, and at the approximation tier a statistic over the tessellation
+# refuses it (C3). Measured 2026-09-29:
+#   exact tier, 153 facets (153 cut): 153 on cylinder 1 (claimed by nothing for it)
+# Tolerated by name until cut facets join their region and no statistic
+# vetoes a named facet (doc/step-export-wip.md, open item 34); the test
+# fails the day it is no longer raised.
+# KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
 # EXPECT: 2 analytic surfaces available (1 cylindrical, 0 spherical, 0 toroidal, 0 Bezier, 1 swept grid)
 # EXPECT: a declared 60x4 cubic sweep claims 349 facets whole, 184 cut across it, within its tessellation band of 0.1290
 # EXPECT: 49 facets have every corner on the sweep and their middle off it

@@ -83,6 +83,20 @@
 // doc/step-export-development.md, *Derived, not captured*. When the region is
 // claimed whole and the wall is one exact face, a volume becomes derivable and
 // belongs here.
+//
+// Every facet its maker named for a declared surface is D0 by that heritage,
+// whole or cut, and has to end in a face written on that surface (checklist
+// B6, B7, E8). A facet a boolean cut is not in its surface's D0 region yet -
+// the region holds whole facets only - so nothing proposes it at the exact
+// tier, and at the approximation tier a statistic over the tessellation
+// refuses it (C3). Measured 2026-09-29:
+//   approximation tier, 2 facets (2 cut): 2 on cylinder 0 (a quadric face: fewer than three facets
+//     of the surface were free to claim)
+//   exact tier, 2 facets (2 cut): 2 on cylinder 0 (claimed by nothing for it)
+// Tolerated by name until cut facets join their region and no statistic
+// vetoes a named facet (doc/step-export-wip.md, open item 34); the test
+// fails the day it is no longer raised.
+// KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
 $fn = 32;
 difference() {
   cylinder(h = 30, r = 12);

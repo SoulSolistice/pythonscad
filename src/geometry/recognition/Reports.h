@@ -67,8 +67,14 @@ void reportRepresentations(const ReportInputs& in);
 
 /*! The declaration census: is everything that could be exact written as exact,
  * per declaration and per facet, and why not where it is not. `decl_written`
- * and `facet_class` arrive holding what the writer's planes stand on. */
-void reportDeclarationCensus(const ReportInputs& in, bool analytic, std::vector<char>& decl_written,
-                             std::vector<unsigned char>& facet_class);
+ * and `facet_class` arrive holding what the writer's planes stand on. Ends by
+ * asking every facet its maker named for a declared surface whether it was
+ * written on it - an EXPORT-ERROR where not (checklist B6, B7, E8);
+ * `approximate` says whether this tier writes a declared sweep at all, and
+ * `written_on` is the declared surface each facet's written face stands on, or
+ * -1 - what the writers wrote, not what was claimed. */
+void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approximate,
+                             std::vector<char>& decl_written, std::vector<unsigned char>& facet_class,
+                             const std::vector<int32_t>& written_on);
 
 }  // namespace recognition

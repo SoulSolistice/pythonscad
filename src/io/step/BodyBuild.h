@@ -561,6 +561,13 @@ struct StepKernel::BodyBuild {
   // declaration" cannot see a declaration that kept one facet of a hundred,
   // and cannot see ground a fit took.
   std::vector<unsigned char> facet_class = std::vector<unsigned char>(faces.size(), 0);
+  // Per facet, the entry of `surfaces` a face the file holds stands on and
+  // covers it with, or -1. Set where each writer pushes its face (wroteFace),
+  // not where a claim was honoured: a writer that finds no boundary for a
+  // patch writes nothing, and its facets are still claimed.
+  std::vector<int32_t> facet_written_on = std::vector<int32_t>(faces.size(), -1);
+  void wroteFace(const std::vector<std::size_t>& facets, const Surface *surface);
+  void wroteFace(const std::vector<std::size_t>& facets, int32_t surface_index);
   struct SectionMiss {
     double tilt, offset;
   };

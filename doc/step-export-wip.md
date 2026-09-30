@@ -4895,6 +4895,23 @@ quad is a ruled surface, not planes. The roof's faces are labelled for the
 declared grid that sweeps them; where the grid's claim does not take them, the
 root is why, and the closed form a warped quad has is its bilinear patch.
 
+**Traced 2026-09-30, and the title's hypothesis is refuted.** A written face's
+own plane is no constraint on its corners - `kCornerTiers` has MeshPlane
+unused, and the arbiter's `add()` drops it - so near-parallel triangles cannot
+be what leaves corners off. Measured per kind of surface
+(`scripts/step-corner-stray.py`), lid10's approximation tier before and after:
+planes went from 2.26e-6 to 1.04e-10 worst - exact coplanarity did what it
+promised - and every new stray is on declared cylinder 12 (r 78.3073), 64
+corner uses 0.1017 to 0.1073 off it, the chord's sagitta at `$fn` 60. They
+bound eight facets of the channel's outer wall that a boolean cut mid-chord:
+named for cylinder 12, not in its D0 region because a corner is off it, so
+claimed by the band statistic at D4 - declined before, when the region could not
+be bounded, and bounded and written since the planes beside them merged exactly.
+Their cut corners have nowhere on the cylinder the faces around them agree on.
+The 40 conics declined as "an end off the quadric" at 1.07e-1 are the same
+corners. The root is cut-facet membership, open item 34, not the merge; what the
+merge did is let a D4 claim that was already there be written.
+
 ### 42. A faceted polyhedron whose faces are all named states no solid
 
 **Opened 2026-09-30**, with the grid's certified closest point: existence can
@@ -4942,6 +4959,44 @@ the tessellation (C5). step-partial-cylinder writes its 8 cut facets as 8 faces
 beside the band's 16, one surface in two kinds by pass order (B3). **R0 first**:
 a D0 region written by one representation, chosen among the claims that will be
 written - then the cut facets join it.
+
+**Enforced at the end, 2026-09-29.** The gap below is now an `EXPORT-ERROR`
+rather than a silence. After every writer that stands a face on a declaration
+has run, each facet its maker named for a declared surface - D0 by heritage,
+whole or cut (checklist E8) - is asked whether a face *written* on that surface
+covers it: what the writers pushed (`BodyBuild::wroteFace`), not what was
+claimed, since a writer that finds no boundary for a patch writes nothing and
+its facets stay claimed. Not asked, each counted: a derived name (D1), a phantom
+(B10, its own error), and a declared sweep in the exact tier, which the author's
+flags keep out. Whole or cut is read from the regions, decided before any corner
+moved. Mutation-checked: a quadric writer made to drop its first face is caught
+as *claimed by a face never written* while the ledger's census still reads the
+face as written, and planar faces kept off their declared planes are caught
+plane by plane. Measured on its first run over 120 exports: no writer drops a
+claimed face anywhere; the losses are the cut facets the exact tier refuses - lid10 306,
+the bayonet 218, f04 277, the band family 138, the declared grids 135-153 - and
+a few in the approximation tier: lid10 80, f04 30, the bayonet 18,
+step-partial-cylinder 8, step-exchange-never-surrender 4, step-declare-grid-scad
+4, step-split-surface, step-region-beyond-the-band and step-cap-meets-wall 2
+each. Whole or cut is
+read from the regions, decided before any corner moved; every whole loss is one
+the regions' own check already reports.
+
+**Two causes, and the check names each by its reason.** At the exact tier every
+loss is *claimed by nothing for it*: the quadric pass proposes only whole
+facets, so a cut one is never proposed. At the approximation tier every loss is
+a named facet refused by a statistic over the tessellation - *the region's
+worst corner strays further than the region's tessellation band*, *four times
+this claim's median span*, *fewer than three facets were free to claim*, the
+sweep's *four times this claim's median stray* - a D4 rule vetoing D0 ground,
+which checklist C3 forbids. On lid10 that is 40 facets each of cylinders 12 and
+15, and they are the corners behind item 41's 9 to 70. **Both are one root.**
+The region rules may decide only D4 members, and a cut facet is D4 exactly
+because membership leaves it out; the exact tier then proposes nothing for it
+and the approximation tier's statistics decide it. So both wait on membership of
+cut facets, and that on phantom excision below - on lid10 the 40 facets of
+cylinder 12 are the ones beside the cutters' phantom slivers of cylinder 17.
+Each fixture carries the error as a `KNOWN-EXPORT-ERROR` until it lands.
 
 **The region's own gap, named so it is not mistaken for complete**: a D0 region
 holds *whole* facets only - every corner on the surface. A boolean-*cut* facet of
