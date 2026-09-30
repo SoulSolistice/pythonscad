@@ -6,7 +6,8 @@
  * decide: what the file asserts, as the neutral B-rep (geometry/brep/Brep.h),
  * so brep::check can hold it to the contract every writer shares, and so the
  * translator that replaces the phases' own entities can be proven against it.
- * It goes when the phases fill the B-rep themselves.
+ * It shrinks as the phases fill the B-rep themselves, and goes when nothing is
+ * left to read.
  */
 
 #include <cstddef>
@@ -42,11 +43,48 @@ struct EdgeSource {
   bool stated_exact = false;
 };
 
-/*! `faces` as a B-rep: their bounds, edges, vertices, curves, pcurves and
- * surface forms as the entities hold them, each face's record, facets and
- * class from `sources`, and `shells` as indices into `faces`; each edge's
- * maker's statement from `edge_sources`. The classes of vertices and edges are
- * then brep::stateClasses' to derive, from the faces meeting there. */
+/*! What its maker registered of a face, stated on the B-rep's face: the record,
+ * the facets, and the classes. */
+void stateSource(brep::Face& face, const FaceSource& source);
+
+/*! The B-rep, built as the phases decide it (open item 39, step 2d): a phase
+ * that builds B-rep entities itself names the entities it still takes from a
+ * phase before it through this, and each is read off its STEP entity once - its
+ * vertices, curve, pcurves and surface form as the entity holds them, the edge's
+ * maker's statement from `edge_sources` - and is the same B-rep entity every
+ * time it is named again. As phases convert, less is read, until nothing is.
+ *
+ * An index is identity, not order: what is written follows the faces, their
+ * loops and their coedges, never the order entities were first named in. */
+class BrepReader
+{
+public:
+  BrepReader(brep::Body& body, const std::map<const StepKernel::EdgeCurve *, EdgeSource>& edge_sources)
+    : body(body), edge_sources(edge_sources)
+  {
+  }
+  std::size_t vertex(const StepKernel::Vertex *v);
+  std::size_t edge(const StepKernel::EdgeCurve *e);
+  /*! A face a phase made as an entity, appended to the body with what its maker
+   * registered, `source` - null where it registered nothing, which leaves the
+   * face's classes unstated for brep::check to name. */
+  std::size_t face(const StepKernel::Face *face, const FaceSource *source);
+
+private:
+  brep::Body& body;
+  const std::map<const StepKernel::EdgeCurve *, EdgeSource>& edge_sources;
+  // Entities by identity, for lookup only.
+  std::map<const StepKernel::Vertex *, std::size_t> vertex_index;
+  std::map<const StepKernel::EdgeCurve *, std::size_t> edge_index;
+  // The entity each edge was read from, by the edge's index; null for one a
+  // phase built itself.
+  std::vector<const StepKernel::EdgeCurve *> edge_entity;
+};
+
+/*! `faces` as a B-rep, read whole: each face through a BrepReader with its
+ * record, facets and class from `sources`, and `shells` as indices into
+ * `faces`. The classes of vertices and edges are then brep::stateClasses' to
+ * derive, from the faces meeting there. */
 brep::Body mirrorBrep(const std::vector<StepKernel::Face *>& faces,
                       const std::map<const StepKernel::Face *, FaceSource>& sources,
                       const std::vector<std::vector<std::size_t>>& shells,

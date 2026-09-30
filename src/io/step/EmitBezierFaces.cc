@@ -62,7 +62,6 @@ void StepKernel::BodyBuild::emitBezierFaces()
     }
 
     std::vector<OrientedEdge *> loop;
-    std::vector<EdgeCurve *> face_edges_here;
     for (const auto& run : patch.runs) {
       const std::set<int> key(run.verts.begin(), run.verts.end());
       Vertex *from = get_vertex(run.verts.front());
@@ -105,7 +104,6 @@ void StepKernel::BodyBuild::emitBezierFaces()
       // The curve was built running from whichever patch reached it first.
       const bool sense = edge->vert1 == from;
       loop.push_back(new OrientedEdge(entities, edge, sense));
-      face_edges_here.push_back(edge);
 
       // and the neighbouring planar face gives up the segments it replaces
       // The region boundary is walked in the direction its own facets go, so
@@ -161,6 +159,5 @@ void StepKernel::BodyBuild::emitBezierFaces()
     std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
     registerFace(sfaces_extra.back(), patch.surface, patch.facets);
-    face_edges_extra.push_back(face_edges_here);
   }
 }

@@ -285,13 +285,4 @@ std::vector<std::array<int, 3>> triangulateWithHoles(const std::vector<std::vect
   return out;
 }
 
-int uf_find(std::vector<int>& parent, int x)
-{
-  while (parent[x] != x) {
-    parent[x] = parent[parent[x]];
-    x = parent[x];
-  }
-  return x;
-}
-
 }  // namespace step

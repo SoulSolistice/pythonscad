@@ -337,4 +337,11 @@ ClassTally stateClasses(Body& body);
  * lies on its edges' curves and an edge on its faces' surfaces is geometry, and asked elsewhere. */
 std::vector<std::string> check(const Body& body);
 
+/*! The body's faces as shells: one per connected component, faces that share
+ * an edge being one, since a closed shell has to be connected. Read off the
+ * coedges - the topology the file asserts, not a list kept beside it. Each
+ * shell lists its faces in order, and the shells come in the order of their
+ * first face. */
+std::vector<Shell> connectedShells(const Body& body);
+
 }  // namespace brep

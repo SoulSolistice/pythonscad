@@ -4757,14 +4757,33 @@ an edge no curve, and the export then says so as an `EXPORT-ERROR` and keeps
 the phases' entities: never a face on nothing. Next, 2d: the phases build the
 B-rep themselves, one by one, and the mirror shrinks to nothing.
 
-**Step 2d, how it moves.** The B-rep is read at one point (`readBrep`), and
-every phase after that point works on it alone; each move converts the phase
-just before the point and moves the point above it, proven by `compare` at 0
-differences. First move, 2026-09-30: read after `assembleFaces`, with
+**Step 2d, how it moves.** Every phase from some point on works on the B-rep
+alone; each move converts the phase just before the point and moves the point
+above it, proven by `compare` at 0 differences. First move, 2026-09-30: read
+whole after `assembleFaces` (`readBrep`, since gone), with
 `promoteCurves` and the vertex-on-curve check on the B-rep. `promoteCurves` now
 touches no STEP entity, so it is also the first phase ready to leave `io/step`
 for `geometry/brep` (step 3), and the place R10 and R11 are fixed next - its
 quadrics read from the face's record, not rebuilt from the written form.
+
+Second move, 2026-09-30: the planar faces and the fans are built on the B-rep,
+and no planar ADVANCED_FACE, bound or PLANE is made as an entity any more. What
+they take from the phases before them - the rims, arcs and sections the
+analytic faces hand them, and every edge, since the edge map still makes STEP
+edges - they name through `step::BrepReader`, which reads an entity into the
+B-rep the first time it is named and is the same B-rep entity every time after;
+`assembleFaces` reads the analytic faces through it too. The one-shot mirror is
+that reader run over a list of faces. A B-rep index is identity, not order: the
+translator writes by walking faces, loops and coedges, so an edge the planar
+writer names before the faces that were mirrored first changes nothing written.
+The shells are `brep::connectedShells` - read off the faces' own coedges -
+where they were read off a list of edges every emitter kept beside its loops
+and which nothing checked against them; the lists are gone. `brep::check` now
+also names an edge no face uses and a vertex no edge ends at: the reader could
+otherwise leave one behind unseen, since reading an edge adds it to the body.
+With no planar entity to fall back to, the translator's refusal can no longer
+keep the phases' entities; the file then holds no solid, and says so. Proven
+by `compare --data` (R21): every file the same, line for line.
 
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
@@ -4973,6 +4992,17 @@ from coming back - landed with the fix and mutation-checked (F2).
   renumbered in file order, since the ids carry gaps where entities were made and
   not written. *Test:* it reports those 87 files between the two runs, and 0
   between runs that write the same file (r18 and r19).
+- **R22 - a hole of a fanned face is still written as a planar bound.**
+  `EmitPlanarFaces.cc` walks every valid loop, holes included, and a hole whose
+  face is fanned into triangles (`split_for_corners`, which bridges holes into
+  the outer ring) is still given a bound, has its plane matched against the
+  declared planes, and marks that declaration written and its facet written on
+  a declared plane (`decl_written`, `facet_class`) - for a face the file states
+  as fan triangles on planes from their corners. Its bound is built and never
+  assembled; the B-rep now leaves it out, and `brep::check` names any edge left
+  unused, so what remains is the census crediting ground no face stands on (E2,
+  B6). *Test:* a fixture fanning a face with a hole, whose census must not count
+  the hole's declared plane written.
 - **R23 - the shells were ordered by the union-find's roots. Fixed 2026-09-30.**
   `shellFaces` grouped the faces into connected shells and wrote them in the
   order of each component's root - the face the union happened to leave there,

@@ -135,6 +135,40 @@ TEST_CASE("a bound used against its loop reads as the same loop", "[brep-mirror]
   CHECK(structural(step::mirrorBrep(g.faces, g.sources, oneShell(g.faces.size()))).empty());
 }
 
+TEST_CASE("a face built on the B-rep and a face read off entities meet on one edge", "[brep-mirror]")
+{
+  // Half the cube as a phase that builds the B-rep itself does - each loop
+  // named edge by edge through the reader - and half read off its entities: one
+  // cube, 8 corners, 12 edges, one closed shell of 6 faces.
+  Graph g;
+  cube(g);
+  brep::Body body;
+  const std::map<const K::EdgeCurve *, step::EdgeSource> none;
+  step::BrepReader reader(body, none);
+  for (std::size_t f = 0; f < 3; f++) {
+    brep::Face face;
+    step::stateSource(face, g.sources.at(g.faces[f]));
+    face.form = brep::Plane{};
+    brep::Loop loop;
+    for (const K::OrientedEdge *oe : g.faces[f]->faceBounds[0]->edgeLoop->faces)
+      loop.coedges.push_back(brep::Coedge{reader.edge(oe->edge), oe->dir, std::nullopt});
+    face.loops.push_back(loop);
+    body.faces.push_back(face);
+  }
+  for (std::size_t f = 3; f < 6; f++) reader.face(g.faces[f], &g.sources.at(g.faces[f]));
+  body.shells = brep::connectedShells(body);
+  CHECK(body.vertices.size() == 8);
+  CHECK(body.edges.size() == 12);
+  REQUIRE(body.shells.size() == 1);
+  CHECK(body.shells[0].faces.size() == 6);
+  CHECK(structural(body).empty());
+  // An entity named again is the edge it already is.
+  const K::EdgeCurve *e = g.faces[5]->faceBounds[0]->edgeLoop->faces[0]->edge;
+  const std::size_t once = reader.edge(e);
+  CHECK(reader.edge(e) == once);
+  CHECK(body.edges.size() == 12);
+}
+
 TEST_CASE("a face the writer made and left out of the file opens the shell", "[brep-mirror]")
 {
   // A fan triangle dropped in silence (open item 39, R8) is exactly this: its

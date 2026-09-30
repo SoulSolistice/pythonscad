@@ -89,7 +89,4 @@ std::vector<std::array<int, 3>> triangulateWithHoles(const std::vector<std::vect
                                                      const std::function<Vector3d(int)>& at,
                                                      const Vector3d& normal);
 
-/*! The root of `x` in a union-find forest, halving the path on the way. */
-int uf_find(std::vector<int>& parent, int x);
-
 }  // namespace step

@@ -177,6 +177,65 @@ TEST_CASE("an open shell is not asked to pair its edges", "[brep]")
   CHECK(brep::check(body).empty());
 }
 
+TEST_CASE("an edge no face uses, and a vertex no edge ends at, are not part of the body", "[brep]")
+{
+  Body body = cube();
+  body.vertices.push_back({Vector3d(2, 0, 0), EvidenceClass::D0, 8});
+  body.vertices.push_back({Vector3d(3, 0, 0), EvidenceClass::D0, 9});
+  brep::Edge stray;
+  stray.start = 0;
+  stray.end = 8;
+  stray.curve.form = brep::Line{Vector3d(0, 0, 0), Vector3d(1, 0, 0)};
+  stray.evidence = EvidenceClass::D0;
+  body.edges.push_back(stray);
+  const auto defects = brep::check(body);
+  CHECK(says(defects, "edge 12 is used by no face"));
+  // Vertex 8 ends only the stray edge, and vertex 9 ends nothing.
+  CHECK(says(defects, "vertex 8 bounds no edge a face uses"));
+  CHECK(says(defects, "vertex 9 bounds no edge a face uses"));
+  CHECK(defects.size() == 3);
+}
+
+TEST_CASE("a body's shells are its connected components, in the order of their first face", "[brep]")
+{
+  // Two unit cubes two apart share nothing, so they are two shells of six faces
+  // each. Their faces interleaved, the second cube's first: face 0 is the second
+  // cube's, so its shell comes first and holds the even faces.
+  const Body a = cube();
+  Body b = cube();
+  for (auto& v : b.vertices) v.point += Vector3d(2, 0, 0);
+  Body body;
+  body.vertices = a.vertices;
+  body.vertices.insert(body.vertices.end(), b.vertices.begin(), b.vertices.end());
+  body.edges = a.edges;
+  for (brep::Edge e : b.edges) {
+    e.start += a.vertices.size();
+    e.end += a.vertices.size();
+    body.edges.push_back(e);
+  }
+  for (std::size_t f = 0; f < 6; f++) {
+    brep::Face from_b = b.faces[f];
+    for (auto& loop : from_b.loops) {
+      for (auto& c : loop.coedges) c.edge += a.edges.size();
+    }
+    body.faces.push_back(from_b);
+    body.faces.push_back(a.faces[f]);
+  }
+  const std::vector<brep::Shell> shells = brep::connectedShells(body);
+  REQUIRE(shells.size() == 2);
+  CHECK(shells[0].faces == std::vector<std::size_t>{0, 2, 4, 6, 8, 10});
+  CHECK(shells[1].faces == std::vector<std::size_t>{1, 3, 5, 7, 9, 11});
+  CHECK(shells[0].closed);
+  body.shells = shells;
+  CHECK(brep::check(body).empty());
+
+  // A cylinder is one shell, its caps joined to the wall by the circles alone
+  // and the seam used by the wall only.
+  const auto one = brep::connectedShells(cylinder());
+  REQUIRE(one.size() == 1);
+  CHECK(one[0].faces == std::vector<std::size_t>{0, 1, 2});
+}
+
 TEST_CASE("every entity states what decided it", "[brep]")
 {
   Body body = cylinder();

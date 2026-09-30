@@ -72,8 +72,6 @@ void StepKernel::BodyBuild::run()
 
   assembleFaces();
 
-  readBrep();
-
   promoteCurves();
 
   checkBrep();
@@ -98,6 +96,14 @@ void StepKernel::BodyBuild::registerFace(const Face *face, std::shared_ptr<const
                                          std::vector<std::size_t> facets,
                                          std::optional<recognition::EvidenceClass> evidence,
                                          bool plane_from_corners)
+{
+  face_source[face] = sourceOf(std::move(record), std::move(facets), evidence, plane_from_corners);
+}
+
+step::FaceSource StepKernel::BodyBuild::sourceOf(std::shared_ptr<const Surface> record,
+                                                 std::vector<std::size_t> facets,
+                                                 std::optional<recognition::EvidenceClass> evidence,
+                                                 bool plane_from_corners) const
 {
   using recognition::EvidenceClass;
   // The weakest class its facets' honoured claims state: a patch of D0 members
@@ -131,8 +137,8 @@ void StepKernel::BodyBuild::registerFace(const Face *face, std::shared_ptr<const
     for (const uint32_t tag : record->tags) all_derived = all_derived && isDerivedTag(tag);
     record_class = all_derived ? EvidenceClass::D1 : EvidenceClass::D0;
   }
-  face_source[face] = FaceSource{std::move(record), std::move(facets), evidence ? *evidence : weakest,
-                                 plane_from_corners, record_class};
+  return FaceSource{std::move(record), std::move(facets), evidence ? *evidence : weakest,
+                    plane_from_corners, record_class};
 }
 
 StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)

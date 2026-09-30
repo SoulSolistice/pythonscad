@@ -407,9 +407,9 @@ struct StepKernel::BodyBuild {
    * onto a quadric and decide for itself is told the answer instead. */
   void writeCrossingPcurves();
 
-  /*! Every facet loop no analytic face took, as a planar bound with its edges
-   * and its carrier PLANE - a declared plane wherever one agrees - with the arcs
-   * and conics the analytic faces handed it spliced in. Then the declaration
+  /*! Every facet loop no analytic face took, as a loop of the B-rep with its
+   * carrier plane - a declared plane wherever one agrees - and the arcs and
+   * conics the analytic faces handed it spliced in. Then the declaration
    * census, which is complete once the last face that can stand on a
    * declaration has been written. */
   void emitPlanarFaces();
@@ -423,9 +423,10 @@ struct StepKernel::BodyBuild {
    * the polygon's plane is the one they no longer all sit on. */
   void emitCornerFans();
 
-  /*! Combine every outer loop with the loops of its holes into one ADVANCED_FACE.
-   * Then the analytic faces the emitters wrote, which are faces of the same
-   * shell. */
+  /*! The B-rep's faces, in the order the file states them: every outer planar
+   * loop with the loops of its holes, then the analytic faces the emitters
+   * wrote, read off their entities, then the fans; and its shells, read off
+   * the faces' own edges. */
   void assembleFaces();
 
   /*! Every edge bounding a recovered curved face was still a straight line: the
@@ -454,20 +455,13 @@ struct StepKernel::BodyBuild {
    * of our own file - and the report lines for what the emitters counted. */
   void checkAndReport();
 
-  /*! The file's faces grouped into shells, as indices into `sfaces`: one per
-   * connected component, faces that share an edge being one body. What
-   * writeShells writes and the B-rep mirrors, asked in one place. */
-  [[nodiscard]] std::vector<std::vector<std::size_t>> shellFaces() const;
-  /*! The B-rep the file holds, read off the entities the phases made (open item
-   * 39, step 2): the bridge while the phases still build STEP entities, and
-   * what the translator that replaces them is proven against. Faces carry what
-   * registerFace recorded; vertices and edges no class yet. */
-  [[nodiscard]] brep::Body mirrorBrep() const;
-  /*! The B-rep, read off the entities once the faces are assembled (open item
-   * 39, step 2d). Every phase after it reads and writes `brep_body` and nothing
-   * else - promoteCurves, the checks, the translator - and the point it is read
-   * at moves upstream a phase at a time, until nothing is left before it. */
-  void readBrep();
+  /*! The B-rep the file holds (open item 39, step 2d). The planar faces and
+   * the fans build it directly; what they take from the phases before them -
+   * the analytic faces, and every edge - is read off those phases' entities
+   * through `reader`, as they name it. Every phase from assembleFaces on reads
+   * and writes this and nothing else - promoteCurves, the checks, the
+   * translator - and the point where entities stop being made moves upstream a
+   * phase at a time, until nothing is read. */
   brep::Body brep_body;
   /*! brep::check over the B-rep: the structure the file asserts, held to the
    * neutral contract - an EXPORT-ERROR where it breaks it - and every vertex's
@@ -532,9 +526,8 @@ struct StepKernel::BodyBuild {
   /*! The one VERTEX_POINT for vertex `ind`, made on first asking. */
   Vertex *get_vertex(int ind);
 
-  // The faces the analytic emitters write, and the edges of each.
+  // The faces the analytic emitters write.
   std::vector<Face *> sfaces_extra;
-  std::vector<std::vector<EdgeCurve *>> face_edges_extra;
 
   // Shared by every emitter because a partial
   // cylinder's two end edges are ordinary straight edges shared with a
@@ -587,19 +580,27 @@ struct StepKernel::BodyBuild {
   // declaration" cannot see a declaration that kept one facet of a hundred,
   // and cannot see ground a fit took.
   std::vector<unsigned char> facet_class = std::vector<unsigned char>(faces.size(), 0);
-  // What each face the file holds stands for, registered where the face is
-  // made rather than inferred from it afterwards: the record it is on, the
-  // facets it covers, and the class that decided it. The one channel the
-  // named-facet census and the B-rep both read (open item 39). Keyed by the
-  // face for lookup only; faces are walked in `sfaces` order, never this map's.
+  // What each face an emitter made as an entity stands for, registered where
+  // the face is made rather than inferred from it afterwards: the record it is
+  // on, the facets it covers, and the class that decided it. The one channel
+  // the named-facet census and the B-rep both read (open item 39); a face built
+  // on the B-rep states the same on itself. Keyed by the face for lookup only;
+  // faces are walked in `sfaces_extra` order, never this map's.
   using FaceSource = step::FaceSource;
   std::map<const Face *, FaceSource> face_source;
   // What an edge's maker states about its carrier, where it states anything - a
   // fit's error, or that it is its face's own boundary; see step::EdgeSource.
   std::map<const EdgeCurve *, step::EdgeSource> edge_source;
-  /*! Register `face`, just made, as standing on `record` over `facets`. Its
-   * class is the weakest its facets' honoured claims state, unless the caller
-   * states it - a planar face, which no recogniser claims. */
+  /*! Where the B-rep takes what a phase before it made as an entity. */
+  step::BrepReader reader{brep_body, edge_source};
+  /*! What a face stands for, standing on `record` over `facets`. Its class is
+   * the weakest its facets' honoured claims state, unless the caller states it
+   * - a planar face, which no recogniser claims. */
+  [[nodiscard]] FaceSource sourceOf(std::shared_ptr<const Surface> record,
+                                    std::vector<std::size_t> facets,
+                                    std::optional<recognition::EvidenceClass> evidence = std::nullopt,
+                                    bool plane_from_corners = false) const;
+  /*! Register `face`, just made as an entity, as sourceOf says. */
   void registerFace(const Face *face, std::shared_ptr<const Surface> record,
                     std::vector<std::size_t> facets,
                     std::optional<recognition::EvidenceClass> evidence = std::nullopt,
@@ -607,13 +608,6 @@ struct StepKernel::BodyBuild {
   /*! The entry of `surfaces` that is `record`, or -1: a fitted record, or a
    * plane derived from a face's corners. */
   [[nodiscard]] int32_t surfaceIndexOf(const Surface *record) const;
-  // Per planar loop, the record its plane is written on and the class that
-  // decided it - filled by emitPlanarFaces, registered by assembleFaces.
-  std::vector<std::shared_ptr<const Surface>> plane_record =
-    std::vector<std::shared_ptr<const Surface>>(faces.size());
-  std::vector<recognition::EvidenceClass> plane_evidence =
-    std::vector<recognition::EvidenceClass>(faces.size(), recognition::EvidenceClass::Unstated);
-  std::vector<char> plane_from_corners = std::vector<char>(faces.size(), 0);
   struct SectionMiss {
     double tilt, offset;
   };
@@ -744,20 +738,19 @@ struct StepKernel::BodyBuild {
    * reference direction `towards`. */
   Axis2Placement *conic_placement(const Vector3d& origin, const Vector3d& dir, const Vector3d& towards);
 
-  // Each facet loop's bound, its carrier plane and its edges; see emitPlanarFaces.
-  std::vector<FaceBound *> face_bounds = std::vector<FaceBound *>(face_cnt, nullptr);
-  std::vector<Plane *> planes = std::vector<Plane *>(face_cnt, nullptr);
-  std::vector<std::vector<EdgeCurve *>> loop_edges = std::vector<std::vector<EdgeCurve *>>(face_cnt);
+  // Each facet loop as a loop of the B-rep, and each outer one's face - its
+  // plane and what the plane stands for, its loops added by assembleFaces; see
+  // emitPlanarFaces.
+  std::vector<brep::Loop> planar_loops = std::vector<brep::Loop>(face_cnt);
+  std::map<std::size_t, brep::Face> planar_faces;  // outer loop -> its face
+  // The triangles of the fans, as faces of the B-rep; see emitCornerFans.
+  std::vector<brep::Face> fan_faces;
   // Planar faces asserting a plane one of their bounds is not in, and by how much.
   std::size_t planes_off_plane = 0;
   double worst_plane_off = 0;
   // What the mesher was entitled to call coplanar, by its own rule - see
   // coplanarTolerance in GeometryEvaluator.cc, which this has to agree with.
   double mesh_coplanar_tol = 1e-9;
-
-  // Every face of the shell, and the edges bounding each; see assembleFaces.
-  std::vector<Face *> sfaces;
-  std::vector<std::vector<EdgeCurve *>> face_edges;
 
   // The corner placement's working state: the moves it proposes, which rung
   // proposed each, and what each path added.

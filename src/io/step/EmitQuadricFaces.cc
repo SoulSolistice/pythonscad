@@ -118,7 +118,6 @@ void StepKernel::BodyBuild::emitQuadricFaces()
     }
 
     std::vector<FaceBound *> bounds;
-    std::vector<EdgeCurve *> face_edges_here;
     std::vector<std::pair<const BoundaryCycle *, std::vector<OrientedEdge *>>> seam_rims;
     for (const auto& entry : boundary) {
       const std::vector<int>& cycle = entry.second.verts;
@@ -268,7 +267,6 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             else sections_fitted++;
           }
           loop.push_back(new OrientedEdge(entities, edge, dir));
-          face_edges_here.push_back(edge);
           // And the planar face across it gives up the segments the curve
           // replaces, the same way a band's rim does. The region's boundary is
           // walked the way its own facets go, so the far face necessarily goes
@@ -322,7 +320,6 @@ void StepKernel::BodyBuild::emitQuadricFaces()
         }
         for (const auto& link : chain) {
           loop.push_back(new OrientedEdge(entities, link.first, link.second));
-          face_edges_here.push_back(link.first);
         }
         step += spans;
       }
@@ -366,7 +363,6 @@ void StepKernel::BodyBuild::emitQuadricFaces()
           EdgeCurve *seam = create_line_edge_curve(start, tip, true);
           loop.push_back(new OrientedEdge(entities, seam, true));
           loop.push_back(new OrientedEdge(entities, seam, false));
-          face_edges_here.push_back(seam);
           apex_seams++;
         }
       }
@@ -386,7 +382,6 @@ void StepKernel::BodyBuild::emitQuadricFaces()
       joined.push_back(new OrientedEdge(entities, seam, true));
       joined.insert(joined.end(), seam_rims[1].second.begin(), seam_rims[1].second.end());
       joined.push_back(new OrientedEdge(entities, seam, false));
-      face_edges_here.push_back(seam);
       bounds.push_back(new FaceBound(entities, new EdgeLoop(entities, joined), true, true));
       band_seams++;
     }
@@ -413,7 +408,6 @@ void StepKernel::BodyBuild::emitQuadricFaces()
     }
 
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
-    face_edges_extra.push_back(face_edges_here);
     registerFace(sfaces_extra.back(), patch.surface, patch.facets);
   }
 }

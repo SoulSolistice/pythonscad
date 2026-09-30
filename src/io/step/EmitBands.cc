@@ -93,7 +93,6 @@ void StepKernel::BodyBuild::emitBands()
       auto edge_loop = new EdgeLoop(entities, loop);
       std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
       sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
-      face_edges_extra.push_back({edge_major, edge_meridian});
       registerFace(sfaces_extra.back(), record, covered);
       continue;
     }
@@ -151,7 +150,6 @@ void StepKernel::BodyBuild::emitBands()
         auto edge_loop = new EdgeLoop(entities, loop);
         std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
         sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
-        face_edges_extra.push_back({edge_seam});
         registerFace(sfaces_extra.back(), record, covered);
         continue;
       }
@@ -311,7 +309,6 @@ void StepKernel::BodyBuild::emitBands()
     }
 
     std::vector<OrientedEdge *> loop;
-    std::vector<EdgeCurve *> face_edges_here;
     if (band.closed) {
       // The seam of a periodic face has to lie *on* the surface. Up a cylinder
       // or a cone that is a straight ruling; over a sphere it is a meridian,
@@ -360,7 +357,6 @@ void StepKernel::BodyBuild::emitBands()
       loop.push_back(new OrientedEdge(entities, edge_seam, true));
       loop.push_back(new OrientedEdge(entities, rim_edge[1], rim_sense[1]));
       loop.push_back(new OrientedEdge(entities, edge_seam, false));
-      face_edges_here = {rim_edge[0], rim_edge[1], edge_seam};
     } else {
       // walk along the bottom rim, up the end edge, back along the top rim,
       // down the other end edge - so the ends are where one rim's traversal
@@ -378,20 +374,16 @@ void StepKernel::BodyBuild::emitBands()
       auto walk_rim = [&](int side) {
         if (rim_chords[side].empty()) {
           loop.push_back(new OrientedEdge(entities, rim_edge[side], rim_sense[side]));
-          face_edges_here.push_back(rim_edge[side]);
           return;
         }
         for (const auto& chord : rim_chords[side]) {
           loop.push_back(new OrientedEdge(entities, chord.first, chord.second));
-          face_edges_here.push_back(chord.first);
         }
       };
       walk_rim(0);
       loop.push_back(new OrientedEdge(entities, edge_up, up_dir));
       walk_rim(1);
       loop.push_back(new OrientedEdge(entities, edge_down, down_dir));
-      face_edges_here.push_back(edge_up);
-      face_edges_here.push_back(edge_down);
     }
 
     auto edge_loop = new EdgeLoop(entities, loop);
@@ -400,7 +392,6 @@ void StepKernel::BodyBuild::emitBands()
     // The surface normal of a cylinder or a cone points away from its axis, so
     // a bore - where the material is outside it - is the opposite sense.
     sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
-    face_edges_extra.push_back(face_edges_here);
     registerFace(sfaces_extra.back(), record, covered);
   }
 }

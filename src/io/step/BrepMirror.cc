@@ -12,8 +12,6 @@
 #include "io/step/LoopGeometry.h"
 #include "utils/printutils.h"
 
-using step::uf_find;
-
 namespace {
 
 using K = StepKernel;
@@ -145,36 +143,92 @@ brep::SurfaceForm surfaceOf(const K::SurfaceType *surface)
 
 }  // namespace
 
-std::vector<std::vector<std::size_t>> StepKernel::BodyBuild::shellFaces() const
+void step::stateSource(brep::Face& face, const FaceSource& source)
 {
-  // A CLOSED_SHELL has to be a single connected shell: faces that share an
-  // edge are one body, and a body that shares none with another is its own.
-  std::vector<int> component(sfaces.size(), 0);
-  for (std::size_t i = 0; i < sfaces.size(); i++) component[i] = int(i);
-  std::map<EdgeCurve *, int> edge_owner;  // lookup only
-  for (std::size_t i = 0; i < face_edges.size(); i++) {
-    for (auto *edge : face_edges[i]) {
-      auto it = edge_owner.find(edge);
-      if (it == edge_owner.end()) {
-        edge_owner.emplace(edge, int(i));
-        continue;
+  face.surface = source.record;
+  face.facets = source.facets;
+  face.evidence = source.evidence;
+  face.plane_from_corners = source.plane_from_corners;
+  face.record_evidence = source.record_evidence;
+}
+
+std::size_t step::BrepReader::vertex(const StepKernel::Vertex *v)
+{
+  const auto it = vertex_index.find(v);
+  if (it != vertex_index.end()) return it->second;
+  brep::Vertex out;
+  if (v != nullptr && v->point != nullptr) out.point = v->point->pt;
+  body.vertices.push_back(out);
+  vertex_index.emplace(v, body.vertices.size() - 1);
+  return body.vertices.size() - 1;
+}
+
+std::size_t step::BrepReader::edge(const StepKernel::EdgeCurve *e)
+{
+  const auto it = edge_index.find(e);
+  if (it != edge_index.end()) return it->second;
+  brep::Edge out;
+  out.start = vertex(e->vert1);
+  out.end = vertex(e->vert2);
+  out.same_sense = e->dir;
+  out.curve.form = curveOf(e->round);
+  const auto stated = edge_sources.find(e);
+  if (stated != edge_sources.end()) {
+    out.curve.carrier_error = stated->second.fit;
+    out.curve.stated_exact = stated->second.stated_exact;
+  }
+  body.edges.push_back(out);
+  edge_entity.resize(body.edges.size(), nullptr);
+  edge_entity.back() = e;
+  edge_index.emplace(e, body.edges.size() - 1);
+  return body.edges.size() - 1;
+}
+
+std::size_t step::BrepReader::face(const StepKernel::Face *face, const FaceSource *source)
+{
+  using SurfaceCurve = StepKernel::SurfaceCurve;
+  brep::Face out;
+  if (source != nullptr) stateSource(out, *source);
+  out.same_sense = face->dir;
+  out.form = surfaceOf(face->surface);
+  for (const StepKernel::FaceBound *bound : face->faceBounds) {
+    brep::Loop loop;
+    loop.outer = bound->outer;
+    if (bound->edgeLoop != nullptr) {
+      for (const StepKernel::OrientedEdge *oe : bound->edgeLoop->faces) {
+        loop.coedges.push_back(brep::Coedge{edge(oe->edge), oe->dir, std::nullopt});
       }
-      const int a = uf_find(component, it->second);
-      const int b = uf_find(component, int(i));
-      if (a != b) component[a] = b;
+    }
+    // A bound used against its loop's own direction runs every coedge the
+    // other way, in the other order.
+    if (!bound->dir) {
+      std::reverse(loop.coedges.begin(), loop.coedges.end());
+      for (auto& c : loop.coedges) c.forward = !c.forward;
+    }
+    out.loops.push_back(std::move(loop));
+  }
+
+  // Each coedge's pcurve: its edge's, on this face's surface - and a seam, used
+  // twice by the face, its first pcurve on the first use.
+  edge_entity.resize(body.edges.size(), nullptr);
+  std::map<std::size_t, std::size_t> uses;  // edge -> uses so far on this face
+  for (auto& loop : out.loops) {
+    for (auto& c : loop.coedges) {
+      const StepKernel::EdgeCurve *entity = edge_entity[c.edge];
+      const auto *on = entity != nullptr ? dynamic_cast<const SurfaceCurve *>(entity->round) : nullptr;
+      if (on == nullptr) continue;
+      std::size_t k = uses[c.edge]++;
+      for (const StepKernel::PCurve *pc : on->on) {
+        if (pc == nullptr || pc->surface != face->surface) continue;
+        if (k-- == 0) {
+          c.pcurve = pcurveOf(pc);
+          break;
+        }
+      }
     }
   }
-  // In the order of each shell's first face. Which face the union left as a
-  // component's root is how its edges happened to be linked, not an order
-  // anything states (open item 39, R23).
-  std::map<int, std::size_t> shell_of_root;  // lookup only
-  std::vector<std::vector<std::size_t>> out;
-  for (std::size_t i = 0; i < sfaces.size(); i++) {
-    const auto it = shell_of_root.emplace(uf_find(component, int(i)), out.size()).first;
-    if (it->second == out.size()) out.emplace_back();
-    out[it->second].push_back(i);
-  }
-  return out;
+  body.faces.push_back(std::move(out));
+  return body.faces.size() - 1;
 }
 
 brep::Body step::mirrorBrep(const std::vector<StepKernel::Face *>& sfaces,
@@ -182,110 +236,14 @@ brep::Body step::mirrorBrep(const std::vector<StepKernel::Face *>& sfaces,
                             const std::vector<std::vector<std::size_t>>& shells,
                             const std::map<const StepKernel::EdgeCurve *, EdgeSource>& edge_sources)
 {
-  using Vertex = StepKernel::Vertex;
-  using EdgeCurve = StepKernel::EdgeCurve;
-  using Face = StepKernel::Face;
-  using FaceBound = StepKernel::FaceBound;
-  using OrientedEdge = StepKernel::OrientedEdge;
-  using SurfaceCurve = StepKernel::SurfaceCurve;
-  using PCurve = StepKernel::PCurve;
   brep::Body body;
-  // Entities by identity, for lookup only: the body's own order is the order
-  // faces, loops and coedges are walked in, which is the file's.
-  std::map<const Vertex *, std::size_t> vertex_index;
-  std::map<const EdgeCurve *, std::size_t> edge_index;
-  std::vector<const EdgeCurve *> edge_entity;
-  auto vertexOf = [&](const Vertex *v) {
-    const auto it = vertex_index.find(v);
-    if (it != vertex_index.end()) return it->second;
-    brep::Vertex out;
-    if (v != nullptr && v->point != nullptr) out.point = v->point->pt;
-    body.vertices.push_back(out);
-    vertex_index.emplace(v, body.vertices.size() - 1);
-    return body.vertices.size() - 1;
-  };
-  auto edgeOf = [&](const EdgeCurve *e) {
-    const auto it = edge_index.find(e);
-    if (it != edge_index.end()) return it->second;
-    brep::Edge out;
-    out.start = vertexOf(e->vert1);
-    out.end = vertexOf(e->vert2);
-    out.same_sense = e->dir;
-    out.curve.form = curveOf(e->round);
-    const auto stated = edge_sources.find(e);
-    if (stated != edge_sources.end()) {
-      out.curve.carrier_error = stated->second.fit;
-      out.curve.stated_exact = stated->second.stated_exact;
-    }
-    body.edges.push_back(out);
-    edge_entity.push_back(e);
-    edge_index.emplace(e, body.edges.size() - 1);
-    return body.edges.size() - 1;
-  };
-
-  for (const Face *face : sfaces) {
-    brep::Face out;
+  BrepReader reader(body, edge_sources);
+  for (const StepKernel::Face *face : sfaces) {
     const auto source = face_source.find(face);
-    if (source != face_source.end()) {
-      out.surface = source->second.record;
-      out.facets = source->second.facets;
-      out.evidence = source->second.evidence;
-      out.plane_from_corners = source->second.plane_from_corners;
-      out.record_evidence = source->second.record_evidence;
-    }
-    out.same_sense = face->dir;
-    out.form = surfaceOf(face->surface);
-    for (const FaceBound *bound : face->faceBounds) {
-      brep::Loop loop;
-      loop.outer = bound->outer;
-      if (bound->edgeLoop != nullptr) {
-        for (const OrientedEdge *oe : bound->edgeLoop->faces) {
-          loop.coedges.push_back(brep::Coedge{edgeOf(oe->edge), oe->dir, std::nullopt});
-        }
-      }
-      // A bound used against its loop's own direction runs every coedge the
-      // other way, in the other order.
-      if (!bound->dir) {
-        std::reverse(loop.coedges.begin(), loop.coedges.end());
-        for (auto& c : loop.coedges) c.forward = !c.forward;
-      }
-      out.loops.push_back(std::move(loop));
-    }
-    body.faces.push_back(std::move(out));
+    reader.face(face, source != face_source.end() ? &source->second : nullptr);
   }
-
-  // Each coedge's pcurve: its edge's, on the surface of the face that uses it -
-  // and a seam, used twice by one face, its first pcurve on the first use.
-  for (std::size_t f = 0; f < body.faces.size(); f++) {
-    std::map<std::size_t, std::size_t> uses;  // edge -> uses so far on this face
-    for (auto& loop : body.faces[f].loops) {
-      for (auto& c : loop.coedges) {
-        const auto *on = dynamic_cast<const SurfaceCurve *>(edge_entity[c.edge]->round);
-        if (on == nullptr) continue;
-        std::size_t k = uses[c.edge]++;
-        for (const PCurve *pc : on->on) {
-          if (pc == nullptr || pc->surface != sfaces[f]->surface) continue;
-          if (k-- == 0) {
-            c.pcurve = pcurveOf(pc);
-            break;
-          }
-        }
-      }
-    }
-  }
-
   for (const auto& faces : shells) body.shells.push_back(brep::Shell{faces, true});
   return body;
-}
-
-brep::Body StepKernel::BodyBuild::mirrorBrep() const
-{
-  return step::mirrorBrep(sfaces, face_source, shellFaces(), edge_source);
-}
-
-void StepKernel::BodyBuild::readBrep()
-{
-  brep_body = mirrorBrep();
 }
 
 void StepKernel::BodyBuild::checkBrep()

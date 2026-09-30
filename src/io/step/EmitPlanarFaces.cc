@@ -26,20 +26,33 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     mesh_coplanar_tol = std::max(1e-9, 1e-8 * (hi - lo).norm());
   }
   int planes_declared = 0;
+  // Whether loop `k` is the outer loop of a face the file states: every loop
+  // below is, but a hole only where its face is.
+  auto face_written = [&](int k) {
+    return k >= 0 && loop_valid[k] && !loop_is_hole[k] && !consumed[k] &&
+           split_for_corners.count(k) == 0;
+  };
 
   for (std::size_t i = 0; i < face_cnt; i++) {
     if (!loop_valid[i] || consumed[i] || split_for_corners.count(i) != 0) continue;
     const std::vector<int>& loop = loops[i];
     const int n = int(loop.size());
 
-    std::vector<OrientedEdge *> oriented_edges;
+    // The loop as the B-rep's: each edge named where it bounds a face. A hole
+    // of a face that is not written - fanned, or taken by an analytic face -
+    // bounds nothing, and its edges are left to whatever does use them.
+    brep::Loop& bound = planar_loops[i];
+    bound.outer = !loop_is_hole[i];
+    const bool bounds_a_face = !loop_is_hole[i] || face_written(parents[i]);
+    auto use = [&](EdgeCurve *edge, bool sense) {
+      if (bounds_a_face) bound.coedges.push_back(brep::Coedge{reader.edge(edge), sense, std::nullopt});
+    };
 
     // a rim of a recognised band is one circular edge instead of n straight
     // ones, shared with the band's face
     const auto rim = rim_of_loop.find(i);
     if (rim != rim_of_loop.end()) {
-      oriented_edges.push_back(new OrientedEdge(entities, rim->second.first, rim->second.second));
-      loop_edges[i].push_back(rim->second.first);
+      use(rim->second.first, rim->second.second);
     } else if (arc_subs.count(i) != 0) {
       // one or more runs of this loop's edges belong to a partial band and are
       // replaced, in place, by the single arc that band is bounded by
@@ -53,8 +66,7 @@ void StepKernel::BodyBuild::emitPlanarFaces()
       for (int j = 0; j < n; j++) {
         if (starts_here[j] >= 0) {
           const ArcSubstitution& sub = subs[starts_here[j]];
-          oriented_edges.push_back(new OrientedEdge(entities, sub.edge, sub.sense));
-          loop_edges[i].push_back(sub.edge);
+          use(sub.edge, sub.sense);
           continue;
         }
         if (covered[j] != 0) continue;
@@ -63,8 +75,7 @@ void StepKernel::BodyBuild::emitPlanarFaces()
         bool edge_dir = true;
         EdgeCurve *edge_curve = get_line_from_map(edge_map, ind, indn, get_vertex(ind), get_vertex(indn),
                                                   edge_dir, merged_edge_cnt);
-        oriented_edges.push_back(new OrientedEdge(entities, edge_curve, edge_dir));
-        loop_edges[i].push_back(edge_curve);
+        use(edge_curve, edge_dir);
       }
     } else
       for (int j = 0; j < n; j++) {
@@ -73,8 +84,7 @@ void StepKernel::BodyBuild::emitPlanarFaces()
         bool edge_dir = true;
         EdgeCurve *edge_curve = get_line_from_map(edge_map, ind, indn, get_vertex(ind), get_vertex(indn),
                                                   edge_dir, merged_edge_cnt);
-        oriented_edges.push_back(new OrientedEdge(entities, edge_curve, edge_dir));
-        loop_edges[i].push_back(edge_curve);
+        use(edge_curve, edge_dir);
       }
     // create the plane. Where the model declared one that this face lies in,
     // that is the plane: a declaration cannot drift, and a fit to mesh vertices
@@ -109,6 +119,7 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     using recognition::EvidenceClass;
     std::shared_ptr<const Surface> record;
     EvidenceClass decided = EvidenceClass::D4;
+    bool from_corners = false;
     {
       for (std::size_t dp = 0; dp < declared_planes.size(); dp++) {
         const auto& declared = declared_planes[dp];
@@ -137,10 +148,8 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     }
     if (record == nullptr) {
       record = std::make_shared<PlaneSurface>(on_plane, norm);
-      plane_from_corners[i] = 1;
+      from_corners = true;
     }
-    plane_record[i] = record;
-    plane_evidence[i] = decided;
     Vector3d ref(0, 0, 0);
     double ref_len = 0;
     for (int j = 0; j < n; j++) {
@@ -184,18 +193,15 @@ void StepKernel::BodyBuild::emitPlanarFaces()
       }
     }
     // A face stands on its outer loop's plane; a hole is a bound of that face
-    // and carries none of its own. Written for a hole, the PLANE is an entity
-    // nothing in the file references (open item 39, R18).
+    // and carries none of its own (open item 39, R18). Its loops are added when
+    // the faces are assembled.
     if (!loop_is_hole[i]) {
-      auto plane_point = new Point(entities, on_plane);
-      auto plane_dir_1 = new Direction(entities, norm);
-      auto plane_dir_2 = new Direction(entities, ref);
-      auto plane_axis = new Axis2Placement(entities, plane_dir_1, plane_dir_2, plane_point);
-      planes[i] = new Plane(entities, plane_axis);
+      brep::Face face;
+      stateSource(face, sourceOf(record, {i}, decided, from_corners));
+      face.form = brep::Plane{{on_plane, norm, ref}};
+      face.same_sense = true;
+      planar_faces.emplace(i, std::move(face));
     }
-
-    auto edge_loop = new EdgeLoop(entities, oriented_edges);
-    face_bounds[i] = new FaceBound(entities, edge_loop, true, !loop_is_hole[i]);
   }
 
   if (planes_declared > 0) {

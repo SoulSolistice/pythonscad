@@ -482,6 +482,68 @@ std::vector<std::string> check(const Body& body)
   for (std::size_t f = 0; f < body.faces.size(); f++) {
     if (shell_of[f] < 0) say(name("face", f) + " is in no shell");
   }
+
+  // A body is its shells and what they refer to: an edge no face uses, or a
+  // vertex no edge ends at, is not part of the solid the file states - and it
+  // would still be counted among the solid's edges and classed.
+  std::vector<char> edge_used(body.edges.size(), 0), vertex_used(body.vertices.size(), 0);
+  for (const Face& face : body.faces) {
+    for (const Loop& loop : face.loops) {
+      for (const Coedge& c : loop.coedges) {
+        if (c.edge < body.edges.size()) edge_used[c.edge] = 1;
+      }
+    }
+  }
+  for (std::size_t e = 0; e < body.edges.size(); e++) {
+    if (edge_used[e] == 0) {
+      say(name("edge", e) + " is used by no face");
+      continue;
+    }
+    for (const std::size_t v : {body.edges[e].start, body.edges[e].end}) {
+      if (v < body.vertices.size()) vertex_used[v] = 1;
+    }
+  }
+  for (std::size_t v = 0; v < body.vertices.size(); v++) {
+    if (vertex_used[v] == 0) say(name("vertex", v) + " bounds no edge a face uses");
+  }
+  return out;
+}
+
+std::vector<Shell> connectedShells(const Body& body)
+{
+  std::vector<std::size_t> root(body.faces.size());
+  for (std::size_t f = 0; f < root.size(); f++) root[f] = f;
+  auto find = [&](std::size_t f) {
+    while (root[f] != f) f = root[f] = root[root[f]];
+    return f;
+  };
+  // Every face using an edge joins the first face that did.
+  std::vector<std::size_t> first_use(body.edges.size(), body.faces.size());
+  for (std::size_t f = 0; f < body.faces.size(); f++) {
+    for (const Loop& loop : body.faces[f].loops) {
+      for (const Coedge& c : loop.coedges) {
+        if (c.edge >= body.edges.size()) continue;
+        if (first_use[c.edge] == body.faces.size()) {
+          first_use[c.edge] = f;
+          continue;
+        }
+        const std::size_t a = find(first_use[c.edge]), b = find(f);
+        if (a != b) root[std::max(a, b)] = std::min(a, b);
+      }
+    }
+  }
+  // Each root is the smallest face of its component, so walking the faces in
+  // order meets every component at its first face.
+  std::vector<Shell> out;
+  std::vector<std::size_t> shell_of_root(body.faces.size(), body.faces.size());
+  for (std::size_t f = 0; f < body.faces.size(); f++) {
+    const std::size_t r = find(f);
+    if (shell_of_root[r] == body.faces.size()) {
+      shell_of_root[r] = out.size();
+      out.push_back(Shell{{}, true});
+    }
+    out[shell_of_root[r]].faces.push_back(f);
+  }
   return out;
 }
 

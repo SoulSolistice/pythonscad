@@ -175,7 +175,6 @@ void StepKernel::BodyBuild::emitSweepFaces()
     }
 
     std::vector<FaceBound *> bounds;
-    std::vector<EdgeCurve *> face_edges_here;
     // Which cycle is the outer bound is a question about the surface's own
     // parameters, not about the model: a hole in a face is a hole in its
     // parameter rectangle. The largest area there is the one that contains the
@@ -247,7 +246,6 @@ void StepKernel::BodyBuild::emitSweepFaces()
         for (const Link& link : links) {
           EdgeCurve *edge = link.edge;
           loop.push_back(new OrientedEdge(entities, edge, link.dir));
-          face_edges_here.push_back(edge);
           auto attach = [&](PCurve *pcurve) {
             // An edge between two sweep faces is on both of them, and STEP
             // allows a SURFACE_CURVE to say so.
@@ -336,6 +334,5 @@ void StepKernel::BodyBuild::emitSweepFaces()
 
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
     registerFace(sfaces_extra.back(), patch.surface, patch.facets);
-    face_edges_extra.push_back(face_edges_here);
   }
 }

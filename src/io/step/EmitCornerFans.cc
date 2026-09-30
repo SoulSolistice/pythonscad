@@ -15,15 +15,14 @@ void StepKernel::BodyBuild::emitCornerFans()
       const Vector3d e1 = vertices[tri[1]] - vertices[tri[0]];
       const Vector3d e2 = vertices[tri[2]] - vertices[tri[0]];
       if (e1.cross(e2).norm() < area_eps) continue;
-      std::vector<OrientedEdge *> oriented;
-      std::vector<EdgeCurve *> edges_here;
+      brep::Loop bound;
+      bound.outer = true;
       for (int j = 0; j < 3; j++) {
         const int a = tri[j], b = tri[(j + 1) % 3];
         bool dir = true;
         EdgeCurve *e =
           get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
-        oriented.push_back(new OrientedEdge(entities, e, dir));
-        edges_here.push_back(e);
+        bound.coedges.push_back(brep::Coedge{reader.edge(e), dir, std::nullopt});
       }
       // The triangle's own plane, not the polygon's. A triangle is planar
       // wherever its corners are, which is the whole reason for fanning one
@@ -45,16 +44,15 @@ void StepKernel::BodyBuild::emitCornerFans()
       Vector3d ref = e1 - tn * tn.dot(e1);
       if (ref.norm() < 1e-12) ref = AnalyticFeatures::perpendicular(tn);
       else ref.normalize();
-      auto axis = new Axis2Placement(entities, new Direction(entities, tn), new Direction(entities, ref),
-                                     new Point(entities, vertices[tri[0]]));
-      std::vector<FaceBound *> bounds;
-      bounds.push_back(new FaceBound(entities, new EdgeLoop(entities, oriented), true, true));
-      sfaces_extra.push_back(new Face(entities, bounds, new Plane(entities, axis), true));
-      face_edges_extra.push_back(edges_here);
       // A triangle of a polygon the placement bent, on the plane its corners
       // are on: as good as they are, D4 until they state their own class.
-      registerFace(sfaces_extra.back(), std::make_shared<PlaneSurface>(vertices[tri[0]], tn), {i},
-                   recognition::EvidenceClass::D4, true);
+      brep::Face face;
+      stateSource(face, sourceOf(std::make_shared<PlaneSurface>(vertices[tri[0]], tn), {i},
+                                 recognition::EvidenceClass::D4, true));
+      face.form = brep::Plane{{vertices[tri[0]], tn, ref}};
+      face.same_sense = true;
+      face.loops.push_back(std::move(bound));
+      fan_faces.push_back(std::move(face));
     }
   }
 }
