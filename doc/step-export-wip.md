@@ -4916,6 +4916,18 @@ from coming back - landed with the fix and mutation-checked (F2).
   of a translated file could match. *Test:* `scripts/step-diagnostics/unreferenced.py`,
   asserted by `stepexportsanitytest.py` on every export of the suite - it failed
   step-bore on its two hole planes before the fix.
+- **R19 - a rational spline with knots was written as a polynomial. Fixed
+  2026-09-30.** `BSplineCurve::serialize` (`StepKernel.h`) took its knotted branch
+  first, and that branch writes no weights: a rational curve with explicit knots
+  came out the polynomial of the same net - a parabola in place of a circular
+  arc. `BSplineSurface::serialize` had this fault once and its comment records
+  the fix; the curve never had it. Unreachable today - rational curves come only
+  from Bezier boundaries, which carry no knots - and exactly what a translator
+  from the B-rep reaches, since the mirror states every spline's knots. Now the
+  degree and knot lists are formed first and both forms write them; every form
+  the writer makes today is written byte for byte as before. *Test:* a rational
+  quadratic arc with explicit knots must serialise as `RATIONAL_B_SPLINE_CURVE`
+  with them - the old branch restored fails it on all three counts.
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

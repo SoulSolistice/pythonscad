@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <catch2/catch_all.hpp>
+#include <cmath>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -172,4 +174,32 @@ TEST_CASE("a spline written without knots is one Bezier span, and says so", "[br
   CHECK(spline->knots == std::vector<double>{0, 1});
   CHECK(spline->mults == std::vector<int>{4, 4});
   CHECK(structural(body).empty());
+}
+
+TEST_CASE("a rational spline with knots is written rational, with its knots", "[step-kernel]")
+{
+  // A quadratic arc of a circle over one span, stated with explicit knots: the
+  // middle weight is cos(45 degrees). Written without its weights it is a
+  // parabola, not the arc - which is what the knotted branch of the serialiser
+  // did (open item 39, R19).
+  std::vector<K::Entity *> ents;
+  std::vector<K::Point *> pts{new K::Point(ents, Vector3d(1, 0, 0)),
+                              new K::Point(ents, Vector3d(1, 1, 0)),
+                              new K::Point(ents, Vector3d(0, 1, 0))};
+  auto *arc = new K::BSplineCurve(ents, "", pts, std::vector<double>{1, std::sqrt(0.5), 1});
+  arc->setKnots(2, {0, 1}, {3, 3});
+  std::ostringstream out;
+  arc->serialize(out);
+  const std::string text = out.str();
+  CHECK(text.find("RATIONAL_B_SPLINE_CURVE") != std::string::npos);
+  CHECK(text.find("B_SPLINE_CURVE_WITH_KNOTS((3,3),(0.,1.),.UNSPECIFIED.)") != std::string::npos);
+  CHECK(text.find("B_SPLINE_CURVE(2,") != std::string::npos);
+  // And the forms the writer makes today are unchanged: a Bezier with no knots
+  // set is one span of its own degree.
+  auto *bezier = new K::BSplineCurve(ents, "", pts);
+  std::ostringstream plain;
+  bezier->serialize(plain);
+  CHECK(plain.str().find("B_SPLINE_CURVE_WITH_KNOTS('',2,(") != std::string::npos);
+  CHECK(plain.str().find("(3,3),(0.,1.),.UNSPECIFIED.);") != std::string::npos);
+  for (auto *e : ents) delete e;
 }

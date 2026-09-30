@@ -679,17 +679,20 @@ public:
       std::ostringstream ctrl;
       for (std::size_t i = 0; i < pts.size(); i++) ctrl << (i ? ",#" : "#") << pts[i]->id;
 
-      if (!knots.empty()) {
-        stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << spline_degree
-                  << ",(" << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.," << curveKnotLists(knots, mults)
-                  << ",.UNSPECIFIED.);\n";
-        return;
-      }
-      const int degree = int(pts.size()) - 1;
+      // The degree and the knot lists first, whichever form the curve has, so
+      // the rational form below cannot drop a curve's knots and the knotted
+      // form cannot drop its weights - which it did: a rational curve with
+      // knots was written as the polynomial of the same net, a different curve
+      // (open item 39, R19; BSplineSurface::serialize had the same fault once).
+      const bool knotted = !knots.empty();
+      const int degree = knotted ? spline_degree : int(pts.size()) - 1;
+      std::ostringstream knot_text;
+      if (knotted) knot_text << curveKnotLists(knots, mults);
+      else knot_text << "(" << degree + 1 << "," << degree + 1 << "),(0.,1.)";
+
       if (weights.empty()) {
         stream_in << "#" << id << " = B_SPLINE_CURVE_WITH_KNOTS('" << label << "'," << degree << ",("
-                  << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.,(" << degree + 1 << "," << degree + 1
-                  << "),(0.,1.),.UNSPECIFIED.);\n";
+                  << ctrl.str() << "),.UNSPECIFIED.,.F.,.F.," << knot_text.str() << ",.UNSPECIFIED.);\n";
         return;
       }
 
@@ -701,8 +704,8 @@ public:
         wts << (i ? "," : "") << step_real(weights[i]);
       }
       stream_in << "#" << id << " = ( BOUNDED_CURVE() B_SPLINE_CURVE(" << degree << ",(" << ctrl.str()
-                << "),.UNSPECIFIED.,.F.,.F.) B_SPLINE_CURVE_WITH_KNOTS((" << degree + 1 << ","
-                << degree + 1 << "),(0.,1.),.UNSPECIFIED.) CURVE()"
+                << "),.UNSPECIFIED.,.F.,.F.) B_SPLINE_CURVE_WITH_KNOTS(" << knot_text.str()
+                << ",.UNSPECIFIED.) CURVE()"
                 << " GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_CURVE((" << wts.str() << "))"
                 << " REPRESENTATION_ITEM('" << label << "') );\n";
     }
