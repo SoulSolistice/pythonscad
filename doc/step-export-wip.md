@@ -4655,6 +4655,82 @@ writer an arc only where the arc is D0 or D1. STEP is its first writer; a second
 steps 5 to 7: those rewrite corner placement, and landing them after the move
 puts that work in the neutral domain once rather than moving it twice.
 
+**Step 1, landed 2026-09-30**: `src/geometry/brep/Brep.h` - vertices, edges,
+coedges, loops, faces, shells, every entity with its evidence class, topology by
+index - and `brep::check`, used by nothing; `compare` 0 differences over 120
+exports. Reviewing it against the doctrine before it landed changed four things:
+a face has *at most* one outer loop (a periodic face between two rims has none,
+and ISO 10303 writes it so); an edge's surfaces are stated once, by the faces
+that use it, not copied onto its curve; an unset curve is `std::monostate` and
+named, not a default line; a face's class is the weakest of its members'.
+
+**Found on the way: the phases held against the doctrine.** Moving a phase is
+neutral by rule (A8), so what the review finds is recorded here and fixed in
+commits of its own - after the move, so the fix is made once, in the neutral
+domain. Each names where it is, what it points to, and the test that keeps it
+from coming back - landed with the fix and mutation-checked (F2).
+
+- **R1 - the planar writer chooses a declared plane by position.**
+  `EmitPlanarFaces.cc`: the first declared plane the loop lies on, never the
+  plane its triangles are named for. An unnamed face lying on a declared plane is
+  written on it and counted "on a declared plane" (position standing in for
+  heritage, E8); a named face bent off it gets a fitted plane in silence (the
+  named-facet check catches it after the fact). The name decides; position only
+  derives, at D1, and says so.
+  *Test:* a fixture with an unnamed face lying exactly on a declared plane - a
+  `polyhedron()` slab flush on a `cube()` - whose report must count it as derived,
+  not declared.
+- **R2 - one property, two tolerances, neither the machine's.** "Every corner of
+  a planar face is in the plane it asserts" is vetoed at an absolute 1e-9
+  (`CornersApply.cc`) and checked at 1e-8 of the part (`mesh_coplanar_tol`,
+  `EmitPlanarFaces.cc`, reported by `AssembleFaces.cc`). The check's own comment
+  justifies 1e-8 by the merge's bucketing and lid10's 2.26e-6 warped quads; both
+  premises are false since `d45fb5638`. One predicate at machine precision
+  (`recognition::onPlane` / `coplanar`) - C2.
+  *Test:* once it is one function, a unit test - a corner 1e-10 off a plane at
+  100 mm is off it, one within the forward error is on - so no second tolerance
+  can stand beside it unnoticed.
+- **R3 - the bend veto re-anchors at a moved corner.** `CornersApply.cc` measures
+  out-of-plane against the mesh's normal through `at_moved(loops[i][0])`, so a
+  face whose corners all move the same distance along its normal is not "bent" -
+  it is carried off its plane, and off a declared one, unseen. For a face on a
+  declared plane the question is whether every corner stays on that plane; for
+  any other, whether the final corners are coplanar.
+  *Test:* a unit test on the extracted bend test - a face's corners all moved 0.1
+  along its normal has left its plane, a corner moved within it has not.
+- **R4 - chord or face is told by angle, twice, two ways.** `placeOnMeshPlanes`
+  (`CornersOnMeshPlanes.cc`) and `keepExactSurfaces` (`CornersKeepExact.cc`)
+  both probe 1e-4 along a facet's normal and compare the surface's give against
+  a threshold - cos(pi/6) in one, 0.5 in the other - so a plane reading between
+  them is a chord to one pass and a face to the other. The first says of itself
+  "an inference standing in for something the model knew: a declared plane would
+  make this a lookup". Since item 40 it is one: a facet named for the surface
+  being placed on is its chord, one named for a plane record is a face on that
+  record. Identity before position (E8), and three chosen numbers gone (F6).
+  *Test:* a fixture that makes the two passes disagree today - a **D-shaft**, a
+  cylinder with a flat milled at d/r = 0.7, whose plane meets the cylinder at its
+  edge with a give of 0.7: a face to one pass, a chord to the other. Its corners
+  lie on the lines where the flat meets the cylinder, exactly; its volume is the
+  circle less its segment, times the height, in closed form. It keeps any angle
+  test from returning, as well as the disagreement.
+- **R5 - corners grounded on facet planes where the record is known.** The same
+  two passes cross the corner's surface with `loop_normals` - the mesh's plane
+  of the facet - even where the facet is named for a declared plane. The arbiter
+  may overrule later; where nothing does, the corner stands on a facet (closed
+  form or proof). Their acceptance tests disagree too: 1e-6 off the surface,
+  1e-9 absolute off a plane, 1e-12 relative for the solve.
+  *Test:* the D-shaft above, asked of its corners - every corner on the flat's
+  declared plane at machine precision (`scripts/step-corner-stray.py`, planes).
+- **R6 - D0 corners protected by position.** `deserts_exact`
+  (`CornerPlacement.cc`) refuses a move that takes a corner off another declared
+  quadric it sits on within an absolute 1e-9. It pins a corner that merely
+  coincides with a quadric no face of which meets it, and leaves a corner a maker
+  put on a plane or a grid unprotected. What a corner is exactly on is what its
+  makers named it for - the faces meeting there - not what it happens to touch.
+  *Test:* built with the fix, since the case it needs is the one the fix makes
+  askable: a maker's corner on a declared plane that a weaker candidate would
+  move, which must stay where its maker put it.
+
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records
 with every edge named by its maker (E6; the last gap, edges Clipper merges,

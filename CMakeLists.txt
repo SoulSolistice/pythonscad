@@ -1656,6 +1656,7 @@ set(CORE_SOURCES
   src/geometry/PolySetBuilder.cc
   src/geometry/Curve.cc
   src/geometry/Surface.cc
+  src/geometry/brep/Brep.cc
   src/geometry/SolidTree.cc
   src/geometry/PolySetUtils.cc
   src/geometry/Polygon2d.cc
