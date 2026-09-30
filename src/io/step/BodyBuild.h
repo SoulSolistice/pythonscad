@@ -584,6 +584,9 @@ struct StepKernel::BodyBuild {
   // face for lookup only; faces are walked in `sfaces` order, never this map's.
   using FaceSource = step::FaceSource;
   std::map<const Face *, FaceSource> face_source;
+  // What an edge's maker states about its carrier, where it states anything - a
+  // fit's error, or that it is its face's own boundary; see step::EdgeSource.
+  std::map<const EdgeCurve *, step::EdgeSource> edge_source;
   /*! Register `face`, just made, as standing on `record` over `facets`. Its
    * class is the weakest its facets' honoured claims state, unless the caller
    * states it - a planar face, which no recogniser claims. */

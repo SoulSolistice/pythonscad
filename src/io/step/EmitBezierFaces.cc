@@ -89,6 +89,7 @@ void StepKernel::BodyBuild::emitBezierFaces()
           const Vector3d ref = (vertices[run.verts.front()] - centre).normalized();
           auto circle = new Circle(entities, "", placement(centre, normal, ref), radius);
           edge = new EdgeCurve(entities, from, to, circle, true);
+          edge_source[edge] = step::EdgeSource{0, true};  // the patch's own boundary
         } else {
           std::vector<Point *> cp;
           std::vector<double> cw;
@@ -97,6 +98,7 @@ void StepKernel::BodyBuild::emitBezierFaces()
           }
           auto curve = new BSplineCurve(entities, "", cp, cw);
           edge = new EdgeCurve(entities, from, to, curve, true);
+          edge_source[edge] = step::EdgeSource{0, true};  // a row of the patch's own net
         }
         run_edges.emplace(key, edge);
       }

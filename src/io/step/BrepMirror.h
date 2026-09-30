@@ -31,12 +31,23 @@ struct FaceSource {
   recognition::EvidenceClass evidence = recognition::EvidenceClass::Unstated;
 };
 
+/*! What an edge's maker states about its carrier, where it states anything:
+ * the error of a fit (a crossing curve's, from its fitter), or that the carrier
+ * is its face's own boundary (a row of a Bezier net). Every other edge states
+ * nothing, and is certified against its faces or not (brep::stateClasses). */
+struct EdgeSource {
+  double fit = 0;
+  bool stated_exact = false;
+};
+
 /*! `faces` as a B-rep: their bounds, edges, vertices, curves, pcurves and
  * surface forms as the entities hold them, each face's record, facets and
- * class from `sources`, and `shells` as indices into `faces`. Vertices and
- * edges state no class: their writers do not say yet. */
+ * class from `sources`, and `shells` as indices into `faces`; each edge's
+ * maker's statement from `edge_sources`. The classes of vertices and edges are
+ * then brep::stateClasses' to derive, from the faces meeting there. */
 brep::Body mirrorBrep(const std::vector<StepKernel::Face *>& faces,
                       const std::map<const StepKernel::Face *, FaceSource>& sources,
-                      const std::vector<std::vector<std::size_t>>& shells);
+                      const std::vector<std::vector<std::size_t>>& shells,
+                      const std::map<const StepKernel::EdgeCurve *, EdgeSource>& edge_sources = {});
 
 }  // namespace step

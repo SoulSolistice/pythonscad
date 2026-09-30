@@ -42,6 +42,7 @@
  * every facet whether a face was written over it.
  */
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -112,6 +113,10 @@ using CurveForm = std::variant<std::monostate, Line, Conic, BSpline>;
 struct Curve {
   CurveForm form;
   double carrier_error = 0;
+  // Set by a maker that built the carrier from its face's own record - a row
+  // of a Bezier net is that patch's boundary - where no algebraic certificate
+  // can ask it (stateClasses). A statement, not a measurement.
+  bool stated_exact = false;
 };
 
 /*! A curve in a face's parameter plane: a line or a B-spline in (u, v), as
@@ -244,6 +249,52 @@ struct Body {
   std::vector<Face> faces;
   std::vector<Shell> shells;
 };
+
+/*! Whether the curve carried between `start` and `end` lies on `surface`
+ * exactly - a closed-form certificate, no tolerance. A surface of algebraic
+ * degree d (a plane 1, a quadric 2, a torus 4) meets a line in at most d points
+ * and a conic in at most 2d unless it contains it, so d + 1 points of a line
+ * and 2d + 1 of a conic, each on the surface at machine precision, prove the
+ * whole curve is. Each point is asked against the surface's own residual bound
+ * plus the forward error of computing the point from the carrier, which the
+ * residual's bound does not state (recognition/Exact.h). False where no
+ * certificate exists: a B-spline, or a surface with no algebraic degree - a
+ * grid, a Bezier patch. */
+bool curveOn(const CurveForm& form, const Vector3d& start, const Vector3d& end, const Surface *surface);
+
+/*! Whether curveOn can answer at all: a line or a conic, on a record of some
+ * algebraic degree. Where it cannot, "not certified" means "not asked", never
+ * "off". */
+bool certifiable(const CurveForm& form, const Surface *surface);
+
+/*! How a body's vertices and edges came out of stateClasses: how many of each
+ * class; how many are shown off the record of a face they bound; and how many
+ * sit on a record nothing can ask - a grid, a Bezier patch, a spline carrier -
+ * which is not the same as off, and is counted apart. */
+struct ClassTally {
+  std::array<std::size_t, 6> vertices{};  // indexed by EvidenceClass
+  std::array<std::size_t, 6> edges{};
+  std::size_t vertices_off = 0, edges_off = 0;
+  std::size_t vertices_unasked = 0, edges_unasked = 0;
+};
+
+/*! State every vertex's and edge's class from the faces that meet there - the
+ * one truth an edge and a vertex have (see the file comment) - by the
+ * determinacy rule: an entity is as good as the weakest class it rests on and
+ * the freedom it has left (doc/step-rungs.md).
+ *
+ * An edge whose carrier is certified on the record of every face using it
+ * (curveOn), or stated exact by its maker, is D1 - a closed-form consequence -
+ * or its faces' weakest class if that is weaker; one whose carrier is a stated
+ * fit (`carrier_error` > 0) is D2 at best; any other is D4, a carrier off a face
+ * it bounds, with `carrier_error` NaN - not measured.
+ *
+ * A vertex a maker declared - a point of a declared grid's net - is D0. One
+ * exactly on the records of every face it bounds, three of them with normals
+ * independent there, is determined: D1 at best. One on fewer, or off one, has
+ * freedom the tessellation decided: D4. Faces' classes are what registerFace
+ * stated; this reads them and writes nothing else. */
+ClassTally stateClasses(Body& body);
 
 /*! What is wrong with a body's structure, one line per defect, empty when
  * nothing is: an index out of range; an edge with no curve, or a B-spline whose

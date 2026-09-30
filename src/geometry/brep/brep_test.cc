@@ -5,6 +5,7 @@
 #include "geometry/brep/Brep.h"
 
 #include <algorithm>
+#include <cmath>
 #include <catch2/catch_all.hpp>
 #include <map>
 #include <memory>
@@ -270,4 +271,159 @@ TEST_CASE("a face stands on a surface, a loop has coedges, and a face is in one 
   CHECK(says(defects, "face 2, loop 0 is empty"));
   CHECK(says(defects, "face 3 is listed twice in shell 0"));
   CHECK(says(defects, "face 4 is in two shells"));
+}
+
+// ---- certificates and classes (stateClasses) ----------------------------
+//
+// Every expectation below is read off the geometry by hand: a ruling of a
+// cylinder lies on it and a chord across it does not; the section of the
+// cylinder x^2 + y^2 = 1 by the plane through the origin tilted 45 degrees about
+// x is the ellipse of semi-axes sqrt(2) and 1; a cube's corner is where three of
+// its planes cross, and a cylinder's seam end is on only two surfaces.
+
+TEST_CASE("a line is on a plane or a quadric exactly where its degree's worth of points are", "[brep]")
+{
+  const Vector3d z = Vector3d::UnitZ();
+  const auto floor = std::make_shared<PlaneSurface>(Vector3d::Zero(), z);
+  const auto wall = std::make_shared<CylinderSurface>(Vector3d::Zero(), z, 1.0);
+  const brep::CurveForm line = brep::Line{};
+  CHECK(brep::curveOn(line, Vector3d(0, 0, 0), Vector3d(3, 4, 0), floor.get()));
+  CHECK_FALSE(brep::curveOn(line, Vector3d(0, 0, 0), Vector3d(3, 4, 1e-9), floor.get()));
+  // A ruling: both ends and the middle on the cylinder.
+  CHECK(brep::curveOn(line, Vector3d(1, 0, 0), Vector3d(1, 0, 5), wall.get()));
+  // A chord: both ends on it, the middle 1 - 1/sqrt(2) inside.
+  CHECK_FALSE(brep::curveOn(line, Vector3d(1, 0, 0), Vector3d(0, 1, 0), wall.get()));
+}
+
+TEST_CASE("a conic is on a quadric exactly where five of its points are", "[brep]")
+{
+  const Vector3d z = Vector3d::UnitZ();
+  const auto wall = std::make_shared<CylinderSurface>(Vector3d::Zero(), z, 1.0);
+  using Kind = brep::Conic::Kind;
+  const brep::CurveForm rim =
+    brep::Conic{Kind::Circle, {Vector3d(0, 0, 0.5), z, Vector3d::UnitX()}, 1, 1};
+  CHECK(brep::curveOn(rim, Vector3d(1, 0, 0.5), Vector3d(1, 0, 0.5), wall.get()));
+  const brep::CurveForm wider =
+    brep::Conic{Kind::Circle, {Vector3d(0, 0, 0.5), z, Vector3d::UnitX()}, 1 + 1e-7, 1 + 1e-7};
+  CHECK_FALSE(brep::curveOn(wider, Vector3d(1, 0, 0.5), Vector3d(1, 0, 0.5), wall.get()));
+  // The 45 degree section: normal (0, -1, 1)/sqrt(2), major axis (0, 1, 1)/sqrt(2).
+  const double h = std::sqrt(0.5);
+  const brep::CurveForm cut = brep::Conic{
+    Kind::Ellipse, {Vector3d::Zero(), Vector3d(0, -h, h), Vector3d(0, h, h)}, std::sqrt(2.0), 1};
+  CHECK(brep::curveOn(cut, Vector3d(0, 1, 1), Vector3d(0, 1, 1), wall.get()));
+  CHECK(brep::curveOn(cut, Vector3d(0, 1, 1), Vector3d(0, 1, 1),
+                      std::make_shared<PlaneSurface>(Vector3d::Zero(), Vector3d(0, -h, h)).get()));
+  // The same ellipse a hair too long is on the plane still, and off the cylinder.
+  const brep::CurveForm longer = brep::Conic{
+    Kind::Ellipse, {Vector3d::Zero(), Vector3d(0, -h, h), Vector3d(0, h, h)}, std::sqrt(2.0) + 1e-7, 1};
+  CHECK_FALSE(brep::curveOn(longer, Vector3d(0, 1, 1), Vector3d(0, 1, 1), wall.get()));
+}
+
+TEST_CASE("a curve no algebra can certify is not certified", "[brep]")
+{
+  brep::BSpline spline;
+  spline.degree = 1;
+  spline.points = {Vector3d(0, 0, 0), Vector3d(1, 0, 0)};
+  spline.knots = {0, 1};
+  spline.mults = {2, 2};
+  CHECK_FALSE(brep::curveOn(spline, Vector3d(0, 0, 0), Vector3d(1, 0, 0),
+                            std::make_shared<PlaneSurface>(Vector3d::Zero(), Vector3d::UnitZ()).get()));
+}
+
+TEST_CASE("a cube's corners are where three declared planes cross, and its edges where two do", "[brep]")
+{
+  Body body = cube();
+  const brep::ClassTally t = brep::stateClasses(body);
+  CHECK(t.vertices[std::size_t(EvidenceClass::D1)] == 8);
+  CHECK(t.edges[std::size_t(EvidenceClass::D1)] == 12);
+  CHECK(t.vertices_off == 0);
+  CHECK(t.edges_off == 0);
+  CHECK(brep::check(body).empty());
+}
+
+TEST_CASE("a corner off its planes, and the edges it ends, are the tessellation's", "[brep]")
+{
+  Body body = cube();
+  body.vertices[7].point += Vector3d(0, 0, 1e-6);
+  const brep::ClassTally t = brep::stateClasses(body);
+  CHECK(body.vertices[7].evidence == EvidenceClass::D4);
+  CHECK(t.vertices_off == 1);
+  // Of the three edges at corner 7, (5,7) and (6,7) bound the top it has left;
+  // (3,7) bounds x = 1 and y = 1 only, and still lies in both.
+  CHECK(t.edges_off == 2);
+  CHECK(std::isnan(body.edges[0].curve.carrier_error) == (body.edges[0].evidence == EvidenceClass::D4));
+}
+
+TEST_CASE("three records that share a line fix no point on it", "[brep]")
+{
+  // The cube's bottom made to stand on the plane x = y through the origin.
+  // Corner 0, (0,0,0), is on it and on x = 0 and y = 0 - three records, but all
+  // three contain the z axis, so their normals are coplanar and the corner can
+  // slide along it: not determined, the tessellation's, and not off.
+  Body body = cube();
+  const double h = std::sqrt(0.5);
+  body.faces[0].surface = std::make_shared<PlaneSurface>(Vector3d::Zero(), Vector3d(h, -h, 0));
+  brep::stateClasses(body);
+  CHECK(body.vertices[0].evidence == EvidenceClass::D4);
+  // Corner 3, (1,1,0), is on x = y too, and on x = 1 and y = 1: normals
+  // (1,-1,0), (1,0,0), (0,1,0) - coplanar again, so D4 for the same reason.
+  CHECK(body.vertices[3].evidence == EvidenceClass::D4);
+  // Corner 4, (0,0,1), is untouched by the change: x = 0, y = 0, z = 1 fix it.
+  CHECK(body.vertices[4].evidence == EvidenceClass::D1);
+}
+
+TEST_CASE("a seam's end is on two surfaces only, so where it sits was the tessellation's choice",
+          "[brep]")
+{
+  Body body = cylinder();
+  const brep::ClassTally t = brep::stateClasses(body);
+  // Rims: the crossing of the cylinder with each cap, exactly. The seam: a
+  // ruling. Its two ends: each on the wall and one cap - two normals, a curve's
+  // worth of freedom.
+  CHECK(t.edges[std::size_t(EvidenceClass::D1)] == 3);
+  CHECK(t.vertices[std::size_t(EvidenceClass::D4)] == 2);
+  CHECK(t.vertices_off == 0);
+}
+
+TEST_CASE("a stated fit is D2, a stated boundary D1, and a weaker face weakens its edges", "[brep]")
+{
+  Body body = cube();
+  brep::BSpline spline;
+  spline.degree = 1;
+  spline.points = {body.vertices[body.edges[0].start].point, body.vertices[body.edges[0].end].point};
+  spline.knots = {0, 1};
+  spline.mults = {2, 2};
+  body.edges[0].curve.form = spline;
+  body.edges[0].curve.carrier_error = 1e-8;
+  body.edges[1].curve.form = spline;
+  body.edges[1].curve.stated_exact = true;
+  body.edges[2].curve.form = spline;  // stated nothing: not certifiable, the tessellation's
+  body.faces[5].evidence = EvidenceClass::D4;
+  brep::stateClasses(body);
+  CHECK(body.edges[0].evidence == EvidenceClass::D2);
+  CHECK(body.edges[0].curve.carrier_error == 1e-8);
+  CHECK(body.edges[1].evidence == EvidenceClass::D1);
+  CHECK(body.edges[2].evidence == EvidenceClass::D4);
+  CHECK(std::isnan(body.edges[2].curve.carrier_error));
+  // Face 5, x = 1, now D4: every edge it uses is D4 however exact.
+  for (const auto& c : body.faces[5].loops[0].coedges)
+    CHECK(body.edges[c.edge].evidence == EvidenceClass::D4);
+}
+
+TEST_CASE("a record nothing can ask is not a record the entity is off", "[brep]")
+{
+  // The cube with one face's record replaced by a Bezier patch - no algebraic
+  // degree, no closed-form residual. Its corners and edges cannot be asked of
+  // it: D4, since nothing certifies them, and not "off".
+  Body body = cube();
+  body.faces[1].surface = std::make_shared<BezierPatchSurface>(
+    1, 1,
+    std::vector<Vector3d>{Vector3d(0, 0, 1), Vector3d(0, 1, 1), Vector3d(1, 0, 1), Vector3d(1, 1, 1)});
+  const brep::ClassTally t = brep::stateClasses(body);
+  CHECK(t.vertices_off == 0);
+  CHECK(t.edges_off == 0);
+  CHECK(t.vertices_unasked == 4);  // the top's four corners
+  CHECK(t.edges_unasked == 4);     // and its four edges
+  CHECK(t.vertices[std::size_t(EvidenceClass::D4)] == 4);
+  CHECK(t.vertices[std::size_t(EvidenceClass::D1)] == 4);
 }

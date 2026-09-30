@@ -4675,6 +4675,44 @@ counted - which is step 2b's to close, at their creation sites. Then 2c: a
 translator writes STEP from the B-rep, proven by `compare` against the entities
 the phases make today, and the phases move over one by one.
 
+**Step 2b, landed 2026-09-30**: every vertex and edge states its class, derived
+where the one truth an edge and a vertex have is - the faces meeting there - by
+closed-form certificates, no tolerance (`brep::curveOn`, `brep::stateClasses`).
+A surface of algebraic degree d meets a line in at most d points and a conic in
+at most 2d unless it contains it, so d + 1 points of a line and 2d + 1 of a
+conic on the surface at machine precision prove the curve is; each point is
+asked against the record's residual bound plus the forward error of computing
+the point from the carrier, which that bound does not state. A vertex exactly on
+the records of all its faces, three of them with independent normals, is
+determined (D1); a declared grid point is D0; any other has freedom the
+tessellation decided (D4). The verdict is three-valued: on, off, or not askable
+(a grid, a Bezier patch, a spline carrier) - "not askable" is counted apart and
+never reported as off. Only two statements come from creation sites: a crossing
+fit's own error (`DecideCrossingRuns`, per part, not the running maximum) and a
+Bezier boundary's being its patch's own row.
+
+What it measures, both tiers, on its first run: the cube wholly determined; a
+seam's end, on two surfaces only, honestly D4; step-exact-trim 32 of 128
+corners determined; lid10 1583 of 1589 corners D4, **270 shown off a face they
+bound and 609 edges carried off one** - the file's false assertions, counted.
+On step-declare-grid, a clean fixture, one corner 2.68e-12 off its cylinder:
+far inside any kernel's tolerance, a thousand ulps outside the machine's -
+R5's 1e-12 solve, measured.
+
+Owed by this step's own design, and named: a planar face on the plane of its
+own corners is D4 until its corners state their class - and now they do. A
+plane through determined corners is determined, but a corner's class reads its
+faces' and a derived plane's reads its corners', so it wants a fixpoint, not a
+guess. Until then most D4 edges on clean fixtures are certified on both
+surfaces and weakened only by that. And a D2 edge's stated error is R16's sample.
+And the certificate's own reach: for exact zeros it is a proof, and at machine
+precision it bounds the residual up to the interpolation's amplification over
+the range sampled - the edge's own segment for a line, the whole curve for a
+circle or an ellipse. A hyperbola or a parabola is sampled over t in [-1, 1],
+which need not contain the edge's own parameters; it wants sampling between the
+edge's ends. *Test:* a parabola edge far out along its arm, off the surface there
+and not at t in [-1, 1].
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral
@@ -4735,7 +4773,9 @@ from coming back - landed with the fix and mutation-checked (F2).
   of the facet - even where the facet is named for a declared plane. The arbiter
   may overrule later; where nothing does, the corner stands on a facet (closed
   form or proof). Their acceptance tests disagree too: 1e-6 off the surface,
-  1e-9 absolute off a plane, 1e-12 relative for the solve.
+  1e-9 absolute off a plane, 1e-12 relative for the solve. Measured since step
+  2b: step-declare-grid writes a corner 2.68e-12 off its cylinder - accepted by a
+  solve held to 1e-12, a thousand ulps from the machine.
   *Test:* the D-shaft above, asked of its corners - every corner on the flat's
   declared plane at machine precision (`scripts/step-corner-stray.py`, planes).
 - **R6 - D0 corners protected by position.** `deserts_exact`

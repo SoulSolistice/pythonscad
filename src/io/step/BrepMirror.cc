@@ -167,7 +167,8 @@ std::vector<std::vector<std::size_t>> StepKernel::BodyBuild::shellFaces() const
 
 brep::Body step::mirrorBrep(const std::vector<StepKernel::Face *>& sfaces,
                             const std::map<const StepKernel::Face *, FaceSource>& face_source,
-                            const std::vector<std::vector<std::size_t>>& shells)
+                            const std::vector<std::vector<std::size_t>>& shells,
+                            const std::map<const StepKernel::EdgeCurve *, EdgeSource>& edge_sources)
 {
   using Vertex = StepKernel::Vertex;
   using EdgeCurve = StepKernel::EdgeCurve;
@@ -199,6 +200,11 @@ brep::Body step::mirrorBrep(const std::vector<StepKernel::Face *>& sfaces,
     out.end = vertexOf(e->vert2);
     out.same_sense = e->dir;
     out.curve.form = curveOf(e->round);
+    const auto stated = edge_sources.find(e);
+    if (stated != edge_sources.end()) {
+      out.curve.carrier_error = stated->second.fit;
+      out.curve.stated_exact = stated->second.stated_exact;
+    }
     body.edges.push_back(out);
     edge_entity.push_back(e);
     edge_index.emplace(e, body.edges.size() - 1);
@@ -260,30 +266,30 @@ brep::Body step::mirrorBrep(const std::vector<StepKernel::Face *>& sfaces,
 
 brep::Body StepKernel::BodyBuild::mirrorBrep() const
 {
-  return step::mirrorBrep(sfaces, face_source, shellFaces());
+  return step::mirrorBrep(sfaces, face_source, shellFaces(), edge_source);
 }
 
 void StepKernel::BodyBuild::checkBrep() const
 {
   if (!analytic) return;
-  const brep::Body body = mirrorBrep();
-  const std::vector<std::string> defects = brep::check(body);
-  // Vertices and edges whose writers do not state a class yet are the step
-  // this is part of, and counted as such; every other defect is the file's.
-  std::size_t vertices_unstated = 0, edges_unstated = 0;
-  std::vector<std::string> real;
-  for (const std::string& d : defects) {
-    const bool unstated = d.find(" states no evidence class") != std::string::npos;
-    if (unstated && d.rfind("vertex ", 0) == 0) vertices_unstated++;
-    else if (unstated && d.rfind("edge ", 0) == 0) edges_unstated++;
-    else real.push_back(d);
-  }
+  brep::Body body = mirrorBrep();
+  const brep::ClassTally t = brep::stateClasses(body);
+  const std::vector<std::string> real = brep::check(body);
+  using recognition::EvidenceClass;
+  auto n = [](const std::array<std::size_t, 6>& by, EvidenceClass c) { return int(by[std::size_t(c)]); };
   LOG(
-    "STEP export: the B-rep as written - %1$d vertices, %2$d edges, %3$d faces in %4$d shells; %5$d "
-    "vertices "
-    "and %6$d edges state no evidence class yet, their writers not saying (open item 39, step 2)",
+    "STEP export: the B-rep as written - %1$d vertices, %2$d edges, %3$d faces in %4$d shells; vertices "
+    "by what "
+    "decided them %5$d D0, %6$d D1, %7$d D4 - %8$d off a face they bound, %9$d on one nothing can ask; "
+    "edges "
+    "%10$d D1, %11$d D2, %12$d D4 - %13$d carried off a face they bound, %14$d on one nothing can ask "
+    "(open item "
+    "39)",
     int(body.vertices.size()), int(body.edges.size()), int(body.faces.size()), int(body.shells.size()),
-    int(vertices_unstated), int(edges_unstated));
+    n(t.vertices, EvidenceClass::D0), n(t.vertices, EvidenceClass::D1), n(t.vertices, EvidenceClass::D4),
+    int(t.vertices_off), int(t.vertices_unasked), n(t.edges, EvidenceClass::D1),
+    n(t.edges, EvidenceClass::D2), n(t.edges, EvidenceClass::D4), int(t.edges_off),
+    int(t.edges_unasked));
   if (!real.empty()) {
     LOG(message_group::Export_Error,
         "STEP export: the B-rep as written breaks its own contract in %1$d place%2$s (brep::check) - "

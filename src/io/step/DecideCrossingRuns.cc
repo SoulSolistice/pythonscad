@@ -169,6 +169,7 @@ void StepKernel::BodyBuild::decideCrossingRuns()
       run.size() == 2 && corners_in(run[0], run[1]).empty() &&
       intersectionArc(a, b, vertices[key.first], vertices[key.second], target, ctrl, arc_error);
     std::vector<CurveFit> parts;
+    std::vector<double> part_errors;  // each part's own, which its edge states
     double parts_error = 0;
     bool fitted = !arc;
     if (fitted) {
@@ -177,6 +178,7 @@ void StepKernel::BodyBuild::decideCrossingRuns()
         parts.emplace_back();
         double achieved = 0;
         fitted = fitted && fitCrossingRun(a, b, points, target, parts.back(), achieved);
+        part_errors.push_back(achieved);
         parts_error = std::max(parts_error, achieved);
         points = {at};
       };
@@ -198,6 +200,7 @@ void StepKernel::BodyBuild::decideCrossingRuns()
       for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
       piece.edges = {new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
                                    new BSplineCurve(entities, "", cp), true)};
+      edge_source[piece.edges.back()] = step::EdgeSource{arc_error, false};
       piece.fits = {CurveFit()};
     } else {
       if (!fitted) {
@@ -224,6 +227,7 @@ void StepKernel::BodyBuild::decideCrossingRuns()
           auto curve = new BSplineCurve(entities, "", cp);
           curve->setKnots(CurveFit::degree, part.knots, part.mults);
           piece.edges.push_back(new EdgeCurve(entities, from, to, curve, true));
+          edge_source[piece.edges.back()] = step::EdgeSource{part_errors[k], false};
           piece.fits.push_back(part);
           from = to;
         }
