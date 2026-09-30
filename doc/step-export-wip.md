@@ -5021,6 +5021,17 @@ from coming back - landed with the fix and mutation-checked (F2).
   face, which is a function of the face order alone. *Test:*
   `brep::connectedShells`' own - two cubes, their faces interleaved, come out in
   the order of their first face.
+- **R24 - the corner placement fanned a hole as a face. Fixed 2026-09-30.**
+  `applyCornerMoves` (`CornersApply.cc`) judged every valid loop, holes
+  included. A hole's ring bent by a move was "splittable" in its own right and
+  fanned into triangles of its own, covering the hole a second time against the
+  face whose own triangles - bridged round the hole by `triangulateWithHoles` -
+  already bounded it: every edge of the ring used twice the same way. The test of
+  a face already reads its holes, so a hole is now judged with its face and
+  never alone. Found by looking for R22: no export reached it, and the first
+  part built to reach it broke `brep::check` in 17 places. *Test:*
+  `step-hole-in-a-fanned-facet` - a radial bore through the facet of
+  step-cap-meets-wall that is fanned; with the hole judged alone again it fails.
 - **R26 - a curve handed to a hole nothing writes. Fixed 2026-09-30.** An
   analytic face hands the planar loop across it the curve it bounds itself
   with - a band's rim, an arc, a plane section, a Bezier run - and the fans,

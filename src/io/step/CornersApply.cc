@@ -85,7 +85,12 @@ void StepKernel::BodyBuild::applyCornerMoves()
         }
       };
       for (std::size_t i = 0; i < loops.size(); i++) {
-        if (!loop_valid[i]) continue;
+        // A hole is a bound of its face, and is judged with it: everything below
+        // reads every hole of the face it asks about. Judged as a face of its
+        // own, a hole a move bent was fanned into triangles of its own, which
+        // covered the hole a second time against the face already bounding it -
+        // every edge of the ring used twice the same way (open item 39, R24).
+        if (!loop_valid[i] || loop_is_hole[i]) continue;
         // Whether a move touches this face at all - over every bound it has, not
         // only its outer one. The measurement below already reads the holes,
         // because a face asserts one plane and its inner bounds are as much a part
