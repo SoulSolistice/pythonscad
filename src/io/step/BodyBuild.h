@@ -756,9 +756,6 @@ struct StepKernel::BodyBuild {
   // Planar faces asserting a plane one of their bounds is not in, and by how much.
   std::size_t planes_off_plane = 0;
   double worst_plane_off = 0;
-  // What the mesher was entitled to call coplanar, by its own rule - see
-  // coplanarTolerance in GeometryEvaluator.cc, which this has to agree with.
-  double mesh_coplanar_tol = 1e-9;
 
   // The corner placement's working state: the moves it proposes, which rung
   // proposed each, and what each path added.

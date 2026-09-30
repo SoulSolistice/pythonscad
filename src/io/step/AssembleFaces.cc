@@ -19,10 +19,9 @@ void StepKernel::BodyBuild::assembleFaces()
 
   if (planes_off_plane > 0) {
     LOG(message_group::Export_Error,
-        "STEP export: %1$d planar face%2$s assert a plane one of their own bounds is not in, by up "
-        "to %3$.4f against the %4$.2e the mesh's own coplanarity allows - a bound bent by "
-        "something other than the merge",
-        int(planes_off_plane), planes_off_plane == 1 ? "" : "s", worst_plane_off, mesh_coplanar_tol);
+        "STEP export: %1$d planar face%2$s assert a plane one of their own bounds is not in, at "
+        "machine precision - by up to %3$.4f; a bound bent by something other than the merge",
+        int(planes_off_plane), planes_off_plane == 1 ? "" : "s", worst_plane_off);
   }
   // The analytic faces are faces of the same shell, read off the entities
   // their emitters made; then the fans.

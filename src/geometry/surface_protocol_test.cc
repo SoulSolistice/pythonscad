@@ -261,6 +261,44 @@ TEST_CASE("classifications: each asked in one place, at machine precision", "[su
   CHECK_FALSE(recognition::samePlane(rim[0], axis, turn * Vector3d(0, 0, 5 + 1e-9), axis));
 }
 
+TEST_CASE("a face's corners are on one plane, or one is off it, at machine precision",
+          "[surface][identity]")
+{
+  // A face of a turned solid 100 mm out: a pentagon in the plane z = 5 of a
+  // turned frame, and a hole in it. Every corner is on one plane. The writer
+  // asked this within 1e-8 of the model's size until 2026-09-30 - which lets a
+  // corner 1e-10 off through at any size above a centimetre (open item 39, R2).
+  Transform3d turn = Transform3d::Identity();
+  turn.rotate(Eigen::AngleAxisd(0.3, Vector3d(1, 2, 3).normalized()));
+  turn.pretranslate(Vector3d(100, -70, 120));
+  std::vector<Vector3d> corners;
+  for (int i = 0; i < 5; i++) {
+    const double a = 2 * M_PI * i / 5;
+    corners.push_back(turn * Vector3d(100 * cos(a), 100 * sin(a), 5));
+  }
+  for (int i = 0; i < 4; i++) {
+    const double a = 2 * M_PI * i / 4;
+    corners.push_back(turn * Vector3d(20 * cos(a), 20 * sin(a), 5));
+  }
+  CHECK(recognition::allCoplanar(corners));
+
+  // a hole corner 1e-10 off the plane is off it
+  std::vector<Vector3d> lifted = corners;
+  lifted[7] = turn * Vector3d(20 * cos(M_PI), 20 * sin(M_PI), 5 + 1e-10);
+  CHECK_FALSE(recognition::allCoplanar(lifted));
+
+  // and one moved by the last bit of one coordinate - within what the
+  // arithmetic that put it there can promise - is on it
+  std::vector<Vector3d> nudged = corners;
+  nudged[3][0] = std::nextafter(nudged[3][0], 1e300);
+  CHECK(recognition::allCoplanar(nudged));
+
+  // three points, and points on one line, state no plane to be off
+  CHECK(recognition::allCoplanar({corners[0], corners[1], corners[2]}));
+  CHECK(recognition::allCoplanar(
+    {Vector3d(0, 0, 0), Vector3d(1, 1, 1), Vector3d(2, 2, 2), Vector3d(5, 5, 5)}));
+}
+
 TEST_CASE("a maker's names ride with its polygons into triangles, in step", "[surface][identity]")
 {
   // Identity said by the maker (checklist E8, open item 40): each polygon names

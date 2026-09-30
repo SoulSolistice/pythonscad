@@ -16,15 +16,6 @@ using namespace step;
 
 void StepKernel::BodyBuild::emitPlanarFaces()
 {
-  {
-    Vector3d lo = vertices.empty() ? Vector3d(0, 0, 0) : vertices[0];
-    Vector3d hi = lo;
-    for (const auto& v : vertices) {
-      lo = lo.cwiseMin(v);
-      hi = hi.cwiseMax(v);
-    }
-    mesh_coplanar_tol = std::max(1e-9, 1e-8 * (hi - lo).norm());
-  }
   int planes_declared = 0, planes_by_position = 0;
 
   for (std::size_t i = 0; i < face_cnt; i++) {
@@ -167,31 +158,39 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     if (ref.norm() < 1e-12) ref = AnalyticFeatures::perpendicular(norm);
     else ref.normalize();
 
-    {
-      // A planar face may not assert a plane one of its own bounds is not in.
+    if (!loop_is_hole[i]) {
+      // A planar face may not assert a plane one of its own bounds is not in:
+      // every corner, its holes' too, on the declared plane it stands on, or all
+      // on one plane where it stands on its corners' - at machine precision (C2,
+      // open item 39, R2). A hole is asked with its face, never alone (R24).
       //
       // The veto above refuses a move that would bend a face; this is the same
-      // property asked of what is actually written, over every bound the face
-      // carries. It is measured against the mesh's own coplanarity tolerance,
-      // which is what a merged loop is entitled to be warped by:
-      // GeometryEvaluator's coplanarTolerance buckets triangles within
-      // 1e-8 of the model's diagonal, so on lid10 - 248 mm across - ten merged
-      // quads come out warped by up to 2.262e-06 against that 2.48e-06
-      // allowance, and no coupon or fixture exceeds it. Anything further off was
-      // bent by something else, which is a defect in this exporter and not in
-      // the mesh it was given: on lid10 the corner placement bent two faces
-      // through their *holes* by 1.8 and 5.7, which a kernel cannot read as one
-      // planar face at all - it splits them, seals the cavity between, and reads
-      // the solid 28% too large.
-      double off = 0;
-      for (const int w : loop) off = std::max(off, fabs((vertices[w] - on_plane).dot(norm)));
+      // property asked of what is actually written. Until 2026-09-30 it was
+      // asked within 1e-8 of the model's size, the bucketing the triangle merge
+      // once did; the merge asks exact coplanarity since d45fb5638, and over
+      // every face of every export measured the two answers were the same. What
+      // it catches is a face bent by something else: on lid10 the corner
+      // placement once bent two faces through their *holes* by 1.8 and 5.7,
+      // which a kernel cannot read as one planar face at all - it splits them,
+      // seals the cavity between, and reads the solid 28% too large.
+      std::vector<Vector3d> corners;
+      for (const int w : loop) corners.push_back(vertices[w]);
       for (std::size_t j = 0; j < face_cnt; j++) {
-        if (!loop_valid[j] || loop_is_hole[i] || parents[j] != int(i)) continue;
-        for (const int w : loops[j]) {
-          off = std::max(off, fabs((vertices[w] - on_plane).dot(norm)));
-        }
+        if (!loop_valid[j] || parents[j] != int(i)) continue;
+        for (const int w : loops[j]) corners.push_back(vertices[w]);
       }
-      if (off > mesh_coplanar_tol) {
+      const auto *declared = from_corners ? nullptr : dynamic_cast<const PlaneSurface *>(record.get());
+      bool flat = true;
+      if (declared != nullptr) {
+        for (const Vector3d& p : corners)
+          flat = flat && recognition::onPlane(declared->refpt, declared->normdir, p);
+      } else {
+        flat = recognition::allCoplanar(corners);
+      }
+      if (!flat) {
+        // How far, for the report: against the plane the face asserts.
+        double off = 0;
+        for (const Vector3d& p : corners) off = std::max(off, fabs((p - on_plane).dot(norm)));
         planes_off_plane++;
         worst_plane_off = std::max(worst_plane_off, off);
       }

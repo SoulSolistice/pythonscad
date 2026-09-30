@@ -158,6 +158,38 @@ inline bool coplanar(const Vector3d& a, const Vector3d& b, const Vector3d& c, co
   return fabs(det) <= forwardError(23, scale);
 }
 
+/*! Whether every one of `points` is on one plane, at machine precision: each
+ * against the plane of a spanning three by `coplanar` - the first point, the
+ * one farthest from it, and the one farthest from their line, the best
+ * conditioned three the set offers. Chosen by distance, which only picks; the
+ * answer is coplanar's. Fewer than four points, or none off a line, are flat.
+ * "Every corner of a planar face is in the plane it asserts", asked in one
+ * place (open item 39, R2). */
+inline bool allCoplanar(const std::vector<Vector3d>& points)
+{
+  if (points.size() < 4) return true;
+  const Vector3d& a = points[0];
+  std::size_t ib = 0, ic = 0;
+  double far = 0;
+  for (std::size_t k = 1; k < points.size(); k++) {
+    const double d = (points[k] - a).norm();
+    if (d > far) far = d, ib = k;
+  }
+  if (ib == 0) return true;
+  const Vector3d& b = points[ib];
+  far = 0;
+  for (std::size_t k = 1; k < points.size(); k++) {
+    const double d = (b - a).cross(points[k] - a).norm();
+    if (d > far) far = d, ic = k;
+  }
+  if (ic == 0) return true;
+  const Vector3d& c = points[ic];
+  for (const Vector3d& p : points) {
+    if (!coplanar(a, b, c, p)) return false;
+  }
+  return true;
+}
+
 /*! Whether `p` is on the line through `origin` along `dir`, at machine
  * precision: a normalisation, 9; a difference, a dot, a scale, a difference, a
  * norm, 20 - over |p| + |origin|. */

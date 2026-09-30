@@ -4820,14 +4820,29 @@ from coming back - landed with the fix and mutation-checked (F2).
   `EmitPlanarFaces.cc`, reported by `AssembleFaces.cc`). The check's own comment
   justifies 1e-8 by the merge's bucketing and lid10's 2.26e-6 warped quads; both
   premises are false since `d45fb5638`. One predicate at machine precision
-  (`recognition::onPlane` / `coplanar`) - C2. Two more classification
-  tolerances of the same kind in `PlaneSections.cc`: `coplanarStretches` groups a
+  (`recognition::onPlane` / `coplanar`) - C2. Two more classification tolerances
+  of the same kind in `PlaneSections.cc`: `coplanarStretches` groups a
   boundary's vertices into planes at a relative 1e-9, and `sectionTiltFloor`
   falls back to 1e-6 for a surface that states no lean. (The file's other small
   numbers guard divisions against a singular solve; they decide no membership.)
   *Test:* once it is one function, a unit test - a corner 1e-10 off a plane at
   100 mm is off it, one within the forward error is on - so no second tolerance
-  can stand beside it unnoticed.
+  can stand beside it unnoticed. **The writer's half, 2026-09-30.**
+  `recognition::allCoplanar` is the one predicate - every corner against the
+  plane of a spanning three, by `coplanar` - and the writer's check asks it, or
+  `onPlane` of the declared plane a face stands on; `mesh_coplanar_tol` is gone.
+  Measured first: over all 16203 planar faces of the 128 exports the tolerance
+  and the predicate agreed on every one, so the change is neutral, proven by
+  `compare --data`. The test above is `surface_protocol_test.cc`'s. **The veto's
+  half is measured and waits for its own step:** the old veto never passes a
+  face the predicate calls bent - R3's face carried off its plane is reached by
+  no export - but it calls 41 faces bent that the predicate finds flat, on
+  lid10, f04, the bayonet, step-partial-cylinder and
+  step-region-beyond-the-band. Some are triangles the veto skips a line later
+  anyway; the rest are faces the moves tilted whole and left flat, fanned into
+  triangles today for a bend they do not have. Asking the predicate there
+  changes files, so it is a behavioural step with its own measure.
+  `coplanarStretches` and `sectionTiltFloor` in `PlaneSections.cc` remain.
 - **R3 - the bend veto re-anchors at a moved corner.** `CornersApply.cc` measures
   out-of-plane against the mesh's normal through `at_moved(loops[i][0])`, so a
   face whose corners all move the same distance along its normal is not "bent" -
