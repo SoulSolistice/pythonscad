@@ -5013,6 +5013,15 @@ from coming back - landed with the fix and mutation-checked (F2).
   face, which is a function of the face order alone. *Test:*
   `brep::connectedShells`' own - two cubes, their faces interleaved, come out in
   the order of their first face.
+- **R27 - the validator took a plane for its mirror image. Fixed 2026-09-30.**
+  `tests/validatestep.py`, `check_hole_nesting`: loops were grouped into planes
+  by a key with the sign of each normal component dropped on its own, so a plane
+  and its mirror image in a coordinate plane shared one. The faceted export of
+  `step-hole-in-a-fanned-facet` was refused for a hole in the right face, the
+  facet at y = +9.53 taken for an intervening loop of the hole at y = -9.53.
+  The whole normal's sign is settled now, on the rounded normal's first nonzero
+  component. *Test:* `tests/hole-nesting-check-mutations.py`, the check's first
+  calibration - it fails on the old key, and on one that tells windings apart.
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

@@ -737,8 +737,21 @@ def check_hole_nesting(entities, problems):
             continue
         n = [c / ln for c in n]
         off = sum(a * b for a, b in zip(n, pts[0]))
-        key = (round(abs(n[0]), 4), round(abs(n[1]), 4), round(abs(n[2]), 4), round(abs(off), 4))
+        # The plane whichever way its normal points: the sign of the whole
+        # normal is settled, never of each component. Taken per component, a
+        # plane and its mirror image in a coordinate plane got one key - the
+        # facets at y = +9.53 and y = -9.53 of step-hole-in-a-fanned-facet - and
+        # each was the intervening loop of the other's hole. The sign is read off
+        # the rounded normal's first nonzero component: rounding is symmetric,
+        # so a loop and one wound the other way on the same plane get one key
+        # even where their two normals differ in the last bit and two of the
+        # components nearly tie - where the largest component could be a
+        # different one for each. See tests/hole-nesting-check-mutations.py.
         drop = max(range(3), key=lambda i: abs(n[i]))
+        rounded = [round(c, 4) for c in n]
+        lead = next((c for c in rounded if c != 0), 1.0)
+        sign = 1.0 if lead > 0 else -1.0
+        key = tuple(sign * c + 0.0 for c in rounded) + (round(sign * off, 4) + 0.0,)
         faces.append((face.id, outer, inner, pts, drop, key))
         planes.setdefault(key, []).append((face.id, outer, pts, drop))
 

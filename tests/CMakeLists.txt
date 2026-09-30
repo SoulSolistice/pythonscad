@@ -1313,6 +1313,15 @@ add_test(NAME closed-sphere-check-mutations
   COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/closed-sphere-check-mutations.py
 )
 
+# The validator's hole-nesting check asks whether a loop lies between a hole and
+# its face on the same plane, and "the same plane" is a key that must be one for
+# a plane however its loops wind and another for its mirror image - which it was
+# not until 2026-09-30. Each case is a face with a hole and a second face, on the
+# same plane, the diagonal x = y, a mirror plane or a parallel one.
+add_test(NAME hole-nesting-check-mutations
+  COMMAND ${Python3_EXECUTABLE} -Xutf8=1 ${CMAKE_CURRENT_SOURCE_DIR}/hole-nesting-check-mutations.py
+)
+
 # Export/import color support
 add_cmdline_test(offcolorpngtest EXPERIMENTAL SCRIPT ${EXPORT_IMPORT_PNGTEST_PY} SUFFIX png FILES ${COLOR_3D_TEST_FILES} EXPECTEDDIR render-manifold ARGS ${OPENSCAD_EXE_ARG} --format=OFF --backend=manifold --render --trust-python)
 if (ENABLE_LIB3MF_TESTS)
