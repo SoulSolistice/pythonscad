@@ -478,11 +478,32 @@ std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Ex
   return out;
 }
 
-std::vector<std::shared_ptr<Surface>> roofSurfaces(const Profile2d& profile, bool voronoi)
+int RoofFaces::of(const RoofSite& site) const
+{
+  switch (site.kind) {
+  case RoofSite::Kind::Floor: return floor;
+  case RoofSite::Kind::Edge:  {
+    const auto it = walls.find(site.edge);
+    return site.edge == 0 || it == walls.end() ? -1 : it->second;
+  }
+  case RoofSite::Kind::Corner: {
+    // Two names fix the one corner between them, whichever way a loop walks it.
+    if (site.edge == 0 || site.next == 0) return -1;
+    auto it = corners.find({site.edge, site.next});
+    if (it == corners.end()) it = corners.find({site.next, site.edge});
+    return it == corners.end() ? -1 : it->second;
+  }
+  }
+  return -1;
+}
+
+std::vector<std::shared_ptr<Surface>> roofSurfaces(const Profile2d& profile, bool voronoi,
+                                                   RoofFaces *faces)
 {
   Surfaces out;
+  RoofFaces made;
   const Vector3d up(0., 0., 1.);
-  addSurfaceUnique(out, std::make_shared<PlaneSurface>(Vector3d(0., 0., 0.), up));
+  made.floor = addKept(out, std::make_shared<PlaneSurface>(Vector3d(0., 0., 0.), up));
   for (const auto& loop : profile.loops) {
     const std::size_t n = loop.size();
     for (std::size_t i = 0; i < n; i++) {
@@ -494,16 +515,21 @@ std::vector<std::shared_ptr<Surface>> roofSurfaces(const Profile2d& profile, boo
       // Over the edge: away from the material, which is on the edge's left, is
       // its right; the height is the distance behind the edge.
       const Vector2d away = Vector2d(d[1], -d[0]).normalized();
-      addSurfaceUnique(out, std::make_shared<PlaneSurface>(Vector3d(e.a[0], e.a[1], 0.),
-                                                           Vector3d(away[0], away[1], 1.).normalized()));
+      const int wall =
+        addKept(out, std::make_shared<PlaneSurface>(Vector3d(e.a[0], e.a[1], 0.),
+                                                    Vector3d(away[0], away[1], 1.).normalized()));
+      if (e.id != 0) made.walls[e.id] = wall;
       // Over the corner this edge turns into: reflex where it turns right, away
       // from the material. Anchored one unit up, where its radius is one.
       const ProfileEdge& next = loop[(i + 1) % n];
       if (!voronoi || !next.declared || next.kind != EdgeKind::Line) continue;
       const Vector2d d2 = next.b - next.a;
       if (d[0] * d2[1] - d[1] * d2[0] >= 0) continue;
-      addSurfaceUnique(out, std::make_shared<ConeSurface>(Vector3d(e.b[0], e.b[1], 1.), up, 1., 1.));
+      const int corner =
+        addKept(out, std::make_shared<ConeSurface>(Vector3d(e.b[0], e.b[1], 1.), up, 1., 1.));
+      if (e.id != 0 && next.id != 0) made.corners[{e.id, next.id}] = corner;
     }
   }
+  if (faces != nullptr) *faces = std::move(made);
   return out;
 }

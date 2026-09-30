@@ -216,6 +216,9 @@ struct Faces_2_plus_1 {
   };
   std::vector<std::vector<Vector2d>> faces;
   std::map<Vector2d, double, Vector2d_comp> heights;
+  /*! Parallel to `faces`: the site whose cell each is - the segment's index,
+   * and 0 for the segment itself, 1 for its start point, 2 for its end point. */
+  std::vector<std::pair<std::size_t, int>> sites;
 };
 
 Faces_2_plus_1 vd_inner_faces(const voronoi_diagram& vd, const std::vector<Segment>& segments,
@@ -256,6 +259,7 @@ Faces_2_plus_1 vd_inner_faces(const voronoi_diagram& vd, const std::vector<Segme
 
       // add all inside edges
       ret.faces.emplace_back();  // Puts a new empty vector<Vector2d> at the end of ret.faces.
+      ret.sites.emplace_back(cell_index, 0);
       {
         Vector2d p(segment.p1.a, segment.p1.b);
         ret.faces.back().push_back(p);
@@ -306,8 +310,11 @@ Faces_2_plus_1 vd_inner_faces(const voronoi_diagram& vd, const std::vector<Segme
         }
       }
 
-      auto add_triangle = [&ret, &point](const Vector2d& v0, const Vector2d& v1) {
+      const int end =
+        cell.source_category() == ::boost::polygon::SOURCE_CATEGORY_SEGMENT_START_POINT ? 1 : 2;
+      auto add_triangle = [&ret, &point, cell_index, end](const Vector2d& v0, const Vector2d& v1) {
         ret.faces.emplace_back();
+        ret.sites.emplace_back(cell_index, end);
 
         Vector2d p(point.a, point.b);
         ret.faces.back().push_back(p);
@@ -347,7 +354,8 @@ Faces_2_plus_1 vd_inner_faces(const voronoi_diagram& vd, const std::vector<Segme
   return ret;
 }
 
-std::unique_ptr<PolySet> voronoi_diagram_roof(const Polygon2d& poly, const CurveDiscretizer& discretizer)
+std::unique_ptr<PolySet> voronoi_diagram_roof(const Polygon2d& poly, const CurveDiscretizer& discretizer,
+                                              const std::function<uint32_t(const RoofSite&)>& name)
 {
   PolySetBuilder hatbuilder = PolySetBuilder();
 
@@ -362,24 +370,46 @@ std::unique_ptr<PolySet> voronoi_diagram_roof(const Polygon2d& poly, const Curve
     // sanitize is important e.g. when after converting to 32 bit integers we have double points
     paths = Clipper2Lib::PolyTreeToPaths64(*ClipperUtils::sanitize(paths));
     std::vector<Segment> segments;
+    // Each segment's edge, by the name its two ends carry through Clipper
+    // (EdgeIdentity.h), and the edges before and after it along its path.
+    std::vector<EdgeId> edge_of, edge_before, edge_after;
 
     for (auto path : paths) {
       auto prev = path.back();
+      const std::size_t first = segments.size();
       for (auto p : path) {
         segments.emplace_back(prev.x, prev.y, p.x, p.y);
+        edge_of.push_back(commonEdge(prev.z, p.z));
         prev = p;
       }
+      const std::size_t n = segments.size() - first;
+      for (std::size_t k = 0; k < n; k++) {
+        edge_before.push_back(edge_of[first + (k + n - 1) % n]);
+        edge_after.push_back(edge_of[first + (k + 1) % n]);
+      }
     }
+    // What a cell's faces stand over: a segment's, its edge; a point's, the
+    // corner between the edge ending there and the edge starting there.
+    auto site_of = [&](const std::pair<std::size_t, int>& site) {
+      const std::size_t k = site.first;
+      switch (site.second) {
+      case 0:  return RoofSite{RoofSite::Kind::Edge, edge_of[k], 0};
+      case 1:  return RoofSite{RoofSite::Kind::Corner, edge_before[k], edge_of[k]};
+      default: return RoofSite{RoofSite::Kind::Corner, edge_of[k], edge_after[k]};
+      }
+    };
 
     voronoi_diagram vd;
     ::boost::polygon::construct_voronoi(segments.begin(), segments.end(), &vd);
     Faces_2_plus_1 inner_faces = vd_inner_faces(vd, segments, RoofDiscretizer(discretizer, scale));
 
     // roof
-    for (const std::vector<Vector2d>& face : inner_faces.faces) {
+    for (std::size_t fi = 0; fi < inner_faces.faces.size(); fi++) {
+      const std::vector<Vector2d>& face = inner_faces.faces[fi];
       if (!(face.size() >= 3)) {
         RAISE_ROOF_EXCEPTION("Voronoi error");
       }
+      if (name) hatbuilder.setSurfaceTag(name(site_of(inner_faces.sites[fi])));
       // convex partition (actually a triangulation - maybe do a proper convex partition later)
       Polygon2d face_poly;
       Outline2d outline;
@@ -415,6 +445,7 @@ std::unique_ptr<PolySet> voronoi_diagram_roof(const Polygon2d& poly, const Curve
         poly_floor.addOutline(o);
       }
       auto tess = poly_floor.tessellate();
+      if (name) hatbuilder.setSurfaceTag(name(RoofSite{RoofSite::Kind::Floor, 0, 0}));
       for (const IndexedFace& triangle : tess->indices) {
         std::vector<int> floor;
         for (const int tv : triangle) {

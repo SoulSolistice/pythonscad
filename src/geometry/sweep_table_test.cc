@@ -327,6 +327,50 @@ TEST_CASE("roof: a plane over each edge, and a cone over each reflex corner of a
   CHECK(planes[1]->normdir.isApprox(Vector3d(0., -1., 1.).normalized()));
 }
 
+TEST_CASE("roof: a face's record is known by what it stands over, by its maker's names",
+          "[sweep-table][e8]")
+{
+  // The L again. What each face stands over is the maker's to say (checklist
+  // E8): the floor, an edge by its name, the reflex corner by the names of the
+  // edges into it and out of it - and the record answers, not a position.
+  const VectorOfVector2d ell{{0., 0.}, {10., 0.}, {10., 5.}, {5., 5.}, {5., 10.}, {0., 10.}};
+  const Profile2d profile = declared({ell}, {}, {});
+  const auto& loop = profile.loops[0];
+  auto edge_from = [&](const Vector2d& a, const Vector2d& b) {
+    for (const auto& e : loop)
+      if (e.a == a && e.b == b) return e.id;
+    return EdgeId(0);
+  };
+  const EdgeId bottom = edge_from({0., 0.}, {10., 0.});
+  const EdgeId into = edge_from({10., 5.}, {5., 5.}), out = edge_from({5., 5.}, {5., 10.});
+  REQUIRE(bottom != 0);
+  REQUIRE(into != 0);
+  REQUIRE(out != 0);
+
+  RoofFaces faces;
+  const auto voronoi = roofSurfaces(profile, true, &faces);
+  auto record = [&](const RoofSite& site) -> const Surface * {
+    const int at = faces.of(site);
+    return at < 0 ? nullptr : voronoi[std::size_t(at)].get();
+  };
+  const auto *floor = dynamic_cast<const PlaneSurface *>(record({RoofSite::Kind::Floor, 0, 0}));
+  REQUIRE(floor != nullptr);
+  CHECK(floor->normdir == Vector3d(0., 0., 1.));
+  // over the bottom edge: through it, rising away from y = 0 at slope 1
+  const auto *wall = dynamic_cast<const PlaneSurface *>(record({RoofSite::Kind::Edge, bottom, 0}));
+  REQUIRE(wall != nullptr);
+  CHECK(wall->normdir.isApprox(Vector3d(0., -1., 1.).normalized()));
+  // over the reflex corner at (5, 5): its cone, whichever way the names come
+  const auto *cone = dynamic_cast<const ConeSurface *>(record({RoofSite::Kind::Corner, into, out}));
+  REQUIRE(cone != nullptr);
+  CHECK(cone->refpt == Vector3d(5., 5., 1.));
+  CHECK(record({RoofSite::Kind::Corner, out, into}) == cone);
+  // a convex corner has no cone, and a name nobody gave names nothing
+  CHECK(record({RoofSite::Kind::Corner, bottom, edge_from({10., 0.}, {10., 5.})}) == nullptr);
+  CHECK(record({RoofSite::Kind::Edge, 0, 0}) == nullptr);
+  CHECK(record({RoofSite::Kind::Corner, into, 0}) == nullptr);
+}
+
 // A straight edge whose two ends both lie on a recorded circle - the flat of a
 // D-shaft, the back of a half disc - is a chord by every measurement there is.
 // Only its maker knows it is not: doc/step-export-wip.md, *Inferred where a

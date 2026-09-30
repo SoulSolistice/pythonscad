@@ -52,29 +52,55 @@ using CGAL_SsPtr = boost::shared_ptr<CGAL_Ss>;
 using CGAL_SsPtr = std::shared_ptr<CGAL_Ss>;
 #endif
 
-CGAL_Polygon_2 to_cgal_polygon_2(const Clipper2Lib::Path64& path, int scale_bits)
+// The edge names each contour point carries - its two edges' ids, as Clipper's Z
+// packs them (EdgeIdentity.h) - by the point, exactly as it went into CGAL. A
+// point two contour vertices share with different names names nothing.
+struct ContourNames {
+  struct Less {
+    bool operator()(const Vector2d& a, const Vector2d& b) const
+    {
+      return a[0] < b[0] || (a[0] == b[0] && a[1] < b[1]);
+    }
+  };
+  std::map<Vector2d, std::int64_t, Less> z;
+  void add(const Vector2d& p, std::int64_t zp)
+  {
+    const auto it = z.emplace(p, zp).first;
+    if (it->second != zp) it->second = 0;
+  }
+  /*! The one edge between two contour points, or 0. */
+  [[nodiscard]] EdgeId between(const CGAL_Point_2& a, const CGAL_Point_2& b) const
+  {
+    const auto ia = z.find(Vector2d(a.x(), a.y()));
+    const auto ib = z.find(Vector2d(b.x(), b.y()));
+    return ia == z.end() || ib == z.end() ? 0 : commonEdge(ia->second, ib->second);
+  }
+};
+
+CGAL_Polygon_2 to_cgal_polygon_2(const Clipper2Lib::Path64& path, int scale_bits, ContourNames& names)
 {
   CGAL_Polygon_2 poly;
   const double scale = std::ldexp(1.0, -scale_bits);
   for (auto v : path) {
     poly.push_back({v.x * scale, v.y * scale});
+    names.add(Vector2d(v.x * scale, v.y * scale), v.z);
   }
   return poly;
 }
 
 // break a list of outlines into polygons with holes
 std::vector<CGAL_Polygon_with_holes_2> polygons_with_holes(const Clipper2Lib::PolyTree64& polytree,
-                                                           int scale_bits)
+                                                           int scale_bits, ContourNames& names)
 {
   std::vector<CGAL_Polygon_with_holes_2> ret;
 
   // lambda for recursive walk through polytree
   std::function<void(const Clipper2Lib::PolyPath64&)> walk = [&](const Clipper2Lib::PolyPath64& c) {
     // outer path
-    CGAL_Polygon_with_holes_2 c_poly(to_cgal_polygon_2(c.Polygon(), scale_bits));
+    CGAL_Polygon_with_holes_2 c_poly(to_cgal_polygon_2(c.Polygon(), scale_bits, names));
     // holes
     for (const auto& cc : c) {
-      c_poly.add_hole(to_cgal_polygon_2(cc->Polygon(), scale_bits));
+      c_poly.add_hole(to_cgal_polygon_2(cc->Polygon(), scale_bits, names));
       for (const auto& ccc : *cc) walk(*ccc);
     }
     ret.push_back(c_poly);
@@ -86,7 +112,8 @@ std::vector<CGAL_Polygon_with_holes_2> polygons_with_holes(const Clipper2Lib::Po
   return ret;
 }
 
-std::unique_ptr<PolySet> straight_skeleton_roof(const Polygon2d& poly)
+std::unique_ptr<PolySet> straight_skeleton_roof(const Polygon2d& poly,
+                                                const std::function<uint32_t(const RoofSite&)>& name)
 {
   PolySetBuilder hatbuilder;
 
@@ -97,7 +124,9 @@ std::unique_ptr<PolySet> straight_skeleton_roof(const Polygon2d& poly)
 
   try {
     // roof
-    const std::vector<CGAL_Polygon_with_holes_2> shapes = polygons_with_holes(*polytree, scale_bits);
+    ContourNames names;
+    const std::vector<CGAL_Polygon_with_holes_2> shapes =
+      polygons_with_holes(*polytree, scale_bits, names);
     for (const CGAL_Polygon_with_holes_2& shape : shapes) {
       const CGAL_SsPtr ss = CGAL::create_interior_straight_skeleton_2(shape);
       // store heights of vertices
@@ -126,6 +155,16 @@ std::unique_ptr<PolySet> straight_skeleton_roof(const Polygon2d& poly)
             "A non-simple face in straight skeleton, likely cause is cgal issue #5177");
         }
 
+        // What the face stands over: the one contour edge a skeleton face has,
+        // named by its two ends - so the face is on that edge's plane, by its
+        // maker's word rather than by where its corners came out.
+        if (name) {
+          const auto contour = ss_face->halfedge()->defining_contour_edge();
+          const EdgeId edge =
+            names.between(contour->opposite()->vertex()->point(), contour->vertex()->point());
+          hatbuilder.setSurfaceTag(name(RoofSite{RoofSite::Kind::Edge, edge, 0}));
+        }
+
         // do convex partition if necessary
         std::vector<CGAL_PT::Polygon_2> facets;
         CGAL::approx_convex_partition_2(face.vertices_begin(), face.vertices_end(),
@@ -147,6 +186,7 @@ std::unique_ptr<PolySet> straight_skeleton_roof(const Polygon2d& poly)
       // poly has to go through clipper just as it does for the roof
       // because this may change coordinates
       auto tess = poly_sanitized->tessellate();
+      if (name) hatbuilder.setSurfaceTag(name(RoofSite{RoofSite::Kind::Floor, 0, 0}));
       for (const IndexedFace& triangle : tess->indices) {
         std::vector<int> floor;
         for (const int tv : triangle) {

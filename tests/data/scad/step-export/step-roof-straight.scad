@@ -15,6 +15,13 @@
 // EXPECT: 0 analytic surfaces available (0 cylindrical, 0 spherical, 0 toroidal, 0 Bezier), and 9 declared planes
 // EXPECT: 9 declared planes: 9 written as a face, 0 read to identify a surface without one standing on them, 0 with no mesh left on them, 0 unexplained
 // EXPECT: 0 on a surface the approximation fitted, 0 left to the tessellation
+//
+// And each face is named for its plane by the roof, which knows what it stands
+// over: a skeleton face's one contour edge, named by the names its two ends
+// carry through Clipper. Until 2026-09-30 it named none, and "9 written" was
+// position standing in for the name - which the census no longer lets it do
+// (doc/step-export-wip.md, open item 39, R1).
+// EXPECT: 9 facets named by their maker for a declared surface - D0 by heritage, whole or cut: 9 written on it
 // ROUNDTRIP: Plane=9
 //
 // Derived: in s = max(|x|, |y|), the frame runs from s = 3 to s = 10, the

@@ -23,6 +23,7 @@
 
 #include <map>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "geometry/Profile2d.h"
@@ -92,5 +93,30 @@ std::vector<std::shared_ptr<Surface>> extrude(const Profile2d& profile, const Ex
  *
  * The profile's loops must run with the material on their left, as a sanitized
  * polygon's do. A chord of a curve is left alone: over a circle the roof the
- * model means is a cone, and a skeleton of chords is not on it. */
-std::vector<std::shared_ptr<Surface>> roofSurfaces(const Profile2d& profile, bool voronoi);
+ * model means is a cone, and a skeleton of chords is not on it.
+ *
+ * Where asked, `faces` says which of them each face of the roof is made on - the
+ * floor, the plane over each named edge, the cone over each named corner - which
+ * is how the roof names its faces (checklist E8). */
+struct RoofFaces;
+std::vector<std::shared_ptr<Surface>> roofSurfaces(const Profile2d& profile, bool voronoi,
+                                                   RoofFaces *faces = nullptr);
+
+/*! What a face of a roof stands over, as its maker knows it: the floor; a
+ * profile edge, by its name; or - on the Voronoi roof, which is a cone there - a
+ * corner, by the names of the edge into it and the edge out of it. A name of 0
+ * is one nobody gave. */
+struct RoofSite {
+  enum class Kind { Floor, Edge, Corner } kind = Kind::Floor;
+  EdgeId edge = 0, next = 0;
+};
+
+/*! Which of roofSurfaces' records each site's faces are made on, as indices into
+ * what it returned; -1 for none. */
+struct RoofFaces {
+  int floor = -1;
+  std::map<EdgeId, int> walls;
+  std::map<std::pair<EdgeId, EdgeId>, int> corners;
+  /*! The record a face over `site` is made on, or -1. */
+  [[nodiscard]] int of(const RoofSite& site) const;
+};

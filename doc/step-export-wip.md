@@ -5150,9 +5150,15 @@ not state, now checklist E7, E8 and C9 made universal:
   others turned out to be zero-area triangles along a chord of the socket's
   wall; keyed apart, they became faces of no area and opened the shell
   (scripts/step-diagnostics/open-edges.py found them). Measured neutral on all
-  120 exports. Left: roof() (straight skeleton faces are planes and need no
-  name; the Voronoi roof's cones would, and the writer cannot yet write their
-  parabolic bounds), a hull not of revolution, imports.
+  120 exports. Left: a hull not of revolution, imports. **roof() names its
+  faces, 2026-09-30:** each for the record over what it stands on - a skeleton
+  face's one contour edge, a Voronoi cell's edge or reflex corner - by the names
+  the profile's points carry through Clipper (`RoofFaces`, `RoofSite`). It had
+  been left on the premise that a plane needs no name, which is false: a face
+  on a declared plane by position alone stood in for heritage in the census
+  until R1 of item 39 stopped it, and the roof fixtures' "9 written" was that
+  stand-in. The Voronoi roof's cones are a D0 region again, and at the exact
+  tier the writer's missing parabolic sections are an EXPORT-ERROR once more.
 - **Nothing unnamed stands in for D0 - 2026-09-29, the author.** "Unnamed may
   never step in for a D0 declaration"; "by definition a D0 must declare its
   full heritage or something is wrong." The positional tagger is **not** a
@@ -5232,7 +5238,7 @@ not state, now checklist E7, E8 and C9 made universal:
     by 4 whole and 60 cut facets that position named, and without them 12 more
     of lid10's faces are written in the approximation tier, its junction
     corners left where the mesh put them), sweeps' own generators, fillets,
-    text(), roof(), imports.
+    text(), imports. (roof() since 2026-09-30.)
 - **Identity is minted by the maker (E8) - the original entry.** Where a facet's
   surface is minted (`ManifoldUtils::TriangleTagger`, and `facetedEnvelope`'s
   `record_of`), it is measured: the one face-declaring record a triangle's
@@ -5994,7 +6000,7 @@ box, and neither asks the other.
 | 7 | `linear_extrude`, uneven scale - **done 2026-09-25**, with the taper's cone and a twisted circle centred on its axis, by deriving what the station map does (step-extrude-uneven-scale); the patch is written at D1, as every Bezier is - membership in one is asked by projection, where a bilinear patch has a closed-form inverse and could be D0 | a sheared straight wall declares nothing; it is exactly the bilinear patch between AB and A'B', a (1,1) Bezier the exporter already writes. An arc under it is a rational (2,1) patch |
 | 8 | `linear_extrude(twist)`, `rotate_extrude` with `v` or twist | the sweep is known in closed form; written D1, since a helicoid has no rational form (above) |
 | 9 | `path_extrude`, `skin` | as above |
-| 10 | `roof()` - **done 2026-09-25**: a plane over each straight edge, and for the Voronoi roof a cone over each reflex corner (step-roof-straight, step-roof-voronoi); the cones are declared and not yet written - their boundary with the planes beside them is a parabola, and the plane-section writer knows ellipses only (KNOWN-EXPORT-ERROR) | every roof face is the plane through one profile edge at the roof's slope - closed form from the 2D edge, declares nothing |
+| 10 | `roof()` - **done 2026-09-25**: a plane over each straight edge, and for the Voronoi roof a cone over each reflex corner (step-roof-straight, step-roof-voronoi); the cones are declared and not yet written at the exact tier - their boundary with the planes beside them is a parabola, and the plane-section writer knows ellipses only (KNOWN-EXPORT-ERROR); every face named for its record since 2026-09-30 | every roof face is the plane through one profile edge at the roof's slope - closed form from the 2D edge, declares nothing |
 | 11 | `wrap` | bends onto a cylinder of known radius; a flat face becomes a cylinder in closed form, declares nothing |
 
 **Operations on solids.**

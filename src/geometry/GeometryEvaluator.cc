@@ -3715,18 +3715,30 @@ Response GeometryEvaluator::visit(State& state, const AbstractIntersectionNode& 
 // FIXME: What is the convex/manifold situation of the resulting PolySet?
 static std::unique_ptr<Geometry> roofOverPolygon(const RoofNode& node, const Polygon2d& poly)
 {
+  // What the roof is, from the profile's own edges (SweptSurfaces.h), and which
+  // record each of its faces is made on: the builders know what each face
+  // stands over, and name it for that record (checklist E8) - until 2026-09-30
+  // they named nothing, and position stood in (open item 39, R1).
+  const bool voronoi = node.method == "voronoi";
+  RoofFaces faces;
+  const std::vector<std::shared_ptr<Surface>> surfaces =
+    stampTags(roofSurfaces(classifyProfile(poly), voronoi, &faces));
+  auto name = [&](const RoofSite& site) -> uint32_t {
+    const int at = faces.of(site);
+    if (at < 0 || std::size_t(at) >= surfaces.size() || surfaces[at]->tags.empty()) return 0;
+    return surfaces[at]->tags.back();
+  };
   std::unique_ptr<PolySet> roof;
-  if (node.method == "voronoi") {
-    roof = roof_vd::voronoi_diagram_roof(poly, node.discretizer);
+  if (voronoi) {
+    roof = roof_vd::voronoi_diagram_roof(poly, node.discretizer, name);
     roof->setConvexity(node.convexity);
   } else if (node.method == "straight") {
-    roof = roof_ss::straight_skeleton_roof(poly);
+    roof = roof_ss::straight_skeleton_roof(poly, name);
     roof->setConvexity(node.convexity);
   } else {
     assert(false && "Invalid roof method");
   }
-  // What the roof is, from the profile's own edges: SweptSurfaces.h.
-  if (roof) roof->surfaces = roofSurfaces(classifyProfile(poly), node.method == "voronoi");
+  if (roof) roof->surfaces = surfaces;
   return roof;
 }
 
