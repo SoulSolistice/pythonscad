@@ -463,9 +463,16 @@ struct StepKernel::BodyBuild {
    * what the translator that replaces them is proven against. Faces carry what
    * registerFace recorded; vertices and edges no class yet. */
   [[nodiscard]] brep::Body mirrorBrep() const;
-  /*! brep::check over the mirror: the structure the file asserts, held to the
-   * neutral B-rep's contract - an EXPORT-ERROR where it breaks it. */
-  void checkBrep() const;
+  /*! The B-rep, read off the entities once the faces are assembled (open item
+   * 39, step 2d). Every phase after it reads and writes `brep_body` and nothing
+   * else - promoteCurves, the checks, the translator - and the point it is read
+   * at moves upstream a phase at a time, until nothing is left before it. */
+  void readBrep();
+  brep::Body brep_body;
+  /*! brep::check over the B-rep: the structure the file asserts, held to the
+   * neutral contract - an EXPORT-ERROR where it breaks it - and every vertex's
+   * and edge's class stated. */
+  void checkBrep();
 
   /*! The faces as closed shells - one per connected component, since a
    * CLOSED_SHELL has to be connected - each a MANIFOLD_SOLID_BREP, and the

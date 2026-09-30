@@ -24,7 +24,7 @@ K::RoundType *curveOf(std::vector<K::Entity *>& ents, const brep::CurveForm& for
   if (const auto *line = std::get_if<brep::Line>(&form)) {
     // The writer's own: from the edge's start, the magnitude its length.
     const double len = (end - start).norm();
-    const Vector3d dir = len < 1e-12 ? Vector3d(1, 0, 0) : Vector3d(line->direction.normalized());
+    const Vector3d dir = len < 1e-12 ? Vector3d(1, 0, 0) : line->direction;
     return new K::Line(ents, new K::Point(ents, line->origin),
                        new K::Vector(ents, new K::Direction(ents, dir), len < 1e-12 ? 1.0 : len));
   }
@@ -69,12 +69,11 @@ K::SurfaceType *surfaceOf(std::vector<K::Entity *>& ents, const brep::SurfaceFor
     return surface;
   }
   if (const auto *x = std::get_if<brep::Extrusion>(&form)) {
-    const double len = x->direction.norm();
     // The swept curve is a closed conic here - an ellipse - so no edge ends
     // bound it; its own frame states it.
     return new K::SurfaceOfLinearExtrusion(
       ents, "", curveOf(ents, x->curve, Vector3d::Zero(), Vector3d::Zero()),
-      new K::Vector(ents, new K::Direction(ents, x->direction / len), len));
+      new K::Vector(ents, new K::Direction(ents, x->direction), x->length));
   }
   return nullptr;
 }

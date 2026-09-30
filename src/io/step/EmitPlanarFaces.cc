@@ -8,7 +8,6 @@
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Reports.h"
-#include "io/step/CurveChecks.h"
 #include "io/step/LoopGeometry.h"
 #include "io/step/PlaneSections.h"
 #include "utils/printutils.h"

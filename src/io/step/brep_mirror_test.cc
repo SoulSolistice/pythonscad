@@ -3,7 +3,6 @@
 // the solid it describes: a unit cube is 8 corners, 12 edges and 6 faces.
 #include "io/step/BrepMirror.h"
 #include "io/step/BrepToStep.h"
-#include "io/step/CurveChecks.h"
 
 #include <algorithm>
 #include <catch2/catch_all.hpp>
@@ -304,16 +303,20 @@ TEST_CASE("the translator writes nothing for a body with a face on no form or an
   }
 }
 
-TEST_CASE("a vertex is measured against a SURFACE_CURVE's own curve", "[step-kernel]")
+TEST_CASE("a vertex is measured against a SURFACE_CURVE's own curve", "[brep-mirror]")
 {
-  // The x axis as a LINE, wrapped as a SURFACE_CURVE the way a crossing curve
-  // with pcurves is: a vertex at (3, 0.5, 0) is 0.5 off it, wrapped or not
-  // (open item 39, R20 - wrapped, it measured 0).
-  std::vector<K::Entity *> ents;
-  auto *line = new K::Line(ents, new K::Point(ents, Vector3d::Zero()),
-                           new K::Vector(ents, new K::Direction(ents, Vector3d::UnitX()), 1.0));
-  auto *wrapped = new K::SurfaceCurve(ents, line, {});
-  CHECK(step::vertexOffCurve(line, Vector3d(3, 0.5, 0)) == Catch::Approx(0.5));
-  CHECK(step::vertexOffCurve(wrapped, Vector3d(3, 0.5, 0)) == Catch::Approx(0.5));
-  for (auto *e : ents) delete e;
+  // An edge's line wrapped as a SURFACE_CURVE the way a crossing curve with
+  // pcurves is: the mirror reads it as the line, and a point half a unit off
+  // that line is half a unit off the edge's curve (open item 39, R20 - wrapped,
+  // it once measured 0).
+  Graph g;
+  cube(g);
+  K::EdgeCurve *wrapped = g.faces[0]->faceBounds[0]->edgeLoop->faces[0]->edge;
+  wrapped->round = new K::SurfaceCurve(g.ents, wrapped->round, {});
+  const brep::Body body = step::mirrorBrep(g.faces, g.sources, oneShell(g.faces.size()));
+  const brep::Edge& edge = body.edges[0];
+  REQUIRE(std::holds_alternative<brep::Line>(edge.curve.form));
+  const Vector3d a = body.vertices[edge.start].point, b = body.vertices[edge.end].point;
+  const Vector3d off = (a + b) / 2 + (b - a).unitOrthogonal() * 0.5;
+  CHECK(brep::distanceToCurve(edge.curve.form, off) == Catch::Approx(0.5));
 }

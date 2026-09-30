@@ -552,3 +552,27 @@ TEST_CASE("a corner rests on its records, not on how a band admitted a face's fa
   for (const auto& c : body.faces[5].loops[0].coedges)
     CHECK(body.edges[c.edge].evidence == EvidenceClass::D1);
 }
+
+TEST_CASE("a point's distance to a curve, read off the geometry", "[brep]")
+{
+  using Kind = brep::Conic::Kind;
+  const Vector3d z = Vector3d::UnitZ(), x = Vector3d::UnitX();
+  // The x axis: (3, 0.5, 0) is 0.5 off it.
+  CHECK(brep::distanceToCurve(brep::Line{Vector3d::Zero(), x}, Vector3d(3, 0.5, 0)) ==
+        Catch::Approx(0.5));
+  // A circle of radius 2 about z: (3,0,0) is 1 outside it; (0,0,1), on the
+  // axis 1 above its plane, is sqrt(1 + 4) from every point of it.
+  const brep::CurveForm circle = brep::Conic{Kind::Circle, {Vector3d::Zero(), z, x}, 2, 2};
+  CHECK(brep::distanceToCurve(circle, Vector3d(3, 0, 0)) == Catch::Approx(1.0));
+  CHECK(brep::distanceToCurve(circle, Vector3d(0, 0, 1)) == Catch::Approx(std::sqrt(5.0)));
+  // An ellipse of semi-axes 2 along x and 1 along y: (0,3,0) is 2 from its
+  // nearest point (0,1,0); its own point (2,0,0) is on it.
+  const brep::CurveForm ellipse = brep::Conic{Kind::Ellipse, {Vector3d::Zero(), z, x}, 2, 1};
+  CHECK(brep::distanceToCurve(ellipse, Vector3d(0, 3, 0)) == Catch::Approx(2.0));
+  CHECK(brep::distanceToCurve(ellipse, Vector3d(2, 0, 0)) == Catch::Approx(0.0).margin(1e-12));
+  // The parabola a(t^2 x + 2t y), a = 1: its vertex is on it, and (0,0,5) is 5
+  // above the vertex, the nearest point in its plane.
+  const brep::CurveForm parabola = brep::Conic{Kind::Parabola, {Vector3d::Zero(), z, x}, 1, 0};
+  CHECK(brep::distanceToCurve(parabola, Vector3d::Zero()) == Catch::Approx(0.0).margin(1e-12));
+  CHECK(brep::distanceToCurve(parabola, Vector3d(0, 0, 5)) == Catch::Approx(5.0));
+}

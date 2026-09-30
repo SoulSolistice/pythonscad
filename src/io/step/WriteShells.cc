@@ -35,7 +35,7 @@ void StepKernel::BodyBuild::writeShells()
   // B-rep afresh. The two must be the same file; `compare` says whether they
   // are. A CLOSED_SHELL has to be a single connected shell, so each of the
   // body's shells - its connected components - is one MANIFOLD_SOLID_BREP.
-  const brep::Body body = mirrorBrep();
+  const brep::Body& body = brep_body;
   const std::size_t before = entities.size();
   ParametricContext *context = nullptr;
   std::vector<Face *> written = step::writeBrep(entities, body, context);

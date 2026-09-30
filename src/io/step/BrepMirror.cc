@@ -23,9 +23,11 @@ brep::Frame frameOf(const K::Axis2Placement *axis)
   brep::Frame frame;
   if (axis == nullptr || axis->point == nullptr || axis->dir1 == nullptr || axis->dir2 == nullptr)
     return frame;
+  // As written, not renormalised: a unit vector normalised again can move its
+  // last bit, and the mirror carries what the file says.
   frame.origin = axis->point->pt;
-  frame.axis = axis->dir1->pt.normalized();
-  frame.ref = axis->dir2->pt.normalized();
+  frame.axis = axis->dir1->pt;
+  frame.ref = axis->dir2->pt;
   return frame;
 }
 
@@ -43,7 +45,7 @@ brep::CurveForm curveOf(const K::RoundType *round)
   if (const auto *on = dynamic_cast<const K::SurfaceCurve *>(round)) return curveOf(on->curve);
   if (const auto *line = dynamic_cast<const K::Line *>(round)) {
     if (line->point == nullptr || line->vector == nullptr || line->vector->dir == nullptr) return {};
-    return brep::Line{line->point->pt, line->vector->dir->pt.normalized()};
+    return brep::Line{line->point->pt, line->vector->dir->pt};
   }
   using Kind = brep::Conic::Kind;
   if (const auto *c = dynamic_cast<const K::Circle *>(round))
@@ -132,8 +134,10 @@ brep::SurfaceForm surfaceOf(const K::SurfaceType *surface)
   if (const auto *x = dynamic_cast<const K::SurfaceOfLinearExtrusion *>(surface)) {
     brep::Extrusion out;
     out.curve = curveOf(dynamic_cast<const K::RoundType *>(x->curve));
-    if (x->sweep != nullptr && x->sweep->dir != nullptr)
-      out.direction = x->sweep->dir->pt.normalized() * x->sweep->length;
+    if (x->sweep != nullptr && x->sweep->dir != nullptr) {
+      out.direction = x->sweep->dir->pt;
+      out.length = x->sweep->length;
+    }
     return out;
   }
   return {};  // a surface the B-rep has no form for: check() names it
@@ -273,10 +277,15 @@ brep::Body StepKernel::BodyBuild::mirrorBrep() const
   return step::mirrorBrep(sfaces, face_source, shellFaces(), edge_source);
 }
 
-void StepKernel::BodyBuild::checkBrep() const
+void StepKernel::BodyBuild::readBrep()
+{
+  brep_body = mirrorBrep();
+}
+
+void StepKernel::BodyBuild::checkBrep()
 {
   if (!analytic) return;
-  brep::Body body = mirrorBrep();
+  brep::Body& body = brep_body;
   const brep::ClassTally t = brep::stateClasses(body);
   const std::vector<std::string> real = brep::check(body);
   using recognition::EvidenceClass;

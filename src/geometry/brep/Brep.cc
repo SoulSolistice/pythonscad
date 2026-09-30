@@ -91,6 +91,76 @@ std::vector<Sample> samples(const CurveForm& form, const Vector3d& start, const 
 
 }  // namespace
 
+double distanceToCurve(const CurveForm& form, const Vector3d& p)
+{
+  if (const auto *line = std::get_if<Line>(&form)) {
+    Vector3d dir = line->direction;
+    if (dir.norm() < 1e-12) return (p - line->origin).norm();
+    dir.normalize();
+    const Vector3d rel = p - line->origin;
+    return (rel - dir * rel.dot(dir)).norm();
+  }
+  if (const auto *spline = std::get_if<BSpline>(&form)) {
+    // Clamped, so it starts at the first control point and ends at the last;
+    // the vertex belongs to whichever end it is nearer.
+    if (spline->points.empty()) return 0;
+    return std::min((spline->points.front() - p).norm(), (spline->points.back() - p).norm());
+  }
+  const auto *c = std::get_if<Conic>(&form);
+  if (c == nullptr) return 0;
+  Vector3d n = c->frame.axis, major = c->frame.ref;
+  if (n.norm() < 1e-12) return 0;
+  n.normalize();
+  if (c->kind == Conic::Kind::Circle) {
+    const Vector3d rel = p - c->frame.origin;
+    const double along = rel.dot(n);
+    const double across = (rel - n * along).norm();
+    return std::sqrt(along * along + (across - c->a) * (across - c->a));
+  }
+  if (major.norm() < 1e-12) return 0;
+  major.normalize();
+  const Vector3d minor = n.cross(major);
+  const Vector3d centre = c->frame.origin;
+  // Sampled over the parameter, then refined by halving the step round the best:
+  // an upper bound on the distance.
+  auto nearest = [&](auto at, double lo, int samples, double first_step, double floor) {
+    double best_t = 0, best = std::numeric_limits<double>::infinity();
+    for (int k = 0; k < samples; k++) {
+      const double t = lo + k * first_step;
+      const double d = (at(t) - p).norm();
+      if (d < best) {
+        best = d;
+        best_t = t;
+      }
+    }
+    for (double step = first_step; step > floor; step *= 0.5) {
+      for (const double t : {best_t - step, best_t + step}) {
+        const double d = (at(t) - p).norm();
+        if (d < best) {
+          best = d;
+          best_t = t;
+        }
+      }
+    }
+    return best;
+  };
+  switch (c->kind) {
+  case Conic::Kind::Ellipse:
+    return nearest(
+      [&](double t) { return Vector3d(centre + major * (c->a * cos(t)) + minor * (c->b * sin(t))); }, 0,
+      720, 2 * M_PI / 720.0, 1e-12);
+  case Conic::Kind::Hyperbola:
+    return nearest(
+      [&](double t) { return Vector3d(centre + major * (c->a * cosh(t)) + minor * (c->b * sinh(t))); },
+      -8.0, 801, 0.02, 1e-14);
+  case Conic::Kind::Parabola:
+    return nearest(
+      [&](double t) { return Vector3d(centre + major * (c->a * t * t) + minor * (2 * c->a * t)); },
+      -30.0, 1201, 0.05, 1e-14);
+  default: return 0;
+  }
+}
+
 bool certifiable(const CurveForm& form, const Surface *surface)
 {
   return surface != nullptr && algebraicDegree(surface) > 0 &&

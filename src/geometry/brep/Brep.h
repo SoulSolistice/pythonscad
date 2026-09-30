@@ -173,7 +173,8 @@ struct SplineSurface {
  * swept along its axis. */
 struct Extrusion {
   CurveForm curve;
-  Vector3d direction = Vector3d::UnitZ();  // the sweep, with its length
+  Vector3d direction = Vector3d::UnitZ();  // unit, as stated
+  double length = 1;                       // how far one unit of the sweep's parameter runs
 };
 /*! `std::monostate` is no surface at all, which check() names. */
 using SurfaceForm =
@@ -273,6 +274,14 @@ struct Body {
  * certificate exists: a B-spline, or a surface with no algebraic degree - a
  * grid, a Bezier patch. */
 bool curveOn(const CurveForm& form, const Vector3d& start, const Vector3d& end, const Surface *surface);
+
+/*! How far `p` is from the curve `form` carries - what a reader asks of every
+ * vertex against its own edge's curve (SOLIDWORKS fault code 7). Exact for a
+ * line and a circle; an ellipse, a hyperbola and a parabola are sampled and
+ * refined, which bounds the true distance from above - the safe direction for
+ * a check that has to be believed; a clamped B-spline is its end control
+ * points. No curve, 0: not a finding. */
+double distanceToCurve(const CurveForm& form, const Vector3d& p);
 
 /*! Whether curveOn can answer at all: a line or a conic, on a record of some
  * algebraic degree. Where it cannot, "not certified" means "not asked", never

@@ -10,7 +10,6 @@
 #include "io/step/BoundaryCycles.h"
 #include "io/step/CornerLadder.h"
 #include "io/step/CrossingArc.h"
-#include "io/step/CurveChecks.h"
 #include "io/step/LoopGeometry.h"
 #include "io/step/PlaneSections.h"
 #include "utils/printutils.h"
@@ -72,6 +71,8 @@ void StepKernel::BodyBuild::run()
   emitCornerFans();
 
   assembleFaces();
+
+  readBrep();
 
   promoteCurves();
 

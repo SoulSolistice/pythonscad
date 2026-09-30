@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
-#include "io/step/CurveChecks.h"
 #include "utils/printutils.h"
 
 using namespace step;
@@ -22,12 +21,12 @@ void StepKernel::BodyBuild::checkAndReport()
     std::size_t off = 0;
     double worst = 0;
     std::vector<double> strays;
-    for (const Entity *ent : entities) {
-      const auto *edge = dynamic_cast<const EdgeCurve *>(ent);
-      if (edge == nullptr || edge->round == nullptr) continue;
-      for (const Vertex *v : {edge->vert1, edge->vert2}) {
-        if (v == nullptr || v->point == nullptr) continue;
-        const double d = vertexOffCurve(edge->round, v->point->pt);
+    // Of the B-rep the file is written from - what it holds, and nothing a
+    // phase made and set aside.
+    for (const brep::Edge& edge : brep_body.edges) {
+      for (const std::size_t v : {edge.start, edge.end}) {
+        if (v >= brep_body.vertices.size()) continue;
+        const double d = brep::distanceToCurve(edge.curve.form, brep_body.vertices[v].point);
         if (d <= owed) continue;
         off++;
         strays.push_back(d);

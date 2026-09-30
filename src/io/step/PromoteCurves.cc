@@ -15,34 +15,41 @@ using namespace step;
 
 void StepKernel::BodyBuild::promoteCurves()
 {
-  // Looked up by address, but walked in the order the faces meet their edges:
-  // walking the map itself visits edges in allocation order, which differs from
-  // run to run, and each promotion mints its curve's entities as it goes - so
-  // the same file came out with its curves under other ids (checklist F9).
-  std::map<EdgeCurve *, std::vector<Face *>> edge_faces;
-  std::vector<EdgeCurve *> edge_order;
-  for (std::size_t i = 0; i < face_edges.size(); i++) {
-    for (auto *edge : face_edges[i]) {
-      auto& faces = edge_faces[edge];
-      if (faces.empty()) edge_order.push_back(edge);
-      faces.push_back(sfaces[i]);
+  // On the B-rep (open item 39, step 2d): which faces use each edge, once per
+  // use, walked in the order the faces meet their edges - the B-rep's own, so no
+  // address decides anything (checklist F9). An edge whose uses carry pcurves
+  // is a SURFACE_CURVE in the file, not a bare line, and is not promoted.
+  brep::Body& body = brep_body;
+  std::vector<std::vector<std::size_t>> edge_faces(body.edges.size());
+  std::vector<std::size_t> edge_order;
+  std::vector<char> carries_pcurve(body.edges.size(), 0);
+  for (std::size_t f = 0; f < body.faces.size(); f++) {
+    for (const brep::Loop& loop : body.faces[f].loops) {
+      for (const brep::Coedge& c : loop.coedges) {
+        if (edge_faces[c.edge].empty()) edge_order.push_back(c.edge);
+        edge_faces[c.edge].push_back(f);
+        if (c.pcurve) carries_pcurve[c.edge] = 1;
+      }
     }
   }
+  auto is_line = [&](std::size_t e) {
+    return std::holds_alternative<brep::Line>(body.edges[e].curve.form) && carries_pcurve[e] == 0;
+  };
 
   // The axis and radius a quadric face implies for an edge, if it implies one:
   // the section at the edge's own height, which exists only when both ends are
   // at the same height and the same distance from the axis.
-  auto section_of = [&](const SurfaceType *surface, const Vector3d& p1, const Vector3d& p2,
+  auto section_of = [&](const brep::SurfaceForm& form, const Vector3d& p1, const Vector3d& p2,
                         Vector3d& axis, Vector3d& centre, double& radius) {
     Vector3d ax, org;
     double apex_r = 0.0, slope = 0.0;
-    if (const auto *cyl = dynamic_cast<const CylindricalSurface *>(surface)) {
-      ax = cyl->axis->dir1->pt.normalized();
-      org = cyl->axis->point->pt;
+    if (const auto *cyl = std::get_if<brep::Cylinder>(&form)) {
+      ax = cyl->frame.axis.normalized();
+      org = cyl->frame.origin;
       apex_r = cyl->r;
-    } else if (const auto *con = dynamic_cast<const ConicalSurface *>(surface)) {
-      ax = con->axis->dir1->pt.normalized();
-      org = con->axis->point->pt;
+    } else if (const auto *con = std::get_if<brep::Cone>(&form)) {
+      ax = con->frame.axis.normalized();
+      org = con->frame.origin;
       apex_r = con->r;
       slope = tan(con->half_angle);
     } else {
@@ -95,11 +102,11 @@ void StepKernel::BodyBuild::promoteCurves()
   int why_noproj = 0, why_offquad = 0, why_offplane = 0, why_nosection = 0, why_shape = 0;
   int why_branch = 0, conics_ellipse = 0, conics_hyperbola = 0, conics_parabola = 0;
   double conic_worst_end = 0, why_offplane_worst = 0;
-  auto promote_to_conic = [&](EdgeCurve *edge, const std::vector<Face *>& faces) {
-    auto *was_line = dynamic_cast<Line *>(edge->round);
-    if (was_line == nullptr) return false;
-    const Vector3d p1 = edge->vert1->point->pt;
-    const Vector3d p2 = edge->vert2->point->pt;
+  auto promote_to_conic = [&](std::size_t e, const std::vector<std::size_t>& faces) {
+    if (!is_line(e)) return false;
+    brep::Edge& edge = body.edges[e];
+    const Vector3d p1 = body.vertices[edge.start].point;
+    const Vector3d p2 = body.vertices[edge.end].point;
     if ((p1 - p2).norm() < 1e-12) return false;
 
     // One quadric and one plane, and every other face at the edge has to be
@@ -108,17 +115,18 @@ void StepKernel::BodyBuild::promoteCurves()
     std::shared_ptr<Surface> quadric;
     bool have_plane = false;
     Vector3d pnorm(0, 0, 0), ppoint(0, 0, 0);
-    for (auto *face : faces) {
-      if (const auto *con = dynamic_cast<const ConicalSurface *>(face->surface)) {
+    for (const std::size_t f : faces) {
+      const brep::SurfaceForm& form = body.faces[f].form;
+      if (const auto *con = std::get_if<brep::Cone>(&form)) {
         if (quadric != nullptr) return false;
-        quadric = std::make_shared<ConeSurface>(con->axis->point->pt, con->axis->dir1->pt, con->r,
+        quadric = std::make_shared<ConeSurface>(con->frame.origin, con->frame.axis, con->r,
                                                 tan(con->half_angle));
-      } else if (const auto *cyl = dynamic_cast<const CylindricalSurface *>(face->surface)) {
+      } else if (const auto *cyl = std::get_if<brep::Cylinder>(&form)) {
         if (quadric != nullptr) return false;
-        quadric = std::make_shared<CylinderSurface>(cyl->axis->point->pt, cyl->axis->dir1->pt, cyl->r);
-      } else if (const auto *pl = dynamic_cast<const Plane *>(face->surface)) {
-        const Vector3d n = pl->axis->dir1->pt.normalized();
-        const Vector3d o = pl->axis->point->pt;
+        quadric = std::make_shared<CylinderSurface>(cyl->frame.origin, cyl->frame.axis, cyl->r);
+      } else if (const auto *pl = std::get_if<brep::Plane>(&form)) {
+        const Vector3d n = pl->frame.axis.normalized();
+        const Vector3d o = pl->frame.origin;
         if (have_plane) {
           if (fabs(fabs(n.dot(pnorm)) - 1) > 1e-9 || fabs((o - ppoint).dot(pnorm)) > tol) return false;
         } else {
@@ -299,7 +307,8 @@ void StepKernel::BodyBuild::promoteCurves()
     // the *placement's* axis - a conic lies in its plane either way round, and
     // reversing the normal reverses the direction its parameter runs - which is
     // the same thing the arc promotion above does by choosing `from x to`.
-    RoundType *curve = nullptr;
+    using Kind = brep::Conic::Kind;
+    brep::Conic curve;
     Vector3d nz = sec.normal.normalized();
     Vector3d minor = nz.cross(sec.major);
     if (sec.kind == SectionConic::ELLIPSE) {
@@ -317,7 +326,7 @@ void StepKernel::BodyBuild::promoteCurves()
         nz = -nz;
         minor = -minor;
       }
-      curve = new Ellipse(entities, "", conic_placement(sec.centre, nz, sec.major), sec.a, sec.b);
+      curve = brep::Conic{Kind::Ellipse, {sec.centre, nz, sec.major}, sec.a, sec.b};
     } else if (sec.kind == SectionConic::HYPERBOLA) {
       // A HYPERBOLA entity describes one branch, the one the reference direction
       // points at, and `a cosh(t)` is never less than `a` - so both ends have to
@@ -337,67 +346,62 @@ void StepKernel::BodyBuild::promoteCurves()
       // t increases with the minor coordinate, so the axis points whichever way
       // makes it increase from vert1 to vert2.
       if ((p1 - sec.centre).dot(nz.cross(major)) > (p2 - sec.centre).dot(nz.cross(major))) nz = -nz;
-      curve = new Hyperbola(entities, "", conic_placement(sec.centre, nz, major), sec.a, sec.b);
+      curve = brep::Conic{Kind::Hyperbola, {sec.centre, nz, major}, sec.a, sec.b};
     } else {
       if ((p1 - sec.centre).dot(minor) > (p2 - sec.centre).dot(minor)) nz = -nz;
-      curve = new Parabola(entities, "", conic_placement(sec.centre, nz, sec.major), sec.a);
+      curve = brep::Conic{Kind::Parabola, {sec.centre, nz, sec.major}, sec.a, 0};
     }
-    if (curve == nullptr) return false;
     if (sec.kind == SectionConic::ELLIPSE) conics_ellipse++;
     else if (sec.kind == SectionConic::HYPERBOLA) conics_hyperbola++;
     else conics_parabola++;
 
-    edge->round = curve;
-    edge->dir = true;
-    was_line->live = false;
-    was_line->vector->live = false;
-    was_line->vector->dir->live = false;
-    was_line->point->live = false;
+    edge.curve.form = curve;
+    edge.same_sense = true;
     conics_promoted++;
     return true;
   };
 
   int arcs_promoted = 0, arcs_declined = 0;
-  for (EdgeCurve *edge : edge_order) {
-    const auto& entry = *edge_faces.find(edge);
-    auto *was_line = dynamic_cast<Line *>(edge->round);
-    if (was_line == nullptr) continue;
-    const Vector3d p1 = edge->vert1->point->pt;
-    const Vector3d p2 = edge->vert2->point->pt;
+  for (const std::size_t e : edge_order) {
+    if (!is_line(e)) continue;
+    brep::Edge& edge = body.edges[e];
+    const std::vector<std::size_t>& faces = edge_faces[e];
+    const Vector3d p1 = body.vertices[edge.start].point;
+    const Vector3d p2 = body.vertices[edge.end].point;
     if ((p1 - p2).norm() < 1e-12) continue;
 
     // A quadric among the faces proposes the arc; every face then gets a veto.
     Vector3d axis, centre;
     double radius = 0.0;
     bool proposed = false;
-    for (auto *face : entry.second) {
-      if (section_of(face->surface, p1, p2, axis, centre, radius)) {
+    for (const std::size_t f : faces) {
+      if (section_of(body.faces[f].form, p1, p2, axis, centre, radius)) {
         proposed = true;
         break;
       }
     }
     if (!proposed) {
-      promote_to_conic(edge, entry.second);
+      promote_to_conic(e, faces);
       continue;
     }
 
     bool agreed = true;
-    for (auto *face : entry.second) {
-      if (const auto *pl = dynamic_cast<const Plane *>(face->surface)) {
+    for (const std::size_t f : faces) {
+      if (const auto *pl = std::get_if<brep::Plane>(&body.faces[f].form)) {
         // A circle about `axis` lies in a plane only if the plane is
         // perpendicular to it, and its endpoints are in the plane already.
-        const Vector3d n = pl->axis->dir1->pt.normalized();
+        const Vector3d n = pl->frame.axis.normalized();
         agreed = fabs(fabs(n.dot(axis)) - 1) < 1e-9;
       } else {
         Vector3d other_axis, other_centre;
         double other_radius = 0.0;
-        agreed = section_of(face->surface, p1, p2, other_axis, other_centre, other_radius) &&
+        agreed = section_of(body.faces[f].form, p1, p2, other_axis, other_centre, other_radius) &&
                  (other_centre - centre).norm() < tol && fabs(other_radius - radius) < tol;
       }
       if (!agreed) break;
     }
     if (!agreed) {
-      if (!promote_to_conic(edge, entry.second)) arcs_declined++;
+      if (!promote_to_conic(e, faces)) arcs_declined++;
       continue;
     }
 
@@ -411,19 +415,9 @@ void StepKernel::BodyBuild::promoteCurves()
       arcs_declined++;
       continue;
     }
-    auto arc_point = new Point(entities, centre);
-    auto arc_axis = new Direction(entities, normal.normalized());
-    auto arc_ref = new Direction(entities, from);
-    edge->round =
-      new Circle(entities, "", new Axis2Placement(entities, arc_axis, arc_ref, arc_point), radius);
-    edge->dir = true;
-    // The line and the three entities it alone referred to would otherwise sit
-    // in the file unreferenced. `get_line_from_map` gives every edge its own,
-    // so nothing else can be pointing at them.
-    was_line->live = false;
-    was_line->vector->live = false;
-    was_line->vector->dir->live = false;
-    was_line->point->live = false;
+    edge.curve.form =
+      brep::Conic{brep::Conic::Kind::Circle, {centre, normal.normalized(), from}, radius, radius};
+    edge.same_sense = true;
     arcs_promoted++;
   }
   if (rim_unshared > 0) {

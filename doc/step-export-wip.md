@@ -4757,6 +4757,15 @@ an edge no curve, and the export then says so as an `EXPORT-ERROR` and keeps
 the phases' entities: never a face on nothing. Next, 2d: the phases build the
 B-rep themselves, one by one, and the mirror shrinks to nothing.
 
+**Step 2d, how it moves.** The B-rep is read at one point (`readBrep`), and
+every phase after that point works on it alone; each move converts the phase
+just before the point and moves the point above it, proven by `compare` at 0
+differences. First move, 2026-09-30: read after `assembleFaces`, with
+`promoteCurves` and the vertex-on-curve check on the B-rep. `promoteCurves` now
+touches no STEP entity, so it is also the first phase ready to leave `io/step`
+for `geometry/brep` (step 3), and the place R10 and R11 are fixed next - its
+quadrics read from the face's record, not rebuilt from the written form.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral
