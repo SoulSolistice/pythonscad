@@ -4962,6 +4962,17 @@ from coming back - landed with the fix and mutation-checked (F2).
   own ends - so SOLIDWORKS code 7 was never asked of them. It unwraps now, as the
   mirror does. *Test:* a vertex half a unit off a wrapped line measures 0.5, not
   0; with the unwrapping taken out it measures 0 and fails.
+- **R21 - the neutral oracle could not see a value move. Fixed 2026-09-30.**
+  `measure-compare.py` compares the report, the ledger and a census of entity
+  *types*; a file whose every number moved compares equal. Step 2c's translator
+  renormalised every direction it read, which moved 19865 of them in 87 of 120
+  files by up to 3.3e-16, and `compare` said 0 differences; the first move of 2d
+  carried them raw again and put them back, and `compare` said 0 again. Nothing
+  is wrong in the tree - but a neutral step proven by the census alone proved
+  less than it said. `compare --data` also compares each DATA section with ids
+  renumbered in file order, since the ids carry gaps where entities were made and
+  not written. *Test:* it reports those 87 files between the two runs, and 0
+  between runs that write the same file (r18 and r19).
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

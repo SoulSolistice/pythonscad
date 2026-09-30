@@ -25,7 +25,7 @@
 #   scripts/step-dev.sh measure <name>     every reference part and every fixture, both
 #                                          tiers, with the claim ledger dumped, into
 #                                          build/measure/<name>/
-#   scripts/step-dev.sh compare <a> <b> [--relabel-originals]
+#   scripts/step-dev.sh compare <a> <b> [--relabel-originals] [--data]
 #                                          two measure runs by content: the report less
 #                                          timings, the entity census, and the ledger
 #                                          sorted row by row. The oracle for a change
@@ -36,6 +36,9 @@
 #                                          not files. --relabel-originals compares
 #                                          original ids by rank, for a change that mints
 #                                          Manifold ids differently and nothing else.
+#                                          --data adds the files' DATA sections, ids
+#                                          renumbered in file order, for a change that
+#                                          must write the same file.
 #   scripts/step-dev.sh python             print the interpreter ctest uses (has OCP)
 #
 # From PowerShell, go through scripts/step-dev.ps1, which sets up MSYS2 correctly.

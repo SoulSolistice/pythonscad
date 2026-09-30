@@ -213,7 +213,9 @@ positions (`canonicalNumbering`); a choice made by index anywhere downstream
 is safe only for that reason. Since 2026-09-27 two runs of one binary write
 identical DATA sections on either backend, so a file diff is evidence now -
 but a neutral refactor may still reorder entities, and `compare` stays the
-oracle.
+oracle. `compare <a> <b> --data` adds that diff, ids renumbered in file order:
+the census counts entities and cannot see a value move, and on 2026-09-30 it
+passed a change that had moved 19865 directions in their last bit.
 
 `export-step-sanitytest_step-cap-meets-wall` was a third, and the only *fixture*
 ever registered `WILL_FAIL`; it passes on its own merits since 2026-09-16 and the
@@ -293,7 +295,7 @@ via Utilities → ADD-INS → Scripts and Add-Ins.
 | compare <a> <b>`. `measure` exports the four reference parts and every fixture
 in both tiers with the claim ledger dumped; `compare` is the behaviour-neutral
 oracle (report, entity census, ledger - 0 differences is the bar for any
-refactor). **Every
+refactor; add `--data` where the refactor must write the same file). **Every
 diagnostic is catalogued by the question it answers in
 `scripts/step-diagnostics/README.md`** — read it before writing a new one.
 

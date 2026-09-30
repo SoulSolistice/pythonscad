@@ -96,7 +96,7 @@ needs an instrument that does not exist, that is a finding.
 | F1 | **Derive expectations from the model, never from a kernel, never from a faceted input**; nothing grounds on tessellations. *development: Derived, not captured; author* | Where did every number in the new assertion come from? | review |
 | F2 | **Mutation-check every new assertion and every zero.** *development* | Which planted fault did the new check fail on? | process - stated in the commit |
 | F3 | **Kernel agreement is not proof.** *development* | Is a kernel's reading offered as the evidence? | review |
-| F4 | **Behaviour-neutral is proven by the oracle, never argued**; measure both tiers. *development; design* | `compare` result, both tiers? | `scripts/step-dev.sh measure` / `compare` |
+| F4 | **Behaviour-neutral is proven by the oracle, never argued**; measure both tiers. *development; design* | `compare` result, both tiers - and `--data` where the change must write the same file? | `scripts/step-dev.sh measure` / `compare [--data]` |
 | F5 | **A census that moves is not a regression, one that does not move is not proof**; watch closed forms per surface, and ask why a rung declined, not how much. *rungs: How to read a result* | Is a count being read as a verdict? | review |
 | F6 | **Magic numbers and statistical thresholds need explicit approval**; a statistic over the tessellation is the yardstick made of the error it grades. *rungs: How to add a rung* | Does the change introduce a number nobody derived? | review |
 | F7 | **Root-cause fixes only**; five whys with the branches named; half a fix parks on a `-parked` branch with its measurements. *development; handover* | Is this a gate or exclusion standing in for a cause? | review |

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Compare two `scripts/step-dev.sh measure` runs by content.
 
-The oracle for a change that claims to change no behaviour. The exporter is not
-byte-deterministic - entity numbering moves run to run - so files are never
-diffed. Per export, three things must be identical:
+The oracle for a change that claims to change no behaviour. Per export, three
+things must be identical:
 
   report   the export's own log, less wall-clock timings and the ledger's own
            "written to" line
@@ -12,7 +11,16 @@ diffed. Per export, three things must be identical:
            the order a pass happened to record them in is not), and beside it the
            surfaces and existence tables the same way
 
-    measure-compare.py <run a> <run b> [--show N] [--relabel-originals]
+    measure-compare.py <run a> <run b> [--show N] [--relabel-originals] [--data]
+
+--data also compares each file's DATA section line by line, with the entity ids
+renumbered in the order the file defines them. Two runs of one binary write
+identical DATA since 2026-09-27, but the ids carry gaps where entities were made
+and not written, so a change that stops making an unwritten entity shifts every
+id after it without changing the file. Renumbered, that compares equal, and an
+entity written in another order, with another value, or in another place in a
+shell does not - which the census cannot see. For a refactor that has to write
+the same file, not only the same kinds of entity in the same numbers.
 
 --relabel-originals renumbers each export's original ids by rank before
 comparing, in the report ("original N"), the ledger's origin column and the
@@ -49,6 +57,24 @@ def report(path):
 
 def census(path):
     return Counter(ENTITY.findall(path.read_text(encoding="utf-8", errors="replace")))
+
+
+REF = re.compile(r"#(\d+)")
+
+
+def data(path):
+    """The DATA section, ids renumbered in the order the file defines them."""
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    try:
+        body = lines[lines.index("DATA;") + 1:]
+    except ValueError:
+        return None
+    rank = {}
+    for ln in body:
+        m = re.match(r"#(\d+)\s*=", ln)
+        if m:
+            rank.setdefault(m.group(1), len(rank) + 1)
+    return [REF.sub(lambda m: "#" + str(rank.get(m.group(1), "?" + m.group(1))), ln) for ln in body]
 
 
 def ledger(path):
@@ -116,6 +142,8 @@ def main():
     ap.add_argument("--show", type=int, default=3, help="differing lines to print per difference")
     ap.add_argument("--relabel-originals", action="store_true",
                     help="compare original ids by rank, not by the label Manifold minted")
+    ap.add_argument("--data", action="store_true",
+                    help="also compare each file's DATA section, ids renumbered in file order")
     args = ap.parse_args()
     ra, rb = Path(args.a), Path(args.b)
     exports = sorted(ra.glob("*/*.stp"))
@@ -136,6 +164,12 @@ def main():
             bad += 1
             moved = sorted(k for k in set(ca) | set(cb) if ca[k] != cb[k])
             print(f"ENTITIES {rel}: " + ", ".join(f"{k} {ca[k]}->{cb[k]}" for k in moved[:8]))
+        if args.data:
+            da, db = data(stp), data(other)
+            if da != db:
+                bad += 1
+                print(f"DATA     {rel}")
+                print("\n".join(first_differences(da or [], db or [], args.show)))
         la, lb = report(base.with_suffix(".log")), report(obase.with_suffix(".log"))
         ga, gb = ledger(base.with_suffix(".ledger.tsv")), ledger(obase.with_suffix(".ledger.tsv"))
         sa = ledger(Path(str(base) + ".ledger.tsv.surfaces.tsv"))
