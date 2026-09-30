@@ -4945,6 +4945,14 @@ from coming back - landed with the fix and mutation-checked (F2).
   the writer makes today is written byte for byte as before. *Test:* a rational
   quadratic arc with explicit knots must serialise as `RATIONAL_B_SPLINE_CURVE`
   with them - the old branch restored fails it on all three counts.
+- **R20 - a SURFACE_CURVE escaped the vertex-on-curve check. Fixed 2026-09-30.**
+  `vertexOffCurve` (`CurveChecks.cc`) knew lines, conics and B-splines; an edge
+  whose curve is wrapped as a SURFACE_CURVE fell to "a curve this does not know
+  how to measure is not a finding" and measured 0. The wrapped edges are the
+  crossing curves with pcurves - the fitted B-splines, the likeliest to miss their
+  own ends - so SOLIDWORKS code 7 was never asked of them. It unwraps now, as the
+  mirror does. *Test:* a vertex half a unit off a wrapped line measures 0.5, not
+  0; with the unwrapping taken out it measures 0 and fails.
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

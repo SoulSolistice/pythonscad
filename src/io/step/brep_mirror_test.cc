@@ -3,6 +3,7 @@
 // the solid it describes: a unit cube is 8 corners, 12 edges and 6 faces.
 #include "io/step/BrepMirror.h"
 #include "io/step/BrepToStep.h"
+#include "io/step/CurveChecks.h"
 
 #include <algorithm>
 #include <catch2/catch_all.hpp>
@@ -301,4 +302,18 @@ TEST_CASE("the translator writes nothing for a body with a face on no form or an
     CHECK(step::writeBrep(out, broken, made).empty());
     CHECK(out.empty());  // refused before making anything
   }
+}
+
+TEST_CASE("a vertex is measured against a SURFACE_CURVE's own curve", "[step-kernel]")
+{
+  // The x axis as a LINE, wrapped as a SURFACE_CURVE the way a crossing curve
+  // with pcurves is: a vertex at (3, 0.5, 0) is 0.5 off it, wrapped or not
+  // (open item 39, R20 - wrapped, it measured 0).
+  std::vector<K::Entity *> ents;
+  auto *line = new K::Line(ents, new K::Point(ents, Vector3d::Zero()),
+                           new K::Vector(ents, new K::Direction(ents, Vector3d::UnitX()), 1.0));
+  auto *wrapped = new K::SurfaceCurve(ents, line, {});
+  CHECK(step::vertexOffCurve(line, Vector3d(3, 0.5, 0)) == Catch::Approx(0.5));
+  CHECK(step::vertexOffCurve(wrapped, Vector3d(3, 0.5, 0)) == Catch::Approx(0.5));
+  for (auto *e : ents) delete e;
 }

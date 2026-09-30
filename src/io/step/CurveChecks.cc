@@ -8,6 +8,13 @@ namespace step {
 
 double vertexOffCurve(const StepKernel::RoundType *curve, const Vector3d& p)
 {
+  // A SURFACE_CURVE is its 3D curve with the pcurves beside it: the vertex
+  // answers to the curve. Left out, every crossing curve with pcurves - the
+  // fitted B-splines, the likeliest to miss their ends - fell to the last line
+  // below and was never measured (open item 39, R20).
+  if (const auto *on = dynamic_cast<const StepKernel::SurfaceCurve *>(curve)) {
+    return vertexOffCurve(on->curve, p);
+  }
   if (const auto *line = dynamic_cast<const StepKernel::Line *>(curve)) {
     if (line->point == nullptr || line->vector == nullptr || line->vector->dir == nullptr) return 0;
     const Vector3d base = line->point->pt;
