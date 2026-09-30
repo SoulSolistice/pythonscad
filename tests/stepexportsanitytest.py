@@ -31,6 +31,21 @@ import sys
 from steproundtrip import roundtripSTEP
 from validatestep import validateSTEP
 
+
+def _load_unreferenced():
+    """scripts/step-diagnostics/unreferenced.py, the one definition of an entity
+    nothing references - loaded by path, since its directory is not a package."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "..", "scripts", "step-diagnostics", "unreferenced.py")
+    spec = importlib.util.spec_from_file_location("unreferenced", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.orphans
+
+
+unreferenced = _load_unreferenced()
+
 # locales which conventionally use a comma radix, cheapest first
 LOCALE_CANDIDATES = [
     "de_DE.UTF-8", "de_DE.utf8", "de_DE",
@@ -96,6 +111,16 @@ def export(openscad, inputfile, outfile, extra_args, env=None):
             failquit("the exporter says its own output is wrong (%s):\n  %s"
                      % (" ".join(extra_args) or "default", line))
         KNOWN_SEEN.update(hit)
+    # Nothing in the file that nothing references: an entity reached by no solid
+    # is geometry the file holds and no shape uses, and one a writer working
+    # from the B-rep could never reproduce (open item 39, R18). Any run, any
+    # tier - on the text, so no kernel's healing can hide it.
+    stray, _ = unreferenced(outfile)
+    if stray:
+        failquit("the file holds %d entities nothing references (%s): %s - see "
+                 "scripts/step-diagnostics/unreferenced.py"
+                 % (sum(stray.values()), " ".join(extra_args) or "default",
+                    ", ".join("%d %s" % (c, t) for t, c in stray.most_common())))
     return output
 
 

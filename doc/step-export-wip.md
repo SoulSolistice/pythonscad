@@ -4906,6 +4906,16 @@ from coming back - landed with the fix and mutation-checked (F2).
   papers over the defect behind it. *Test:* a contract rule in `brep::check` - a
   line from a vertex to itself - planted in a unit test, so every export's mirror
   says whether any file carries one.
+- **R18 - entities in the file that nothing references. Fixed 2026-09-30.** Found
+  asking what a translator writing from the B-rep would have to reproduce: 38 of
+  120 exports held geometry no solid reached - a PLANE (with its placement, two
+  directions and a point) for every hole loop, the planar writer building one per
+  loop though a face stands on its outer loop's; and a point and a direction per
+  elliptic extrusion, made before the branch that has its own placement. Neither
+  harms a reader; both put in the file what the B-rep never had, which no census
+  of a translated file could match. *Test:* `scripts/step-diagnostics/unreferenced.py`,
+  asserted by `stepexportsanitytest.py` on every export of the suite - it failed
+  step-bore on its two hole planes before the fix.
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

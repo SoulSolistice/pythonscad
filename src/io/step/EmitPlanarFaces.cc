@@ -184,11 +184,16 @@ void StepKernel::BodyBuild::emitPlanarFaces()
         worst_plane_off = std::max(worst_plane_off, off);
       }
     }
-    auto plane_point = new Point(entities, on_plane);
-    auto plane_dir_1 = new Direction(entities, norm);
-    auto plane_dir_2 = new Direction(entities, ref);
-    auto plane_axis = new Axis2Placement(entities, plane_dir_1, plane_dir_2, plane_point);
-    planes[i] = new Plane(entities, plane_axis);
+    // A face stands on its outer loop's plane; a hole is a bound of that face
+    // and carries none of its own. Written for a hole, the PLANE is an entity
+    // nothing in the file references (open item 39, R18).
+    if (!loop_is_hole[i]) {
+      auto plane_point = new Point(entities, on_plane);
+      auto plane_dir_1 = new Direction(entities, norm);
+      auto plane_dir_2 = new Direction(entities, ref);
+      auto plane_axis = new Axis2Placement(entities, plane_dir_1, plane_dir_2, plane_point);
+      planes[i] = new Plane(entities, plane_axis);
+    }
 
     auto edge_loop = new EdgeLoop(entities, oriented_edges);
     face_bounds[i] = new FaceBound(entities, edge_loop, true, !loop_is_hole[i]);

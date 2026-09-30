@@ -58,8 +58,17 @@ void StepKernel::BodyBuild::emitQuadricFaces()
       if (ref.norm() > 0.5) break;
     }
     if (ref.norm() < 0.5) ref = AnalyticFeatures::perpendicular(axis);
-    auto point = new Point(entities, base);
-    auto dir_ref = new Direction(entities, ref);
+    // The placement a cylinder or a cone is written in; an elliptic cylinder
+    // carries its ellipse's own, and would leave these referenced by nothing
+    // (open item 39, R18).
+    // Made one after another, in the order they always were: an entity's id is
+    // its place in the file, and argument evaluation order is not fixed.
+    auto placed = [&](const Vector3d& along) {
+      auto point = new Point(entities, base);
+      auto dir_ref = new Direction(entities, ref);
+      auto dir_axis = new Direction(entities, along);
+      return new Axis2Placement(entities, dir_axis, dir_ref, point);
+    };
     SurfaceType *surface = nullptr;
     if (elliptic != nullptr) {
       // The section across the sweep, swept: its ELLIPSE in its own principal
@@ -74,15 +83,12 @@ void StepKernel::BodyBuild::emitQuadricFaces()
       surface = new SurfaceOfLinearExtrusion(entities, "", ellipse,
                                              new Vector(entities, new Direction(entities, axis), 1.0));
     } else if (cyl != nullptr) {
-      auto dir_axis = new Direction(entities, axis);
-      surface = new CylindricalSurface(entities, "",
-                                       new Axis2Placement(entities, dir_axis, dir_ref, point), cyl->r);
+      surface = new CylindricalSurface(entities, "", placed(axis), cyl->r);
     } else {
       // ISO 10303 wants a half angle in (0, pi/2) and a radius growing along the
       // placement's axis, so a cone narrowing that way is written from its other
       // end - the same convention the band pass follows.
-      auto dir_axis = new Direction(entities, cone->slope > 0 ? axis : Vector3d(-axis));
-      surface = new ConicalSurface(entities, "", new Axis2Placement(entities, dir_axis, dir_ref, point),
+      surface = new ConicalSurface(entities, "", placed(cone->slope > 0 ? axis : Vector3d(-axis)),
                                    cone->r, atan(fabs(cone->slope)));
     }
 
