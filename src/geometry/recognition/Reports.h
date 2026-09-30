@@ -72,6 +72,7 @@ enum FacetClass : unsigned char {
   kDeclaredSurface = 2,  // held by a claim for a declared curved surface
   kFitted = 3,           // held by a claim for a surface the approximation fitted
   kUnnamed = 4,          // held by a claim that names no surface: malformed
+  kPlaneByPosition = 5,  // a planar face on a declared plane only its position places it on
 };
 
 /*! The class of a facet an honoured claim holds, read off the surface the claim

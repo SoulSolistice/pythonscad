@@ -4791,16 +4791,29 @@ commits of its own - after the move, so the fix is made once, in the neutral
 domain. Each names where it is, what it points to, and the test that keeps it
 from coming back - landed with the fix and mutation-checked (F2).
 
-- **R1 - the planar writer chooses a declared plane by position.**
-  `EmitPlanarFaces.cc`: the first declared plane the loop lies on, never the
-  plane its triangles are named for. An unnamed face lying on a declared plane is
-  written on it and counted "on a declared plane" (position standing in for
-  heritage, E8); a named face bent off it gets a fitted plane in silence (the
-  named-facet check catches it after the fact). The name decides; position only
-  derives, at D1, and says so.
-  *Test:* a fixture with an unnamed face lying exactly on a declared plane - a
-  `polyhedron()` slab flush on a `cube()` - whose report must count it as derived,
-  not declared.
+- **R1 - the planar writer chooses a declared plane by position. Fixed
+  2026-09-30.** `EmitPlanarFaces.cc`: the first declared plane the loop lies on,
+  never the plane its triangles are named for. An unnamed face lying on a
+  declared plane is written on it and counted "on a declared plane" (position
+  standing in for heritage, E8); a named face bent off it gets a fitted plane in
+  silence (the named-facet check catches it after the fact). The name decides;
+  position only derives, at D1, and says so. Four branches, two refuted. *A
+  named face off its plane*: refuted as silent - the E3 check reports a corner
+  off the plane its facet is named for, and the named-facet check the face, both
+  as EXPORT-ERRORs. *Which plane*: refuted - the records are merged by
+  `samePlane` at machine precision and a loop with a corner off a line lies in
+  one plane, so the first declared plane a loop is on is the only one, and it is
+  the one it is named for where it is named for one. *The class written*:
+  already D1 where no name places the face. *The census*: the defect - a face on
+  a declared plane by position alone was counted with the named ones and marked
+  the declaration written. It is counted apart now, `kPlaneByPosition`, credits
+  nothing, and the planar faces state which record they stand on (`written_on`)
+  as the curved ones do. It exposed a maker that relied on the stand-in:
+  `roof()` declared its planes and named none of its faces, and the roof
+  fixtures' "9 written" was position - it names them since `f69b46806`. *Test:*
+  `step-plane-by-position` - two cubes and a `polyhedron()` block whose top,
+  bottom, front and back lie on the cubes' planes: 12 faces on a declared plane,
+  4 by position alone. With position counted as the name again it fails.
 - **R2 - one property, two tolerances, neither the machine's.** "Every corner of
   a planar face is in the plane it asserts" is vetoed at an absolute 1e-9
   (`CornersApply.cc`) and checked at 1e-8 of the part (`mesh_coplanar_tol`,
@@ -5076,6 +5089,22 @@ from coming back - landed with the fix and mutation-checked (F2).
   the classes named (`FacetClass`). No export of the 120 has such a claim.
   *Test:* `reports_test.cc` - an unnamed claim is `kUnnamed`, not `kFitted`;
   with that branch removed it fails.
+
+**Planned, in this order (the author, 2026-09-30): a catch-all for warnings,
+then a tripwire.** What the fixtures catch without being told: every
+EXPORT-ERROR unless named by `KNOWN-EXPORT-ERROR`, the validator, the
+unreferenced-entity check and the kernel round trip, on every export. What
+nothing catches: an EXPORT-WARNING - no test reads one, and the fixtures raise
+some 70, among them "a declaration that is not taken is a bug report" - and any
+report or census line a fixture does not quote with `EXPECT:`, which is how R1's
+shift on lid10 and the bayonet passed the suite unseen. First, warnings are held
+as errors are: every one the fixtures raise is fixed or named, with its reason,
+by a `KNOWN-EXPORT-WARNING:` line, any other fails, and a named one that stops
+appearing fails. Only then a tripwire: each fixture's census and summary lines
+kept as its expected output, regenerated and reviewed, so that anything that
+moves is seen. It is a record of the last reviewed output, not an expectation -
+expectations stay derived (F1) - and it waits for the warnings, since until each
+is fixed or classified it would freeze them as they are.
 
 **Not this item, and smaller: true 2D curves in SVG and DXF.** A 2D export
 needs no 3D B-rep. The 2D channel already carries exact arc and Bezier records

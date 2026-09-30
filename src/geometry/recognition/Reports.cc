@@ -1156,11 +1156,12 @@ void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approxi
     // admired: D0 is covered first precisely so that a D3 fit never gets the
     // chance to take exact ground and strand the remainder.
     {
-      std::size_t by_plane = 0, by_declared = 0, by_fit = 0, by_mesh = 0, unnamed = 0;
+      std::size_t by_plane = 0, by_position = 0, by_declared = 0, by_fit = 0, by_mesh = 0, unnamed = 0;
       for (std::size_t f = 0; f < facet_class.size() && f < loops.size(); f++) {
         if (!loop_valid[f] || loop_is_hole[f]) continue;
         switch (facet_class[f]) {
         case kDeclaredPlane:   by_plane++; break;
+        case kPlaneByPosition: by_position++; break;
         case kDeclaredSurface: by_declared++; break;
         case kFitted:          by_fit++; break;
         case kUnnamed:         unnamed++; break;
@@ -1169,8 +1170,9 @@ void reportDeclarationCensus(const ReportInputs& in, bool analytic, bool approxi
       }
       LOG(
         "STEP export:   by facet: %1$d written on a declared surface, %2$d on a declared plane, "
-        "%3$d on a surface the approximation fitted, %4$d left to the tessellation",
-        int(by_declared), int(by_plane), int(by_fit), int(by_mesh));
+        "%3$d on one by position alone, %4$d on a surface the approximation fitted, %5$d left to "
+        "the tessellation",
+        int(by_declared), int(by_plane), int(by_position), int(by_fit), int(by_mesh));
       // Loud, because every number on the line above is only as good as the
       // claims behind it. A claim the exporter *acted on* that cannot say which
       // surface it was for leaves the census unable to tell a declaration from

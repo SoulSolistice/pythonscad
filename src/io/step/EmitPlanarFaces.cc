@@ -25,7 +25,7 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     }
     mesh_coplanar_tol = std::max(1e-9, 1e-8 * (hi - lo).norm());
   }
-  int planes_declared = 0;
+  int planes_declared = 0, planes_by_position = 0;
 
   for (std::size_t i = 0; i < face_cnt; i++) {
     // Only a loop that bounds a face the file writes. A hole of a face that is
@@ -108,9 +108,11 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     Vector3d on_plane = vertices[loop[0]];
     // The record the plane is written on, and what decided it: the model's own
     // plane where the face lies in one - D0 where its triangles are named for
-    // it, D1 where only its position says so (open item 39, R1) - and otherwise
-    // the plane its corners are on, which is as good as they are: D4 until the
-    // corners state their own class.
+    // it, D1 where the name is derived or only its position says so - and
+    // otherwise the plane its corners are on, which is as good as they are: D4
+    // until the corners state their own class. The first declared plane the
+    // face lies on is the only one: the records are merged by samePlane, and a
+    // loop with a corner off a line lies in one plane (open item 39, R1).
     using recognition::EvidenceClass;
     std::shared_ptr<const Surface> record;
     EvidenceClass decided = EvidenceClass::D4;
@@ -126,18 +128,25 @@ void StepKernel::BodyBuild::emitPlanarFaces()
           decided = !named                                          ? EvidenceClass::D1
                     : i < faceDerived.size() && faceDerived[i] != 0 ? EvidenceClass::D1
                                                                     : EvidenceClass::D0;
+          // The census counts what the name put there. Position derives a
+          // face's plane, and says so: it does not make the declaration written,
+          // and a face no name places is not counted on a declared plane - it
+          // stood in for heritage there until 2026-09-30 (E8).
+          if (named) {
+            if (si < decl_written.size()) decl_written[si] = 1;
+            if (i < facet_class.size()) facet_class[i] = recognition::kDeclaredPlane;
+          } else if (i < facet_class.size()) {
+            facet_class[i] = recognition::kPlaneByPosition;
+          }
+          if (!loop_is_hole[i]) (named ? planes_declared : planes_by_position)++;
         }
-        if (dp < declared_plane_index.size() && declared_plane_index[dp] < decl_written.size()) {
-          decl_written[declared_plane_index[dp]] = 1;
-        }
-        if (i < facet_class.size()) facet_class[i] = recognition::kDeclaredPlane;
         // Keep the mesh's sense: a declaration says which plane, not which way
         // the face looks out of it.
         norm = declared.second.dot(norm) > 0 ? declared.second : Vector3d(-declared.second);
         on_plane = declared.first + norm * (vertices[loop[0]] - declared.first).dot(norm);
-        // Per face, not per loop: a face with a hole in it computes a plane for
-        // its inner bound too, and counting those says a ring was written twice.
-        if (!loop_is_hole[i]) planes_declared++;
+        // Counted above per face, not per loop: a face with a hole in it
+        // computes a plane for its inner bound too, and counting those says a
+        // ring was written twice.
         break;
       }
     }
@@ -199,11 +208,13 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     }
   }
 
-  if (planes_declared > 0) {
+  if (planes_declared + planes_by_position > 0) {
     LOG(
       "STEP export: %1$d planar face%2$s written on a plane the model declared rather than one "
-      "fitted to its own corners",
-      planes_declared, planes_declared == 1 ? "" : "s");
+      "fitted to its own corners - %3$d named for it, %4$d on it by position alone, which "
+      "derives the plane (D1)",
+      planes_declared + planes_by_position, planes_declared + planes_by_position == 1 ? "" : "s",
+      planes_declared, planes_by_position);
   }
 
   const recognition::ReportInputs report_inputs{
@@ -220,8 +231,9 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     &faceSurface,
     &faceDerived};
   // Where each facet's written face stands, read from the faces the writers
-  // registered - the curved ones, all made by now.
+  // made - the planar ones just now, the curved ones before them.
   std::vector<int32_t> written_on(face_cnt, -1);
+  for (const auto& [i, face] : planar_faces) written_on[i] = surfaceIndexOf(face.surface.get());
   for (const Face *face : sfaces_extra) {
     const auto source = face_source.find(face);
     if (source == face_source.end()) continue;
