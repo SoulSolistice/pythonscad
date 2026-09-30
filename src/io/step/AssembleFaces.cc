@@ -10,8 +10,7 @@ void StepKernel::BodyBuild::assembleFaces()
   for (auto& [i, face] : planar_faces) {
     face.loops.push_back(std::move(planar_loops[i]));
     for (std::size_t j = 0; j < face_cnt; j++) {
-      if (!loop_valid[j] || consumed[j] || split_for_corners.count(j) != 0 || parents[j] != int(i))
-        continue;
+      if (parents[j] != int(i) || !boundWritten(j)) continue;
       face.loops.push_back(std::move(planar_loops[j]));
     }
     brep_body.faces.push_back(std::move(face));

@@ -183,8 +183,9 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             // with the corner placement relaxed, one boundary came out as an
             // ELLIPSE from the cylinder and a LINE from the plane beside it, two
             // edges where the geometry has one. `split_for_corners` is settled
-            // long before any face is written, so this is knowable here.
-            if (split_for_corners.count(std::size_t(bs.loop)) != 0) {
+            // long before any face is written, so this is knowable here - and a
+            // hole is written only where its face is (open item 39, R26).
+            if (!boundWritten(std::size_t(bs.loop))) {
               section_unshared++;
               starts_at[i] = -1;  // chords on both sides, which is what agrees
               continue;

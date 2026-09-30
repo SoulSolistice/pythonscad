@@ -248,9 +248,41 @@ void StepKernel::BodyBuild::emitBands()
         // a full circle is one edge whose two ends are the same vertex
         rim_edge[side] = new EdgeCurve(entities, vert, vert, curve, true);
         rim_sense[side] = rim.wall_ccw;
-        if (rim.kind == AnalyticFeatures::RimRef::OTHER_BAND)
+        if (rim.kind == AnalyticFeatures::RimRef::OTHER_BAND) {
           shared_rim_edges.emplace(key, rim_edge[side]);
-        else rim_of_loop.emplace(rim.loop, std::make_pair(rim_edge[side], !rim.wall_ccw));
+          continue;
+        }
+        // The same rule as an arc's, below: a loop that is not written cannot
+        // take the curve. The whole ring then, as the mesh's own chords from the
+        // seam round to it again, the way this face walks the curve - counter
+        // clockwise about the axis where the wall runs that way. Asked of the
+        // arcs only until 2026-09-30, and a bore's rim in the hole of a fanned
+        // facet was handed to a hole nothing wrote (open item 39, R26).
+        if (!boundWritten(rim.loop)) {
+          const std::vector<int>& ring = loops[rim.loop];
+          const std::size_t m = ring.size();
+          const auto at = std::find(ring.begin(), ring.end(), seam);
+          if (m >= 3 && at != ring.end()) {
+            double turn = 0;  // the ring's own sense about the axis
+            for (std::size_t k = 0; k < m; k++) {
+              turn +=
+                (vertices[ring[k]] - centre).cross(vertices[ring[(k + 1) % m]] - centre).dot(band.axis);
+            }
+            const bool forward = (turn > 0) == rim.wall_ccw;
+            const std::size_t s = std::size_t(at - ring.begin());
+            for (std::size_t k = 0; k < m; k++) {
+              const int a = ring[forward ? (s + k) % m : (s + m - k) % m];
+              const int b = ring[forward ? (s + k + 1) % m : (s + 2 * m - k - 1) % m];
+              bool dir = true;
+              EdgeCurve *chord =
+                get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+              rim_chords[side].emplace_back(chord, dir);
+            }
+            rim_unshared++;
+            continue;
+          }
+        }
+        rim_of_loop.emplace(rim.loop, std::make_pair(rim_edge[side], !rim.wall_ccw));
       } else {
         // An arc, from one end of the rim to the other. A CIRCLE is counter
         // clockwise about its own axis, so the arc is always written that way
@@ -281,8 +313,9 @@ void StepKernel::BodyBuild::emitBands()
           // So the rim is written as the mesh's own chords instead, taken from
           // the same edge map the fan's triangles use - which is what makes
           // them the same edges rather than a second set on the same points. A
-          // worse boundary on this one face, and a closed shell.
-          if (!band.closed && split_for_corners.count(rim.loop) != 0) {
+          // worse boundary on this one face, and a closed shell. A hole is
+          // written only where its face is (open item 39, R26).
+          if (!boundWritten(rim.loop)) {
             const std::vector<int>& across = loops[rim.loop];
             const std::size_t m = across.size();
             std::vector<int> walk;
@@ -309,6 +342,16 @@ void StepKernel::BodyBuild::emitBands()
     }
 
     std::vector<OrientedEdge *> loop;
+    // A rim as the one curve it is, or as the chords it was given up as.
+    auto walk_rim = [&](int side) {
+      if (rim_chords[side].empty()) {
+        loop.push_back(new OrientedEdge(entities, rim_edge[side], rim_sense[side]));
+        return;
+      }
+      for (const auto& chord : rim_chords[side]) {
+        loop.push_back(new OrientedEdge(entities, chord.first, chord.second));
+      }
+    };
     if (band.closed) {
       // The seam of a periodic face has to lie *on* the surface. Up a cylinder
       // or a cone that is a straight ruling; over a sphere it is a meridian,
@@ -353,9 +396,9 @@ void StepKernel::BodyBuild::emitBands()
         edge_seam =
           create_line_edge_curve(get_vertex(band.seam_bottom), get_vertex(band.seam_top), true);
       }
-      loop.push_back(new OrientedEdge(entities, rim_edge[0], rim_sense[0]));
+      walk_rim(0);
       loop.push_back(new OrientedEdge(entities, edge_seam, true));
-      loop.push_back(new OrientedEdge(entities, rim_edge[1], rim_sense[1]));
+      walk_rim(1);
       loop.push_back(new OrientedEdge(entities, edge_seam, false));
     } else {
       // walk along the bottom rim, up the end edge, back along the top rim,
@@ -371,15 +414,6 @@ void StepKernel::BodyBuild::emitBands()
                                              get_vertex(t_from), up_dir, merged_edge_cnt);
       EdgeCurve *edge_down = get_line_from_map(edge_map, t_to, b_from, get_vertex(t_to),
                                                get_vertex(b_from), down_dir, merged_edge_cnt);
-      auto walk_rim = [&](int side) {
-        if (rim_chords[side].empty()) {
-          loop.push_back(new OrientedEdge(entities, rim_edge[side], rim_sense[side]));
-          return;
-        }
-        for (const auto& chord : rim_chords[side]) {
-          loop.push_back(new OrientedEdge(entities, chord.first, chord.second));
-        }
-      };
       walk_rim(0);
       loop.push_back(new OrientedEdge(entities, edge_up, up_dir));
       walk_rim(1);

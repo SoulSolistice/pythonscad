@@ -26,26 +26,21 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     mesh_coplanar_tol = std::max(1e-9, 1e-8 * (hi - lo).norm());
   }
   int planes_declared = 0;
-  // Whether loop `k` is the outer loop of a face the file states: every loop
-  // below is, but a hole only where its face is.
-  auto face_written = [&](int k) {
-    return k >= 0 && loop_valid[k] && !loop_is_hole[k] && !consumed[k] &&
-           split_for_corners.count(k) == 0;
-  };
 
   for (std::size_t i = 0; i < face_cnt; i++) {
-    if (!loop_valid[i] || consumed[i] || split_for_corners.count(i) != 0) continue;
+    // Only a loop that bounds a face the file writes. A hole of a face that is
+    // fanned, or taken by an analytic face, bounds nothing: walked, it was held
+    // to a plane of its own and credited to a declared plane no face stands on
+    // (open item 39, R22).
+    if (!boundWritten(i)) continue;
     const std::vector<int>& loop = loops[i];
     const int n = int(loop.size());
 
-    // The loop as the B-rep's: each edge named where it bounds a face. A hole
-    // of a face that is not written - fanned, or taken by an analytic face -
-    // bounds nothing, and its edges are left to whatever does use them.
+    // The loop as the B-rep's, each edge named through the reader.
     brep::Loop& bound = planar_loops[i];
     bound.outer = !loop_is_hole[i];
-    const bool bounds_a_face = !loop_is_hole[i] || face_written(parents[i]);
     auto use = [&](EdgeCurve *edge, bool sense) {
-      if (bounds_a_face) bound.coedges.push_back(brep::Coedge{reader.edge(edge), sense, std::nullopt});
+      bound.coedges.push_back(brep::Coedge{reader.edge(edge), sense, std::nullopt});
     };
 
     // a rim of a recognised band is one circular edge instead of n straight

@@ -141,6 +141,20 @@ step::FaceSource StepKernel::BodyBuild::sourceOf(std::shared_ptr<const Surface> 
                     plane_from_corners, record_class};
 }
 
+bool StepKernel::BodyBuild::boundWritten(std::size_t loop) const
+{
+  auto outer_written = [&](std::size_t k) {
+    return k < face_cnt && loop_valid[k] && !loop_is_hole[k] && !consumed[k] &&
+           split_for_corners.count(k) == 0;
+  };
+  if (loop >= face_cnt || !loop_valid[loop] || consumed[loop]) return false;
+  if (!loop_is_hole[loop]) return outer_written(loop);
+  // A hole is a bound of its face, written where that face is and nowhere
+  // else (open item 39, R22, R26).
+  return split_for_corners.count(loop) == 0 && parents[loop] >= 0 &&
+         outer_written(std::size_t(parents[loop]));
+}
+
 StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)
 {
   if (step_verts[ind] == nullptr) {

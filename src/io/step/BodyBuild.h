@@ -647,6 +647,13 @@ struct StepKernel::BodyBuild {
   const std::vector<char>& consumed = features.consumed;
   // A planar face the corner placement bent -> the triangles it is written as.
   std::map<std::size_t, std::vector<std::array<int, 3>>> split_for_corners;
+  /*! Whether facet loop `loop` is written as a bound of a planar face: an
+   * outer loop no analytic face took and the placement did not fan, or a hole
+   * of one. The one question every face that hands a planar loop a curve along
+   * it has to ask first - a fan writes one straight line per triangle side, so
+   * a loop that is not written cannot take the curve, and the curve is then the
+   * mesh's chords on both sides - and the one the planar writer walks by. */
+  [[nodiscard]] bool boundWritten(std::size_t loop) const;
 
   // What a planar loop gives up to a curve an analytic face writes along it.
   /*! One run of loop edges replaced by a single arc. */

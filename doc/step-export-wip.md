@@ -4992,17 +4992,25 @@ from coming back - landed with the fix and mutation-checked (F2).
   renumbered in file order, since the ids carry gaps where entities were made and
   not written. *Test:* it reports those 87 files between the two runs, and 0
   between runs that write the same file (r18 and r19).
-- **R22 - a hole of a fanned face is still written as a planar bound.**
-  `EmitPlanarFaces.cc` walks every valid loop, holes included, and a hole whose
-  face is fanned into triangles (`split_for_corners`, which bridges holes into
-  the outer ring) is still given a bound, has its plane matched against the
-  declared planes, and marks that declaration written and its facet written on
-  a declared plane (`decl_written`, `facet_class`) - for a face the file states
-  as fan triangles on planes from their corners. Its bound is built and never
-  assembled; the B-rep now leaves it out, and `brep::check` names any edge left
-  unused, so what remains is the census crediting ground no face stands on (E2,
-  B6). *Test:* a fixture fanning a face with a hole, whose census must not count
-  the hole's declared plane written.
+- **R22 - a hole of a fanned face is still written as a planar bound. Fixed
+  2026-09-30.** `EmitPlanarFaces.cc` walks every valid loop, holes included, and
+  a hole whose face is fanned into triangles (`split_for_corners`, which bridges
+  holes into the outer ring) is still given a bound, has its plane matched
+  against the declared planes, and marks that declaration written and its facet
+  written on a declared plane (`decl_written`, `facet_class`) - for a face the
+  file states as fan triangles on planes from their corners. Its bound is built
+  and never assembled; the B-rep now leaves it out, and `brep::check` names any
+  edge left unused, so what remains is the census crediting ground no face
+  stands on (E2, B6). Reached by no export of the 120: probed 2026-09-30, no
+  fanned face in any of them has a hole. `step-hole-in-a-fanned-facet` reaches
+  it once R24 is fixed: the bent ring, walked as a planar loop, was held to a
+  plane of its own and reported as a planar face asserting a plane its bound is
+  not in, 0.0017 off - for a face no one writes. The planar writer now walks
+  only loops `boundWritten` says bound a written face, the question R26 asks
+  too. *Test:* that fixture, which fails on the report with a hole walked again.
+  The census credit itself is unreached - the fixture's facet plane is declared
+  by nothing - and goes for good when the census reads what the B-rep's faces
+  stand on rather than flags the writers set.
 - **R23 - the shells were ordered by the union-find's roots. Fixed 2026-09-30.**
   `shellFaces` grouped the faces into connected shells and wrote them in the
   order of each component's root - the face the union happened to leave there,
@@ -5013,6 +5021,21 @@ from coming back - landed with the fix and mutation-checked (F2).
   face, which is a function of the face order alone. *Test:*
   `brep::connectedShells`' own - two cubes, their faces interleaved, come out in
   the order of their first face.
+- **R26 - a curve handed to a hole nothing writes. Fixed 2026-09-30.** An
+  analytic face hands the planar loop across it the curve it bounds itself
+  with - a band's rim, an arc, a plane section, a Bezier run - and the fans,
+  writing straight sides, cannot take one. Three of the four handovers asked
+  first whether the loop was fanned, and none asked it of a hole, whose face
+  is what is fanned: the bore's elliptic rim went to the ring of a fanned
+  facet, the fans wrote chords, and every rim edge was used once.
+  `BodyBuild::boundWritten` is now the one question - an outer loop no
+  analytic face took and nothing fanned, or a hole of one - and the bands'
+  rims (whole rings too, now given up as the ring's own chords from the seam
+  round), their arcs and the plane sections ask it. The Bezier runs have no
+  chords to fall back to yet; a run handed to a loop nothing writes is an open
+  shell `brep::check` names as an EXPORT-ERROR. *Test:*
+  `step-hole-in-a-fanned-facet`, which fails with a hole written whatever its
+  face.
 - **R27 - the validator took a plane for its mirror image. Fixed 2026-09-30.**
   `tests/validatestep.py`, `check_hole_nesting`: loops were grouped into planes
   by a key with the sign of each normal component dropped on its own, so a plane
