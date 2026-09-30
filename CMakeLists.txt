@@ -1713,6 +1713,7 @@ set(CORE_SOURCES
   src/io/step/CornersOnMeshPlanes.cc
   src/io/step/WriteShells.cc
   src/io/step/BrepMirror.cc
+  src/io/step/BrepToStep.cc
   src/io/step/CheckAndReport.cc
   src/io/step/PromoteCurves.cc
   src/io/step/AssembleFaces.cc

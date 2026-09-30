@@ -73,6 +73,9 @@ struct StepKernel::BodyBuild {
   StepKernel& kernel;
   /*! Where every entity made here registers itself: the kernel's. */
   std::vector<Entity *>& entities;
+  // Where this body's entities begin: everything from here to writeShells is its
+  // B-rep's, and none of the product structure is (see writeShells).
+  const std::size_t first_entity = entities.size();
 
   // The inputs, as build_tri_body received them.
   const char *name;

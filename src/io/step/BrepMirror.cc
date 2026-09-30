@@ -76,8 +76,10 @@ brep::PCurve pcurveOf(const K::PCurve *pc)
   if (const auto *line = dynamic_cast<const K::Line2d *>(curve)) {
     brep::Line2 out;
     if (line->point != nullptr) out.origin = Vector2d(line->point->u, line->point->v);
-    if (line->vector != nullptr && line->vector->dir != nullptr)
+    if (line->vector != nullptr && line->vector->dir != nullptr) {
       out.direction = Vector2d(line->vector->dir->u, line->vector->dir->v);
+      out.length = line->vector->length;
+    }
     return out;
   }
   brep::BSpline2 out;

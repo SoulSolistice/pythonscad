@@ -2,6 +2,7 @@
 // built by hand as the writer builds one, and every expectation is read off
 // the solid it describes: a unit cube is 8 corners, 12 edges and 6 faces.
 #include "io/step/BrepMirror.h"
+#include "io/step/BrepToStep.h"
 
 #include <algorithm>
 #include <catch2/catch_all.hpp>
@@ -10,6 +11,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <typeinfo>
 #include <vector>
 
 #include "geometry/Surface.h"
@@ -202,4 +204,101 @@ TEST_CASE("a rational spline with knots is written rational, with its knots", "[
   CHECK(plain.str().find("B_SPLINE_CURVE_WITH_KNOTS('',2,(") != std::string::npos);
   CHECK(plain.str().find("(3,3),(0.,1.),.UNSPECIFIED.);") != std::string::npos);
   for (auto *e : ents) delete e;
+}
+
+namespace {
+
+/*! How many entities of each type, live ones only - what a STEP file's census
+ * counts. */
+std::map<std::string, int> census(const std::vector<K::Entity *>& ents)
+{
+  std::map<std::string, int> out;
+  for (const auto *e : ents) {
+    if (e->live) out[typeid(*e).name()]++;
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("a body translated to STEP reads back as the same body, entity for entity", "[brep-translate]")
+{
+  // The cube as the writer writes it, with one edge carried as a SURFACE_CURVE
+  // with a pcurve on its first face - a straight line across that face's (u, v)
+  // whose span is 2.5, which a direction alone does not state.
+  Graph g;
+  cube(g);
+  K::EdgeCurve *wrapped = g.faces[0]->faceBounds[0]->edgeLoop->faces[0]->edge;
+  auto *context = new K::ParametricContext(g.ents);
+  auto *flat = new K::Line2d(g.ents, new K::Point2d(g.ents, 0.5, 0.25),
+                             new K::Vector2d(g.ents, new K::Direction2d(g.ents, 0.6, 0.8), 2.5));
+  wrapped->round =
+    new K::SurfaceCurve(g.ents, wrapped->round,
+                        {new K::PCurve(g.ents, g.faces[0]->surface,
+                                       new K::DefinitionalRepresentation(g.ents, flat, context))});
+
+  const brep::Body body = step::mirrorBrep(g.faces, g.sources, oneShell(g.faces.size()));
+  std::vector<K::Entity *> out;
+  K::ParametricContext *made = nullptr;
+  const std::vector<K::Face *> faces = step::writeBrep(out, body, made);
+  std::map<const K::Face *, step::FaceSource> sources;
+  for (std::size_t i = 0; i < faces.size(); i++) sources[faces[i]] = g.sources.at(g.faces[i]);
+  const brep::Body back = step::mirrorBrep(faces, sources, oneShell(faces.size()));
+
+  // The same body: every vertex where it was, every edge between the same two
+  // with the same kind of curve and sense, every loop the same coedges.
+  REQUIRE(back.vertices.size() == body.vertices.size());
+  REQUIRE(back.edges.size() == body.edges.size());
+  REQUIRE(back.faces.size() == body.faces.size());
+  for (std::size_t v = 0; v < body.vertices.size(); v++)
+    CHECK(back.vertices[v].point == body.vertices[v].point);
+  for (std::size_t e = 0; e < body.edges.size(); e++) {
+    CHECK(back.edges[e].start == body.edges[e].start);
+    CHECK(back.edges[e].end == body.edges[e].end);
+    CHECK(back.edges[e].same_sense == body.edges[e].same_sense);
+    CHECK(back.edges[e].curve.form.index() == body.edges[e].curve.form.index());
+  }
+  for (std::size_t f = 0; f < body.faces.size(); f++) {
+    CHECK(back.faces[f].form.index() == body.faces[f].form.index());
+    REQUIRE(back.faces[f].loops.size() == body.faces[f].loops.size());
+    for (std::size_t l = 0; l < body.faces[f].loops.size(); l++) {
+      const auto& a = body.faces[f].loops[l].coedges;
+      const auto& b = back.faces[f].loops[l].coedges;
+      REQUIRE(a.size() == b.size());
+      for (std::size_t i = 0; i < a.size(); i++) {
+        CHECK(a[i].edge == b[i].edge);
+        CHECK(a[i].forward == b[i].forward);
+        CHECK(a[i].pcurve.has_value() == b[i].pcurve.has_value());
+      }
+    }
+  }
+  // The pcurve, span and all.
+  const auto& pc = back.faces[0].loops[0].coedges[0].pcurve;
+  REQUIRE(pc.has_value());
+  const auto *line = std::get_if<brep::Line2>(&*pc);
+  REQUIRE(line != nullptr);
+  CHECK(line->length == 2.5);
+  CHECK(line->origin == Vector2d(0.5, 0.25));
+
+  // And the same entities: a census by type of what the writer built and of
+  // what the translator wrote from its B-rep.
+  CHECK(census(out) == census(g.ents));
+  for (auto *e : out) delete e;
+}
+
+TEST_CASE("the translator writes nothing for a body with a face on no form or an edge on no curve",
+          "[brep-translate]")
+{
+  Graph g;
+  cube(g);
+  brep::Body body = step::mirrorBrep(g.faces, g.sources, oneShell(g.faces.size()));
+  for (int which = 0; which < 2; which++) {
+    brep::Body broken = body;
+    if (which == 0) broken.faces[2].form = std::monostate{};
+    else broken.edges[4].curve.form = std::monostate{};
+    std::vector<K::Entity *> out;
+    K::ParametricContext *made = nullptr;
+    CHECK(step::writeBrep(out, broken, made).empty());
+    CHECK(out.empty());  // refused before making anything
+  }
 }

@@ -124,6 +124,9 @@ struct Curve {
 struct Line2 {
   Vector2d origin = Vector2d::Zero();
   Vector2d direction = Vector2d::UnitX();
+  // The line's parameter scale: how far along (u, v) one unit of its parameter
+  // runs - a pcurve's span, which the direction alone does not state.
+  double length = 1;
 };
 struct BSpline2 {
   int degree = 0;

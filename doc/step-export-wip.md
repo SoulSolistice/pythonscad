@@ -4740,6 +4740,23 @@ Owed by 2b's own design, and settled the day after it landed:
 
 A D2 edge's stated error remains R16's sample.
 
+**Step 2c, landed 2026-09-30**: every file is written from its B-rep.
+`step::writeBrep` (`src/io/step/BrepToStep.cc`) is the one place a boundary
+representation becomes ISO 10303 entities; `writeShells` reads the phases'
+entities into the B-rep, sets them aside - everything the body built before the
+shells is its geometry - and writes the B-rep afresh. Proven on all 120 exports
+by `compare`: 0 differences in report, entity census and ledger, and the suite,
+which reads every file back with OpenCASCADE and asserts no orphan, 69 of 69.
+Two things had to be settled first, each its own commit: the file held entities
+nothing referenced (R18), which a translator could never reproduce; and the
+spline serialiser dropped a rational curve's weights where it had knots (R19),
+which the translator - stating every spline's knots - would have reached first.
+A pcurve line gained its span (`Line2::length`), which its direction alone does
+not state. The translator refuses, making nothing, where a face has no form or
+an edge no curve, and the export then says so as an `EXPORT-ERROR` and keeps
+the phases' entities: never a face on nothing. Next, 2d: the phases build the
+B-rep themselves, one by one, and the mirror shrinks to nothing.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral
