@@ -471,7 +471,9 @@ struct StepKernel::BodyBuild {
    * whether it runs from `a`. One per mesh edge, whoever names it first: the
    * one an analytic face made along it, read, or else one built here, as the
    * line from its first vertex to its second - which is what the edge map
-   * made as an entity before (StepKernel::create_line_edge_curve). */
+   * made as an entity before (StepKernel::create_line_edge_curve). Asked only
+   * of two corners that are two vertices: where the placement made them one,
+   * there is no edge between them (open item 39, R17). */
   std::size_t lineEdge(int a, int b, bool& forward);
   std::map<std::pair<int, int>, std::size_t> line_edges;  // mesh edge (lo, hi) -> B-rep edge
   /*! brep::check over the B-rep: the structure the file asserts, held to the

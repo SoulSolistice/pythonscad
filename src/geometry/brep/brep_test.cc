@@ -196,6 +196,24 @@ TEST_CASE("an edge no face uses, and a vertex no edge ends at, are not part of t
   CHECK(defects.size() == 3);
 }
 
+TEST_CASE("a line from a vertex to itself is named; a circle closed on one vertex is not", "[brep]")
+{
+  // A face whose corners the placement merged keeps the edge between them: a
+  // line from corner 0 to corner 0, inserted into the bottom face's loop where
+  // it still closes. The cylinder's circles start and end at one vertex each
+  // and are whole curves.
+  Body body = cube();
+  brep::Edge none;
+  none.start = none.end = 0;
+  none.curve.form = brep::Line{body.vertices[0].point, Vector3d(1, 0, 0)};
+  none.evidence = EvidenceClass::D0;
+  body.edges.push_back(none);
+  auto& coedges = body.faces[0].loops[0].coedges;
+  coedges.insert(coedges.begin(), Coedge{body.edges.size() - 1, true, std::nullopt});
+  CHECK(says(brep::check(body), "edge 12 is a line from a vertex to itself"));
+  CHECK_FALSE(says(brep::check(cylinder()), "from a vertex to itself"));
+}
+
 TEST_CASE("a body's shells are its connected components, in the order of their first face", "[brep]")
 {
   // Two unit cubes two apart share nothing, so they are two shells of six faces

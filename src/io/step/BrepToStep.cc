@@ -22,11 +22,12 @@ K::RoundType *curveOf(std::vector<K::Entity *>& ents, const brep::CurveForm& for
                       const Vector3d& end)
 {
   if (const auto *line = std::get_if<brep::Line>(&form)) {
-    // The writer's own: from the edge's start, the magnitude its length.
-    const double len = (end - start).norm();
-    const Vector3d dir = len < 1e-12 ? Vector3d(1, 0, 0) : line->direction;
-    return new K::Line(ents, new K::Point(ents, line->origin),
-                       new K::Vector(ents, new K::Direction(ents, dir), len < 1e-12 ? 1.0 : len));
+    // The writer's own: from the edge's start, the magnitude its length. Its
+    // direction is the B-rep's, never one made up for an edge of no length -
+    // brep::check names a line from a vertex to itself (open item 39, R17).
+    return new K::Line(
+      ents, new K::Point(ents, line->origin),
+      new K::Vector(ents, new K::Direction(ents, line->direction), (end - start).norm()));
   }
   using Kind = brep::Conic::Kind;
   if (const auto *c = std::get_if<brep::Conic>(&form)) {

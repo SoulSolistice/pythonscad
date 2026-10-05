@@ -381,6 +381,11 @@ std::vector<std::string> check(const Body& body)
       say(name("edge", e) + " names a vertex the body does not have");
     if (edge.evidence == EvidenceClass::Unstated) say(name("edge", e) + " states no evidence class");
     if (std::holds_alternative<std::monostate>(edge.curve.form)) say(name("edge", e) + " has no curve");
+    // A closed curve may start and end at one vertex; a line cannot, and one
+    // that does has no length and a direction nothing determines - an edge that
+    // should not exist (open item 39, R17).
+    if (std::holds_alternative<Line>(edge.curve.form) && edge.start == edge.end)
+      say(name("edge", e) + " is a line from a vertex to itself");
     if (const auto *spline = std::get_if<BSpline>(&edge.curve.form)) {
       if (!knotsFit(spline->points.size(), spline->degree, spline->knots, spline->mults)) {
         int counted = 0;

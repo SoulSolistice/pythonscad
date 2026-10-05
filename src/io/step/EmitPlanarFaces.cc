@@ -35,6 +35,11 @@ void StepKernel::BodyBuild::emitPlanarFaces()
       bound.coedges.push_back(brep::Coedge{reader.edge(edge), sense, std::nullopt});
     };
     auto line = [&](int a, int b) {
+      // Two corners the placement brought onto one point are one vertex, and
+      // the mesh edge between them is no edge of the file: the loop runs on
+      // from that vertex. Written, it was a line from a point to itself with a
+      // direction made up for it (open item 39, R17).
+      if (brepVertex(a) == brepVertex(b)) return;
       bool forward = true;
       const std::size_t e = lineEdge(a, b, forward);
       bound.coedges.push_back(brep::Coedge{e, forward, std::nullopt});

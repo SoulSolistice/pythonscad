@@ -217,15 +217,13 @@ std::size_t StepKernel::BodyBuild::lineEdge(int a, int b, bool& forward)
       brep::Edge edge;
       edge.start = from;
       edge.end = brepVertex(b);
-      // From its first vertex, along the unit vector to its second - a zero
-      // length one along x, since a direction may not be zero (see
-      // StepKernel::create_line_edge_curve, which this replaces).
+      // From its first vertex, along the unit vector to its second. Two
+      // vertices are one wherever their points are (get_vertex), so the two
+      // differ and the direction is theirs: a line of no length is not asked
+      // for (the planar writer skips it) and no direction is invented for one
+      // (open item 39, R17).
       const Vector3d p = brep_body.vertices[edge.start].point;
-      Vector3d v = brep_body.vertices[edge.end].point - p;
-      const double len = v.norm();
-      if (len < 1e-12) v = Vector3d(1, 0, 0);
-      else v /= len;
-      edge.curve.form = brep::Line{p, v};
+      edge.curve.form = brep::Line{p, (brep_body.vertices[edge.end].point - p).normalized()};
       edge.same_sense = true;
       brep_body.edges.push_back(std::move(edge));
       e = brep_body.edges.size() - 1;
