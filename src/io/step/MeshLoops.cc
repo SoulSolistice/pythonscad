@@ -9,6 +9,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include "geometry/recognition/Exact.h"
 #include "io/step/LoopGeometry.h"
 #include "utils/printutils.h"
 
@@ -69,9 +70,13 @@ void StepKernel::BodyBuild::buildLoops()
     }
 
     Vector3d norm = polygonNormal(vertices, loop);
-    if (norm.norm() < area_eps) {
-      // zero area polygon, exporting it would create a face without a usable
-      // surface normal
+    std::vector<Vector3d> corners;
+    for (const int w : loop) corners.push_back(vertices[w]);
+    if (!recognition::statesPlane(corners)) {
+      // A polygon whose corners state no plane, at machine precision - asked as
+      // the merge asks it, where it was an absolute area of 1e-12 whatever the
+      // part's size (open item 39, R9). Exporting it would create a face
+      // without a usable surface normal.
       degenerated_cnt++;
       zero_area_cnt++;
       lost_area += 0.5 * norm.norm();

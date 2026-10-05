@@ -139,6 +139,51 @@ inline bool samePoint(const Vector3d& p, const Vector3d& q)
   return (p - q).norm() <= forwardError(9, p.norm() + q.norm());
 }
 
+/*! Whether three points state a plane, at machine precision: their cross
+ * product against its forward error - each difference rounded relative to the
+ * points it subtracts, and the cross product over the magnitudes it multiplies.
+ * Three on a line state none. "Does this polygon have a plane?", asked in one
+ * place: by the triangle merge, the loops, the fans' acceptance and their writer
+ * (open item 39, R9) - where the loops and the fans asked an absolute area of
+ * 1e-12, whatever the part's size. */
+inline bool statesPlane(const Vector3d& a, const Vector3d& b, const Vector3d& c)
+{
+  const Vector3d u = b - a, v = c - a;
+  return u.cross(v).norm() >
+         forwardError(9, (a.norm() + b.norm()) * v.norm() + u.norm() * (a.norm() + c.norm()));
+}
+
+/*! The best conditioned three of `points`, as indices: the first, the one
+ * farthest from it, and the one farthest from their line. Chosen by distance,
+ * which only picks; zero in `ib` or `ic` where every point is on the first, or
+ * on the line of the first two. */
+inline void spanningThree(const std::vector<Vector3d>& points, std::size_t& ib, std::size_t& ic)
+{
+  ib = ic = 0;
+  if (points.empty()) return;
+  const Vector3d& a = points[0];
+  double far = 0;
+  for (std::size_t k = 1; k < points.size(); k++) {
+    const double d = (points[k] - a).norm();
+    if (d > far) far = d, ib = k;
+  }
+  if (ib == 0) return;
+  const Vector3d& b = points[ib];
+  far = 0;
+  for (std::size_t k = 1; k < points.size(); k++) {
+    const double d = (b - a).cross(points[k] - a).norm();
+    if (d > far) far = d, ic = k;
+  }
+}
+
+/*! Whether a polygon's corners state a plane: whether its spanning three do. */
+inline bool statesPlane(const std::vector<Vector3d>& points)
+{
+  std::size_t ib = 0, ic = 0;
+  spanningThree(points, ib, ic);
+  return ib != 0 && ic != 0 && statesPlane(points[0], points[ib], points[ic]);
+}
+
 /*! Whether `p` is on the plane through `a`, `b` and `c`, at machine precision:
  * the orientation determinant (b - a) x (c - a) . (p - a) against its forward
  * error - each difference rounded relative to the points it subtracts (3 each),
@@ -151,10 +196,7 @@ inline bool coplanar(const Vector3d& a, const Vector3d& b, const Vector3d& c, co
   const double scale = (a.norm() + b.norm()) * v.norm() * w.norm() +
                        u.norm() * (a.norm() + c.norm()) * w.norm() +
                        u.norm() * v.norm() * (a.norm() + p.norm());
-  if (!(u.cross(v).norm() >
-        forwardError(9, (a.norm() + b.norm()) * v.norm() + u.norm() * (a.norm() + c.norm())))) {
-    return false;
-  }
+  if (!statesPlane(a, b, c)) return false;
   return fabs(det) <= forwardError(23, scale);
 }
 
@@ -168,24 +210,11 @@ inline bool coplanar(const Vector3d& a, const Vector3d& b, const Vector3d& c, co
 inline bool allCoplanar(const std::vector<Vector3d>& points)
 {
   if (points.size() < 4) return true;
-  const Vector3d& a = points[0];
   std::size_t ib = 0, ic = 0;
-  double far = 0;
-  for (std::size_t k = 1; k < points.size(); k++) {
-    const double d = (points[k] - a).norm();
-    if (d > far) far = d, ib = k;
-  }
-  if (ib == 0) return true;
-  const Vector3d& b = points[ib];
-  far = 0;
-  for (std::size_t k = 1; k < points.size(); k++) {
-    const double d = (b - a).cross(points[k] - a).norm();
-    if (d > far) far = d, ic = k;
-  }
-  if (ic == 0) return true;
-  const Vector3d& c = points[ic];
+  spanningThree(points, ib, ic);
+  if (ib == 0 || ic == 0) return true;
   for (const Vector3d& p : points) {
-    if (!coplanar(a, b, c, p)) return false;
+    if (!coplanar(points[0], points[ib], points[ic], p)) return false;
   }
   return true;
 }

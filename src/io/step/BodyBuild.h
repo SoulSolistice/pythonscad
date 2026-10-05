@@ -499,8 +499,6 @@ struct StepKernel::BodyBuild {
   // and it is known which faces would mind. Nothing else writes to this.
   std::vector<Vector3d> vertices = mesh_vertices;
   const double model_tol = tol > 0 ? tol : 1e-5;
-  // twice the area of the smallest polygon still considered a face
-  static constexpr double area_eps = 1e-12;
   const std::size_t face_cnt = faces.size();
 
   // Each face of the mesh as a loop of canonical vertices, with its plane; see

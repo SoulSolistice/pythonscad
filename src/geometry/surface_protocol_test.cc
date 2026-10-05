@@ -299,6 +299,28 @@ TEST_CASE("a face's corners are on one plane, or one is off it, at machine preci
     {Vector3d(0, 0, 0), Vector3d(1, 1, 1), Vector3d(2, 2, 2), Vector3d(5, 5, 5)}));
 }
 
+TEST_CASE("three points state a plane by the machine's precision, not by an area", "[recognition]")
+{
+  // A sliver on a 1000 mm part: twice its area is 3e-12, above the absolute
+  // 1e-12 the loops and the fans asked, and below what the arithmetic placing
+  // corners 1000 out can promise - so no plane (open item 39, R9).
+  const Vector3d a(1000, 0, 0), b(1001, 0, 0), c(1000.5, 3e-12, 0);
+  CHECK((b - a).cross(c - a).norm() > 1e-12);
+  CHECK_FALSE(recognition::statesPlane(a, b, c));
+  // A triangle on a part a thousandth of a millimetre across: twice its area
+  // is 1e-13, below the old bound, and a plane at that size by a wide margin.
+  CHECK(recognition::statesPlane(Vector3d(0, 0, 0), Vector3d(1e-3, 0, 0), Vector3d(0, 1e-10, 0)));
+  // A polygon asks its spanning three: the sliver with a corner between two of
+  // its own states none, and a square does.
+  CHECK_FALSE(recognition::statesPlane(std::vector<Vector3d>{a, Vector3d(1000.25, 0, 0), b, c}));
+  CHECK(recognition::statesPlane(
+    std::vector<Vector3d>{Vector3d(0, 0, 0), Vector3d(1, 0, 0), Vector3d(1, 1, 0), Vector3d(0, 1, 0)}));
+  // and points on one line, or one point, state none
+  CHECK_FALSE(recognition::statesPlane(
+    std::vector<Vector3d>{Vector3d(0, 0, 0), Vector3d(1, 1, 1), Vector3d(2, 2, 2)}));
+  CHECK_FALSE(recognition::statesPlane(std::vector<Vector3d>{Vector3d(1, 2, 3)}));
+}
+
 TEST_CASE("a face on a declared plane is flat where it stands, not wherever its corners went",
           "[surface][identity]")
 {

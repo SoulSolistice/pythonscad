@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
+#include "geometry/recognition/Exact.h"
 #include "utils/printutils.h"
 
 void StepKernel::BodyBuild::emitCornerFans()
@@ -35,7 +36,7 @@ void StepKernel::BodyBuild::emitCornerFans()
       const int tri[3] = {corner[0], corner[1], corner[2]};
       const Vector3d e1 = vertices[tri[1]] - vertices[tri[0]];
       const Vector3d e2 = vertices[tri[2]] - vertices[tri[0]];
-      if (e1.cross(e2).norm() < area_eps) {
+      if (!recognition::statesPlane(vertices[tri[0]], vertices[tri[1]], vertices[tri[2]])) {
         no_plane++;
         continue;
       }

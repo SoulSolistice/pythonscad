@@ -197,7 +197,13 @@ void StepKernel::BodyBuild::applyCornerMoves()
         double worst_tri = tris.empty() ? -1 : std::numeric_limits<double>::max();
         for (const auto& t : tris) {
           const Vector3d q0 = at_moved(t[0]), q1 = at_moved(t[1]), q2 = at_moved(t[2]);
-          worst_tri = std::min(worst_tri, 0.5 * (q1 - q0).cross(q2 - q0).dot(nhat));
+          // A triangle that states no plane at machine precision winds neither
+          // way, and the writer could not write it: as wrong as one turned over
+          // (open item 39, R9) - asked here as there, so the fan the placement
+          // accepts is the fan the writer writes.
+          const double area =
+            recognition::statesPlane(q0, q1, q2) ? 0.5 * (q1 - q0).cross(q2 - q0).dot(nhat) : 0.0;
+          worst_tri = std::min(worst_tri, area);
         }
         if (worst_tri <= 0) {
           bent++;

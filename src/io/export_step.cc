@@ -1225,8 +1225,7 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
       }
       const Vector3d b = ps->vertices[poly[ib]], c = ps->vertices[poly[ic]];
       const Vector3d n = (b - a).cross(c - a);
-      if (!(n.norm() > recognition::forwardError(9, (a.norm() + b.norm()) * (c - a).norm() +
-                                                      (b - a).norm() * (a.norm() + c.norm())))) {
+      if (!recognition::statesPlane(a, b, c)) {
         slivers++;  // three corners on a line: no plane to be flat in
         continue;
       }

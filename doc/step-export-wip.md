@@ -4958,7 +4958,14 @@ from coming back - landed with the fix and mutation-checked (F2).
   than a case to paper over", its comment says, and then drops it, which opens the
   shell with nothing said. *Test:* the mirror's closed-shell check (step 2)
   names the edge used once; planted with a dropped fan triangle.
-- **R9 - "does this polygon have a plane?" asked two ways.** The merge decides
+- **R9 - "does this polygon have a plane?" asked two ways. Fixed 2026-10-05**,
+  where the fans moved: `recognition::statesPlane` - three points' cross
+  product against its forward error, a polygon by its spanning three - is the
+  one predicate, asked by the merge's report, `coplanar`, `MeshLoops`, the fans'
+  acceptance in `CornersApply` (a triangle with no plane winds neither way) and
+  their writer; `area_eps` is gone. Neutral over 130 exports: no part measured
+  sits in the band where the two disagree. `model_tol`'s silent 1e-5 is R11's.
+  The merge decides
   it at machine precision; `MeshLoops.cc` and the fans by `area_eps`, an absolute
   1e-12, whatever the part's size - and `model_tol` falls back to a silent 1e-5.
   *Test:* a unit test on the one predicate once both ask it: a sliver on a
