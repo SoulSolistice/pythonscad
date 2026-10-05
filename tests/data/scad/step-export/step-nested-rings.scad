@@ -18,6 +18,13 @@
 // = 10220*pi.
 // ROUNDTRIP: Cylinder=5 Plane=6
 // VOLUME: 32107.0769197
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// The repair this fixture exists for: a hole recorded against the face
+// further out is moved to the face that encloses it.
+// KNOWN-EXPORT-WARNING: to the enclosing face
 $fn = 32;
 union() {
   cylinder(h = 2, r = 40);

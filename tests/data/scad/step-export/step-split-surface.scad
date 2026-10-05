@@ -45,6 +45,24 @@
 // vetoes a named facet (doc/step-export-wip.md, open item 34); the test
 // fails the day it is no longer raised.
 // KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// One declared surface written partly by one recogniser and partly by
+// another, the division decided by pass order - the split surface of open
+// item 26, which R0 (item 29) has not reached here.
+// KNOWN-EXPORT-WARNING: split between different kinds of recogniser
+// KNOWN-EXPORT-WARNING: so this is one connected region cut in two by pass order
+//
+// The split warning is raised although its own detail line finds the pieces
+// disconnected and two faces correct - a defect of the warning, not of the
+// file (open item 43, W2).
+// KNOWN-EXPORT-WARNING: so the pieces are disconnected and two faces are correct
+//
+// A plane fitted to facets does not survive the corner placement and its
+// section falls back to chords; a declared plane would (open item 11).
+// KNOWN-EXPORT-WARNING: agreed before the corners were placed
 $fn = 32;
 difference() {
   union() {

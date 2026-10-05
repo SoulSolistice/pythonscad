@@ -24,5 +24,14 @@
 // middle and 312 + 52*pi for the two rounded ends, so 2*pi*(1612 + 52*pi).
 // ROUNDTRIP: Cylinder=2 Plane=2 Torus=4
 // VOLUME: 11154.9335655
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// Corners the file does not write: the export writes one closed face here,
+// and every corner it does write is on its surface at about 1e-15
+// (scripts/step-corner-stray.py). The arbiter counts corners of faces that
+// are not written, against the wrong surface - open item 43, W1.
+// KNOWN-EXPORT-WARNING: left off a surface the file writes a face of them on
 $fn = 32;
 rotate_extrude() offset(r = 2) translate([10, 0]) square([6, 10]);

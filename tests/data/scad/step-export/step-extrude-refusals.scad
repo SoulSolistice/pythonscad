@@ -76,6 +76,14 @@
 // taper is a faceted export, so the figure would be the mesh's own and has no
 // closed form to check it against.
 // ROUNDTRIP: Cylinder=1 SurfaceOfExtrusion=2 Plane=2056
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// Regions the approximation finds no fit for stay facets, which is a valid
+// export and what the pass is built to do; that no closed form exists for
+// them is not proven.
+// KNOWN-EXPORT-WARNING: no fit having been found
 $fn = 32;
 linear_extrude(height = 20, twist = 90) circle(r = 4);
 translate([20, 0, 0]) linear_extrude(height = 20, scale = [0.5, 1]) circle(r = 4);

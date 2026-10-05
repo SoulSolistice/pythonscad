@@ -66,6 +66,34 @@ makes it fire.
 # region - their maker declared the cylinder, and the sweep's pass ran first.
 # Fixed 2026-09-29: a D1 proposer takes no facet of another surface's D0 region,
 # whichever pass runs first, and the marking announced it.
+#
+# Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+# any other fails the test, and so does a named one no run raises any more.
+#
+# The exact tier is not asked to approximate, so a declared sweep is left
+# faceted for the approximation flag - by design.
+# KNOWN-EXPORT-WARNING: await the approximation flag
+#
+# One declared surface written partly by one recogniser and partly by
+# another, the division decided by pass order - the split surface of open
+# item 26, which R0 (item 29) has not reached here.
+# KNOWN-EXPORT-WARNING: split between different kinds of recogniser
+# KNOWN-EXPORT-WARNING: so this is one connected region cut in two by pass order
+#
+# The census calls a declared sweep unexplained in the same run that says
+# it was left faceted for the approximation flag - a defect of the census
+# (open item 43, W3).
+# KNOWN-EXPORT-WARNING: a declaration that is not taken is a bug report
+# KNOWN-EXPORT-WARNING: have mesh held under another surface's name
+#
+# The approximation fits a surface the model declared, the declaration
+# having been refused upstream - open item 19.
+# KNOWN-EXPORT-WARNING: fitted to a surface the model had already declared
+#
+# Crossings of a declared sweep the fitter does not reach at machine
+# precision, written as chords: a sweep answers by projecting, not
+# algebraically (open item 10, B1/B2).
+# KNOWN-EXPORT-WARNING: could not be written as that curve and fell back to a chord
 from pythonscad import *
 import math
 

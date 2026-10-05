@@ -75,6 +75,23 @@
 // vetoes a named facet (doc/step-export-wip.md, open item 34); the test
 // fails the day it is no longer raised.
 // KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// Regions the approximation finds no fit for stay facets, which is a valid
+// export and what the pass is built to do; that no closed form exists for
+// them is not proven.
+// KNOWN-EXPORT-WARNING: no fit having been found
+//
+// A plane fitted to facets does not survive the corner placement and its
+// section falls back to chords; a declared plane would (open item 11).
+// KNOWN-EXPORT-WARNING: agreed before the corners were placed
+//
+// A conic cut by a facet named for nothing: whether that is a crossing of
+// two declared surfaces or the seam of one waits on its maker's name
+// (open item 40).
+// KNOWN-EXPORT-WARNING: cut from a quadric by a plane whose facets are named for nothing
 $fn = 24;
 R = 30; Ri = 24; H = 30;
 z0 = 8; h = 8; ramp = 3;

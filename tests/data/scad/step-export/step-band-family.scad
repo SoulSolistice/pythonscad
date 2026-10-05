@@ -41,6 +41,19 @@
 // vetoes a named facet (doc/step-export-wip.md, open item 34); the test
 // fails the day it is no longer raised.
 // KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// The exact tier is not asked to approximate, so a declared sweep is left
+// faceted for the approximation flag - by design.
+// KNOWN-EXPORT-WARNING: await the approximation flag
+//
+// The census's side of the KNOWN-EXPORT-ERROR above for the cylinder; for
+// the sweep, it calls unexplained one the same run says was left faceted
+// for the approximation flag (open item 43, W3).
+// KNOWN-EXPORT-WARNING: a declaration that is not taken is a bug report
+// KNOWN-EXPORT-WARNING: have mesh held under another surface's name
 FN = 32;
 
 ridgeDepth = 2;

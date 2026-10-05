@@ -30,6 +30,18 @@
 //
 // No ROUNDTRIP: or VOLUME: line: the corners are faceted, so both would state
 // the mesh.
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// The census's side of the KNOWN-EXPORT-ERROR above: a declaration with mesh
+// and no face written on it is one whose facets are not written on it.
+// KNOWN-EXPORT-WARNING: a declaration that is not taken is a bug report
+// KNOWN-EXPORT-WARNING: have mesh held under another surface's name
+//
+// Unexplained: vertices of the roof's approximation tier off their own
+// edges' curves by up to 2.4 - SOLIDWORKS fault code 7 (open item 43, W5).
+// KNOWN-EXPORT-WARNING: not on the curve its own edge is written as
 roof(method = "voronoi") difference() {
   square(20, center = true);
   square(6, center = true);

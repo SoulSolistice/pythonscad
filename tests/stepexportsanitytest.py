@@ -111,6 +111,23 @@ def export(openscad, inputfile, outfile, extra_args, env=None):
             failquit("the exporter says its own output is wrong (%s):\n  %s"
                      % (" ".join(extra_args) or "default", line))
         KNOWN_SEEN.update(hit)
+    # And every EXPORT-WARNING, the same way. A warning is the exporter saying
+    # something is short of what it should be - a corner off its surface, a
+    # surface split by pass order, a declaration nobody took - and until
+    # 2026-10-05 none of them failed anything, so a change could start one on any
+    # fixture and pass (open item 43). Each one a fixture raises is named in a
+    # KNOWN-EXPORT-WARNING: line with the reason it is known; any other fails,
+    # and a named one no run raises any more fails at the end of this script.
+    known = known_export_errors(inputfile, "KNOWN-EXPORT-WARNING")
+    warnings = [line for line in output.splitlines() if "EXPORT-WARNING" in line]
+    for line in warnings:
+        hit = [k for k in known if k in line]
+        if not hit:
+            failquit("the exporter warns about its own output, and the fixture does not "
+                     "name the warning (%s):\n  %s - fix it, or name it with a "
+                     "KNOWN-EXPORT-WARNING: line saying why it is known"
+                     % (" ".join(extra_args) or "default", line))
+        KNOWN_WARNINGS_SEEN.update(hit)
     # Nothing in the file that nothing references: an entity reached by no solid
     # is geometry the file holds and no shape uses, and one a writer working
     # from the B-rep could never reproduce (open item 39, R18). Any run, any
@@ -125,9 +142,10 @@ def export(openscad, inputfile, outfile, extra_args, env=None):
 
 
 KNOWN_SEEN = set()
+KNOWN_WARNINGS_SEEN = set()
 
 
-def known_export_errors(path):
+def known_export_errors(path, tag="KNOWN-EXPORT-ERROR"):
     """Systemic defects a fixture is known to carry: `KNOWN-EXPORT-ERROR: <text>`,
     each a substring of an EXPORT-ERROR line the exporter raises about its own
     output. Narrower than WILL_FAIL on purpose - that passes a test whatever it
@@ -140,9 +158,11 @@ def known_export_errors(path):
     not required, for an error that came and went between identical runs on the
     CGAL backend (doc/step-export-wip.md, open item 28). It went with item 28 on
     2026-09-27: the exporter numbers the mesh by its positions, so an export is
-    the same every run and an error is either raised or not."""
+    the same every run and an error is either raised or not.
+
+    `KNOWN-EXPORT-WARNING:` names an EXPORT-WARNING the same way (open item
+    43), with the tag passed."""
     found = []
-    tag = "KNOWN-EXPORT-ERROR"
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             m = re.search(r"(?<![-\w])" + tag + r":\s*(.+?)\s*$", line)
@@ -822,6 +842,11 @@ if ok:
         if known not in KNOWN_SEEN:
             print("the fixture lists a KNOWN-EXPORT-ERROR no run raised: %r - it is fixed, "
                   "take the directive out" % known, file=sys.stderr)
+            ok = False
+    for known in known_export_errors(inputfile, "KNOWN-EXPORT-WARNING"):
+        if known not in KNOWN_WARNINGS_SEEN:
+            print("the fixture lists a KNOWN-EXPORT-WARNING no run raised: %r - it is fixed "
+                  "or no longer reached, take the directive out" % known, file=sys.stderr)
             ok = False
 
 if ok:

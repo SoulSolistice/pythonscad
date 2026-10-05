@@ -1789,6 +1789,7 @@ did once, and every approximation fixture failed at the same moment.
 | `EDGES:` / `EDGES-APPROX:` | the kernel's edge census | mostly |
 | `CANONICAL:` | what the kernel thinks each B-spline really is | no — it is an audit |
 | `KNOWN-EXPORT-ERROR:` | a systemic defect the fixture is known to carry, by a substring of the `EXPORT-ERROR` line; any other error fails the test, and so does this one once no run raises it | no - it names a defect, it asserts none |
+| `KNOWN-EXPORT-WARNING:` | the same for an `EXPORT-WARNING`, with the reason it is known written above it; any warning not named fails the test, and so does a named one once no run raises it | no - it names a warning, it asserts none |
 
 **Every run fails on an `EXPORT-ERROR`, since 2026-09-24.** The exporter raises
 one where it can tell its own output is wrong - a shadow check that disagrees, a
@@ -1797,6 +1798,13 @@ tessellation. Until then the sanity test never read them and they were loud to
 nobody. A fixture that carries a known one names it with `KNOWN-EXPORT-ERROR:`,
 never with `WILL_FAIL`, which passes a test whatever it fails on and so blinds it
 to every other regression.
+
+**And on an `EXPORT-WARNING`, since 2026-10-05**, unless the fixture names it with
+`KNOWN-EXPORT-WARNING:` and says why it is known (open item 43). A warning nobody
+reads is a regression nobody sees: the exporter says something is short, and the
+next change can make it say so on a fixture it never did. Name it by the words
+that say what it is, never by a count, so a number that moves keeps its name and
+a new kind of warning does not inherit one.
 
 **`ROUNDTRIP:` is exhaustive.** It accounts for every surface kind the kernel
 reads, not only the ones a fixture names. Checking a subset let an unlisted kind

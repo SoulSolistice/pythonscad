@@ -46,6 +46,33 @@
 // vetoes a named facet (doc/step-export-wip.md, open item 34); the test
 // fails the day it is no longer raised.
 // KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// The exact tier is not asked to approximate, so a declared sweep is left
+// faceted for the approximation flag - by design.
+// KNOWN-EXPORT-WARNING: await the approximation flag
+//
+// The census's side of the KNOWN-EXPORT-ERROR above: a declaration with mesh
+// and no face written on it is one whose facets are not written on it.
+// KNOWN-EXPORT-WARNING: a declaration that is not taken is a bug report
+// KNOWN-EXPORT-WARNING: have mesh held under another surface's name
+//
+// Raised by the CGAL re-export only - the Manifold runs assert its absence
+// above, and the CGAL run's output is not read for EXPECT-NOT. Why the CGAL
+// mesh has no station at the law corners is unexplained (open item 43, W4).
+// KNOWN-EXPORT-WARNING: lie across a corner of its laws
+//
+// True of the file: a corner of the sweep's face is off the fitted surface,
+// the placement that reaches it folding a face - the claim decided before
+// placement, open item 25.
+// KNOWN-EXPORT-WARNING: left off a surface the file writes a face of them on
+//
+// Crossings of a declared sweep the fitter does not reach at machine
+// precision, written as chords: a sweep answers by projecting, not
+// algebraically (open item 10, B1/B2).
+// KNOWN-EXPORT-WARNING: could not be written as that curve and fell back to a chord
 FN = 32;
 
 ridgeDepth = 2;

@@ -78,6 +78,15 @@
 // sequence-agnostic*. Tolerated by name until it lands; the test fails the
 // day it is no longer raised.
 // KNOWN-EXPORT-ERROR: split on a boundary the model does not have
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// One declared surface written partly by one recogniser and partly by
+// another, the division decided by pass order - the split surface of open
+// item 26, which R0 (item 29) has not reached here.
+// KNOWN-EXPORT-WARNING: split between different kinds of recogniser
+// KNOWN-EXPORT-WARNING: so this is one connected region cut in two by pass order
 $fn = 32;
 difference() {
   cylinder(h = 30, r = 12);

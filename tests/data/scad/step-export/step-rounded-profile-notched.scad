@@ -43,6 +43,15 @@
 //     2 pi 1612 + 104 pi^2 - 720 pi = 8892.9868623
 // VOLUME: 8892.9868623
 // VOLUME-APPROX: 8892.9868623
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// Corners the file does not write: the export writes one closed face here,
+// and every corner it does write is on its surface at about 1e-15
+// (scripts/step-corner-stray.py). The arbiter counts corners of faces that
+// are not written, against the wrong surface - open item 43, W1.
+// KNOWN-EXPORT-WARNING: left off a surface the file writes a face of them on
 $fn = 32;
 rotate_extrude() difference() {
   offset(r = 2) translate([10, 0]) square([6, 10]);

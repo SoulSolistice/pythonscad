@@ -5437,6 +5437,77 @@ the next reason - the polyhedron's leaf of the model's solid states only an
 envelope, never "on a face". A faceted leaf whose every face is named for a
 record states, in principle, the solid those records bound.
 
+### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
+
+**Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`
+is the exporter saying its output is short of what it should be, and the sanity
+test read none of them: a change could start one on any fixture and pass. Now
+`export()` reads them as it reads errors - from every run, faceted, comma
+locale, analytic, approximation, CGAL - and a fixture names each one it raises in
+a `KNOWN-EXPORT-WARNING: <text>` line, with the reason it is known above it. Any
+other warning fails the test; a named one that no run raises any more fails it
+too, so a fix announces itself. Mutation-checked both ways on step-nested-rings.
+It is the precondition for the "something moved" tripwire, which waits on this.
+
+**The census, at e45e0146c**: 23 of the suite's fixtures raise 16 kinds. Each
+was looked up, and where its truth was in doubt measured against the written
+file - which found that five of them are wrong about the file, or wrong to
+warn. Those are named in their fixtures and listed here as W1-W5:
+
+| warning | fixtures | why it is known |
+| --- | --- | --- |
+| split between different kinds of recogniser, *one connected region cut in two by pass order* | sphere, sphere-closed, approximate-turned, bored-cone, bored-cylinder, region-pocket, split-surface, cap-meets-wall, hole-in-a-fanned-facet, declare-grid-two-bands | the split surface, item 26; R0 (item 29) has not reached these |
+| the same, *the pieces are disconnected and two faces are correct* | split-surface | **W2** |
+| corners left off a surface the file writes a face of them on - *no candidate satisfies every face* | torus, sphere, sphere-closed, rounded-profile, rounded-profile-notched, approximate-turned | **W1** |
+| the same - *the one that does would fold a face* | declare-grid, -strip, -topcap, -scad, sweep-law-corners | true of the file: a sweep corner 0.022 to 0.060 off; the claim decided before placement, item 25 |
+| declared sweeps left faceted - await the approximation flag | the declare-grid family, sweep-law-corners, band-family | the exact tier is not asked to approximate - by design |
+| a declaration that is not taken is a bug report, and its *of those* line | cap-meets-wall, hole-in-a-fanned-facet, sweep-law-corners, band-family (cylinder), roof-voronoi | the census's side of the fixture's KNOWN-EXPORT-ERROR: a declaration with mesh and no face is one whose facets are not written on it |
+| the same, for a sweep | the declare-grid family, band-family (sweep) | **W3** |
+| edges could not be written as that curve and fell back to a chord | the declare-grid family, sweep-law-corners | a sweep answers by projecting; item 10, B1/B2 |
+| plane sections agreed before the corners were placed and do not after | split-surface, exchange-never-surrender | a fitted plane does not survive the placement; item 11 |
+| regions stay faceted, no fit having been found | extrude-refusals, exchange-never-surrender | the pass's design; that no closed form exists is not proven |
+| a region fitted to a surface the model had already declared | declare-grid-two-bands | item 19 |
+| a conic cut by a plane whose facets are named for nothing | exchange-never-surrender | item 40 (R4's new warning) |
+| moved a hole to the enclosing face | nested-rings | the repair this fixture exists for |
+| a band rim given up as one arc | hole-in-a-fanned-facet | the fanned facet this fixture is about cannot be handed an edge |
+| facets of a declared sweep lie across a corner of its laws | sweep-law-corners, CGAL only | **W4** |
+| vertices not on the curve their own edge is written as | roof-voronoi | **W5** |
+
+**W1 - the arbiter reports corners the file does not write.** On the torus it
+says 960 corners are left off a surface by 6.0 at worst - twice the tube's
+radius - and on the sphere 448 by 8.97, sphere-closed 240 by 4.30, both
+rounded profiles 896 by 0.828 and step-approximate-turned 448 by 8.97. The
+files hold one closed face each, or a handful: every corner they write is on
+its surface at 1.6e-15 or better (`scripts/step-corner-stray.py`). So the
+arbiter counts corners of faces that are never written, against a surface
+they are not on. A defect of the report, and on the evidence a large one: its
+own numbers are what the next placement change would be judged by.
+
+**W2 - the split warning fires on pieces it finds disconnected.** Its detail
+line says "two faces are correct" and the parent line warns anyway; only a
+connected region cut by pass order is the defect it exists for.
+
+**W3 - the census calls a declared sweep unexplained when the same run says why
+it is faceted.** The exact tier leaves a sweep for the approximation flag and
+says so, and the declaration census then lists it as "not taken, nothing read
+it". On step-declare-grid the census does this on the Manifold run and not on
+the CGAL one.
+
+**W4 - step-sweep-law-corners raises the law-corner warning on its CGAL
+re-export.** The fixture puts a station at each corner of its laws and asserts
+`EXPECT-NOT: across a corner of its laws` - on the Manifold runs, the only ones
+whose output `check_expectations` reads. Why the CGAL mesh has no station there
+is not known.
+
+**W5 - step-roof-voronoi's approximation tier writes 24 vertices off their own
+edges' curves**, by 1.17 median and 2.43 at worst against 1.41e-08 declared -
+SOLIDWORKS fault code 7. Unexplained; the roof's two KNOWN-EXPORT-ERRORs are the
+exact tier's and say nothing of this.
+
+**Next**: the flagship coupons (`step-flagship-check.py`) still do not read
+warnings; they want the same treatment, per coupon. And W1-W5 are each a fix of
+their own, each of which a fixture's directive will announce.
+
 ### 34. What the D0 regions report found on its first read, 2026-09-24
 
 `recognition::reportRegions` - each declared surface's D0 region (provenance

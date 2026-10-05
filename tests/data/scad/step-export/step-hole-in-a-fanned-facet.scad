@@ -40,6 +40,24 @@
 // by name; the test fails the day either is no longer raised.
 // KNOWN-EXPORT-ERROR: of a D0 region are left to the tessellation
 // KNOWN-EXPORT-ERROR: facets named by their maker for a declared surface are not written on it
+//
+// Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+// any other fails the test, and so does a named one no run raises any more.
+//
+// The census's side of the KNOWN-EXPORT-ERROR above: a declaration with mesh
+// and no face written on it is one whose facets are not written on it.
+// KNOWN-EXPORT-WARNING: a declaration that is not taken is a bug report
+// KNOWN-EXPORT-WARNING: have mesh held under another surface's name
+//
+// One declared surface written partly by one recogniser and partly by
+// another, the division decided by pass order - the split surface of open
+// item 26, which R0 (item 29) has not reached here.
+// KNOWN-EXPORT-WARNING: split between different kinds of recogniser
+// KNOWN-EXPORT-WARNING: so this is one connected region cut in two by pass order
+//
+// The face across the rim is the fanned facet this fixture is about, and a
+// fanned face cannot be handed an edge.
+// KNOWN-EXPORT-WARNING: given up as one arc
 
 $fn = 64;
 difference() {

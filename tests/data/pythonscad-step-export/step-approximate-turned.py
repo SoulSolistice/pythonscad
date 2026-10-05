@@ -89,6 +89,21 @@ of anything. A closure that ate those would be the bug this pass has to avoid.
 # capped ball would miss it by 0.1454535 - 2.4e-5 relative, which is 24 times the
 # default tolerance and so a failure rather than a rounding.
 # VOLUME-APPROX: 6149.1440206
+#
+# Every EXPORT-WARNING this fixture raises, named, each with why it is known;
+# any other fails the test, and so does a named one no run raises any more.
+#
+# One declared surface written partly by one recogniser and partly by
+# another, the division decided by pass order - the split surface of open
+# item 26, which R0 (item 29) has not reached here.
+# KNOWN-EXPORT-WARNING: split between different kinds of recogniser
+# KNOWN-EXPORT-WARNING: so this is one connected region cut in two by pass order
+#
+# Corners the file does not write: the export writes one closed face here,
+# and every corner it does write is on its surface at about 1e-15
+# (scripts/step-corner-stray.py). The arbiter counts corners of faces that
+# are not written, against the wrong surface - open item 43, W1.
+# KNOWN-EXPORT-WARNING: left off a surface the file writes a face of them on
 from pythonscad import *
 import math
 
