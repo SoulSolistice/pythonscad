@@ -1144,6 +1144,30 @@ TEST_CASE("two crossing cylinders meet where both say they do", "[projectontobot
   CHECK(fabs(sqrt(p.y() * p.y() + p.z() * p.z()) - 6.0) <= 1e-9);
 }
 
+TEST_CASE("a crossing is solved to the machine, not to the caller's tolerance", "[projectontoboth]")
+{
+  // The corner arbiter asks for 1e-11, and the solver used to stop there - a
+  // point 1e-12 off both cylinders, which then scored as on them and was
+  // written so (open item 39, R5). Past the tolerance it goes on until each
+  // surface holds the point at its own residual bound.
+  auto a = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  auto b = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(1, 0, 0), 6);
+  Vector3d p(10.05, 0.02, 5.97);
+  REQUIRE(projectOntoBoth(a.get(), b.get(), p, 1e-11));
+  CHECK(recognition::onExactly(a.get(), p));
+  CHECK(recognition::onExactly(b.get(), p));
+
+  // And three surfaces meeting in a point: both cylinders and the plane y = 0,
+  // which they cross at (10, 0, 6).
+  auto c = std::make_shared<PlaneSurface>(Vector3d(0, 0, 0), Vector3d(0, 1, 0));
+  Vector3d q(10.05, 0.02, 5.97);
+  REQUIRE(projectOntoThree(a.get(), b.get(), c.get(), q, 1e-11, 0));
+  CHECK(recognition::onExactly(a.get(), q));
+  CHECK(recognition::onExactly(b.get(), q));
+  CHECK(recognition::onExactly(c.get(), q));
+  CHECK((q - Vector3d(10, 0, 6)).norm() < 1e-12);
+}
+
 TEST_CASE("two cylinders that touch rather than cross are refused", "[projectontoboth]")
 {
   // Radius 10 about z, and radius 10 about a parallel axis 20 away: they meet

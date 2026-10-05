@@ -318,17 +318,29 @@ void StepKernel::BodyBuild::placeOnFileFaces()
       }
       const std::size_t n_all = constraints.size();
 
-      // Which constraints a position satisfies, counted per tier, to the ladder's
-      // exactness floor. Compared from the most precise tier down.
+      // Whether a position is on a constraint: at machine precision, by the
+      // surface's own closed-form residual, wherever it states one - a plane, a
+      // quadric, a torus, a sphere. Until 2026-10-05 it was within 1e-9 of the
+      // position's size by projection for every surface, so a corner 2.7e-12
+      // off a cylinder scored as on it, won, and was written so - and the
+      // curves a later pass had to write through it could not hold their ends
+      // (open item 39, R5, which R11 waits on). A surface with no closed form -
+      // a sweep, a patch - states no residual and is asked by projection still,
+      // which is what its fit can say (item 10, B1/B2).
+      auto on_constraint = [&](const Surface *s, const Vector3d& p) {
+        const recognition::Residual r = recognition::residualOf(s, p);
+        if (std::isfinite(r.value)) return r.exact();
+        Vector3d q;
+        return AnalyticFeatures::closestOnSurface(s, p, q) &&
+               (q - p).norm() <= 1e-9 * std::max(1.0, p.norm());
+      };
+      // Which constraints a position satisfies, counted per tier. Compared from
+      // the most precise tier down.
       using Score = std::array<std::size_t, kConstraintTierCount>;
       auto score_of = [&](const Vector3d& p) {
         Score s{};
         for (const auto& c : constraints) {
-          Vector3d q;
-          if (AnalyticFeatures::closestOnSurface(c.surface, p, q) &&
-              (q - p).norm() <= 1e-9 * std::max(1.0, p.norm())) {
-            s[tierRank(c.tier)]++;
-          }
+          if (on_constraint(c.surface, p)) s[tierRank(c.tier)]++;
         }
         return s;
       };
@@ -443,9 +455,7 @@ void StepKernel::BodyBuild::placeOnFileFaces()
       // Which constraints the corner is on where the mesh put it, for `hard`.
       std::vector<char> on_at_mesh(constraints.size(), 0);
       for (std::size_t k = 0; k < constraints.size(); k++) {
-        Vector3d q;
-        on_at_mesh[k] = AnalyticFeatures::closestOnSurface(constraints[k].surface, vertices[v], q) &&
-                        (q - vertices[v]).norm() <= 1e-9 * std::max(1.0, vertices[v].norm());
+        on_at_mesh[k] = on_constraint(constraints[k].surface, vertices[v]);
       }
       // Ordered, then walked: score from the most precise tier down, then the
       // rung table, then least travel. Within one score only the first - the
@@ -480,11 +490,7 @@ void StepKernel::BodyBuild::placeOnFileFaces()
         bool leaves_hard = false;
         for (std::size_t k = 0; moved && k < constraints.size(); k++) {
           if (!tierHard(constraints[k].tier) || !on_at_mesh[k]) continue;
-          Vector3d q;
-          if (!AnalyticFeatures::closestOnSurface(constraints[k].surface, cand.p, q) ||
-              (q - cand.p).norm() > 1e-9 * std::max(1.0, cand.p.norm())) {
-            leaves_hard = true;
-          }
+          if (!on_constraint(constraints[k].surface, cand.p)) leaves_hard = true;
         }
         if (leaves_hard) continue;
         if (moved && folds_a_facet(v, cand.p)) {

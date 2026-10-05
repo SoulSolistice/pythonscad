@@ -4933,6 +4933,28 @@ from coming back - landed with the fix and mutation-checked (F2).
   solve held to 1e-12, a thousand ulps from the machine.
   *Test:* the D-shaft above, asked of its corners - every corner on the flat's
   declared plane at machine precision (`scripts/step-corner-stray.py`, planes).
+  **First part fixed 2026-10-05: the arbiter and the solvers it calls.** Found
+  by R11, whose exact promotion declined conics on ends 1.3e-12 to 9.8e-12 off
+  their quadric; by provenance every one was placed by the arbiter's FileFaces
+  rung. Its maker is the arbiter's acceptance: it scored a candidate "on" a
+  constraint within 1e-9 of its size by projection, and its solvers
+  (`projectOntoBoth`, `projectOntoThree`, and `crossInParameters` for a sweep
+  against a quadric) stopped at the caller's 1e-11. Now each solver goes past
+  `tol` until every surface holds the point at its own residual bound, and
+  counts that as met whatever the caller asked - exactness is all there is past
+  it (a first version returned "unmet" where the fitter's 1e-14 was tighter
+  than a surface's own bound, and every crossing fit seemed to fail: a bug of
+  the patch, not of the fitter, whose B1 had been fixed long since). The
+  arbiter scores "on" by the surface's closed-form residual wherever it states
+  one; a sweep or a patch with none is asked by projection still (item 10).
+  Measured: vertices off a face they bound go to 0 on every part that had any
+  (band family 6, f04 10, bayonet 3, cap-meets-wall and the hole fixture 4, the
+  grid family 1), some certified D1 where they were D4; no entity count moves.
+  *Test:* `analytic_features_test.cc` - two crossing cylinders, and the two
+  with a plane, solved at the arbiter's 1e-11 and holding the point exactly.
+  Left: the MeshTriple, MeshConic and KeepExact rungs' own solves and
+  acceptances (1e-12 relative, 1e-6 off a surface, 1e-9 off a plane), and
+  R11 on top.
 - **R6 - D0 corners protected by position.** `deserts_exact`
   (`CornerPlacement.cc`) refuses a move that takes a corner off another declared
   quadric it sits on within an absolute 1e-9. It pins a corner that merely

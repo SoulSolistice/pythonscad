@@ -14,6 +14,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Internal.h"
 
 namespace AnalyticFeatures {
@@ -345,6 +346,8 @@ static bool crossInParameters(const S *surface, const Surface *quadric, Vector3d
   Vector3d best = p;
   double best_residual = std::numeric_limits<double>::infinity();
   double u = 0, v = 0;
+  int past_tol = 0;
+  bool exact = false;  // every surface holds the point at its own residual bound
   if (!surface->project(p, u, v)) return false;
   for (int step = 0; step < 64; step++) {
     const Vector3d here = surface->evaluate(u, v);
@@ -358,7 +361,16 @@ static bool crossInParameters(const S *surface, const Surface *quadric, Vector3d
       best_residual = residual;
       best = here;
     }
-    if (residual <= tol) break;
+    // On to the machine past `tol`, as projectOntoBoth does (R5): the sweep is
+    // held by construction, and the quadric has to hold the point at its own
+    // residual bound for the corner arbiter to count it on.
+    if (recognition::onExactly(quadric, here)) {
+      best = here;
+      best_residual = std::min(best_residual, residual);
+      exact = true;
+      break;
+    }
+    if (residual <= tol && ++past_tol > 3) break;
     // The tangent plane, differenced inside the parameter square so that a step
     // never straddles a profile corner - the same reason GridSurface::project
     // differences within a span.
@@ -385,7 +397,10 @@ static bool crossInParameters(const S *surface, const Surface *quadric, Vector3d
     v = nv;
   }
   p = best;
-  return best_residual <= tol;
+  // Met where the caller's tolerance is met, or where the machine is: a caller
+  // asking for less than the arithmetic can certify - the crossing fitter asks
+  // 1e-14 of the part's size - is answered by exactness, all there is past it.
+  return exact || best_residual <= tol;
 }
 
 bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol)
@@ -427,6 +442,14 @@ bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol
   // 42 corners of the band family that the acceptance test would have kept.
   Vector3d best = p;
   double best_residual = std::numeric_limits<double>::infinity();
+  // Past `tol` the iteration goes on to the machine: Newton converges
+  // quadratically, so from `tol` the point is on both surfaces at their own
+  // residual bound within a step or two - and until 2026-10-05 it stopped at
+  // `tol`, so the corner arbiter wrote corners 1e-12 off surfaces it had solved
+  // them onto, a thousand ulps from the machine (open item 39, R5). `tol` is
+  // what the caller accepts; exactness is where it stops.
+  int past_tol = 0;
+  bool exact = false;  // every surface holds the point at its own residual bound
   for (int step = 0; step <= 256; step++) {
     double fa = 0, fb = 0;
     Vector3d ga, gb;
@@ -437,7 +460,13 @@ bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol
       best_residual = residual;
       best = p;
     }
-    if (residual <= tol) break;
+    if (recognition::onExactly(a, p) && recognition::onExactly(b, p)) {
+      best = p;
+      best_residual = std::min(best_residual, residual);
+      exact = true;
+      break;
+    }
+    if (residual <= tol && ++past_tol > 3) break;
     if (step == 256) break;
     const double aa = ga.dot(ga), ab = ga.dot(gb), bb = gb.dot(gb);
     const double det = aa * bb - ab * ab;
@@ -451,7 +480,10 @@ bool projectOntoBoth(const Surface *a, const Surface *b, Vector3d& p, double tol
   }
   if (!std::isfinite(best_residual)) return false;
   p = best;
-  return best_residual <= tol;
+  // Met where the caller's tolerance is met, or where the machine is: a caller
+  // asking for less than the arithmetic can certify - the crossing fitter asks
+  // 1e-14 of the part's size - is answered by exactness, all there is past it.
+  return exact || best_residual <= tol;
 }
 
 /*! The point three surfaces meet in, nearest to a given start.
@@ -490,6 +522,8 @@ bool projectOntoThree(const Surface *a, const Surface *b, const Surface *c, Vect
   const Vector3d start = p;
   Vector3d best = p;
   double best_residual = std::numeric_limits<double>::infinity();
+  int past_tol = 0;
+  bool exact = false;  // every surface holds the point at its own residual bound
   for (int step = 0; step <= 128; step++) {
     Eigen::Matrix3d J;
     Vector3d f;
@@ -511,7 +545,14 @@ bool projectOntoThree(const Surface *a, const Surface *b, const Surface *c, Vect
       best_residual = residual;
       best = p;
     }
-    if (residual <= tol || step == 128) break;
+    // On to the machine past `tol`, as projectOntoBoth does (R5).
+    if (recognition::onExactly(a, p) && recognition::onExactly(b, p) && recognition::onExactly(c, p)) {
+      best = p;
+      best_residual = std::min(best_residual, residual);
+      exact = true;
+      break;
+    }
+    if ((residual <= tol && ++past_tol > 3) || step == 128) break;
     // Three surfaces crossing in a point have three independent normals there.
     // A singular Jacobian says they do not - two of them are tangent, or all
     // three share a direction - and then there is no point to find rather than
@@ -532,7 +573,7 @@ bool projectOntoThree(const Surface *a, const Surface *b, const Surface *c, Vect
   }
   if (!std::isfinite(best_residual)) return false;
   p = best;
-  return best_residual <= tol && (travel <= 0 || (best - start).norm() <= travel);
+  return (exact || best_residual <= tol) && (travel <= 0 || (best - start).norm() <= travel);
 }
 
 /*! The point where a surface meets the line two planes cross in, nearest to a
