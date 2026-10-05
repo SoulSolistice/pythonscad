@@ -36,11 +36,12 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
     std::size_t placed = 0, triple = 0, placed_triple = 0, plane_gave_up = 0, held_on_exact = 0;
     // Why the surface-against-line placement gives up, kept apart: these are
     // five unrelated reasons and one number for all of them says nothing about
-    // which to work on. `t_offsurf` is the corner's own surface refusing to
-    // answer, `t_faces` is the corner not having exactly two mesh planes to
-    // cross - not a solver failure at all - `t_parallel` is those two planes
-    // being parallel, and `t_solve` is the only one the projection owns.
-    std::size_t t_offsurf = 0, t_faces = 0, t_parallel = 0, t_solve = 0;
+    // which to work on. `t_unnamed` is a facet at the corner that carries no
+    // name, so no one knows whether it is a face, `t_faces` is the corner not
+    // having exactly two faces to cross - not a solver failure at all -
+    // `t_parallel` is those two being parallel, and `t_solve` is the only one
+    // the projection owns.
+    std::size_t t_unnamed = 0, t_faces = 0, t_parallel = 0, t_solve = 0;
     std::size_t ts_noconv = 0, ts_offsurf = 0, ts_plane = 0, ts_far = 0;
     double near_min = 0, near_med = 0, near_max = 0;
     std::vector<double> near_misses;
@@ -84,31 +85,21 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
         // them is a chord; taking all three would over-determine the point and
         // decline it again.
         //
-        // A chord's plane normal is parallel to the surface's normal there, a
-        // face's is not. The bound is the tessellation's own angular half-step:
-        // a facet of an n-gon lies within pi/n of the surface normal at any of
-        // its corners, and nothing coarser than a hexagon is a tessellation, so
-        // cos(pi/6) admits every chord. Measured, chords read 0.885 to 1.000
-        // and faces 0.000 to 0.643 - the closest pair being step-band-family's
-        // 0.885 against step-cut-cone's 0.643.
-        //
-        // That margin is the weakest thing here and it is an inference standing
-        // in for something the model knew: a declared plane would make this a
-        // lookup. See doc/step-export-development.md, *Corner placement*.
+        // Which is which is the facets' names (namedFor): one named for a
+        // declared plane is a face of the model, and constrains the corner by
+        // that record's own point and normal; one named for a curved surface -
+        // this one or another - is a chord of it, and constrains nothing. It
+        // was told by angle until 2026-09-30 - a chord's normal near the
+        // surface's, within cos(pi/6) - which also took a chord of a *different*
+        // curved surface for a face, and was, as it said of itself, an inference
+        // standing in for something the model knew (open item 39, R4). A facet
+        // named for nothing is not known to be either, and the corner stays.
         std::vector<std::pair<Vector3d, double>> faces_here;
+        std::vector<const Surface *> records_here;
         double reach_all = 0;
+        bool unnamed_here = false;
         {
-          const Surface *os = surfaces[entry.second].get();
-          Vector3d q0;
-          if (!AnalyticFeatures::closestOnSurface(os, vertices[v], q0)) {
-            triple++;
-            t_offsurf++;
-            continue;
-          }
-          const double off0 = (vertices[v] - q0).norm();
           for (const std::size_t i : at->second) {
-            const Vector3d n = loop_normals[i].normalized();
-            const double d = n.dot(vertices[loops[i][0]]);
             // How far the corner may travel: to its nearest neighbour and no
             // further. The face's whole extent is far too loose - the line two
             // faces cross along can meet the surface twice, and on
@@ -120,17 +111,24 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
               const double e = (vertices[w] - vertices[v]).norm();
               if (e > 1e-12) reach_all = reach_all == 0 ? e : std::min(reach_all, e);
             }
-            bool have = false;
-            for (const auto& w : faces_here) {
-              if ((w.first - n).norm() < 1e-6 && fabs(w.second - d) < 1e-6) have = true;
+            const Surface *named = namedFor(i);
+            if (named == nullptr) {
+              unnamed_here = true;
+              continue;
             }
-            if (have) continue;
-            Vector3d q1;
-            if (!AnalyticFeatures::closestOnSurface(os, vertices[v] + n * 1e-4, q1)) continue;
-            const double along = fabs(((vertices[v] + n * 1e-4) - q1).norm() - off0) / 1e-4;
-            if (along >= cos(M_PI / 6)) continue;  // a chord of this surface
-            faces_here.emplace_back(n, d);
+            const auto *record = dynamic_cast<const PlaneSurface *>(named);
+            if (record == nullptr) continue;  // a chord of a curved surface
+            if (std::find(records_here.begin(), records_here.end(), named) != records_here.end())
+              continue;
+            records_here.push_back(named);
+            const Vector3d rn = record->normdir.normalized();
+            faces_here.emplace_back(rn, rn.dot(record->refpt));
           }
+        }
+        if (unnamed_here) {
+          triple++;
+          t_unnamed++;
+          continue;
         }
         if (faces_here.size() != 2) {
           triple++;
@@ -227,12 +225,15 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
     }
     on_conic = placed;
     on_triple = placed_triple;
-    if (placed_triple > 0) {
+    // Whenever a corner was asked, placed or not: why none was is the report
+    // that matters most where none was.
+    if (placed_triple + triple > 0) {
       LOG(
         "STEP export: %1$d corners where a declared surface meets two faces of the model are "
-        "placed where all three cross, moving at most %2$.4f; %3$d are not - %4$d off their own "
-        "surface, %5$d without two faces to cross, %6$d on parallel faces, %7$d the solve did not reach",
-        int(placed_triple), worst_triple, int(triple), int(t_offsurf), int(t_faces), int(t_parallel),
+        "placed where all three cross, moving at most %2$.4f; %3$d are not - %4$d beside a facet "
+        "named for nothing, %5$d without two faces to cross, %6$d on parallel faces, %7$d the solve "
+        "did not reach",
+        int(placed_triple), worst_triple, int(triple), int(t_unnamed), int(t_faces), int(t_parallel),
         int(t_solve));
       if (!near_misses.empty()) {
         std::sort(near_misses.begin(), near_misses.end());

@@ -220,7 +220,9 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             // Counted, not refused, for the reason the promotion pass gives:
             // the conic is the wrong curve but lies on the quadric, and the
             // chord it would fall back to does not. See open item 26.
-            if (planeIsFacetOfCurved(surfaces, bs.normal, {vertices[a], vertices[b]}) != nullptr) {
+            // A chord facet of a curved surface, by its name (open item 39, R4).
+            const Surface *across = bs.loop >= 0 ? namedFor(std::size_t(bs.loop)) : nullptr;
+            if (across != nullptr && dynamic_cast<const PlaneSurface *>(across) == nullptr) {
               sections_on_facet++;
             }
             SectionEllipse sec;

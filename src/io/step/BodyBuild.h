@@ -663,6 +663,11 @@ struct StepKernel::BodyBuild {
    * writer holds a face to, asked before a move is applied and of every face a
    * fan replaces (open item 39, R2, R3). */
   [[nodiscard]] bool flatWhereItStands(std::size_t face, const std::function<Vector3d(int)>& at) const;
+  /*! The declared surface facet `facet` was made on, by its maker's name, or
+   * null where it carries none. A facet named for a declared plane is a face of
+   * the model on that record; one named for a curved surface is a chord of it
+   * wherever its corners are - identity, not an angle (open item 39, R4). */
+  [[nodiscard]] const Surface *namedFor(std::size_t facet) const;
 
   // What a planar loop gives up to a curve an analytic face writes along it.
   /*! One run of loop edges replaced by a single arc. */

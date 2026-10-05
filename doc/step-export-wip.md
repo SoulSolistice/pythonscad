@@ -4880,6 +4880,38 @@ from coming back - landed with the fix and mutation-checked (F2).
   lie on the lines where the flat meets the cylinder, exactly; its volume is the
   circle less its segment, times the height, in closed form. It keeps any angle
   test from returning, as well as the disagreement.
+  **Landed 2026-10-05.** `BodyBuild::namedFor(facet)` is the record a facet's
+  maker named it for, and all three sites ask it: the triple placement takes the
+  faces at a corner from the plane records its facets are named for, by the
+  record's own point and normal; `keepExactSurfaces` takes the plane a corner is
+  held to from a facet named for a plane record the corner is on; and the plane
+  sections' facet test is gone (`planeIsFacetOfCurved`), replaced in both its
+  callers by the name of the facet across. A facet named for nothing says
+  neither, and is not guessed at: the triple placement declines the corner
+  ("beside a facet named for nothing") and the promotion counts the conic under
+  a new warning. The D-shaft is at d/r = 0.9, not 0.7 - at 0.7 both thresholds
+  agreed - where the flat's give is 0.9, a chord to both passes; HEAD placed
+  none of its four corners where three exact things meet, and this places all
+  four (`step-d-shaft`). Measured against the previous commit, by `compare
+  --data`: the file changes on step-partial-cylinder, step-region-beyond-the-band
+  and step-split-surface (2 to 4 triple placements), and on lid10 (719 to 687
+  faces). **Declined by doctrine, and the trade-off to know**: every one of
+  lid10's 301 triple candidates has a facet named for nothing beside it, so the
+  16 it used to place stay where the mesh put them and 8 fewer faces are fanned
+  to follow them (50 to 42); the bayonet's 8, which moved 0.0000, likewise. They
+  wait on item 40 naming those makers, not on a threshold.
+  **What the name found that the angle hid** - see the correction under item
+  27: every conic the angle had cut by "a chord of the very surface being cut"
+  and whose facets carry a name is a crossing of two declared surfaces by that
+  name, and the same-surface warning (26 on f04, 29 on lid10-exact, 47 on lid10,
+  18 on the bayonet) is gone. lid10's approximation tier has 70 more beside
+  facets named for nothing, which the new warning counts rather than calls. The
+  sections test moved too, by the same cause: declare-grid's exact tier counts
+  74 sections cut by a facet of something curved where the angle counted 1, its
+  ridge facets being chords of the declared sweep, which the angle could not
+  evaluate (residual infinite, so "classifies nothing"). Left positional, and
+  named: the one-plane test at the top of `placeOnMeshPlanes` (loop normals
+  within 1e-6 - R5's ground), and the promotion's `declared_plane` (R10).
 - **R5 - corners grounded on facet planes where the record is known.** The same
   two passes cross the corner's surface with `loop_normals` - the mesh's plane
   of the facet - even where the facet is named for a declared plane. The arbiter
@@ -5533,6 +5565,26 @@ of R0.
 **Do not start by refusing the wrong curves**, which remains measured: code 17
 went 42 to 198 on lid10 when the facet-plane conics were removed, because the
 chord they fall back to is further off the face. The refusals come first.
+
+**Corrected 2026-10-05 - the premise was a misattribution.** "Both sides are the
+same declared surface" was the plane sections' facet test speaking, which judged
+a facet's surface by angle: it took the quadric being cut for the facet's own
+surface wherever the edge's ends lay on it and the facet's normal was near its
+normal, and it could not evaluate a sweep at all. Since item 39's R4 the facet
+says by its name, and on no reference part is a single one the same surface:
+
+| part | the edge's face | the facets across, by name | edges |
+| --- | --- | --- | --- |
+| lid10 | cone | a cylinder's chords | 29 |
+| f04 | cylinder | the declared sweep | 37 |
+| bayonet | cone | the thread's sweep | 10 |
+| bayonet | cylinder | the thread's sweep | 8 |
+
+Each end of lid10's edges is on both the cone and the cylinder at residual 0. So
+these are not seams of one surface and C0 is not their rung: they are crossings
+of two declared surfaces, whose curve is the crossing (C3), written as the conic
+of a chord plane because the far side is written as facets. The refusals above
+are still why it is facets; the counts in the heading are the angle's.
 
 ### 28. The exporter is not byte-deterministic run to run
 

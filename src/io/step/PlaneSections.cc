@@ -265,31 +265,4 @@ std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
   return out;
 }
 
-const Surface *planeIsFacetOfCurved(const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                    const Vector3d& pnorm, const std::vector<Vector3d>& on_plane)
-{
-  const Vector3d n = pnorm.normalized();
-  if (!(n.norm() > 0)) return nullptr;
-  for (const auto& d : surfaces) {
-    const Surface *sf = d.get();
-    if (sf == nullptr || dynamic_cast<const PlaneSurface *>(sf) != nullptr) continue;
-    for (const Vector3d& p : on_plane) {
-      const double scale = std::max(1.0, p.norm());
-      const double owed = 1e-9 * scale;
-      Vector3d q0;
-      if (!AnalyticFeatures::closestOnSurface(sf, p, q0)) continue;
-      const double off0 = (q0 - p).norm();
-      if (off0 > owed) continue;  // not on this surface: it classifies nothing
-      // Step along the plane's normal. A facet's normal is the surface's, so
-      // the distance grows at the full rate; a cap's does not grow at all.
-      const double eps = 1e-4 * scale;
-      Vector3d q1;
-      if (!AnalyticFeatures::closestOnSurface(sf, p + n * eps, q1)) continue;
-      const double along = fabs(((p + n * eps) - q1).norm() - off0) / eps;
-      if (along >= cos(M_PI / 6)) return sf;
-    }
-  }
-  return nullptr;
-}
-
 }  // namespace step

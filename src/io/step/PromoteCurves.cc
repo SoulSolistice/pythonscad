@@ -95,7 +95,7 @@ void StepKernel::BodyBuild::promoteCurves()
   int rims_kept_circular = 0;
   // Which conics are cut by a declared plane, and which by a tessellation
   // chord. See open item 26.
-  int conics_on_declared = 0, conics_on_chord = 0, conics_on_facet = 0;
+  int conics_on_declared = 0, conics_on_chord = 0, conics_on_facet = 0, conics_beside_unnamed = 0;
   // Why the crossing was not available: the facet belongs to the very surface
   // being cut, or the arc would not fit.
   int facet_same_surface = 0;
@@ -114,6 +114,7 @@ void StepKernel::BodyBuild::promoteCurves()
     // through the edge would be asserting a curve it does not contain.
     std::shared_ptr<Surface> quadric;
     bool have_plane = false;
+    std::size_t plane_face = 0;
     Vector3d pnorm(0, 0, 0), ppoint(0, 0, 0);
     for (const std::size_t f : faces) {
       const brep::SurfaceForm& form = body.faces[f].form;
@@ -131,6 +132,7 @@ void StepKernel::BodyBuild::promoteCurves()
           if (fabs(fabs(n.dot(pnorm)) - 1) > 1e-9 || fabs((o - ppoint).dot(pnorm)) > tol) return false;
         } else {
           have_plane = true;
+          plane_face = f;
           pnorm = n;
           ppoint = o;
         }
@@ -267,27 +269,38 @@ void StepKernel::BodyBuild::promoteCurves()
       // once that has happened no consumer can recover what the model said. The
       // fix is upstream, in the claim; see open item 26 and
       // doc/step-recognition-design.md, *region before representation*.
-      const Surface *facet_of =
-        declared_plane ? nullptr : planeIsFacetOfCurved(surfaces, pnorm, {p1, p2});
+      // Which curved surface the plane is a chord facet of, by the name its
+      // facets carry (open item 39, R4) - by angle until 2026-09-30.
+      // A facet named for nothing cannot say, and is counted as such rather
+      // than guessed at: on lid10 these are the chords of surfaces whose makers
+      // name nothing yet (item 40), which the angle used to find.
+      const Surface *facet_of = nullptr;
+      bool beside_unnamed = false;
+      if (!declared_plane) {
+        for (const std::size_t facet : body.faces[plane_face].facets) {
+          const Surface *named = namedFor(facet);
+          if (named == nullptr) beside_unnamed = true;
+          else if (dynamic_cast<const PlaneSurface *>(named) == nullptr) facet_of = named;
+        }
+      }
+      if (facet_of == nullptr && beside_unnamed) conics_beside_unnamed++;
       if (facet_of != nullptr) {
         conics_on_facet++;
-        // And *every one of them*, on every reference part, has the facet on
-        // the same surface being cut: 78 of 78 on lid10, 18 of 18 on the
-        // bayonet, 31 of 31 on f04.
+        // Until 2026-09-30, told by angle, *every one of them* on every
+        // reference part had the facet on the same surface being cut - and so
+        // was read as the seam of one surface claimed over part of its region,
+        // a boundary of nothing (open item 27). By name, not one does: on lid10
+        // all 29 are a cone against the chords of a cylinder, on f04 all 37 a
+        // cylinder against a declared sweep, and on the bayonet 10 a cone and 8
+        // a cylinder against its thread's sweep. The angle took the quadric
+        // itself for the facet's surface - the edge's ends lie on it, and the
+        // chord of a surface tangent to it has nearly its normal - and could
+        // not evaluate a sweep at all. These are crossings of two declared
+        // surfaces, whose curve is the crossing (rung C3), written as a conic
+        // because the far side is written as facets.
         //
-        // So there are not two surfaces here and there is no crossing to write.
-        // There is one declared surface, claimed as an analytic face over part
-        // of its region and left as facets over the rest, and this edge is the
-        // seam between the two halves - written as a section of the surface by
-        // its own chord plane, which is not a boundary of anything.
-        //
-        // These edges should not exist. That is the split-surface defect of
-        // open item 26 in another costume, and it cannot be repaired here:
-        // refusing the conics was tried and took code 17 from 42 to 198 on
-        // lid10, because the chord they fall back to is further off the face
-        // than the wrong curve is. Removing the paper does not mend the tear.
-        // The fix is upstream - claim the region whole - see
-        // doc/step-recognition-design.md, *region before representation*.
+        // Still counted, because a seam of one surface is still possible and
+        // is still a boundary of nothing where it occurs.
         if (facet_of == quadric.get() || facet_of->sameAs(*quadric)) facet_same_surface++;
       }
     }
@@ -447,10 +460,18 @@ void StepKernel::BodyBuild::promoteCurves()
   if (conics_on_declared + conics_on_chord > 0) {
     LOG(
       "STEP export: of the conics considered, %1$d are cut by a plane the model declared and "
-      "%2$d by a plane nothing declares - of which %3$d are facets of something curved, so the "
-      "conic is the wrong curve; kept because the chord is further off the face, and the fix is "
-      "upstream in the claim",
-      conics_on_declared, conics_on_chord, conics_on_facet);
+      "%2$d by a plane nothing declares - of which %3$d are facets of something curved by their "
+      "names, so the conic is the wrong curve, and %4$d are facets named for nothing, which "
+      "cannot say; kept because the chord is further off the face, and the fix is upstream in "
+      "the claim",
+      conics_on_declared, conics_on_chord, conics_on_facet, conics_beside_unnamed);
+  }
+  if (conics_beside_unnamed > 0) {
+    LOG(message_group::Export_Warning,
+        "STEP export: %1$d edge%2$s cut from a quadric by a plane whose facets are named for "
+        "nothing - whether each is the seam of a surface claimed over part of its region (open "
+        "item 26) cannot be told without the name its maker does not give (item 40)",
+        conics_beside_unnamed, conics_beside_unnamed == 1 ? " is" : "s are");
   }
   if (conics_promoted > 0 || conics_declined > 0) {
     LOG(

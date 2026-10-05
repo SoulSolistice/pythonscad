@@ -106,31 +106,4 @@ std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
                                             const std::vector<Vector3d>& vertices, const Vector3d& axis,
                                             double min_cos_tilt);
 
-/*! The declared curved surface this plane is a *facet* of, or null.
- *
- * Not every planar face is a plane. A tessellation's facet lies *along* the
- * surface it approximates, so its normal runs with that surface's own normal
- * there; a plane that genuinely cuts across - a cylinder's cap, the face a
- * boolean's cutter left - does not. That is section 4's chord-vs-cap rule, and
- * `cos(pi/6)` admits every chord because nothing coarser than a hexagon is a
- * tessellation.
- *
- * The corner arbiter has always known this - `kCornerTiers` marks MeshPlane
- * `used = false`, "a chord is not a constraint" - and every other consumer of a
- * plane was told only whether the *model declared* it. That is a far rarer
- * thing (item 23 measured 2 of 1533 merged planes matching a declaration), so
- * "undeclared" could not be refused without refusing the genuine flat faces
- * too. This is the question that separates them, and it is the one to ask.
- *
- * Exact, with no tessellation band anywhere in it: the test points must lie on
- * the candidate surface *to the exactness floor*, which the corners of a facet
- * do because they are points the generator emitted. A point that is merely near
- * a surface classifies nothing.
- *
- * Measured on 2026-09-21: lid10 wrote a cylinder's rim as a 45 degree ELLIPSE
- * because the facet beside it - a chord of the chamfer cone - was taken for a
- * section plane. See open item 26. */
-const Surface *planeIsFacetOfCurved(const std::vector<std::shared_ptr<Surface>>& surfaces,
-                                    const Vector3d& pnorm, const std::vector<Vector3d>& on_plane);
-
 }  // namespace step

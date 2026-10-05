@@ -155,6 +155,13 @@ bool StepKernel::BodyBuild::boundWritten(std::size_t loop) const
          outer_written(std::size_t(parents[loop]));
 }
 
+const Surface *StepKernel::BodyBuild::namedFor(std::size_t facet) const
+{
+  if (facet >= faceSurface.size()) return nullptr;
+  const int32_t s = faceSurface[facet];
+  return s < 0 || std::size_t(s) >= surfaces.size() ? nullptr : surfaces[std::size_t(s)].get();
+}
+
 bool StepKernel::BodyBuild::flatWhereItStands(std::size_t face,
                                               const std::function<Vector3d(int)>& at) const
 {
