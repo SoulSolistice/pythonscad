@@ -16,8 +16,10 @@
 // Every wall facet is on it at machine precision - the scale moves each vertex
 // onto the image of the circle it was on - so every one is decided by the model.
 // EXPECT: what decided each written facet: 32 D0, 0 D1, 0 D2, 0 D3, 0 D4
-// And the rims are the planes' sections of it, ellipses, written as such.
-// EXPECT: on a plane the model declared, 0 on one taken from the mesh
+// And the rims are the planes' sections of it, ellipses, written as such - each
+// on the plane its cap facets are named for, not one their corners happen to
+// lie on (open item 39, R13).
+// EXPECT: on a plane the model declared (2 named for it, 0 on it by position alone, which derives the plane - D1), 0 on one taken from the mesh
 //
 // And the wall is one face. It goes all the way round between its two rims, so
 // it is closed by a seam along a ruling, as a band is, and each rim is one whole

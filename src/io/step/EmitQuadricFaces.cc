@@ -268,6 +268,7 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             section_edges.emplace(key, edge);
             if (bs.declared) sections_declared++;
             else sections_fitted++;
+            if (bs.derived) sections_derived++;
           }
           loop.push_back(new OrientedEdge(entities, edge, dir));
           // And the planar face across it gives up the segments the curve

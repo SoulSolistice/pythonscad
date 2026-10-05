@@ -134,6 +134,7 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
     bs.normal = planes[plane_of[e]].normal;
     bs.on_plane = planes[plane_of[e]].on_plane;
     bs.declared = planes[plane_of[e]].declared;
+    bs.derived = planes[plane_of[e]].derived;
     bs.loop = cycle.owner[e];
     if (bs.count >= 2) cycle.sections.push_back(bs);
     // The whole run is spoken for either way: what the trim gave up is a chord

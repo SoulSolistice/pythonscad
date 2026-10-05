@@ -62,8 +62,29 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
       // with the tessellation and with whatever the boolean left behind;
       // the declaration cannot move at all, and the section derived from
       // it is exact rather than merely close.
+      //
+      // Which declaration is the facet's name (checklist E9; open item 39,
+      // R13): a facet named for a declared plane cuts in that record. It was
+      // found by position - the first declared plane every corner of the
+      // facet lies on - which agrees wherever a name is given (every export
+      // measured, 2026-10-05) and says nothing about whose plane it is. A
+      // facet named for a curved surface is a chord of it; the conic its
+      // plane cuts lies on both faces as they are written, and is counted
+      // as the wrong curve where it is written (item 26). Only a facet named
+      // for nothing is asked by position still, and then the plane is a
+      // derivation from its corners (D1), said so - on lid10 86 of them, on
+      // the bayonet 16, facets whose maker named no plane (R32).
+      const Surface *named = namedFor(run.loop);
+      const auto *record = dynamic_cast<const PlaneSurface *>(named);
+      if (record != nullptr) {
+        const Vector3d n = record->normdir.normalized();
+        cp.normal = cp.normal.dot(n) > 0 ? n : Vector3d(-n);
+        cp.on_plane = record->refpt;
+        cp.declared = true;
+      }
       double best_tilt = 9, best_off = 9;
       for (const auto& pl : declared_planes) {
+        if (named != nullptr) break;
         // How near the nearest declaration comes, whether or not it is
         // taken: a section written on the mesh's own plane is a section
         // that moves when the corners do, and knowing it missed by 1e-5
@@ -79,19 +100,18 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
         cp.normal = cp.normal.dot(pl.second) > 0 ? pl.second : Vector3d(-pl.second);
         cp.on_plane = pl.first;
         cp.declared = true;
+        cp.derived = true;
         break;
       }
-      if (!cp.declared) {
+      if (!cp.declared && named == nullptr) {
         section_misses.push_back({best_tilt, best_off});
       }
       bool have = false;
       for (const auto& seen : list) {
-        // Two declared are one plane or not, at machine precision; a fitted
-        // one is measured, and still compared as measured (item 38, C).
-        have = seen.declared && cp.declared
-                 ? recognition::samePlane(seen.on_plane, seen.normal, cp.on_plane, cp.normal)
-                 : fabs(fabs(seen.normal.dot(cp.normal)) - 1.0) < 1e-9 &&
-                     fabs((cp.on_plane - seen.on_plane).dot(seen.normal)) < 1e-9;
+        // One plane or two, at machine precision, whoever states them - where
+        // two planes taken from the mesh were compared within 1e-9 in angle
+        // and in offset (item 38, C; open item 39, R13).
+        have = recognition::samePlane(seen.on_plane, seen.normal, cp.on_plane, cp.normal);
         if (have) break;
       }
       if (!have) list.push_back(cp);

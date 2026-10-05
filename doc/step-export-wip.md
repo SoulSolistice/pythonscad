@@ -5099,6 +5099,28 @@ from coming back - landed with the fix and mutation-checked (F2).
   record meets this one along their crossing, a crossing curve, never a conic.
   *Test:* step-cap-meets-wall, which shows it today, asserting that no conic is
   cut by a facet of something curved.
+  **Fixed 2026-10-05 for the position; the chord half is not this pass's.**
+  Probed first, over every export: wherever the facet across is named for a
+  plane record, the positional search found that record - every corner on it -
+  so the name and the position agree; the plane is the facet's name now, and
+  position is asked only of a facet named for nothing, where the plane it finds
+  is a derivation from the facet's corners (D1), flagged (`CutPlane::derived`)
+  and reported apart, as the planar writer reports its own. lid10 has 86 such
+  cut planes (102 in the exact tier), the bayonet 16 (25),
+  step-exchange-never-surrender 6: facets lying exactly on a declared plane
+  whose maker named none - R32's question. None of them bounds a written conic;
+  every section the parts write is on a plane taken from the mesh, before and
+  after. A chord facet of a curved surface is not a cutting plane of the model,
+  but it is written as a plane, and the conic its plane cuts lies on both faces
+  as written - where the chord the conic replaces does not lie on the quadric -
+  so it stays, counted as the wrong curve (item 26); its fix is the facet joining
+  its surface (item 34). Two cut planes are one by `samePlane` whoever states
+  them, where two from the mesh were one within 1e-9 in angle and offset; and
+  the "took the mesh's own" diagnostic counts only facets named for nothing,
+  since a chord's distance from a declared plane says nothing. Neutral in the
+  file over 132 exports: 0 entity and 0 DATA differences. *Test:*
+  step-elliptic-cylinder asserts its two sections on planes their caps are named
+  for and none by position; with the name ignored, it fails.
 - **R14 - a second decider after the one arbiter.** `placeOnOwnQuadric`
   (`CornersOnOwnQuadric.cc`) runs after the corner arbiter, on exactly the
   corners it left where the mesh put them - often because no candidate satisfied
@@ -5367,7 +5389,10 @@ from coming back - landed with the fix and mutation-checked (F2).
   primitive drew the facet, and whether it declared a plane the boolean lost
   (E1: a missing declaration is added in the primitive that makes it). *Test:*
   once named, the facet's plane record on lid10, and the 21 corners on it at
-  machine precision.
+  machine precision. **R13 found more of them**: facets named for nothing whose
+  every corner lies on a declared plane - 86 cut planes on lid10, 16 on the
+  bayonet, 6 on step-exchange-never-surrender - so the plane was declared and
+  the facet carries no name for it; the boolean or the primitive dropped it.
 - **R31 - a fillet's quadric was measured back from its patch. Fixed
   2026-10-05.** Found auditing the chosen numbers left after R5: recognition
   (`quadricOfPatch`) took each rational patch fillet() draws, read a candidate

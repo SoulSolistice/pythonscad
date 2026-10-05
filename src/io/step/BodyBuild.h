@@ -714,7 +714,7 @@ struct StepKernel::BodyBuild {
   std::size_t apex_seams = 0;            // cone faces closed round their apex
   std::size_t band_seams = 0;            // faces round their axis closed by a seam between two rims
   std::set<std::set<int>> section_subs;  // sections already handed to a planar face
-  int sections_declared = 0, sections_fitted = 0;
+  int sections_declared = 0, sections_fitted = 0, sections_derived = 0;
   // Boundary sections refused because their plane was a facet of something
   // curved rather than a plane. See open item 26.
   int sections_on_facet = 0;

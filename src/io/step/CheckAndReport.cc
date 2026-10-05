@@ -135,11 +135,15 @@ void StepKernel::BodyBuild::checkAndReport()
     // the tessellation, with what the boolean left behind, and with the
     // tolerance the fit was given - and the section's centre and both its
     // semi-axes are differences taken against that plane.
+    // And of the declared, how many stand on a facet named for the plane, and
+    // how many on one named for nothing whose corners lie on it - a derivation
+    // (D1), not the maker's word (open item 39, R13).
     LOG(
       "STEP export: %1$d plane section%2$s written as the conic it is - %3$d on a plane the "
-      "model declared, %4$d on one taken from the mesh",
+      "model declared (%4$d named for it, %5$d on it by position alone, which derives the plane - "
+      "D1), %6$d on one taken from the mesh",
       sections_declared + sections_fitted, sections_declared + sections_fitted == 1 ? "" : "s",
-      sections_declared, sections_fitted);
+      sections_declared, sections_declared - sections_derived, sections_derived, sections_fitted);
     if (section_unshared > 0) {
       LOG(message_group::Export_Warning,
           "STEP export: %1$d plane section%2$s written as chords by both faces instead of as the "
