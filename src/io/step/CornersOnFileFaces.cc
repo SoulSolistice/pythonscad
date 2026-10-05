@@ -180,8 +180,8 @@ void StepKernel::BodyBuild::placeOnFileFaces()
       }
       return false;
     };
-    std::size_t onto_faces = 0, onto_plane = 0, onto_corner = 0, onto_triple_faces = 0;
-    double worst_faces = 0, worst_plane = 0, worst_corner = 0;
+    std::size_t onto_faces = 0, onto_plane = 0, onto_corner = 0, onto_triple_faces = 0, onto_one = 0;
+    double worst_faces = 0, worst_plane = 0, worst_corner = 0, worst_one = 0;
     // Corners this pass leaves off a surface whose face is written on them,
     // counted by the exit they took. A corner is a vertex of every face that
     // uses it, and each of those faces asserts it lies on that face's surface;
@@ -438,6 +438,33 @@ void StepKernel::BodyBuild::placeOnFileFaces()
           }
         }
       }
+      // And each face's own surface alone: the point of it nearest where the
+      // mesh put the corner. Where no pair or triple of the corner's faces has a
+      // point it can take - it bounds one face only, or every solve folds the
+      // file - it is still a vertex of each, and on one of them is more than on
+      // none; the scores decide, here, where the one arbiter decides everything
+      // else. Until 2026-10-05 a pass after the arbiter did this on its own,
+      // for a trimmed quadric's corners, deciding by position that nothing else
+      // held them and overruling the arbiter by a weaker rule (open item 39,
+      // R14). Only the faces the file writes at the corner: a provenance owner
+      // with no face here is a hint, and no reason to move a corner onto it.
+      // Only to a corner on none of its constraints where the mesh put it: on
+      // one is then more than on none and nothing it is on is traded away,
+      // where a corner already on one would give it up for another at the same
+      // tier. And only onto a surface that states where it is in closed form,
+      // whose nearest point is its own: a sweep or a patch answers by
+      // projecting, and the nearest point of a bounded net can be its far edge -
+      // offered there, corners of step-sphere went 9.0 along a neighbour's patch.
+      bool on_any = false;
+      for (const auto& c : constraints) on_any = on_any || on_constraint(c.surface, vertices[v]);
+      for (const auto& sf : entry.second) {
+        if (on_any) break;
+        if (!std::isfinite(recognition::residualOf(sf.get(), vertices[v]).value)) continue;
+        Vector3d q;
+        if (AnalyticFeatures::closestOnSurface(sf.get(), vertices[v], q) && q.allFinite()) {
+          candidates.push_back({q, CornerRung::OneFace});
+        }
+      }
       (void)travel_bound;
 
       // Weigh them: the tiers from the most precise down, then the rung table,
@@ -521,6 +548,10 @@ void StepKernel::BodyBuild::placeOnFileFaces()
         moves[v] = best->p;
         move_rung[v] = best->rung;
       }
+      if (best->rung == CornerRung::OneFace) {
+        worst_one = std::max(worst_one, (best->p - vertices[v]).norm());
+        onto_one++;
+      }
       if (best->rung == CornerRung::FileFaces) {
         const double travel = (best->p - vertices[v]).norm();
         if (n_all >= 3) {
@@ -595,8 +626,15 @@ void StepKernel::BodyBuild::placeOnFileFaces()
           tally, int(overruled));
       }
     }
-    on_faces = onto_faces;
-    on_plane_face = onto_plane + onto_corner;
+    if (onto_one > 0) {
+      // Determined by that one surface and by where the mesh put the corner
+      // along it - the tessellation's freedom, kept (C8).
+      LOG(
+        "STEP export: %1$d corners are placed on the surface of one face they bound, at its point "
+        "nearest where the mesh put them, since no point of two of their faces is one they can "
+        "take, moving at most %2$.4f",
+        int(onto_one), worst_one);
+    }
     if (onto_triple_faces > 0) {
       LOG(
         "STEP export: %1$d corners are placed where the three analytic faces they bound meet - a "

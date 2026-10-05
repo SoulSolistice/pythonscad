@@ -14,7 +14,7 @@
 // cross: four corners where three exact things meet, placed where all three
 // cross. Taken for a chord, the flat constrained nothing and none of the four
 // was placed.
-// APPROX: 4 where three exact things meet
+// APPROX: 4 corners where a declared surface meets two faces of the model are placed where all three cross
 //
 // The volume, bracketed as the other fixtures are. The smooth solid is the
 // circle less the segment beyond x = 9, 100 acos(0.9) - 9 sqrt(19) = 5.872591,

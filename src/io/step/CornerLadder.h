@@ -37,6 +37,7 @@ enum class CornerRung : int {
   Provenance,  // the two surfaces provenance names for the corner's originals
   MeshTriple,  // a declared surface and two of the mesh's facet planes
   MeshConic,   // a declared surface and one of the mesh's facet planes
+  OneFace,     // the nearest point of one face's surface, where no two can be had
   Mesh,        // where the mesh put it: no move at all
 };
 struct CornerRungSpec {
@@ -49,7 +50,8 @@ constexpr CornerRungSpec kCornerRungs[] = {
   {CornerRung::Provenance, 1, "the two surfaces provenance names"},
   {CornerRung::MeshTriple, 2, "a declared surface and two mesh planes"},
   {CornerRung::MeshConic, 3, "a declared surface and one mesh plane"},
-  {CornerRung::Mesh, 4, "where the mesh put it"},
+  {CornerRung::OneFace, 4, "the nearest point of one face's surface"},
+  {CornerRung::Mesh, 5, "where the mesh put it"},
 };
 inline int cornerRungRank(CornerRung rung)
 {

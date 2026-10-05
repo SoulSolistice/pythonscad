@@ -9,7 +9,6 @@ void StepKernel::BodyBuild::placeCorners()
   placeOnMeshPlanes();
   reportRecognition();
   placeOnFileFaces();
-  placeOnOwnQuadric();
   holdWeldedVertices();
   keepExactSurfaces();
   checkMovesStayOnFaces();

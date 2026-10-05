@@ -248,14 +248,17 @@ def report_contradictions(output):
         bad.append("corners said to move no further than a band of %s move up to %s"
                    % (band.group(1), band.group(2)))
 
-    moved = re.search(r"(\d+) corners moved, by at most ([\d.]+) - (\d+) where two declared "
-                      r"owners cross, (\d+) onto a conic with one plane, (\d+) where three "
-                      r"exact things meet, (\d+) onto the quadric their own face", out)
+    # Matched nothing from the day a fourth path joined the line until
+    # 2026-10-05, and its paths' proposals summed to more than the moves once
+    # the arbiter weighed them (open item 39, R14): each move by the placement
+    # that put it there, which sums to the total or the line is wrong.
+    moved = re.search(r"(\d+) corners moved, by at most ([\d.]+) - by the placement that put "
+                      r"them there: ([^;]*);", out)
     if moved:
         total = int(moved.group(1))
-        parts = [int(moved.group(i)) for i in (3, 4, 5, 6)]
+        parts = [int(n) for n in re.findall(r"(\d+) [a-z]", moved.group(3))]
         if sum(parts) != total:
-            bad.append("%d corners moved but the three paths account for %d"
+            bad.append("%d corners moved but the placements account for %d"
                        % (total, sum(parts)))
         # every path's own worst is over a subset of the same moves
         for label, pat in (("onto a conic", r"reach the conic where the two cross, moving at most "

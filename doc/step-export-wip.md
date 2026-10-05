@@ -5113,6 +5113,36 @@ from coming back - landed with the fix and mutation-checked (F2).
   coupon (`examples/step_test/phantom-sliver.scad`), parked outside the suite for
   exactly this corner, 0.103 off its face - it joins the suite with its derived
   volume when this is fixed.
+  **Fixed 2026-10-05**: the pass is gone, and what it did is a candidate the one
+  arbiter weighs. The arbiter solved every pair and triple of a corner's
+  constraints and never offered a constraint's own nearest point, so a corner
+  bounding one face, or whose every solve folded the file, could only stay
+  where the mesh put it - the gap the pass filled after the fact. Now each face
+  the file writes at the corner offers its point nearest where the mesh put it
+  (`CornerRung::OneFace`, ranked above the mesh alone), to a corner on none of
+  its constraints - so it trades nothing it is on for something of the same
+  tier - and only on a surface with a closed-form residual, whose nearest point
+  is its own. Its first proof offered it everywhere and moved corners 9.0
+  along a neighbouring patch on step-sphere; the patch's nearest point of a
+  bounded net is its far edge, and the corner was already on its faces. That
+  proof also found item 43's W1 - the arbiter measuring a band's corners
+  against a surface rebuilt from its rims - fixed at the band first (069d3f26a).
+  Measured over 132 exports: only lid10's file moves - 53 corners placed on
+  one face's surface where the pass placed 38, the arbiter's "left off a
+  surface" 70 to 17, vertices off a face they bound 273 to 258 and edges carried
+  off one 604 to 589, 15 more conics, and 15 more planar faces fanned to follow
+  their corners. The tessellation's freedom along the surface is kept, and the
+  report says so: placed "at its point nearest where the mesh put them". The
+  move summary was a sum of what each path *proposed*, which the arbiter
+  overrules - 144 of 120 moves on a bore with a frustum through it - and its
+  sanity check had matched nothing since a fourth path joined the line; it
+  tallies each move by the rung that finally placed it now, and the check
+  holds it to the total. *Test:* still owed, as R6's: no unit test drives the
+  arbiter. The phantom-sliver coupon stays parked - its corner sits on a
+  phantom sliver, existence's to remove (steps 4 to 7).
+  The same shape remains in `keepExactSurfaces` (`CornersKeepExact.cc`), which
+  re-places moves after the arbiter where they leave a plane a declaration
+  vouches for; it fires on no export or flagship coupon, and is next.
 - **R15 - "the move keeps the corner on its faces", judged by the band.**
   `checkMovesStayOnFaces` (`CornersStayOnFaces.cc`) accepts a moved corner
   anywhere within `declaredBand(s)` of a face's surface - up to its sagitta, D4

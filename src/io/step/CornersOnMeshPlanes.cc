@@ -271,8 +271,6 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
       move_rung[v] = CornerRung::MeshConic;
       placed++;
     }
-    on_conic = placed;
-    on_triple = placed_triple;
     // Whenever a corner was asked, placed or not: why none was is the report
     // that matters most where none was.
     if (placed_triple + triple > 0) {

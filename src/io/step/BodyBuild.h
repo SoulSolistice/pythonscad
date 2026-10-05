@@ -228,24 +228,6 @@ struct StepKernel::BodyBuild {
    * licensed a 1.9976 move on step-partial-cylinder. */
   void placeOnFileFaces();
 
-  /*! A corner of a trimmed quadric that nothing else holds goes on that quadric.
-   *
-   * The placement above reaches a corner two surfaces made. It does not reach a
-   * corner the *mesh* made in the middle of a facet, which a trim then left on
-   * the boundary of the face written on that quadric: nothing declared it, so
-   * provenance names no owners for it and no crossing curve applies. It is
-   * nonetheless a corner of an analytic face, sitting at the inradius of the
-   * polygon the surface was tessellated as - 20(1 - cos(pi/32)) = 0.0963 inside
-   * the cylinder its own face is written on.
-   *
-   * On step-band-family that is the last 39 corners, at the height where the
-   * ridge tapers to nothing and the trim runs along the bore's own facets
-   * instead of across them. They are moved onto the surface their face names,
-   * and only where no other exact declared surface already holds them - a
-   * corner on two of them belongs where both agree, which is the crossing curve
-   * the paths above compute, not on either one alone. */
-  void placeOnOwnQuadric();
-
   /*! A welded vertex stays where it is.
    *
    * Those are the insertions that keep the shell conformal: a vertex one face
@@ -297,7 +279,7 @@ struct StepKernel::BodyBuild {
    * bounded by a point off its own surface is describing a different surface.
    * Every path above is meant to satisfy this by construction - the crossing
    * puts a corner on both its owners, the conic and triple placements on their
-   * owner, the pass onto a quadric on the face's own - and one of them did not.
+   * owner, the arbiter's one-face candidate on that face's own - and one of them did not.
    * The placement onto a conic trusted provenance's single owner, and where a
    * boolean cut every facet of a bore, that owner was the wall across the cap:
    * band-fn024's 48 bore corners were slid 3.0 off the face they bound, lid10's
@@ -792,8 +774,6 @@ struct StepKernel::BodyBuild {
   // Which rung placed each move, so the arbiter can weigh it against the
   // others. See kCornerRungs.
   std::map<int, step::CornerRung> move_rung;
-  // what each path added
-  std::size_t on_conic = 0, on_triple = 0, on_own = 0, on_faces = 0, on_plane_face = 0;
 
   // ---- the kernel methods the phases call
   EdgeCurve *create_line_edge_curve(Vertex *vert1, Vertex *vert2, bool dir)

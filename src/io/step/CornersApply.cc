@@ -323,21 +323,30 @@ void StepKernel::BodyBuild::applyCornerMoves()
         worst = std::max(worst, (m.second - vertices[m.first]).norm());
         vertices[m.first] = m.second;
       }
-      // Three populations, not one. `moves` starts as the corners two declared
-      // owners cross at and then takes the conic and triple-point placements
-      // above, so calling the total "their two declared owners" was false
-      // wherever the other paths fired: on step-exact-trim provenance names two
-      // owners for *zero* vertices and this line still claimed 40 of them.
-      // Each is named now, and they sum to the total by construction - every
-      // path checks `moves.count(v)` before inserting.
+      // By the placement each move is finally the work of, so they sum to the
+      // total by construction. Calling the total "their two declared owners"
+      // was false wherever another path fired: on step-exact-trim provenance
+      // names two owners for *zero* vertices and the line claimed 40 of them.
+      // And counting what each path *proposed* was false once the arbiter
+      // weighed them: it overrules and drops proposals, and the paths' counts
+      // summed to 144 of 120 moves on a bore with a frustum through it (open
+      // item 39, R14). A move no rung is recorded for is provenance's, as the
+      // placement starts.
+      std::map<CornerRung, std::size_t> by_rung;
+      for (const auto& m : moves) {
+        const auto r = move_rung.find(m.first);
+        by_rung[r != move_rung.end() ? r->second : CornerRung::Provenance]++;
+      }
+      std::string tally;
+      for (const auto& spec : kCornerRungs) {
+        const auto n = by_rung.find(spec.rung);
+        if (n == by_rung.end()) continue;
+        tally += (tally.empty() ? "" : ", ") + std::to_string(n->second) + " " + spec.name;
+      }
       LOG(
-        "STEP export: %1$d corners moved, by at most %2$.4f - %3$d where two declared owners "
-        "cross, %4$d onto a conic with one plane, %5$d where three exact things meet, %6$d where "
-        "the two analytic faces they bound cross, %7$d where an analytic face meets the plane of "
-        "the face beside it, %8$d onto the quadric their own face is written "
-        "on; %9$d analytic faces now bound themselves on their own surface",
-        int(moves.size()), worst, int(cornerMoves.size()), int(on_conic), int(on_triple), int(on_faces),
-        int(on_plane_face), int(on_own), int(analytic_faces));
+        "STEP export: %1$d corners moved, by at most %2$.4f - by the placement that put them "
+        "there: %3$s; %4$d analytic faces now bound themselves on their own surface",
+        int(moves.size()), worst, tally, int(analytic_faces));
       if (!split_for_corners.empty()) {
         std::size_t added = 0;
         for (const auto& sc : split_for_corners) added += sc.second.size() - 1;

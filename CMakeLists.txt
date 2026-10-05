@@ -1708,7 +1708,6 @@ set(CORE_SOURCES
   src/io/step/CornersStayOnFaces.cc
   src/io/step/CornersKeepExact.cc
   src/io/step/CornersWelded.cc
-  src/io/step/CornersOnOwnQuadric.cc
   src/io/step/CornersOnFileFaces.cc
   src/io/step/CornersOnMeshPlanes.cc
   src/io/step/WriteShells.cc
