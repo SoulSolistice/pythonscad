@@ -4837,7 +4837,18 @@ from coming back - landed with the fix and mutation-checked (F2).
   `PlaneSections.cc`: `coplanarStretches` groups a boundary's vertices into
   planes at a relative 1e-9, and `sectionTiltFloor` falls back to 1e-6 for a
   surface that states no lean. (The file's other small numbers guard divisions
-  against a singular solve; they decide no membership.) *Test:* once it is one
+  against a singular solve; they decide no membership.) **Both fixed
+  2026-10-05**: a stretch's seed states a plane by `statesPlane` and a vertex is
+  on it by `onPlane`, where both asked 1e-9 of the cycle's box; a plane across
+  the axis is left to the arc pass by `parallel`, where it was within 1e-9 of
+  across; and one along a cylinder's axis, which cuts rulings and no closed
+  curve, is refused by `perpendicular`, where `sectionTiltFloor` refused every
+  plane within 1e-6 of it - the floor is the surface's lean now, zero for a
+  cylinder. Neutral over 132 exports: 0 differences. *Test:*
+  `plane_sections_test.cc` - six vertices of a cylinder cut by z = 0.3 x are one
+  stretch, and with the middle one 1e-10 off the plane at 100 mm they are not
+  (the old tolerance grouped them; it fails the test); a plane along the axis is
+  no stretch. *Test:* once it is one
   function, a unit test - a corner 1e-10 off a plane at 100 mm is off it, one
   within the forward error is on - so no second tolerance can stand beside it
   unnoticed. **The writer's half, 2026-09-30.** `recognition::allCoplanar` is

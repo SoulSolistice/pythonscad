@@ -81,3 +81,37 @@ TEST_CASE("a plane across a cone's axis cuts its circle", "[planesections]")
   CHECK((sec.centre - Vector3d(0, 0, 3)).norm() < 1e-12);
   CHECK(brep::distanceToCurve(written(sec), Vector3d(0, 3, 3)) < 1e-12);
 }
+
+TEST_CASE("a boundary's planar stretch holds only what is on its plane", "[planesections][R2]")
+{
+  // Six vertices of a cylinder of radius 100 cut by the plane z = 0.3 x, and
+  // two more off it closing the cycle: one stretch of all six. With the middle
+  // one moved 1e-10 off the plane - far below the 1e-9 of the cycle's size the
+  // stretches were grouped at, far above the arithmetic's bound - no stretch
+  // holds all six (open item 39, R2).
+  std::vector<Vector3d> vertices;
+  for (int k = 0; k < 6; k++) {
+    const double a = k * M_PI / 10;
+    vertices.emplace_back(100 * cos(a), 100 * sin(a), 0.3 * 100 * cos(a));
+  }
+  vertices.emplace_back(100 * cos(M_PI / 2), 100 * sin(M_PI / 2), 60);
+  vertices.emplace_back(100.0, 0.0, 60);
+  const std::vector<int> cycle{0, 1, 2, 3, 4, 5, 6, 7};
+  const Vector3d axis(0, 0, 1);
+  auto longest = [&](const std::vector<Vector3d>& at) {
+    std::size_t most = 0;
+    for (const auto& st : step::coplanarStretches(cycle, at, axis, 0.0)) most = std::max(most, st.count);
+    return most;
+  };
+  CHECK(longest(vertices) == 6);
+  const Vector3d normal = Vector3d(-0.3, 0, 1).normalized();
+  std::vector<Vector3d> moved = vertices;
+  moved[3] += normal * 1e-10;
+  CHECK(longest(moved) < 6);
+
+  // A plane along the axis cuts a cylinder in rulings, no closed curve, and is
+  // not a stretch; one across it is the circle the arc pass writes.
+  std::vector<Vector3d> wall{{100, 0, 0},  {100, 0, 10}, {100, 0, 20},
+                             {100, 0, 30}, {50, 50, 30}, {50, 50, 0}};
+  CHECK(step::coplanarStretches({0, 1, 2, 3, 4, 5}, wall, axis, 0.0).empty());
+}

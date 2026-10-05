@@ -196,9 +196,12 @@ double sectionTiltFloor(const Surface *surface)
 {
   // A cylinder's rulings are parallel, so every plane but one along them closes;
   // a cone's meet, and past the half angle the section runs away to infinity.
+  // The surface's lean, then - zero for a cylinder, whose one plane that does
+  // not close is the one along its axis, which coplanarStretches asks at machine
+  // precision. It was 1e-6 for a surface leaning none, refusing every plane
+  // within that of along the axis, a chosen number (open item 39, R2).
   const auto *axial = dynamic_cast<const AxialSurface *>(surface);
-  if (axial != nullptr && axial->lean() > 0) return axial->lean();
-  return 1e-6;
+  return axial != nullptr ? axial->lean() : 0.0;
 }
 
 bool surfaceAxis(const Surface *surface, Vector3d& axis)
@@ -217,34 +220,25 @@ std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
   const std::size_t n = cycle.size();
   if (n < 4) return out;
   auto at = [&](std::size_t k) -> const Vector3d& { return vertices[cycle[k % n]]; };
-  // Scale the flatness test to the cycle, so it means the same thing on a coupon
-  // measured in millimetres and on one measured in metres. From the bounding
-  // box, not from a distance to some chosen vertex: two faces meeting along one
-  // stretch see the cycle rotated and reversed, and they have to agree about the
-  // stretch or the shell opens - so nothing here may depend on where the cycle
-  // starts.
-  Vector3d lo = at(0), hi = at(0);
-  for (std::size_t k = 1; k < n; k++) {
-    lo = lo.cwiseMin(at(k));
-    hi = hi.cwiseMax(at(k));
-  }
-  const double tol = std::max(1e-12, 1e-9 * (hi - lo).norm());
 
   // The longest run of vertices starting at s that shares one plane, and that
   // plane. Collinear leading vertices do not fix a plane, so the seed keeps
-  // reaching forward until it finds one that does.
+  // reaching forward until it finds one that does. Both questions at machine
+  // precision (recognition/Exact.h) - whether three vertices state a plane, and
+  // whether the next is on it - where both were asked against 1e-9 of the
+  // cycle's box, a chosen number that grouped a vertex 1e-10 off a plane at
+  // 100 mm into it (open item 39, R2). The answer still depends on nothing but
+  // the vertices, so two faces seeing one stretch from either side agree.
   auto grow = [&](std::size_t s, Vector3d& normal) -> std::size_t {
     const Vector3d& p0 = at(s);
     std::size_t k = 2;
-    Vector3d nn = Vector3d::Zero();
     for (; k < n; k++) {
-      nn = (at(s + 1) - p0).cross(at(s + k) - p0);
-      if (nn.norm() > tol) break;
+      if (recognition::statesPlane(p0, at(s + 1), at(s + k))) break;
     }
     if (k >= n) return 0;
-    nn.normalize();
+    const Vector3d nn = (at(s + 1) - p0).cross(at(s + k) - p0).normalized();
     std::size_t count = k + 1;
-    while (count < n && fabs((at(s + count) - p0).dot(nn)) <= tol) count++;
+    while (count < n && recognition::onPlane(p0, nn, at(s + count))) count++;
     normal = nn;
     return count;
   };
@@ -273,8 +267,13 @@ std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
     // still crosses every generator - at the half angle it is a parabola and
     // past it a hyperbola, and neither of those closes. Either way the edges are
     // still spent, so the search does not offer the same stretch back.
+    // Across the axis is the circle, along it no closed curve at all, each at
+    // machine precision; it was within 1e-9 of across (open item 39, R2).
     const double cos_tilt = fabs(nor[best_s].dot(axis));
-    if (cos_tilt < min_cos_tilt || cos_tilt > 1 - 1e-9) continue;
+    if (recognition::parallel(nor[best_s], axis) || recognition::perpendicular(nor[best_s], axis) ||
+        cos_tilt < min_cos_tilt) {
+      continue;
+    }
     PlaneStretch st;
     st.start = best_s;
     st.count = best_len;
