@@ -133,6 +133,57 @@ KNOWN_EXPORT_ERRORS = {
     "band-fn096": ["facets named by their maker for a declared surface are not written on it"],
 }
 
+# Every EXPORT-WARNING a coupon raises, named with the reason it is known, as the
+# fixtures name theirs with KNOWN-EXPORT-WARNING: (doc/step-export-wip.md, open
+# item 43). A warning not listed fails the coupon, and a listed one no longer
+# raised fails it too. Named by the words that say what it is, never a count.
+#
+# Regions the approximation finds no fit for stay facets: a valid export and the
+# pass's design, though no proof that no closed form exists.
+NO_FIT = "no fit having been found"
+# A plane fitted to facets does not survive the corner placement and its section
+# falls back to chords; a declared plane would (open item 11).
+AGREED = "agreed before the corners were placed"
+# Crossings the fitter does not reach at machine precision, written as chords
+# (open item 10, B1/B2).
+CHORD = "could not be written as that curve and fell back to a chord"
+# One declared surface written partly as a band's wall and partly as a quadric
+# face, the division decided by pass order - the split surface, open item 26; R0
+# (item 29) has not reached it.
+SPLIT = ["split between different kinds of recogniser",
+         "so this is one connected region cut in two by pass order"]
+# The loop nesting's repair: a hole recorded against a face further out is moved
+# to the face that encloses it (step-nested-rings is the fixture for it).
+HOLE = "to the enclosing face"
+BAND = [NO_FIT, AGREED]
+KNOWN_EXPORT_WARNINGS = {
+    "band-fn024": BAND,
+    "band-fn048": BAND,
+    # The band family's sweep crossing at FN 64, 6.46e-05 off at its nearest.
+    "band-fn064": BAND + [CHORD],
+    "band-fn096": BAND,
+    "lid10": BAND + [CHORD, HOLE] + SPLIT + [
+        # A loop nothing encloses is an outer bound and keeps the winding it
+        # arrived with - reversing it is what put edges in twice the same way
+        # (src/io/step/MeshLoops.cc).
+        "without an enclosing face as their own face",
+        # A cone the approximation re-fits, its declaration refused upstream
+        # (open item 19).
+        "fitted to a surface the model had already declared",
+        # True of the file, and short of it: lid10 writes a cone corner 0.716 off,
+        # beyond this warning's worst - the arbiter's count is not a measure of
+        # the file (open item 43, W1; export-step-flagship-corners).
+        "left off a surface the file writes a face of them on",
+        # Conics cut by facets named for nothing: crossing or seam waits on the
+        # makers' names (open item 40).
+        "cut from a quadric by a plane whose facets are named for nothing",
+        # The face across is fanned, or lacks the run of corners to be handed
+        # the edge, so both write chords, which is what agrees (item 39, R22).
+        "written as chords by both faces instead of as the conic by one",
+    ],
+    "bayonet": BAND + [CHORD, HOLE] + SPLIT,
+}
+
 STRICT_MUST_NOT_SAY = [
     ("corners are held where the mesh put them, each touching a face that keeps a plane",
      "the corner placement gave up corners to protect a planar face"),
@@ -218,6 +269,24 @@ def main():
         if gone:
             print("FAIL %-12s a known defect is no longer reported - it is fixed, take it out of "
                   "KNOWN_EXPORT_ERRORS: %s" % (name, "; ".join(gone)), file=sys.stderr)
+            failures.append(name)
+            continue
+        # And its warnings, the same way (open item 43).
+        warnings = [ln for ln in output.splitlines() if "EXPORT-WARNING" in ln]
+        known = KNOWN_EXPORT_WARNINGS.get(name, [])
+        unknown = [ln for ln in warnings if not any(k in ln for k in known)]
+        gone = [k for k in known if not any(k in ln for ln in warnings)]
+        if unknown:
+            print("FAIL %-12s the exporter warned, and KNOWN_EXPORT_WARNINGS does not name it"
+                  % name, file=sys.stderr)
+            for ln in unknown:
+                print("       " + ln.strip(), file=sys.stderr)
+            failures.append(name)
+            continue
+        if gone:
+            print("FAIL %-12s a known warning is no longer raised - it is fixed or no longer "
+                  "reached, take it out of KNOWN_EXPORT_WARNINGS: %s" % (name, "; ".join(gone)),
+                  file=sys.stderr)
             failures.append(name)
             continue
         if not validateSTEP(target):

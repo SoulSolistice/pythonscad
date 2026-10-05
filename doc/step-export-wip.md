@@ -5504,9 +5504,18 @@ edges' curves**, by 1.17 median and 2.43 at worst against 1.41e-08 declared -
 SOLIDWORKS fault code 7. Unexplained; the roof's two KNOWN-EXPORT-ERRORs are the
 exact tier's and say nothing of this.
 
-**Next**: the flagship coupons (`step-flagship-check.py`) still do not read
-warnings; they want the same treatment, per coupon. And W1-W5 are each a fix of
-their own, each of which a fixture's directive will announce.
+**The flagship coupons too, the same day**: `step-flagship-check.py` names each
+coupon's warnings in `KNOWN_EXPORT_WARNINGS`, as it names its errors, and fails
+on any other or on a named one gone. Two kinds the fixtures do not raise: lid10
+keeps 15 reversed loops nothing encloses as their own faces - the MeshLoops
+record, where reversing them put edges in twice the same way - and writes 17
+plane sections as chords by both faces, the face across fanned (item 39, R22).
+lid10's corner warning is true of its file and short of it: it reports 0.1089 at
+worst, and the file writes a cone corner 0.716 off (as does the bayonet's, which
+raises no corner warning at all) - W1 again, the arbiter's count not being a
+measure of the file. Mutation-checked both ways, one coupon each.
+
+**Next**: W1-W5, each a fix of its own, each of which a directive will announce.
 
 ### 34. What the D0 regions report found on its first read, 2026-09-24
 
