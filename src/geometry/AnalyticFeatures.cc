@@ -616,6 +616,11 @@ bool projectOntoSurfaceAndPlanes(const Surface *surface, const Vector3d& n1, dou
   const double t0 = dhat.dot(p - base);
   const double lo = t0 - travel, hi = t0 + travel;
   double t = t0, best_t = t0, best = std::numeric_limits<double>::infinity();
+  // On to the machine past `tol`, as projectOntoBoth goes (open item 39, R5):
+  // the planes hold every point of their line by construction, and the surface
+  // has to hold this one at its own residual bound.
+  int past_tol = 0;
+  bool exact = false;
   for (int step = 0; step <= 32; step++) {
     const Vector3d at = base + dhat * t;
     double f = 0, d = 0;
@@ -625,7 +630,13 @@ bool projectOntoSurfaceAndPlanes(const Surface *surface, const Vector3d& n1, dou
       best = d;
       best_t = t;
     }
-    if (d <= tol) break;
+    if (recognition::onExactly(surface, at)) {
+      best = std::min(best, d);
+      best_t = t;
+      exact = true;
+      break;
+    }
+    if (d <= tol && ++past_tol > 3) break;
     if (step == 32) break;
     // df/dt = grad f . dhat, zero where the line runs tangent along the
     // surface - there is no crossing there to walk to.
@@ -642,7 +653,7 @@ bool projectOntoSurfaceAndPlanes(const Surface *surface, const Vector3d& n1, dou
   if (closest != nullptr) *closest = best;
   if (!std::isfinite(best)) return false;
   p = base + dhat * best_t;
-  return best <= tol;
+  return exact || best <= tol;
 }
 
 // Forwarding overloads for callers holding a Mesh rather than the graph.

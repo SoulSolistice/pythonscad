@@ -1197,6 +1197,18 @@ TEST_CASE("a line through a cylinder is met at the near crossing", "[surfaceandp
   CHECK(fabs(p.z() - 5.0) <= 1e-15);
 }
 
+TEST_CASE("a line is met on its surface at the machine, past a loose tolerance", "[surfaceandplanes]")
+{
+  // Asked for 1e-8, Newton along the line stopped some 3e-12 off the cylinder
+  // and the triple-point corner was written there; it goes on until the
+  // surface holds the point at its own residual bound (open item 39, R5).
+  auto cyl = std::make_shared<CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  Vector3d p(9.5, 0, 5);
+  REQUIRE(projectOntoSurfaceAndPlanes(cyl.get(), Vector3d(0, 1, 0), 0.0, Vector3d(0, 0, 1), 5.0, p, 1e-8,
+                                      2.0));
+  CHECK(recognition::onExactly(cyl.get(), p));
+}
+
 TEST_CASE("a window wide enough for the far root still returns the near one", "[surfaceandplanes]")
 {
   // The same line, and room to reach either crossing. Alternating projection

@@ -86,20 +86,21 @@ void StepKernel::BodyBuild::keepExactSurfaces()
       const double pd = pn.dot(vouched[0]->refpt);
       Vector3d p = vertices[v], q;
       bool ok = true;
+      // Until the point is on both at machine precision, or stops moving; and
+      // accepted only there, where it was within 1e-6 of the owner and 1e-9 of
+      // the plane (open item 39, R5).
+      const PlaneSurface *plane = vouched[0];
       for (int iter = 0; iter < 64; iter++) {
         if (!AnalyticFeatures::closestOnSurface(own, p, q)) {
           ok = false;
           break;
         }
         const Vector3d next = q - pn * (pn.dot(q) - pd);
-        if ((next - p).norm() < 1e-12) {
-          p = next;
-          break;
-        }
+        const bool still = next == p;
         p = next;
+        if (still || (recognition::onExactly(own, p) && recognition::onExactly(plane, p))) break;
       }
-      if (!ok || !AnalyticFeatures::closestOnSurface(own, p, q) || (q - p).norm() > 1e-6 ||
-          fabs(pn.dot(p) - pd) > 1e-9) {
+      if (!ok || !recognition::onExactly(own, p) || !recognition::onExactly(plane, p)) {
         moves.erase(v);
         dropped++;
         continue;

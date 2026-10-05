@@ -65,7 +65,9 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
           pn = n;
           pd = d;
           any = true;
-        } else if ((n - pn).norm() > 1e-6 || fabs(d - pd) > 1e-6) {
+        } else if (!recognition::samePlane(n * d, n, pn * pd, pn)) {
+          // One plane at machine precision, where it was normals and offsets
+          // within a chosen 1e-6 (open item 39, R5).
           one = false;
           break;
         }
@@ -159,17 +161,21 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
         const bool ok3 =
           projectOntoSurfaceAndPlanes(own3, n1, d1, n2, d2, p3, solve_tol, reach_all, &near3);
         const bool got3 = ok3 && AnalyticFeatures::closestOnSurface(own3, p3, q3);
+        // On the surface and on both planes at machine precision, where it was
+        // within 1e-6 of the one and 1e-9 of the others (open item 39, R5).
+        const bool on3 = got3 && recognition::onExactly(own3, p3);
+        const bool planes3 =
+          recognition::onPlane(n1 * d1, n1, p3) && recognition::onPlane(n2 * d2, n2, p3);
         if (!got3) {
           ts_noconv++;
           if (std::isfinite(near3)) near_misses.push_back(near3);
-        } else if ((q3 - p3).norm() > 1e-6) ts_offsurf++;
-        else if (fabs(n1.dot(p3) - d1) > 1e-9 || fabs(n2.dot(p3) - d2) > 1e-9) ts_plane++;
+        } else if (!on3) ts_offsurf++;
+        else if (!planes3) ts_plane++;
         else if ((p3 - vertices[v]).norm() > reach_all) {
           ts_far++;
           (void)reach_all;
         }
-        if (!got3 || (q3 - p3).norm() > 1e-6 || fabs(n1.dot(p3) - d1) > 1e-9 ||
-            fabs(n2.dot(p3) - d2) > 1e-9 || (p3 - vertices[v]).norm() > reach_all) {
+        if (!got3 || !on3 || !planes3 || (p3 - vertices[v]).norm() > reach_all) {
           triple++;
           t_solve++;
           continue;
@@ -183,17 +189,18 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
       const Surface *own = surfaces[entry.second].get();
       Vector3d p = vertices[v], qa;
       bool ok = true;
+      // Alternating projection, until the point is on both at machine
+      // precision or stops moving - where it stopped at a step under 1e-12
+      // (open item 39, R5).
       for (int iter = 0; iter < 64; iter++) {
         if (!AnalyticFeatures::closestOnSurface(own, p, qa)) {
           ok = false;
           break;
         }
         const Vector3d qb = qa - pn * (pn.dot(qa) - pd);
-        if ((qb - p).norm() < 1e-12) {
-          p = qb;
-          break;
-        }
+        const bool still = qb == p;
         p = qb;
+        if (still || (recognition::onExactly(own, p) && recognition::onPlane(pn * pd, pn, p))) break;
       }
       if (!ok || !AnalyticFeatures::closestOnSurface(own, p, qa)) {
         plane_gave_up++;
@@ -205,7 +212,7 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
       // asserted a plane its corner was not on, by the kernel's own reckoning.
       // The alternating projection converges, so there is no reason to accept
       // less than it converges to.
-      if ((qa - p).norm() > 1e-9 || fabs(pn.dot(p) - pd) > 1e-9) {
+      if (!recognition::onExactly(own, p) || !recognition::onPlane(pn * pd, pn, p)) {
         plane_gave_up++;
         continue;
       }
