@@ -10,39 +10,9 @@ using namespace step;
 
 void StepKernel::BodyBuild::checkAndReport()
 {
-  // Every edge in the file against its own two vertices, which is the one
-  // relation a CAD kernel rejects a substituted curve on and the one nothing
-  // here used to measure. It is asked of the finished entities rather than of
-  // any pass's intermediate state, so no substitution can be added later that
-  // quietly escapes it. Held to what the file declares as its uncertainty: a
-  // vertex further off than that is off by more than the file says anything is.
-  {
-    const double owed = resolution();
-    std::size_t off = 0;
-    double worst = 0;
-    std::vector<double> strays;
-    // Of the B-rep the file is written from - what it holds, and nothing a
-    // phase made and set aside.
-    for (const brep::Edge& edge : brep_body.edges) {
-      for (const std::size_t v : {edge.start, edge.end}) {
-        if (v >= brep_body.vertices.size()) continue;
-        const double d = brep::distanceToCurve(edge.curve.form, brep_body.vertices[v].point);
-        if (d <= owed) continue;
-        off++;
-        strays.push_back(d);
-        worst = std::max(worst, d);
-      }
-    }
-    if (off > 0) {
-      std::sort(strays.begin(), strays.end());
-      LOG(message_group::Export_Warning,
-          "STEP export: %1$d vertex%2$s not on the curve its own edge is written as, by "
-          "%3$.2e median and %4$.2e at worst, against the %5$.2e the file declares as its "
-          "uncertainty - a reader checks exactly this, and calls it "
-          "\"vertex does not lie on edge\'s curve\"",
-          int(off), off == 1 ? " is" : "es are", strays[strays.size() / 2], worst, owed);
-    }
-  }
+  // Every edge against its own two vertices is the contract's question now
+  // (brep::checkVerticesOnCurves, asked by checkBrep as an EXPORT-ERROR; open
+  // item 39, R12).
   if (reseamed > 0 || reseam_full > 0) {
     LOG(
       "STEP export: %1$d sweep face%2$s written from a column that puts the profile's seam in a "

@@ -255,6 +255,7 @@ void StepKernel::BodyBuild::checkBrep()
   const brep::ClassTally t = brep::stateClasses(body);
   const std::vector<std::string> real = brep::check(body);
   const std::vector<std::string> misattributed = brep::checkAttribution(body);
+  const std::vector<std::string> off_curves = brep::checkVerticesOnCurves(body, resolution());
   using recognition::EvidenceClass;
   auto n = [](const std::array<std::size_t, 6>& by, EvidenceClass c) { return int(by[std::size_t(c)]); };
   LOG(
@@ -288,5 +289,19 @@ void StepKernel::BodyBuild::checkBrep()
         misattributed.size() == 1 ? "it stands" : "they stand", misattributed.front().c_str());
     for (std::size_t i = 1; i < misattributed.size() && i < 6; i++)
       LOG("STEP export:   %1$s", misattributed[i].c_str());
+  }
+  // And every vertex on the curve of each edge it ends, to the uncertainty the
+  // file declares: the one relation a reader rejects a substituted curve on. It
+  // was an EXPORT-WARNING in checkAndReport, which a systemic defect is not
+  // (open item 39, R12).
+  if (!off_curves.empty()) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d edge end%2$s off the curve %3$s edge is written as, against the %4$.2e the "
+        "file declares as its uncertainty (brep::checkVerticesOnCurves) - a reader calls it \"vertex "
+        "does not lie on edge's curve\"; first: %5$s",
+        int(off_curves.size()), off_curves.size() == 1 ? " is" : "s are",
+        off_curves.size() == 1 ? "its" : "their", resolution(), off_curves.front().c_str());
+    for (std::size_t i = 1; i < off_curves.size() && i < 6; i++)
+      LOG("STEP export:   %1$s", off_curves[i].c_str());
   }
 }

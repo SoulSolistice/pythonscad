@@ -684,3 +684,21 @@ TEST_CASE("a point's distance to a curve, read off the geometry", "[brep]")
   CHECK(brep::distanceToCurve(parabola, Vector3d::Zero()) == Catch::Approx(0.0).margin(1e-12));
   CHECK(brep::distanceToCurve(parabola, Vector3d(0, 0, 5)) == Catch::Approx(5.0));
 }
+
+TEST_CASE("an edge's ends are on its curve, to the uncertainty the file declares", "[brep][R12]")
+{
+  // A reader rejects an edge whose vertex is off its curve (SOLIDWORKS fault
+  // code 7); the contract names it, an EXPORT-ERROR, where a report once
+  // warned (open item 39, R12). Two of the cube's edges run along x and y from
+  // corner 0; moved half a unit up z, corner 0 is off both - and still on the
+  // third, which runs up z.
+  Body body = cube();
+  CHECK(brep::checkVerticesOnCurves(body, 1e-12).empty());
+  body.vertices[0].point += Vector3d(0, 0, 0.5);
+  const auto off = brep::checkVerticesOnCurves(body, 1e-12);
+  CHECK(off.size() == 2);
+  for (const std::string& line : off)
+    CHECK(line.rfind("vertex 0 is 5.00e-01 off the curve of edge ", 0) == 0);
+  // Within what the file declares, it is on.
+  CHECK(brep::checkVerticesOnCurves(body, 0.5).empty());
+}

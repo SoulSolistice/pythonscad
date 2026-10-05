@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <map>
 #include <set>
@@ -424,6 +425,24 @@ std::vector<std::string> checkAttribution(const Body& body)
     if (!face.carrier->sameAs(*face.surface)) {
       out.push_back(where + " is written on " + kindOf(face.carrier.get()) + " that is not " +
                     kindOf(face.surface.get()) + " it stands for, nor stated derived from it");
+    }
+  }
+  return out;
+}
+
+std::vector<std::string> checkVerticesOnCurves(const Body& body, double uncertainty)
+{
+  std::vector<std::string> out;
+  for (std::size_t e = 0; e < body.edges.size(); e++) {
+    const Edge& edge = body.edges[e];
+    for (const std::size_t v : {edge.start, edge.end}) {
+      if (v >= body.vertices.size()) continue;  // check() names it
+      const double d = distanceToCurve(edge.curve.form, body.vertices[v].point);
+      if (d <= uncertainty) continue;
+      char by[32];
+      snprintf(by, sizeof by, "%.2e", d);
+      out.push_back("vertex " + std::to_string(v) + " is " + by + " off the curve of edge " +
+                    std::to_string(e));
     }
   }
   return out;

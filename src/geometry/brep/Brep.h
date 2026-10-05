@@ -278,6 +278,12 @@ struct Body {
  * not topology - a face can close perfectly on the wrong surface. */
 std::vector<std::string> checkAttribution(const Body& body);
 
+/*! Every end of an edge further off that edge's own curve than `uncertainty`,
+ * the uncertainty the file declares - what a reader rejects an edge on
+ * (SOLIDWORKS fault code 7, "vertex does not lie on edge's curve"). Apart from
+ * check() because it needs that figure, which the topology does not. */
+std::vector<std::string> checkVerticesOnCurves(const Body& body, double uncertainty);
+
 /*! Whether the curve carried between `start` and `end` lies on `surface`
  * exactly - a closed-form certificate, no tolerance. A surface of algebraic
  * degree d (a plane 1, a quadric 2, a torus 4) meets a line in at most d points

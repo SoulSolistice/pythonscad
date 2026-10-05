@@ -5099,6 +5099,14 @@ from coming back - landed with the fix and mutation-checked (F2).
   not hold. It fires on none of the 120 measured exports, so as an error it costs
   no directive and only protects. *Test:* planted - a vertex moved off its edge -
   and the walk taken from the mirror, which holds only what is written.
+  **Fixed 2026-10-05.** The walk had been the mirror's since step 2c; the
+  question moves into the contract, `brep::checkVerticesOnCurves` - every end of
+  an edge against that edge's curve, to the uncertainty the file declares - and
+  `checkBrep` raises it as an EXPORT-ERROR beside `check` and
+  `checkAttribution`, where `checkAndReport` warned. Neutral over 132 exports: it
+  fires on none. *Test:* `brep_test.cc` - a cube's corner moved half a unit up is
+  off its two edges along x and y and on the one up z; with the check made to
+  name nothing, it fails.
 - **R13 - the plane that cuts a quadric is found by position, and a chord
   qualifies.** `decideSections` (`DecideSections.cc`) takes a declared plane
   where a neighbouring loop's corners lie on one, and otherwise the loop's own
