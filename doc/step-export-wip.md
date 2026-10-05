@@ -4785,6 +4785,17 @@ With no planar entity to fall back to, the translator's refusal can no longer
 keep the phases' entities; the file then holds no solid, and says so. Proven
 by `compare --data` (R21): every file the same, line for line.
 
+Third move, 2026-10-05: the straight edges of the planar faces and the fans are
+the B-rep's own. `BodyBuild::lineEdge` gives one edge per mesh edge, whoever
+names it first: the one an analytic face made along it, read through the
+reader, or else one built on the B-rep - the line from its first vertex to its
+second, as `create_line_edge_curve` made it - so neither phase makes an
+EDGE_CURVE, LINE, VECTOR or DIRECTION any more, and `edge_map` is read by no
+phase after the analytic faces. Vertices are still read (`brepVertex`), each off
+the VERTEX_POINT `get_vertex` makes; they are the next move, with the edges the
+analytic faces make. Proven by `compare --data` against the commit before: 0
+differences over 130 exports.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral

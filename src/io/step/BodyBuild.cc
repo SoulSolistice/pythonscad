@@ -197,3 +197,41 @@ StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)
   }
   return step_verts[ind];
 }
+
+std::size_t StepKernel::BodyBuild::brepVertex(int ind)
+{
+  return reader.vertex(get_vertex(ind));
+}
+
+std::size_t StepKernel::BodyBuild::lineEdge(int a, int b, bool& forward)
+{
+  const auto key = std::make_pair(std::min(a, b), std::max(a, b));
+  const std::size_t from = brepVertex(a);
+  auto it = line_edges.find(key);
+  if (it == line_edges.end()) {
+    std::size_t e;
+    const auto made = edge_map.find(key);
+    if (made != edge_map.end()) {
+      e = reader.edge(made->second);
+    } else {
+      brep::Edge edge;
+      edge.start = from;
+      edge.end = brepVertex(b);
+      // From its first vertex, along the unit vector to its second - a zero
+      // length one along x, since a direction may not be zero (see
+      // StepKernel::create_line_edge_curve, which this replaces).
+      const Vector3d p = brep_body.vertices[edge.start].point;
+      Vector3d v = brep_body.vertices[edge.end].point - p;
+      const double len = v.norm();
+      if (len < 1e-12) v = Vector3d(1, 0, 0);
+      else v /= len;
+      edge.curve.form = brep::Line{p, v};
+      edge.same_sense = true;
+      brep_body.edges.push_back(std::move(edge));
+      e = brep_body.edges.size() - 1;
+    }
+    it = line_edges.emplace(key, e).first;
+  }
+  forward = brep_body.edges[it->second].start == from;
+  return it->second;
+}

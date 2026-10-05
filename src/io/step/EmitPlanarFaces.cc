@@ -27,11 +27,17 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     const std::vector<int>& loop = loops[i];
     const int n = int(loop.size());
 
-    // The loop as the B-rep's, each edge named through the reader.
+    // The loop as the B-rep's: a curve an analytic face hands it named through
+    // the reader, and each straight edge the B-rep's own (lineEdge).
     brep::Loop& bound = planar_loops[i];
     bound.outer = !loop_is_hole[i];
     auto use = [&](EdgeCurve *edge, bool sense) {
       bound.coedges.push_back(brep::Coedge{reader.edge(edge), sense, std::nullopt});
+    };
+    auto line = [&](int a, int b) {
+      bool forward = true;
+      const std::size_t e = lineEdge(a, b, forward);
+      bound.coedges.push_back(brep::Coedge{e, forward, std::nullopt});
     };
 
     // a rim of a recognised band is one circular edge instead of n straight
@@ -56,22 +62,10 @@ void StepKernel::BodyBuild::emitPlanarFaces()
           continue;
         }
         if (covered[j] != 0) continue;
-        const int ind = loop[j];
-        const int indn = loop[(j + 1) % n];
-        bool edge_dir = true;
-        EdgeCurve *edge_curve = get_line_from_map(edge_map, ind, indn, get_vertex(ind), get_vertex(indn),
-                                                  edge_dir, merged_edge_cnt);
-        use(edge_curve, edge_dir);
+        line(loop[j], loop[(j + 1) % n]);
       }
     } else
-      for (int j = 0; j < n; j++) {
-        const int ind = loop[j];
-        const int indn = loop[(j + 1) % n];
-        bool edge_dir = true;
-        EdgeCurve *edge_curve = get_line_from_map(edge_map, ind, indn, get_vertex(ind), get_vertex(indn),
-                                                  edge_dir, merged_edge_cnt);
-        use(edge_curve, edge_dir);
-      }
+      for (int j = 0; j < n; j++) line(loop[j], loop[(j + 1) % n]);
     // create the plane. Where the model declared one that this face lies in,
     // that is the plane: a declaration cannot drift, and a fit to mesh vertices
     // moves with the tessellation, with whatever a boolean left behind, and with

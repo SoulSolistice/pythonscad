@@ -457,13 +457,23 @@ struct StepKernel::BodyBuild {
   void checkAndReport();
 
   /*! The B-rep the file holds (open item 39, step 2d). The planar faces and
-   * the fans build it directly; what they take from the phases before them -
-   * the analytic faces, and every edge - is read off those phases' entities
-   * through `reader`, as they name it. Every phase from assembleFaces on reads
-   * and writes this and nothing else - promoteCurves, the checks, the
-   * translator - and the point where entities stop being made moves upstream a
-   * phase at a time, until nothing is read. */
+   * the fans build it directly, their own straight edges with them (lineEdge);
+   * what they take from the phases before them - the analytic faces, the edges
+   * those made, and every vertex - is read off those phases' entities through
+   * `reader`, as they name it. Every phase from assembleFaces on reads and
+   * writes this and nothing else - promoteCurves, the checks, the translator -
+   * and the point where entities stop being made moves upstream a phase at a
+   * time, until nothing is read. */
   brep::Body brep_body;
+  /*! The B-rep's vertex for mesh vertex `ind`: its VERTEX_POINT, read. */
+  std::size_t brepVertex(int ind);
+  /*! The straight edge along mesh edge (a, b), as the B-rep's, and in `forward`
+   * whether it runs from `a`. One per mesh edge, whoever names it first: the
+   * one an analytic face made along it, read, or else one built here, as the
+   * line from its first vertex to its second - which is what the edge map
+   * made as an entity before (StepKernel::create_line_edge_curve). */
+  std::size_t lineEdge(int a, int b, bool& forward);
+  std::map<std::pair<int, int>, std::size_t> line_edges;  // mesh edge (lo, hi) -> B-rep edge
   /*! brep::check over the B-rep: the structure the file asserts, held to the
    * neutral contract - an EXPORT-ERROR where it breaks it - and every vertex's
    * and edge's class stated. */

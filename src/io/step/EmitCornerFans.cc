@@ -33,11 +33,9 @@ void StepKernel::BodyBuild::emitCornerFans()
       brep::Loop bound;
       bound.outer = true;
       for (int j = 0; j < 3; j++) {
-        const int a = tri[j], b = tri[(j + 1) % 3];
-        bool dir = true;
-        EdgeCurve *e =
-          get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
-        bound.coedges.push_back(brep::Coedge{reader.edge(e), dir, std::nullopt});
+        bool forward = true;
+        const std::size_t e = lineEdge(tri[j], tri[(j + 1) % 3], forward);
+        bound.coedges.push_back(brep::Coedge{e, forward, std::nullopt});
       }
       // The triangle's own plane, not the polygon's. A triangle is planar
       // wherever its corners are, which is the whole reason for fanning one
