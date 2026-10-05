@@ -5140,9 +5140,14 @@ from coming back - landed with the fix and mutation-checked (F2).
   holds it to the total. *Test:* still owed, as R6's: no unit test drives the
   arbiter. The phantom-sliver coupon stays parked - its corner sits on a
   phantom sliver, existence's to remove (steps 4 to 7).
-  The same shape remains in `keepExactSurfaces` (`CornersKeepExact.cc`), which
-  re-places moves after the arbiter where they leave a plane a declaration
-  vouches for; it fires on no export or flagship coupon, and is next.
+  The same shape was in `keepExactSurfaces` (`CornersKeepExact.cc`), which
+  re-placed moves after the arbiter where they left a plane a declaration
+  vouches for - written for the flat bottoms of step-declare-grid.py and -strip,
+  where the crossing of a wall and a sweep took a corner off z = 0. It fired on
+  no export or flagship coupon by then: the arbiter decides those corners by its
+  tiers, the cylinder and the declared plane two declared faces against the
+  cylinder and an interpolant. Removed the same day, with `ownerSplit`, the
+  input only it read.
 - **R15 - "the move keeps the corner on its faces", judged by the band.**
   `checkMovesStayOnFaces` (`CornersStayOnFaces.cc`) accepts a moved corner
   anywhere within `declaredBand(s)` of a face's surface - up to its sagitta, D4

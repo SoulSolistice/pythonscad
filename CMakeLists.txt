@@ -1706,7 +1706,6 @@ set(CORE_SOURCES
   src/io/step/DecideCrossingRuns.cc
   src/io/step/CornersApply.cc
   src/io/step/CornersStayOnFaces.cc
-  src/io/step/CornersKeepExact.cc
   src/io/step/CornersWelded.cc
   src/io/step/CornersOnFileFaces.cc
   src/io/step/CornersOnMeshPlanes.cc

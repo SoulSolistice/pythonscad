@@ -10,7 +10,6 @@ void StepKernel::BodyBuild::placeCorners()
   reportRecognition();
   placeOnFileFaces();
   holdWeldedVertices();
-  keepExactSurfaces();
   checkMovesStayOnFaces();
   applyCornerMoves();
 }

@@ -131,7 +131,6 @@ using AnalyticFeatures::closestOnSurface;
  */
 void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_t>> *out,
                      std::map<int, Vector3d> *out_moves, std::map<int, std::size_t> *out_single,
-                     std::map<int, std::pair<std::size_t, std::size_t>> *out_split,
                      std::map<int, std::vector<std::size_t>> *out_owners)
 {
   if (ps.original_ids.size() != ps.indices.size() || ps.indices.empty()) return;
@@ -512,9 +511,10 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // Whether this corner may be placed where the two cross at all.
       //
       // Asked only where both owners are exact quadrics. Where one of them is a
-      // fit, build_tri_body reconsiders the placement against the planes the
-      // merged mesh carries - it is `ownerSplit` that reaches that reroute, and
-      // a corner where a cap meets a wall is what the reroute exists to place.
+      // fit, the corner arbiter weighs the placement against every face the file
+      // writes there - a declared plane the mesh carries among them, and an
+      // exact surface outranking the fit - which a pass after it, rerouting such
+      // moves onto that plane, did until 2026-10-05 (open item 39, R14).
       // Where both are exact nothing downstream looks again, and the crossing
       // stands however far away it is: on a nine-line model of two cylinders and
       // a cone, 26 corners each moved up to 11.0267 on a part of radius 10 and
@@ -561,21 +561,6 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
         p = exact;
       } else {
         AnalyticFeatures::projectOntoBoth(a, b, p, solve_tol);
-      }
-      // Which of the two is exact and which is a fit, because they are not
-      // worth the same. A declared quadric states where the surface is; a
-      // GridSurface was interpolated through the model's own stations and says
-      // so, publishing a tessellation band. Where a corner has one of each, the
-      // exact one is the thing to be placed on and the fit is a tolerance to be
-      // checked against - see doc/step-export-development.md. Handed on
-      // for build_tri_body, which is where the planes are answerable.
-      if (out_split != nullptr) {
-        const bool a_fit = dynamic_cast<const GridSurface *>(a) != nullptr;
-        const bool b_fit = dynamic_cast<const GridSurface *>(b) != nullptr;
-        if (a_fit != b_fit) {
-          out_split->emplace(int(v), a_fit ? std::make_pair(candidates[1], candidates[0])
-                                           : std::make_pair(candidates[0], candidates[1]));
-        }
       }
       // Where the two do not cross transversally the projection does not
       // converge, and the corner used to be left where the mesh put it. On
@@ -1025,11 +1010,10 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   std::map<int32_t, std::vector<std::size_t>> owned;
   std::map<int, Vector3d> corner_moves;
   std::map<int, std::size_t> single_owner;
-  std::map<int, std::pair<std::size_t, std::size_t>> owner_split;  // corner -> (exact, fitted)
-  std::map<int, std::vector<std::size_t>> corner_owners;           // corner -> contributing owners
+  std::map<int, std::vector<std::size_t>> corner_owners;  // corner -> contributing owners
   if (Feature::ExperimentalStepAnalyticSurfaces.is_enabled()) {
     reportProvenance(*ps);
-    reportOwnership(*ps, &owned, &corner_moves, &single_owner, &owner_split, &corner_owners);
+    reportOwnership(*ps, &owned, &corner_moves, &single_owner, &corner_owners);
   }
 
   std::vector<IndexedFace> indicesNew;
@@ -1272,9 +1256,8 @@ void export_step(const std::shared_ptr<const Geometry>& geom, std::ostream& outp
   const bool approximate = analytic && Feature::ExperimentalStepApproximateSurfaces.is_enabled();
 
   sk.build_tri_body(exportInfo.title.c_str(), ps->vertices, indicesNew, ps->curves, ps->surfaces,
-                    faceOrigin, faceSurface, faceDerived, corner_moves, single_owner, owner_split, owned,
-                    faceParents, newNormals, 1e-5, analytic, approximate, corner_owners,
-                    ps->solid_tree.get());
+                    faceOrigin, faceSurface, faceDerived, corner_moves, single_owner, owned, faceParents,
+                    newNormals, 1e-5, analytic, approximate, corner_owners, ps->solid_tree.get());
   std::time_t tt = std ::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   struct std::tm *ptm = std::localtime(&tt);
   std::stringstream iso_time;

@@ -39,7 +39,6 @@ struct StepKernel::BodyBuild {
             const std::vector<int32_t>& faceOrigin, const std::vector<int32_t>& faceSurface,
             const std::vector<char>& faceDerived, const std::map<int, Vector3d>& cornerMoves,
             const std::map<int, std::size_t>& singleOwner,
-            const std::map<int, std::pair<std::size_t, std::size_t>>& ownerSplit,
             const std::map<int32_t, std::vector<std::size_t>>& owned,
             const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals, double tol,
             bool analytic, bool approximate, const std::map<int, std::vector<std::size_t>>& cornerOwners,
@@ -56,7 +55,6 @@ struct StepKernel::BodyBuild {
       faceDerived(faceDerived),
       cornerMoves(cornerMoves),
       singleOwner(singleOwner),
-      ownerSplit(ownerSplit),
       owned(owned),
       faceParents(faceParents),
       faceNormals(faceNormals),
@@ -93,7 +91,6 @@ struct StepKernel::BodyBuild {
   const std::vector<char>& faceDerived;
   const std::map<int, Vector3d>& cornerMoves;
   const std::map<int, std::size_t>& singleOwner;
-  const std::map<int, std::pair<std::size_t, std::size_t>>& ownerSplit;
   const std::map<int32_t, std::vector<std::size_t>>& owned;
   const std::vector<int>& faceParents;
   const std::vector<Vector4d>& faceNormals;
@@ -239,38 +236,6 @@ struct StepKernel::BodyBuild {
    * and every loop in the file was still within 1e-9 of its own plane: the face
    * asserted a plane a corner of it was off, and nothing internal could tell. */
   void holdWeldedVertices();
-
-  /*! Keep every exact thing the corner is already on.
-   *
-   * A corner owned by a declared quadric and a declared sweep was being put
-   * where the two cross - but the two are not worth the same. The quadric
-   * states where its surface is; the sweep was interpolated through the model's
-   * stations and publishes a tessellation band saying how well. Aiming at their
-   * crossing curve spends an exact surface to satisfy a fitted one.
-   *
-   * It shows up as a plane. The mesh's flat bottom on step-declare-grid.py is a
-   * 95-corner face, and one of its corners is owned by the wall cylinder and
-   * the ridge's sweep; placed on their crossing curve it leaves z = 0 by
-   * 0.0423, and a face that big cannot be fanned without turning the part's
-   * flat bottom into 93 triangles, three of them off level and one by 21
-   * degrees. The corner was exactly on that plane, 0.0103 off the cylinder -
-   * 19.2(1 - cos(pi/96)), the wall's own sagitta - and 0.0378 off the sweep,
-   * which had declared a band of 0.1290. Nothing was wrong with it that the
-   * sweep was entitled to complain about.
-   *
-   * So: a plane the mesh carries *and a declaration vouches for* is kept, and
-   * the corner is placed on that plane crossed with its exact owner instead.
-   * Measured over the fixture set, 1533 merged planes are bent by a move and
-   * exactly 2 are vouched for - the flat bottoms of step-declare-grid.py and
-   * -strip, matching a declaration's own plane to 0.00e+00 - so this reaches
-   * the case it is for and no other.
-   *
-   * The direction is what makes it safe: a declaration only ever *confirms* a
-   * plane the mesh already has, and never invents one. refpt is not reliably a
-   * rim - declare_cylinder takes the caller's centre, and a fitted cylinder's
-   * refpt is wherever the fit landed - so a plane the mesh does not carry must
-   * not be conjured out of one. */
-  void keepExactSurfaces();
 
   /*! No move may take a corner off the surface of an analytic face it bounds.
    *
