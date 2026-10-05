@@ -393,3 +393,88 @@ TEST_CASE("a maker's names ride with its polygons into triangles, in step", "[su
   stale.quantizeVertices();
   CHECK(stale.surface_tags.empty());
 }
+
+namespace {
+
+/*! The Bezier curve with control points `ctrl` at `t`, by de Casteljau. */
+Vector3d bezierAt(std::vector<Vector3d> ctrl, double t)
+{
+  for (std::size_t r = 1; r < ctrl.size(); r++) {
+    for (std::size_t i = 0; i + r < ctrl.size(); i++) ctrl[i] = ctrl[i] * (1 - t) + ctrl[i + 1] * t;
+  }
+  return ctrl[0];
+}
+
+/*! The worst |residual| of a million points of the curve - what no sample can
+ * exceed and a bound must not fall below. */
+double denseWorst(const Surface& s, const std::vector<Vector3d>& ctrl)
+{
+  double worst = 0;
+  for (int k = 0; k <= 1000000; k++) worst = std::max(worst, s.residual(bezierAt(ctrl, k / 1e6)).value);
+  return worst;
+}
+
+}  // namespace
+
+TEST_CASE("a curve's distance from a surface is bounded over all of it, not sampled", "[surface][R16]")
+{
+  // A cubic whose height over z = 0 is t (1 - t) (1 - 2t): greatest at
+  // t = 1/2 - 1/(2 sqrt 3), between the samples a crossing fit took (k/12), so
+  // they found 0.09375 where the curve reaches 1/(6 sqrt 3) = 0.0962.
+  const std::vector<Vector3d> bump{{0, 0, 0}, {1. / 3, 0, 1. / 3}, {2. / 3, 0, -1. / 3}, {1, 0, 0}};
+  const PlaneSurface plane(Vector3d::Zero(), Vector3d(0, 0, 1));
+  double bound = 0;
+  REQUIRE(plane.residualAlong(bump, 0.0, bound));
+  const double peak = 1 / (6 * sqrt(3.0));
+  CHECK(bound >= peak);
+  // and above it by no more than the rounding it owns: 16 roundings forming
+  // the polynomial at this unit size and 3 a halving, some 1e-14 in all
+  CHECK(bound <= peak + 1e-14);
+
+  // A quarter circle's cubic, rising along the axis: off the unit cylinder by
+  // its familiar 2.7e-4, which the bound finds to the arithmetic.
+  const double k = 4.0 / 3.0 * tan(M_PI / 8);
+  const std::vector<Vector3d> arc{{1, 0, 0}, {1, k, 1. / 3}, {k, 1, 2. / 3}, {0, 1, 1}};
+  const CylinderSurface cylinder(Vector3d::Zero(), Vector3d(0, 0, 1), 1.0);
+  REQUIRE(cylinder.residualAlong(arc, 0.0, bound));
+  double dense = denseWorst(cylinder, arc);
+  CHECK(dense > 2.7e-4);
+  CHECK(bound >= dense);
+  CHECK(bound <= dense + 1e-13);
+
+  // The same in its own plane against the unit sphere.
+  const std::vector<Vector3d> flat{{1, 0, 0}, {1, k, 0}, {k, 1, 0}, {0, 1, 0}};
+  const SphereSurface sphere(Vector3d::Zero(), Vector3d(0, 0, 1), 1.0);
+  REQUIRE(sphere.residualAlong(flat, 0.0, bound));
+  dense = denseWorst(sphere, flat);
+  CHECK(bound >= dense);
+  CHECK(bound <= dense + 1e-13);
+
+  // A cone, whose residual is two polynomials' worth - the distance to the
+  // axis less the radius there: the rising arc is off one widening by 0.2 a
+  // unit by up to 0.2.
+  const ConeSurface cone(Vector3d::Zero(), Vector3d(0, 0, 1), 1.0, 0.2);
+  REQUIRE(cone.residualAlong(arc, 0.0, bound));
+  dense = denseWorst(cone, arc);
+  CHECK(dense > 0.19);
+  CHECK(bound >= dense);
+  CHECK(bound <= dense + 1e-12);
+
+  // An elliptic cylinder, its residual the implicit over its gradient.
+  const EllipticCylinderSurface ellipse(Vector3d::Zero(), Vector3d(0, 0, 1), Vector3d(1.2, 0, 0),
+                                        Vector3d(0, 1, 0));
+  REQUIRE(ellipse.residualAlong(arc, 0.0, bound));
+  dense = denseWorst(ellipse, arc);
+  CHECK(bound >= dense);
+  CHECK(bound <= dense + 1e-12);
+
+  // A control point that may be off by a little is a curve that may be off by
+  // as much, and the bound says so.
+  double loose = 0;
+  REQUIRE(plane.residualAlong(bump, 1e-6, loose));
+  CHECK(loose >= peak + 1e-6);
+
+  // A surface with no closed form says so rather than answer.
+  const TorusSurface torus(Vector3d::Zero(), Vector3d(0, 0, 1), 3.0, 1.0);
+  CHECK_FALSE(torus.residualAlong(arc, 0.0, bound));
+}

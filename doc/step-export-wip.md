@@ -4738,7 +4738,8 @@ Owed by 2b's own design, and settled the day after it landed:
   and 15 D2 where it had 415 and 0. What stays D4 is honestly the tessellation's:
   a corner on two records only, where along their crossing the mesh put it.
 
-A D2 edge's stated error remains R16's sample.
+A D2 edge's stated error is a bound since R16 (2026-10-05) wherever both its
+surfaces have a closed form, and a sample against a grid or a patch.
 
 **Step 2c, landed 2026-09-30**: every file is written from its B-rep.
 `step::writeBrep` (`src/io/step/BrepToStep.cc`) is the one place a boundary
@@ -5109,6 +5110,38 @@ from coming back - landed with the fix and mutation-checked (F2).
   point was certified; on a grid, its envelope. *Test:* a unit case whose
   deviation peaks between samples - the certified value at least what dense
   sampling finds, which today's is not.
+  **Fixed 2026-10-05 against every surface with a closed form.** Each such kind
+  states the polynomials in the curve's parameter its residual along a Bezier
+  is a function of - its implicit composed with the curve, in Bernstein form,
+  each coefficient with its rounding - and what their ranges bound the residual
+  by (`Surface::residualPolynomials`, `residualOver`): a plane the height over
+  it; a cylinder and a sphere |x|^2 - r^2, which the radial distance is an
+  increasing function of; a cone F = rho^2 - W^2 with rho^2 and W, since
+  rho - W = F / (rho + W); an elliptic cylinder its implicit and its
+  gradient's square. `Surface::residualAlong` halves the polynomials, greatest
+  bound first, until nothing inside a piece can be further off than its ends
+  show beyond the arithmetic's own bound - so the figure is the curve's
+  greatest residual to machine precision, and a bound. The per-edge arc
+  (`intersectionArcError`) asks it of the whole Bezier, the run fit
+  (`fitCrossingRun`) of each span of its spline, taken to Bezier form by
+  blossoming with the conversion's rounding carried. A surface that answers by
+  projecting - a grid, a patch - has no closed form and is still sampled, a
+  sample and not a bound (item 10); the report's "against a surface stated
+  algebraically" now counts a plane there, where it counted it as projecting.
+  Measured over 132 exports: no entity and no value moves - no fit crossed the
+  file's resolution either way - and every stated fit rises to its bound:
+  step-cap-meets-wall's 7.57e-9 to 1.03e-8, lid10's 6.09e-8 to 6.61e-8, the
+  bayonet's refused arcs' median on algebraic surfaces 1.49e-5 to 2.27e-5.
+  *Test:* `surface_protocol_test.cc` - a cubic whose height over a plane peaks
+  between the old samples (they found 0.09375 of 1/(6 sqrt 3)), and a quarter
+  circle's cubic against a cylinder, sphere, cone and elliptic cylinder, each
+  bound at least a million points' worst and above it by its rounding only;
+  `crossing_runs_test.cc` - the arc of two planes is bounded, not sampled, and
+  the ridge run's `achieved` against its bore is at least its dense worst, which
+  the sample (1.15e-8 of 1.25e-8) was not. Mutation-checked: the arc sampled
+  again, the net never halved, the run sampled again - each fails them.
+  Left: `intervalsTurningBack` asks five tangents an interval whether the fit
+  runs along its chord - a sample too, for its own item.
 - **R17 - an edge of no length is written with an invented direction. Fixed
   2026-10-05 where the edges moved; the analytic emitters' lines wait on theirs.**
   `create_line_edge_curve` (`StepKernel.cc`) guards a zero-length edge with an

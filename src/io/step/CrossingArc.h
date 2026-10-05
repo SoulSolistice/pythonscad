@@ -22,7 +22,7 @@ struct ArcOutcome {
   int degree = 0;           //!< the degree that answered, or the highest tried
   int sampling_failed = 0;  //!< degrees abandoned because a sample would not project
   double best_error = std::numeric_limits<double>::infinity();  //!< nearest any degree came
-  double on_quadric = 0;      //!< of that, how much was against a surface stated algebraically
+  double on_quadric = 0;      //!< of that, how much was against a surface with a closed form
   double on_fitted = 0;       //!< and how much against one that answers by projecting
   int straddles_crease = -1;  //!< 1 if the arc's ends sit in different profile spans, 0 if not
 };
@@ -75,10 +75,11 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
 bool onCrossing(const Surface *a, const Surface *b, Vector3d& q, const Vector3d& p0, const Vector3d& p1,
                 double tol);
 
-/*! How far a fitted arc leaves the two surfaces it is supposed to run along; and,
- * where asked, how much of that is against a surface stated algebraically
- * (`on_quadric`) and how much against one that answers by projecting
- * (`on_fitted`). */
+/*! How far a fitted arc leaves the two surfaces it is supposed to run along -
+ * bounded over the whole arc against a surface with a closed form
+ * (Surface::residualAlong), sampled against one that answers by projecting; and,
+ * where asked, how much of that is against the first kind (`on_quadric`) and
+ * how much against the second (`on_fitted`). */
 double intersectionArcError(const Surface *a, const Surface *b, const std::vector<Vector3d>& ctrl,
                             double *on_quadric = nullptr, double *on_fitted = nullptr);
 

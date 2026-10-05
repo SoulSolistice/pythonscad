@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <atomic>
+#include <cfloat>
 #include <mutex>
 #include <set>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <Eigen/SparseLU>
 #include <limits>
 #include <memory>
+#include <queue>
 #include <typeinfo>
 #include <vector>
 #include "geometry/linalg.h"
@@ -2455,6 +2457,303 @@ Residual TorusSurface::signedResidual(const Vector3d& p) const
   out.value = hypot(radial - r_major, along) - r_minor;
   out.bound = forwardError(32, p.norm() + refpt.norm() + fabs(r_major) + fabs(r_minor));
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// A residual along a curve - see Surface::residualAlong. A kind with a closed
+// form states the polynomials its residual along a Bezier is a function of,
+// and what their ranges bound it by; the halving is the same for every kind.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/*! C(n, k), exactly: each step's product is C(n, j) (n - j), an integer the
+ * next divisor goes into, and none here is near 2^53. */
+double binomial(int n, int k)
+{
+  double out = 1;
+  for (int j = 0; j < k; j++) out = out * (n - j) / (j + 1);
+  return out;
+}
+
+/*! The magnitude a difference of a control point and `origin` is rounded at. */
+double reachOf(const std::vector<Vector3d>& ctrl, const Vector3d& origin)
+{
+  double out = 0;
+  for (const Vector3d& c : ctrl) out = std::max(out, c.norm());
+  return out + origin.norm();
+}
+
+/*! x' M x + l . x + c along the Bezier with control points `ctrl`, x = B(t) -
+ * origin, in Bernstein form of twice its degree.
+ *
+ * The product of two Bernstein sums of degree n is one of degree 2n whose k-th
+ * coefficient is the sum over i + j = k of C(n,i) C(n,j) / C(2n,k) times the
+ * factors' coefficients; those weights sum to one, so the linear and constant
+ * parts, written symmetrically, pass through as they are. Each coefficient is a
+ * difference (1), the form (M x 5, the dot 5, l 5 and the halved sum 2, plus c
+ * 1), its weight (2) and a sum of at most n + 1 terms (n): 21 + n roundings
+ * over the largest term. Forming M and l took `form_ops` more over their own
+ * size. A control point `ctrl_err` off moves a term by at most (2 |M| |x| +
+ * |l|) ctrl_err + |M| ctrl_err^2. */
+BernsteinPolynomial quadraticAlong(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                                   const Vector3d& origin, const Matrix3d& M, const Vector3d& l,
+                                   double c, int form_ops)
+{
+  const int n = int(ctrl.size()) - 1;
+  std::vector<Vector3d> x;
+  x.reserve(ctrl.size());
+  for (const Vector3d& p : ctrl) x.push_back(p - origin);
+  const double reach = reachOf(ctrl, origin);
+  const double m = M.norm();  // Frobenius, at least the spectral norm
+  BernsteinPolynomial out;
+  out.coef.assign(2 * n + 1, 0.0);
+  for (int k = 0; k <= 2 * n; k++) {
+    double sum = 0;
+    for (int i = std::max(0, k - n); i <= std::min(k, n); i++) {
+      const int j = k - i;
+      const double w = binomial(n, i) * binomial(n, j) / binomial(2 * n, k);
+      sum += w * (x[i].dot(M * x[j]) + 0.5 * l.dot(x[i] + x[j]) + c);
+    }
+    out.coef[k] = sum;
+  }
+  const double size = m * reach * reach + l.norm() * reach;
+  out.err = forwardError(21 + n, size + fabs(c)) + forwardError(form_ops, size) +
+            (2 * m * reach + l.norm()) * ctrl_err + m * ctrl_err * ctrl_err;
+  return out;
+}
+
+/*! l . x + c along the Bezier, x = B(t) - origin, of the curve's own degree: a
+ * coefficient per control point, a difference (1), the dot (5) and c (1) - 7
+ * roundings - and `form_ops` in forming l. */
+BernsteinPolynomial linearAlong(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                                const Vector3d& origin, const Vector3d& l, double c, int form_ops)
+{
+  BernsteinPolynomial out;
+  for (const Vector3d& p : ctrl) out.coef.push_back(l.dot(p - origin) + c);
+  const double size = l.norm() * reachOf(ctrl, origin);
+  out.err = forwardError(7, size + fabs(c)) + forwardError(form_ops, size) + l.norm() * ctrl_err;
+  return out;
+}
+
+/*! `poly` halved at t = 1/2 by de Casteljau, each half again on [0, 1]. A
+ * coefficient of either is at most m averagings of the parent's, a rounding
+ * each over the largest of them; the parent's own error carries through
+ * unchanged, the averages being convex. */
+void halve(const BernsteinPolynomial& poly, BernsteinPolynomial& left, BernsteinPolynomial& right)
+{
+  const std::size_t m = poly.coef.size() - 1;
+  std::vector<double> w = poly.coef;
+  double largest = 0;
+  for (const double v : w) largest = std::max(largest, fabs(v));
+  left.coef.assign(m + 1, 0.0);
+  right.coef.assign(m + 1, 0.0);
+  left.coef[0] = w[0];
+  right.coef[m] = w[m];
+  for (std::size_t r = 1; r <= m; r++) {
+    for (std::size_t i = 0; i + r <= m; i++) w[i] = 0.5 * (w[i] + w[i + 1]);
+    left.coef[r] = w[0];
+    right.coef[m - r] = w[m - r];
+  }
+  left.err = right.err = poly.err + forwardError(int(m), largest);
+}
+
+/*! Each polynomial's range over its interval - its least and greatest
+ * coefficient - widened by its error. */
+void rangesOf(const std::vector<BernsteinPolynomial>& polys, std::vector<double>& lo,
+              std::vector<double>& hi)
+{
+  lo.assign(polys.size(), 0.0);
+  hi.assign(polys.size(), 0.0);
+  for (std::size_t k = 0; k < polys.size(); k++) {
+    const auto [least, most] = std::minmax_element(polys[k].coef.begin(), polys[k].coef.end());
+    lo[k] = *least - polys[k].err;
+    hi[k] = *most + polys[k].err;
+  }
+}
+
+/*! Each polynomial's value at one end of its interval - its first or last
+ * coefficient - widened by `grow` times its error. */
+void endOf(const std::vector<BernsteinPolynomial>& polys, bool last, double grow,
+           std::vector<double>& lo, std::vector<double>& hi)
+{
+  lo.assign(polys.size(), 0.0);
+  hi.assign(polys.size(), 0.0);
+  for (std::size_t k = 0; k < polys.size(); k++) {
+    const double at = last ? polys[k].coef.back() : polys[k].coef.front();
+    lo[k] = at - grow * polys[k].err;
+    hi[k] = at + grow * polys[k].err;
+  }
+}
+
+/*! |F| / (rho + r) for rho = sqrt(F + r^2), increasing in F: the radial
+ * distance x' M x - r^2 = F states, over F in [lo, hi] - a cylinder's and a
+ * sphere's residual. Four roundings, each at most |F| / r. */
+double radialOver(double lo, double hi, double r)
+{
+  auto at = [r](double f) { return f / (sqrt(std::max(0.0, f + r * r)) + r); };
+  const double most = std::max(fabs(at(lo)), fabs(at(hi)));
+  return most + forwardError(5, std::max(fabs(lo), fabs(hi)) / r);
+}
+
+}  // namespace
+
+bool Surface::residualPolynomials(const std::vector<Vector3d>&, double,
+                                  std::vector<BernsteinPolynomial>&) const
+{
+  return false;
+}
+
+double Surface::residualOver(const std::vector<double>&, const std::vector<double>&) const
+{
+  return std::numeric_limits<double>::infinity();
+}
+
+bool Surface::residualAlong(const std::vector<Vector3d>& ctrl, double ctrl_err, double& bound) const
+{
+  std::vector<BernsteinPolynomial> polys;
+  if (ctrl.empty() || !residualPolynomials(ctrl, ctrl_err, polys) || polys.empty()) return false;
+  struct Piece {
+    std::vector<BernsteinPolynomial> polys;
+    double upper;
+    int depth;
+  };
+  std::vector<double> lo, hi;
+  auto piece = [&](std::vector<BernsteinPolynomial> of, int depth) {
+    rangesOf(of, lo, hi);
+    const double upper = residualOver(lo, hi);
+    return Piece{std::move(of), upper, depth};
+  };
+  auto less = [](const Piece& x, const Piece& y) { return x.upper < y.upper; };
+  std::priority_queue<Piece, std::vector<Piece>, decltype(less)> open(less);
+  open.push(piece(std::move(polys), 0));
+  for (;;) {
+    Piece top = open.top();
+    open.pop();
+    // The greatest bound left bounds the whole curve, every other piece's being
+    // at most it. It is the answer once nothing inside its piece can be further
+    // off than one of the piece's ends shows, beyond the arithmetic's bound on
+    // that end - or once the piece is one point in a double's parameter.
+    double ends = 0;
+    for (const bool last : {false, true}) {
+      endOf(top.polys, last, 2, lo, hi);
+      ends = std::max(ends, residualOver(lo, hi));
+    }
+    if (!(top.upper > ends) || top.depth >= DBL_MANT_DIG) {
+      bound = top.upper;
+      return true;
+    }
+    std::vector<BernsteinPolynomial> left(top.polys.size()), right(top.polys.size());
+    for (std::size_t k = 0; k < top.polys.size(); k++) halve(top.polys[k], left[k], right[k]);
+    open.push(piece(std::move(left), top.depth + 1));
+    open.push(piece(std::move(right), top.depth + 1));
+  }
+}
+
+bool PlaneSurface::residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                                       std::vector<BernsteinPolynomial>& out) const
+{
+  // The curve's height over the plane, (B - refpt) . n: one polynomial of the
+  // curve's own degree; the unit normal is 9 roundings.
+  out = {linearAlong(ctrl, ctrl_err, refpt, normdir.normalized(), 0.0, 9)};
+  return true;
+}
+
+double PlaneSurface::residualOver(const std::vector<double>& lo, const std::vector<double>& hi) const
+{
+  return std::max(fabs(lo[0]), fabs(hi[0]));
+}
+
+bool SphereSurface::residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                                        std::vector<BernsteinPolynomial>& out) const
+{
+  // |B - centre|^2 - r^2, which the distance to the centre less r is an
+  // increasing function of.
+  out = {quadraticAlong(ctrl, ctrl_err, refpt, Matrix3d::Identity(), Vector3d::Zero(), -r * r, 0)};
+  return true;
+}
+
+double SphereSurface::residualOver(const std::vector<double>& lo, const std::vector<double>& hi) const
+{
+  return radialOver(lo[0], hi[0], r);
+}
+
+bool CylinderSurface::residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                                          std::vector<BernsteinPolynomial>& out) const
+{
+  // |perp|^2 - r^2 about the axis, which the distance to the axis less r is an
+  // increasing function of; the unit axis (9) and I - a a' (2).
+  const Vector3d a = normdir.normalized();
+  out = {quadraticAlong(ctrl, ctrl_err, refpt, Matrix3d::Identity() - a * a.transpose(),
+                        Vector3d::Zero(), -r * r, 11)};
+  return true;
+}
+
+double CylinderSurface::residualOver(const std::vector<double>& lo, const std::vector<double>& hi) const
+{
+  return radialOver(lo[0], hi[0], r);
+}
+
+bool ConeSurface::residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                                      std::vector<BernsteinPolynomial>& out) const
+{
+  // The residual is rho - W, the distance to the axis less radiusAt: W = r + s
+  // d . x along the raw normdir as radiusAt has it, rho about the unit axis as
+  // signedResidual has it. Three polynomials - F = rho^2 - W^2, rho^2 and W -
+  // since rho - W = F / (rho + W): F is small where the curve is near the cone,
+  // and bounds the residual to the end.
+  const Vector3d a = normdir.normalized();
+  const Matrix3d perp = Matrix3d::Identity() - a * a.transpose();
+  const Matrix3d dd = normdir * normdir.transpose();
+  out = {quadraticAlong(ctrl, ctrl_err, refpt, perp - slope * slope * dd, -2 * r * slope * normdir,
+                        -r * r, 15),
+         quadraticAlong(ctrl, ctrl_err, refpt, perp, Vector3d::Zero(), 0.0, 11),
+         linearAlong(ctrl, ctrl_err, refpt, slope * normdir, r, 1)};
+  return true;
+}
+
+double ConeSurface::residualOver(const std::vector<double>& lo, const std::vector<double>& hi) const
+{
+  // rho - W lies in [rho_lo - W_hi, rho_hi - W_lo] whatever F says; and where
+  // rho + W is positive throughout, within |F| / (rho + W) of zero, which is
+  // the tighter near the cone. The subtraction, the root and the quotient round.
+  const double rho_lo = sqrt(std::max(0.0, lo[1])), rho_hi = sqrt(std::max(0.0, hi[1]));
+  const double direct = std::max(fabs(rho_lo - hi[2]), fabs(rho_hi - lo[2])) +
+                        forwardError(3, rho_hi + std::max(fabs(lo[2]), fabs(hi[2])));
+  const double denominator = rho_lo + lo[2];
+  if (!(denominator > 0)) return direct;
+  const double through_f = std::max(fabs(lo[0]), fabs(hi[0])) / denominator;
+  return std::min(direct, through_f + forwardError(4, through_f));
+}
+
+bool EllipticCylinderSurface::residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                                                  std::vector<BernsteinPolynomial>& out) const
+{
+  // The residual is F / |grad F| for F = (x/a)^2 + (y/b)^2 - 1, as signedOffset
+  // has it: x and y the coordinates `section` takes - along each unit
+  // semi-axis of the point less its normdir part, so along the semi-axis less
+  // its own normdir part - and |grad F| = 2 sqrt(G), G = x^2/a^4 + y^2/b^4. The
+  // two forms: the unit semi-axes (18), their projections (12), the squares
+  // and quotients (8).
+  const Vector3d e1 = major.normalized(), e2 = minor.normalized();
+  const Vector3d u = e1 - normdir * normdir.dot(e1), v = e2 - normdir * normdir.dot(e2);
+  const double A = a(), B = b();
+  const Matrix3d uu = u * u.transpose(), vv = v * v.transpose();
+  out = {quadraticAlong(ctrl, ctrl_err, refpt, uu / (A * A) + vv / (B * B), Vector3d::Zero(), -1.0, 38),
+         quadraticAlong(ctrl, ctrl_err, refpt, uu / (A * A * A * A) + vv / (B * B * B * B),
+                        Vector3d::Zero(), 0.0, 40)};
+  return true;
+}
+
+double EllipticCylinderSurface::residualOver(const std::vector<double>& lo,
+                                             const std::vector<double>& hi) const
+{
+  // On the axis the gradient vanishes and the residual is as large as a double
+  // goes (signedOffset): no bound where G may reach zero.
+  const double g = std::max(0.0, lo[1]);
+  if (!(g > 0)) return std::numeric_limits<double>::infinity();
+  const double out = std::max(fabs(lo[0]), fabs(hi[0])) / (2 * sqrt(g));
+  return out + forwardError(4, out);
 }
 
 bool CylinderSurface::closestPoint(const Vector3d& p, Vector3d& out) const

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "geometry/Surface.h"
+#include "io/step/CrossingArc.h"
 
 using namespace step;
 
@@ -91,7 +92,29 @@ TEST_CASE("a crossing run with unevenly spaced vertices is one curve", "[step][c
   double achieved = 0;
   REQUIRE(fitCrossingRun(sweep.get(), &bore, run, 1e-9 * scale, fit, achieved));
   CHECK(achieved <= 1e-9 * scale);
+  // Against the bore, which has a closed form, `achieved` is a bound over the
+  // whole curve (open item 39, R16): no point of it is further off.
+  double dense = 0;
+  for (int k = 0; k <= 100000; k++) dense = std::max(dense, bore.residual(evaluate(fit, k / 1e5)).value);
+  CHECK(achieved >= dense);
   CHECK(intervalsTurningBack(fit) == 0);
   CHECK((evaluate(fit, 0.0) - run.front()).norm() < 1e-12);
   CHECK((evaluate(fit, 1.0) - run.back()).norm() < 1e-12);
+}
+
+TEST_CASE("a crossing arc's error is a bound over the arc, not its worst sample",
+          "[step][crossing][R16]")
+{
+  // Two planes crossing along the x axis, and a cubic in one of them whose
+  // height over the other peaks at 1/(6 sqrt 3) between the 4 x 3 - 1 points
+  // it was sampled at, which found 0.09375.
+  const PlaneSurface ground(Vector3d::Zero(), Vector3d(0, 0, 1));
+  const PlaneSurface wall(Vector3d::Zero(), Vector3d(0, 1, 0));
+  const std::vector<Vector3d> bump{{0, 0, 0}, {1. / 3, 0, 1. / 3}, {2. / 3, 0, -1. / 3}, {1, 0, 0}};
+  double on_algebraic = 0, on_projected = 0;
+  const double error = intersectionArcError(&ground, &wall, bump, &on_algebraic, &on_projected);
+  CHECK(error >= 1 / (6 * sqrt(3.0)));
+  // a plane is stated algebraically, and counted so
+  CHECK(on_algebraic == error);
+  CHECK(on_projected == 0);
 }

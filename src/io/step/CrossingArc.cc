@@ -12,7 +12,6 @@
 
 namespace step {
 
-using AnalyticFeatures::isQuadric;
 using AnalyticFeatures::projectOntoBoth;
 using AnalyticFeatures::surfaceImplicit;
 
@@ -218,27 +217,39 @@ double intersectionArcError(const Surface *a, const Surface *b, const std::vecto
 {
   const int degree = int(ctrl.size()) - 1;
   double worst = 0;
-  for (int k = 1; k < 4 * degree; k++) {
-    const double t = double(k) / (4 * degree);
-    Vector3d p = Vector3d::Zero();
-    double binom = 1;
-    for (int j = 0; j <= degree; j++) {
-      p += ctrl[j] * (binom * pow(t, j) * pow(1 - t, degree - j));
-      binom = binom * (degree - j) / (j + 1);
+  for (const Surface *s : {a, b}) {
+    // Against a surface that states its residual in closed form, bounded over
+    // the whole arc (Surface::residualAlong) - the control points are written
+    // as they are, so they are exact. Until 2026-10-05 it was the worst of
+    // 4 x degree - 1 samples, and the worst can lie between them (open item 39,
+    // R16).
+    double d = 0;
+    const bool closed = s->residualAlong(ctrl, 0.0, d);
+    if (!closed) {
+      // A surface that answers by projecting has no closed form to bound by, so
+      // it is still sampled, and the figure is a sample, not a bound (open item
+      // 10).
+      for (int k = 1; k < 4 * degree; k++) {
+        const double t = double(k) / (4 * degree);
+        Vector3d p = Vector3d::Zero();
+        double binom = 1;
+        for (int j = 0; j <= degree; j++) {
+          p += ctrl[j] * (binom * pow(t, j) * pow(1 - t, degree - j));
+          binom = binom * (degree - j) / (j + 1);
+        }
+        double f = 0, at = 0;
+        Vector3d g;
+        if (!surfaceImplicit(s, p, f, g, &at)) return std::numeric_limits<double>::infinity();
+        d = std::max(d, at);  // the distance to the surface, not to its tangent plane
+      }
     }
-    for (const Surface *s : {a, b}) {
-      double f = 0;
-      Vector3d g;
-      double d = 0;
-      if (!surfaceImplicit(s, p, f, g, &d)) return std::numeric_limits<double>::infinity();
-      if (g.norm() < 1e-12) return std::numeric_limits<double>::infinity();
-      worst = std::max(worst, d);  // the distance to the surface, not to its tangent plane
-      // Which of the two the arc is failing is not a detail: a quadric answers
-      // by algebra and a grid by projecting, so a large number here may be the
-      // curve missing the surface or the surface failing to locate itself.
-      double *worst_of_kind = isQuadric(s) ? on_quadric : on_fitted;
-      if (worst_of_kind != nullptr) *worst_of_kind = std::max(*worst_of_kind, d);
-    }
+    worst = std::max(worst, d);
+    // Which of the two the arc is failing is not a detail: a surface with a
+    // closed form answers by algebra and the rest by projecting, so a large
+    // number here may be the curve missing the surface or the surface failing
+    // to locate itself.
+    double *worst_of_kind = closed ? on_quadric : on_fitted;
+    if (worst_of_kind != nullptr) *worst_of_kind = std::max(*worst_of_kind, d);
   }
   return worst;
 }

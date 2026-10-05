@@ -11,6 +11,15 @@
 #include "geometry/MachinePrecision.h"
 #include "geometry/linalg.h"
 
+/*! A polynomial in a curve's parameter, in Bernstein form on [0, 1], and the
+ * bound rounding puts on each of its coefficients. Its values lie between its
+ * least and greatest coefficient - each is a convex combination of them - so
+ * its coefficients bound it, and halving it brings them in on it. */
+struct BernsteinPolynomial {
+  std::vector<double> coef;
+  double err = 0;
+};
+
 class Surface
 {
 public:
@@ -123,6 +132,26 @@ public:
   /*! How far `p` is from this surface - the size of signedResidual - and the
    * same bound: what D0 membership asks. */
   [[nodiscard]] recognition::Residual residual(const Vector3d& p) const;
+  /*! The polynomials in the parameter of the Bezier curve with control points
+   * `ctrl` - each within `ctrl_err` of where it says - that this surface's
+   * residual along it is a function of: its implicit composed with the curve,
+   * in Bernstein form. False for a surface whose residual has no closed form. */
+  virtual bool residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                                   std::vector<BernsteinPolynomial>& out) const;
+  /*! The most |residual| can be where each of those polynomials takes a value
+   * in [lo[k], hi[k]], rounding included; infinity where the ranges bound it by
+   * nothing. */
+  [[nodiscard]] virtual double residualOver(const std::vector<double>& lo,
+                                            const std::vector<double>& hi) const;
+  /*! The most the Bezier curve with control points `ctrl`, each within
+   * `ctrl_err` of where it says, strays from this surface - |residual|
+   * bounded over the whole curve in closed form, not sampled at points of it.
+   * The polynomials are halved where the bound could still hide more than one
+   * of their ends shows, until it cannot beyond the arithmetic's own bound,
+   * so the figure is the greatest residual to machine precision. False for a
+   * surface with no closed form; `bound` is infinity where the curve passes
+   * where the residual has none (a cone's apex, an elliptic cylinder's axis). */
+  bool residualAlong(const std::vector<Vector3d>& ctrl, double ctrl_err, double& bound) const;
   /*! A box holding the part of this surface that a facet with these corners
    * stands for - the facet's image on it - in closed form, or false where this
    * kind has none to give. What an operand that states no solid can still say
@@ -249,6 +278,10 @@ public:
   double r;
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                           std::vector<BernsteinPolynomial>& out) const override;
+  [[nodiscard]] double residualOver(const std::vector<double>& lo,
+                                    const std::vector<double>& hi) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
@@ -476,6 +509,10 @@ public:
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                           std::vector<BernsteinPolynomial>& out) const override;
+  [[nodiscard]] double residualOver(const std::vector<double>& lo,
+                                    const std::vector<double>& hi) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
@@ -530,6 +567,10 @@ public:
   double r;
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                           std::vector<BernsteinPolynomial>& out) const override;
+  [[nodiscard]] double residualOver(const std::vector<double>& lo,
+                                    const std::vector<double>& hi) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
@@ -585,6 +626,10 @@ public:
   double r, slope;
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                           std::vector<BernsteinPolynomial>& out) const override;
+  [[nodiscard]] double residualOver(const std::vector<double>& lo,
+                                    const std::vector<double>& hi) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
@@ -639,6 +684,10 @@ public:
   [[nodiscard]] double size() const override { return a(); }
 
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
+  bool residualPolynomials(const std::vector<Vector3d>& ctrl, double ctrl_err,
+                           std::vector<BernsteinPolynomial>& out) const override;
+  [[nodiscard]] double residualOver(const std::vector<double>& lo,
+                                    const std::vector<double>& hi) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;

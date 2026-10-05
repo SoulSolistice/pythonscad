@@ -83,15 +83,58 @@ bool solveInterpolation(const CurveFit& fit, const Eigen::MatrixXd& rhs, Eigen::
   return lu.info() == Eigen::Success && ctrl.allFinite();
 }
 
-/*! How far `p` is from `s`, or infinity where the surface cannot say. */
+/*! How far `p` is from `s`, or infinity where the surface cannot say - asked
+ * only of a surface that answers by projecting, whose gradient is a unit
+ * normal. */
 double distanceTo(const Surface *s, const Vector3d& p)
 {
   double f = 0, d = 0;
   Vector3d g;
-  if (!AnalyticFeatures::surfaceImplicit(s, p, f, g, &d) || g.norm() < 1e-12) {
-    return std::numeric_limits<double>::infinity();
-  }
+  if (!AnalyticFeatures::surfaceImplicit(s, p, f, g, &d)) return std::numeric_limits<double>::infinity();
   return d;
+}
+
+/*! The blossom of `fit`'s span `k` - from U[k] to U[k + 1] - at the three
+ * parameters `t`: de Boor's algorithm with a parameter of its own at each
+ * level (The NURBS Book, 5.1). */
+Vector3d blossom(const CurveFit& fit, const std::vector<double>& U, int k, const double *t)
+{
+  Vector3d d[kDegree + 1];
+  for (int j = 0; j <= kDegree; j++) d[j] = fit.ctrl[k - kDegree + j];
+  for (int r = 1; r <= kDegree; r++) {
+    for (int j = kDegree; j >= r; j--) {
+      const int i = k - kDegree + j;
+      const double alpha = (t[r - 1] - U[i]) / (U[i + kDegree + 1 - r] - U[i]);
+      d[j] = (1 - alpha) * d[j - 1] + alpha * d[j];
+    }
+  }
+  return d[kDegree];
+}
+
+/*! `fit` as Bezier curves, one per knot span: control point j of the span from
+ * U[k] to U[k + 1] is the blossom at its end j times and its start 3 - j times.
+ * `err` is how far any of them can be from where the spline puts it: three
+ * levels of de Boor, an alpha (3) and a combination (4) per coordinate each,
+ * over the largest control point. */
+std::vector<std::vector<Vector3d>> bezierSpans(const CurveFit& fit, double& err)
+{
+  const std::vector<double> U = fullKnots(fit);
+  const int n = int(fit.ctrl.size()) - 1;
+  double largest = 0;
+  for (const Vector3d& c : fit.ctrl) largest = std::max(largest, c.norm());
+  std::vector<std::vector<Vector3d>> out;
+  for (int k = kDegree; k <= n; k++) {
+    if (!(U[k + 1] > U[k])) continue;
+    std::vector<Vector3d> span;
+    for (int j = 0; j <= kDegree; j++) {
+      double t[kDegree];
+      for (int r = 0; r < kDegree; r++) t[r] = r < j ? U[k + 1] : U[k];
+      span.push_back(blossom(fit, U, k, t));
+    }
+    out.push_back(std::move(span));
+  }
+  err = recognition::forwardError(21, sqrt(3.0) * largest);
+  return out;
 }
 
 }  // namespace
@@ -335,17 +378,37 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
   for (;;) {
     CurveFit fit;
     if (!interpolateCubic(points, fit)) break;
-    // How far the curve strays between each two of its points, from either
-    // surface: where it is on both it is the crossing. And whether it runs
-    // *along* the crossing, which being on both surfaces does not say - see
-    // intervalsTurningBack.
+    // How far the curve strays from either surface: where it is on both it is
+    // the crossing. Against a surface with a closed form, bounded over every
+    // span (Surface::residualAlong) - until 2026-10-05 it was sampled at a
+    // quarter, a half and three quarters of each interval, and the worst can
+    // lie between (open item 39, R16); against one that answers by projecting,
+    // still sampled so, a sample and not a bound (open item 10). And whether it
+    // runs *along* the crossing, which being on both surfaces does not say -
+    // see intervalsTurningBack.
     const std::size_t count = points.size();
+    double span_err = 0.0;
+    const std::vector<std::vector<Vector3d>> spans = bezierSpans(fit, span_err);
     double global = 0.0;
-    for (std::size_t i = 0; i + 1 < count; i++) {
-      for (const double s : {0.25, 0.5, 0.75}) {
-        const Vector3d p = evaluate(fit, fit.params[i] + (fit.params[i + 1] - fit.params[i]) * s);
-        global = std::max(global, std::max(distanceTo(a, p), distanceTo(b, p)));
+    for (const Surface *surface : {a, b}) {
+      double off = 0.0;
+      bool closed = true;
+      for (const auto& span : spans) {
+        double bound = 0.0;
+        closed = surface->residualAlong(span, span_err, bound);
+        if (!closed) break;
+        off = std::max(off, bound);
       }
+      if (!closed) {
+        off = 0.0;
+        for (std::size_t i = 0; i + 1 < count; i++) {
+          for (const double s : {0.25, 0.5, 0.75}) {
+            const Vector3d p = evaluate(fit, fit.params[i] + (fit.params[i + 1] - fit.params[i]) * s);
+            off = std::max(off, distanceTo(surface, p));
+          }
+        }
+      }
+      global = std::max(global, off);
     }
     const std::size_t backward = intervalsTurningBack(fit);
     if (backward == 0 && global < best) {
