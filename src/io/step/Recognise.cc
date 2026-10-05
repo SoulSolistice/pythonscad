@@ -15,8 +15,12 @@ void StepKernel::BodyBuild::recognise()
       for (std::size_t si = 0; si < passes.size(); si++) {
         const auto *pl = dynamic_cast<const PlaneSurface *>(passes[si].get());
         if (pl == nullptr) continue;
+        // Declared planes only: a plane a pass fitted is not the model's word,
+        // and a face found on one would be written on the fit's coefficients
+        // and counted as from its corners (open item 39, R10's twin).
+        if (si >= surfaces.size()) continue;
         declared_planes.emplace_back(pl->refpt, pl->normdir.normalized());
-        declared_plane_index.push_back(si < surfaces.size() ? si : surfaces.size());
+        declared_plane_index.push_back(si);
       }
     };
     writability.boundaryOnSurface = [&](const std::vector<const AnalyticFeatures::Patch *>& standing) {

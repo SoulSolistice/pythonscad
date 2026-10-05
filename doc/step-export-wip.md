@@ -4979,6 +4979,30 @@ from coming back - landed with the fix and mutation-checked (F2).
   planar writer would count a face on one "on a declared plane" - unreachable
   only because no recogniser fits a plane. *Test:* R11's fixture, whose curves
   must be the declared records' exactly.
+  **Fixed 2026-10-05, and the record was the wrong thing to read.** A face's
+  record is what it stands for, not always what it is written on: a Bezier
+  patch that is a quadric is written on that quadric, and a band on the
+  cylinder or cone its rims make. Reading the record put a consumer to looking
+  up the quadric a patch was written on and checking attribution itself - the
+  symptom work E9 was written against. So each face's maker states its
+  **carrier**, the surface it wrote the form from (`brep::Face::carrier`, set
+  through `registerFace`: a band its rims' surface, a Bezier face its patch's
+  quadric, stated derived), `brep::checkAttribution` asks of every face whether
+  its carrier is its record, one surface with it, or stated derived from it - an
+  EXPORT-ERROR of its own, apart from the topology - and promoteCurves reads the
+  carrier, the cone's radius its own closed form (`radiusAt`). That a cutting
+  plane is declared is read from the face beside's own record, not from any
+  declared plane passing through it; and only declarations enter
+  `declared_planes`, the twin. The contract's first catch was the bayonet's
+  chamfer, fixed at its maker as R29 before this landed; with it, no face of
+  the 132 exports is written on a surface it does not stand for. Measured: a
+  parabola an ulp off on step-roof-voronoi, some of lid10's conic placements
+  pointing their axis the other way, and step-split-surface's two rims no longer
+  credited to a declared plane they merely pass through - the face beside is a
+  chord facet of a curved surface, by its record, which is item 26's to fix
+  upstream and not the report's. *Test:* `brep_test.cc` - a carrier with no
+  statement, of another radius, or a cone under a cylinder's form is named; one
+  record of the same surface, or a stated derivation, is not.
 - **R11 - "on the surface already" within `model_tol`.** `promoteCurves` leaves a
   chord straight when its midpoint is within `tol` (1e-5 by default) of the
   quadric - off it by up to a hundred times OpenCASCADE's own 1e-7 - and promotes

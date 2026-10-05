@@ -95,9 +95,13 @@ int32_t StepKernel::BodyBuild::surfaceIndexOf(const Surface *record) const
 void StepKernel::BodyBuild::registerFace(const Face *face, std::shared_ptr<const Surface> record,
                                          std::vector<std::size_t> facets,
                                          std::optional<recognition::EvidenceClass> evidence,
-                                         bool plane_from_corners)
+                                         bool plane_from_corners, std::shared_ptr<const Surface> carrier,
+                                         bool derived)
 {
-  face_source[face] = sourceOf(std::move(record), std::move(facets), evidence, plane_from_corners);
+  FaceSource source = sourceOf(std::move(record), std::move(facets), evidence, plane_from_corners);
+  source.carrier = std::move(carrier);
+  source.carrier_derived = derived;
+  face_source[face] = std::move(source);
 }
 
 step::FaceSource StepKernel::BodyBuild::sourceOf(std::shared_ptr<const Surface> record,

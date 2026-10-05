@@ -158,6 +158,10 @@ void StepKernel::BodyBuild::emitBezierFaces()
     auto edge_loop = new EdgeLoop(entities, loop);
     std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
-    registerFace(sfaces_extra.back(), patch.surface, patch.facets);
+    // Written on the quadric the patch is, where recognition found one
+    // (quadricOfPatch) - a closed form of the patch, the record the face stands
+    // for - and otherwise on the patch itself.
+    registerFace(sfaces_extra.back(), patch.surface, patch.facets, std::nullopt, false, quadric,
+                 quadric != nullptr);
   }
 }

@@ -214,6 +214,37 @@ TEST_CASE("a line from a vertex to itself is named; a circle closed on one verte
   CHECK_FALSE(says(brep::check(cylinder()), "from a vertex to itself"));
 }
 
+TEST_CASE("a face is written on the record it stands for, or on a closed form stated derived from it",
+          "[brep]")
+{
+  // The cylinder's faces, each carried by its own record: nothing to name.
+  Body body = cylinder();
+  for (auto& face : body.faces) face.carrier = face.surface;
+  CHECK(brep::checkAttribution(body).empty());
+
+  // A carrier with no statement at all is named.
+  Body unstated = cylinder();
+  CHECK(says(brep::checkAttribution(unstated), "face 0 states no carrier"));
+
+  // The wall carried by another record of the same cylinder - one surface,
+  // two records - is the record it stands for.
+  body.faces[0].carrier = std::make_shared<CylinderSurface>(Vector3d(0, 0, 5), Vector3d::UnitZ(), 1.0);
+  CHECK(brep::checkAttribution(body).empty());
+
+  // The wall written on a cylinder of another radius than its record's - a
+  // face standing for one surface written on another - is named; stated
+  // derived from the record, it is the maker's closed form and is not.
+  body.faces[0].carrier = std::make_shared<CylinderSurface>(Vector3d::Zero(), Vector3d::UnitZ(), 2.0);
+  CHECK(says(brep::checkAttribution(body), "face 0 is written on a cylinder that is not a cylinder"));
+  body.faces[0].carrier_derived = true;
+  CHECK(brep::checkAttribution(body).empty());
+
+  // A cylinder's form carried by a cone: the form does not write its carrier.
+  body.faces[0].carrier_derived = false;
+  body.faces[0].carrier = std::make_shared<ConeSurface>(Vector3d::Zero(), Vector3d::UnitZ(), 1.0, 1.0);
+  CHECK(says(brep::checkAttribution(body), "face 0 is written as a cylinder on a cone"));
+}
+
 TEST_CASE("a body's shells are its connected components, in the order of their first face", "[brep]")
 {
   // Two unit cubes two apart share nothing, so they are two shells of six faces

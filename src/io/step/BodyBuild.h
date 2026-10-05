@@ -612,11 +612,15 @@ struct StepKernel::BodyBuild {
                                     std::vector<std::size_t> facets,
                                     std::optional<recognition::EvidenceClass> evidence = std::nullopt,
                                     bool plane_from_corners = false) const;
-  /*! Register `face`, just made as an entity, as sourceOf says. */
+  /*! Register `face`, just made as an entity, as sourceOf says - written on
+   * `carrier`, the surface its maker built it from, where that is not `record`
+   * itself; `derived` where the maker derived it from `record` in closed form
+   * (see brep::Face::carrier). */
   void registerFace(const Face *face, std::shared_ptr<const Surface> record,
                     std::vector<std::size_t> facets,
                     std::optional<recognition::EvidenceClass> evidence = std::nullopt,
-                    bool plane_from_corners = false);
+                    bool plane_from_corners = false, std::shared_ptr<const Surface> carrier = nullptr,
+                    bool derived = false);
   /*! The entry of `surfaces` that is `record`, or -1: a fitted record, or a
    * plane derived from a face's corners. */
   [[nodiscard]] int32_t surfaceIndexOf(const Surface *record) const;

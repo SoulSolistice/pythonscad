@@ -32,6 +32,10 @@ struct FaceSource {
   recognition::EvidenceClass evidence = recognition::EvidenceClass::Unstated;
   bool plane_from_corners = false;  // see brep::Face
   recognition::EvidenceClass record_evidence = recognition::EvidenceClass::Unstated;
+  // The surface the maker wrote the face on, and whether it states it derived
+  // from `record` - see brep::Face::carrier. The record itself where unstated.
+  std::shared_ptr<const Surface> carrier;
+  bool carrier_derived = false;
 };
 
 /*! What an edge's maker states about its carrier, where it states anything:

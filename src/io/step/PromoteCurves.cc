@@ -5,6 +5,7 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
@@ -36,30 +37,43 @@ void StepKernel::BodyBuild::promoteCurves()
     return std::holds_alternative<brep::Line>(body.edges[e].curve.form) && carries_pcurve[e] == 0;
   };
 
+  // The surface each face is written on is its carrier, as its maker stated it
+  // - never one rebuilt from the form written from it, which is a re-derivation
+  // with rounding in place of the surface and identity lost (open item 39,
+  // R10). Whether the carrier is the record the face stands for is the
+  // contract's question (brep::checkAttribution, in checkBrep), asked of every
+  // face, not this pass's.
+  auto quadric_of = [&](std::size_t f) -> const Surface * {
+    const brep::Face& face = body.faces[f];
+    const Surface *s = face.carrier.get();
+    if (std::holds_alternative<brep::Cylinder>(face.form) &&
+        dynamic_cast<const CylinderSurface *>(s) != nullptr)
+      return s;
+    if (std::holds_alternative<brep::Cone>(face.form) && dynamic_cast<const ConeSurface *>(s) != nullptr)
+      return s;
+    return nullptr;
+  };
+  auto plane_of = [&](std::size_t f) -> const PlaneSurface * {
+    return dynamic_cast<const PlaneSurface *>(body.faces[f].carrier.get());
+  };
+
   // The axis and radius a quadric face implies for an edge, if it implies one:
   // the section at the edge's own height, which exists only when both ends are
-  // at the same height and the same distance from the axis.
-  auto section_of = [&](const brep::SurfaceForm& form, const Vector3d& p1, const Vector3d& p2,
-                        Vector3d& axis, Vector3d& centre, double& radius) {
-    Vector3d ax, org;
-    double apex_r = 0.0, slope = 0.0;
-    if (const auto *cyl = std::get_if<brep::Cylinder>(&form)) {
-      ax = cyl->frame.axis.normalized();
-      org = cyl->frame.origin;
-      apex_r = cyl->r;
-    } else if (const auto *con = std::get_if<brep::Cone>(&form)) {
-      ax = con->frame.axis.normalized();
-      org = con->frame.origin;
-      apex_r = con->r;
-      slope = tan(con->half_angle);
-    } else {
-      return false;
-    }
+  // at the same height and the same distance from the axis - read off the
+  // face's record, the cone's radius there its own closed form.
+  auto section_of = [&](std::size_t f, const Vector3d& p1, const Vector3d& p2, Vector3d& axis,
+                        Vector3d& centre, double& radius) {
+    const Surface *record = quadric_of(f);
+    if (record == nullptr) return false;
+    const auto *axial = static_cast<const AxialSurface *>(record);
+    const Vector3d ax = axial->axis(), org = axial->refpt;
     const double h1 = (p1 - org).dot(ax), h2 = (p2 - org).dot(ax);
     if (fabs(h1 - h2) > tol) return false;
     const Vector3d c = org + ax * h1;
     const double r1 = (p1 - c).norm(), r2 = (p2 - c).norm();
-    const double want = apex_r + slope * h1;
+    const auto *cone = dynamic_cast<const ConeSurface *>(record);
+    const double want =
+      cone != nullptr ? cone->radiusAt(c) : static_cast<const CylinderSurface *>(record)->r;
     if (fabs(r1 - r2) > tol || fabs(r1 - want) > tol) return false;
     axis = ax;
     centre = c;
@@ -112,22 +126,22 @@ void StepKernel::BodyBuild::promoteCurves()
     // One quadric and one plane, and every other face at the edge has to be
     // that same plane: a conic lies in exactly one plane, so a second one
     // through the edge would be asserting a curve it does not contain.
-    std::shared_ptr<Surface> quadric;
+    std::shared_ptr<const Surface> quadric;
     bool have_plane = false;
     std::size_t plane_face = 0;
     Vector3d pnorm(0, 0, 0), ppoint(0, 0, 0);
     for (const std::size_t f : faces) {
       const brep::SurfaceForm& form = body.faces[f].form;
-      if (const auto *con = std::get_if<brep::Cone>(&form)) {
+      if (std::holds_alternative<brep::Cone>(form) || std::holds_alternative<brep::Cylinder>(form)) {
         if (quadric != nullptr) return false;
-        quadric = std::make_shared<ConeSurface>(con->frame.origin, con->frame.axis, con->r,
-                                                tan(con->half_angle));
-      } else if (const auto *cyl = std::get_if<brep::Cylinder>(&form)) {
-        if (quadric != nullptr) return false;
-        quadric = std::make_shared<CylinderSurface>(cyl->frame.origin, cyl->frame.axis, cyl->r);
-      } else if (const auto *pl = std::get_if<brep::Plane>(&form)) {
-        const Vector3d n = pl->frame.axis.normalized();
-        const Vector3d o = pl->frame.origin;
+        const Surface *record = quadric_of(f);
+        if (record == nullptr) return false;
+        quadric = body.faces[f].carrier;
+      } else if (std::holds_alternative<brep::Plane>(form)) {
+        const PlaneSurface *pl = plane_of(f);
+        if (pl == nullptr) return false;
+        const Vector3d n = pl->normdir.normalized();
+        const Vector3d o = pl->refpt;
         if (have_plane) {
           if (fabs(fabs(n.dot(pnorm)) - 1) > 1e-9 || fabs((o - ppoint).dot(pnorm)) > tol) return false;
         } else {
@@ -241,17 +255,12 @@ void StepKernel::BodyBuild::promoteCurves()
     // refusing everything undeclared would refuse the sound cases with the
     // unsound. Telling them apart is what the claim ledger is for.
     {
-      bool declared_plane = false;
-      for (const auto& d : surfaces) {
-        const auto *pl = dynamic_cast<const PlaneSurface *>(d.get());
-        if (pl == nullptr) continue;
-        if (!recognition::parallel(pl->normdir, pnorm) ||
-            !recognition::onPlane(pl->refpt, pl->normdir, ppoint)) {
-          continue;
-        }
-        declared_plane = true;
-        break;
-      }
+      // By the face's record: a plane the model declared is one it stands on by
+      // name or position, never a plane of its corners - and not any declared
+      // plane that happens to pass through it (open item 39, R10).
+      const brep::Face& beside = body.faces[plane_face];
+      const bool declared_plane =
+        !beside.plane_from_corners && surfaceIndexOf(beside.surface.get()) >= 0;
       if (declared_plane) conics_on_declared++;
       else conics_on_chord++;
       // Counted, *not* refused - and the measurement is why.
@@ -388,7 +397,7 @@ void StepKernel::BodyBuild::promoteCurves()
     double radius = 0.0;
     bool proposed = false;
     for (const std::size_t f : faces) {
-      if (section_of(body.faces[f].form, p1, p2, axis, centre, radius)) {
+      if (section_of(f, p1, p2, axis, centre, radius)) {
         proposed = true;
         break;
       }
@@ -400,15 +409,15 @@ void StepKernel::BodyBuild::promoteCurves()
 
     bool agreed = true;
     for (const std::size_t f : faces) {
-      if (const auto *pl = std::get_if<brep::Plane>(&body.faces[f].form)) {
+      if (std::holds_alternative<brep::Plane>(body.faces[f].form)) {
         // A circle about `axis` lies in a plane only if the plane is
         // perpendicular to it, and its endpoints are in the plane already.
-        const Vector3d n = pl->frame.axis.normalized();
-        agreed = fabs(fabs(n.dot(axis)) - 1) < 1e-9;
+        const PlaneSurface *pl = plane_of(f);
+        agreed = pl != nullptr && fabs(fabs(pl->normdir.normalized().dot(axis)) - 1) < 1e-9;
       } else {
         Vector3d other_axis, other_centre;
         double other_radius = 0.0;
-        agreed = section_of(body.faces[f].form, p1, p2, other_axis, other_centre, other_radius) &&
+        agreed = section_of(f, p1, p2, other_axis, other_centre, other_radius) &&
                  (other_centre - centre).norm() < tol && fabs(other_radius - radius) < tol;
       }
       if (!agreed) break;

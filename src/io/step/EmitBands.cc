@@ -50,6 +50,18 @@ void StepKernel::BodyBuild::emitBands()
             band.base, band.axis, band.r_bottom, (band.r_top - band.r_bottom) / band.height))
         : std::shared_ptr<const Surface>(
             std::make_shared<CylinderSurface>(band.base, band.axis, band.r_bottom));
+    // The surface the face is written on, as the writer below builds it: the
+    // zone it closes, or the cylinder or cone its own rims make. Whether that
+    // is the record it stands for is the contract's question
+    // (brep::checkAttribution), not one this writer answers by assuming it
+    // (open item 39, R10).
+    const std::shared_ptr<const Surface> carrier =
+      band.zone != nullptr ? band.zone
+      : band.isCone()
+        ? std::shared_ptr<const Surface>(std::make_shared<ConeSurface>(
+            band.base, band.axis, band.r_bottom, (band.r_top - band.r_bottom) / band.height))
+        : std::shared_ptr<const Surface>(
+            std::make_shared<CylinderSurface>(band.base, band.axis, band.r_bottom));
     const auto *whole_torus = dynamic_cast<const TorusSurface *>(band.zone.get());
     if (whole_torus != nullptr && band.seam_bottom != band.seam_top) whole_torus = nullptr;
     if (const auto *tor = whole_torus) {
@@ -93,7 +105,7 @@ void StepKernel::BodyBuild::emitBands()
       auto edge_loop = new EdgeLoop(entities, loop);
       std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
       sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
-      registerFace(sfaces_extra.back(), record, covered);
+      registerFace(sfaces_extra.back(), record, covered, std::nullopt, false, carrier);
       continue;
     }
 
@@ -150,7 +162,7 @@ void StepKernel::BodyBuild::emitBands()
         auto edge_loop = new EdgeLoop(entities, loop);
         std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
         sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
-        registerFace(sfaces_extra.back(), record, covered);
+        registerFace(sfaces_extra.back(), record, covered, std::nullopt, false, carrier);
         continue;
       }
     }
@@ -426,6 +438,6 @@ void StepKernel::BodyBuild::emitBands()
     // The surface normal of a cylinder or a cone points away from its axis, so
     // a bore - where the material is outside it - is the opposite sense.
     sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
-    registerFace(sfaces_extra.back(), record, covered);
+    registerFace(sfaces_extra.back(), record, covered, std::nullopt, false, carrier);
   }
 }

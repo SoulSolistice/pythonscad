@@ -150,6 +150,8 @@ void step::stateSource(brep::Face& face, const FaceSource& source)
   face.evidence = source.evidence;
   face.plane_from_corners = source.plane_from_corners;
   face.record_evidence = source.record_evidence;
+  face.carrier = source.carrier != nullptr ? source.carrier : source.record;
+  face.carrier_derived = source.carrier_derived;
 }
 
 std::size_t step::BrepReader::vertex(const StepKernel::Vertex *v)
@@ -252,6 +254,7 @@ void StepKernel::BodyBuild::checkBrep()
   brep::Body& body = brep_body;
   const brep::ClassTally t = brep::stateClasses(body);
   const std::vector<std::string> real = brep::check(body);
+  const std::vector<std::string> misattributed = brep::checkAttribution(body);
   using recognition::EvidenceClass;
   auto n = [](const std::array<std::size_t, 6>& by, EvidenceClass c) { return int(by[std::size_t(c)]); };
   LOG(
@@ -273,5 +276,17 @@ void StepKernel::BodyBuild::checkBrep()
         "first: %3$s",
         int(real.size()), real.size() == 1 ? "" : "s", real.front().c_str());
     for (std::size_t i = 1; i < real.size() && i < 6; i++) LOG("STEP export:   %1$s", real[i].c_str());
+  }
+  // Apart from the topology: a face can close perfectly on the wrong surface,
+  // and which surface it is on is identity, the worst thing to get wrong (open
+  // item 39, R10).
+  if (!misattributed.empty()) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d face%2$s written on a surface that is not the record %3$s for, nor "
+        "derived from it (brep::checkAttribution) - first: %4$s",
+        int(misattributed.size()), misattributed.size() == 1 ? " is" : "s are",
+        misattributed.size() == 1 ? "it stands" : "they stand", misattributed.front().c_str());
+    for (std::size_t i = 1; i < misattributed.size() && i < 6; i++)
+      LOG("STEP export:   %1$s", misattributed[i].c_str());
   }
 }

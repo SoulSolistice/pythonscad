@@ -246,6 +246,15 @@ struct Face {
   // than a record anyone stated: then the face is as good as the corners that
   // span it, and stateClasses decides how good that is.
   bool plane_from_corners = false;
+  // The exact surface `form` writes, as the face's maker built it - what a
+  // consumer asking "which surface is this face on?" reads, never the form read
+  // back, which is the carrier rounded (open item 39, R10). It is `surface`, or
+  // one surface with it (Surface::sameAs), or - where `carrier_derived` says so
+  // - a closed form its maker derived from it: a Bezier patch's quadric.
+  // Anything else is a face written on a surface it does not stand for, which
+  // checkAttribution names.
+  std::shared_ptr<const Surface> carrier;
+  bool carrier_derived = false;
 };
 
 /*! A connected set of faces, indices into `Body::faces`. Closed, it bounds a
@@ -262,6 +271,12 @@ struct Body {
   std::vector<Face> faces;
   std::vector<Shell> shells;
 };
+
+/*! Every face written on a surface its record is not: a carrier of another
+ * kind than its form, or one that is neither the record, one surface with it,
+ * nor stated derived from it. A separate question from check(): attribution,
+ * not topology - a face can close perfectly on the wrong surface. */
+std::vector<std::string> checkAttribution(const Body& body);
 
 /*! Whether the curve carried between `start` and `end` lies on `surface`
  * exactly - a closed-form certificate, no tolerance. A surface of algebraic

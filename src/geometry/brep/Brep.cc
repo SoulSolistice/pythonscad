@@ -363,6 +363,72 @@ ClassTally stateClasses(Body& body)
   return tally;
 }
 
+namespace {
+
+/*! What kind of surface `s` is, for a message. */
+std::string kindOf(const Surface *s)
+{
+  if (s == nullptr) return "nothing";
+  if (dynamic_cast<const PlaneSurface *>(s) != nullptr) return "a plane";
+  if (dynamic_cast<const CylinderSurface *>(s) != nullptr) return "a cylinder";
+  if (dynamic_cast<const ConeSurface *>(s) != nullptr) return "a cone";
+  if (dynamic_cast<const SphereSurface *>(s) != nullptr) return "a sphere";
+  if (dynamic_cast<const TorusSurface *>(s) != nullptr) return "a torus";
+  if (dynamic_cast<const BezierPatchSurface *>(s) != nullptr) return "a Bezier patch";
+  if (dynamic_cast<const GridSurface *>(s) != nullptr) return "a declared sweep";
+  return "a surface of another kind";
+}
+
+/*! Whether a carrier of `s`'s kind can be what `form` writes: the five
+ * analytic forms each have one kind; a spline or an extrusion carries any
+ * surface it approximates or describes, which is not asked here. */
+bool formFits(const SurfaceForm& form, const Surface *s)
+{
+  if (std::holds_alternative<Plane>(form)) return dynamic_cast<const PlaneSurface *>(s) != nullptr;
+  if (std::holds_alternative<Cylinder>(form)) return dynamic_cast<const CylinderSurface *>(s) != nullptr;
+  if (std::holds_alternative<Cone>(form)) return dynamic_cast<const ConeSurface *>(s) != nullptr;
+  if (std::holds_alternative<Sphere>(form)) return dynamic_cast<const SphereSurface *>(s) != nullptr;
+  if (std::holds_alternative<Torus>(form)) return dynamic_cast<const TorusSurface *>(s) != nullptr;
+  return true;
+}
+
+const char *formName(const SurfaceForm& form)
+{
+  if (std::holds_alternative<Plane>(form)) return "a plane";
+  if (std::holds_alternative<Cylinder>(form)) return "a cylinder";
+  if (std::holds_alternative<Cone>(form)) return "a cone";
+  if (std::holds_alternative<Sphere>(form)) return "a sphere";
+  if (std::holds_alternative<Torus>(form)) return "a torus";
+  return "a spline";
+}
+
+}  // namespace
+
+std::vector<std::string> checkAttribution(const Body& body)
+{
+  std::vector<std::string> out;
+  for (std::size_t f = 0; f < body.faces.size(); f++) {
+    const Face& face = body.faces[f];
+    const std::string where = "face " + std::to_string(f);
+    if (face.carrier == nullptr) {
+      if (!std::holds_alternative<std::monostate>(face.form))
+        out.push_back(where + " states no carrier");
+      continue;
+    }
+    if (!formFits(face.form, face.carrier.get())) {
+      out.push_back(where + " is written as " + formName(face.form) + " on " +
+                    kindOf(face.carrier.get()));
+      continue;
+    }
+    if (face.surface == nullptr || face.carrier == face.surface || face.carrier_derived) continue;
+    if (!face.carrier->sameAs(*face.surface)) {
+      out.push_back(where + " is written on " + kindOf(face.carrier.get()) + " that is not " +
+                    kindOf(face.surface.get()) + " it stands for, nor stated derived from it");
+    }
+  }
+  return out;
+}
+
 std::vector<std::string> check(const Body& body)
 {
   std::vector<std::string> out;
