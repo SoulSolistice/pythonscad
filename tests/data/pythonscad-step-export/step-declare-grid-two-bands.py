@@ -89,11 +89,6 @@ makes it fire.
 # The approximation fits a surface the model declared, the declaration
 # having been refused upstream - open item 19.
 # KNOWN-EXPORT-WARNING: fitted to a surface the model had already declared
-#
-# Crossings of a declared sweep the fitter does not reach at machine
-# precision, written as chords: a sweep answers by projecting, not
-# algebraically (open item 10, B1/B2).
-# KNOWN-EXPORT-WARNING: could not be written as that curve and fell back to a chord
 from pythonscad import *
 import math
 

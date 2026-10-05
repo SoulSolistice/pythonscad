@@ -115,11 +115,6 @@ derivations; they are not repeated.
 # the placement that reaches it folding a face - the claim decided before
 # placement, open item 25.
 # KNOWN-EXPORT-WARNING: left off a surface the file writes a face of them on
-#
-# Crossings of a declared sweep the fitter does not reach at machine
-# precision, written as chords: a sweep answers by projecting, not
-# algebraically (open item 10, B1/B2).
-# KNOWN-EXPORT-WARNING: could not be written as that curve and fell back to a chord
 from pythonscad import *
 import math
 

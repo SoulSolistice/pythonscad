@@ -159,8 +159,7 @@ BAND = [NO_FIT, AGREED]
 KNOWN_EXPORT_WARNINGS = {
     "band-fn024": BAND,
     "band-fn048": BAND,
-    # The band family's sweep crossing at FN 64, 6.46e-05 off at its nearest.
-    "band-fn064": BAND + [CHORD],
+    "band-fn064": BAND,
     "band-fn096": BAND,
     "lid10": BAND + [CHORD, HOLE] + SPLIT + [
         # A loop nothing encloses is an outer bound and keeps the winding it

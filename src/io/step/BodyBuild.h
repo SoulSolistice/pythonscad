@@ -592,6 +592,9 @@ struct StepKernel::BodyBuild {
   // tell a fit that missed by 3.4e-05 from one that missed by a tenth of a
   // millimetre, and those want different work.
   std::size_t arc_refused = 0, arc_no_fit = 0, arc_creased = 0, arc_uncreased = 0;
+  // Edges between two declared surfaces with an end off one of them: no curve
+  // of theirs passes through it, so they stay chords, the corners' to place.
+  std::size_t crossing_ends_off = 0;
   std::vector<double> arc_errors, arc_on_quadric, arc_on_fitted;
   // Which facet loops are not available to be written as planar faces. Filled
   // by the quadric pass and read again by its writer, so both sides of every

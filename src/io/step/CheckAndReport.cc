@@ -51,6 +51,17 @@ void StepKernel::BodyBuild::checkAndReport()
         int(crossing_corners.size()));
     }
   }
+  if (crossing_ends_off > 0) {
+    // Not tried as curves: an end off one of the two surfaces is not on their
+    // crossing, and no fit can pass through it. Within a grid's band they used
+    // to be tried, missed by the band, and counted as falling back below (open
+    // item 39, R15's pattern); where they are is the corner placement's
+    // question, which reports the corners off their faces itself (item 25).
+    LOG(
+      "STEP export: %1$d edge%2$s where two declared surfaces meet %3$s written as chords: an end of "
+      "each is off one of the surfaces, and no curve of theirs passes through it",
+      int(crossing_ends_off), crossing_ends_off == 1 ? "" : "s", crossing_ends_off == 1 ? "is" : "are");
+  }
   if (crossing_unwalked > 0) {
     // Two faces on one piece that do not both carry it in order: the one that
     // cannot writes chords where the other writes the curve.

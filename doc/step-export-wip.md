@@ -5213,6 +5213,19 @@ from coming back - landed with the fix and mutation-checked (F2).
   *Test:* `grid_surface_test.cc` - a corner half a band off a grid is off it,
   and one 1e-12 off a cylinder of radius 20; the band put back into the
   predicate fails it.
+  **A fifth asker, the same day**: `decideSections` takes an edge between two
+  declared surfaces as their crossing only where both its ends are on both,
+  and a grid's end was allowed its band. Within the band such an edge was
+  fitted, missed by the band, and counted as "fell back to a chord" - which
+  the declare-grid family and band-fn064 named as the fitter not reaching a
+  sweep at machine precision (item 10). It was never the fitter: the ends were
+  not on the sweep, the corner placement's to settle (item 25, which those
+  fixtures name already). By `onFace` now; such an edge is not tried, and is
+  reported as a chord with an end off one of its surfaces. Neutral in the file
+  over 132 exports; the chord warning gone from step-declare-grid(-scad,
+  -topcap, -two-bands) and band-fn064, their directives out. It also showed the
+  section counters added over both decisions, the one before the corners move
+  and the one after, which is next.
 - **R16 - a crossing curve's fit is a sample, not a bound.**
   `intersectionArcError` (`CrossingArc.cc`) evaluates the Bezier at 4 x degree - 1
   interior parameters and returns the worst distance found there; that becomes

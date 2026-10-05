@@ -145,6 +145,7 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
   // edges the first time it was tried.
   for (const auto& patch : grid_faces) walk_into_along(patch);
   crossing_edges.clear();
+  crossing_ends_off = 0;  // of this decision, not the one it replaces
   crossing_corners.clear();
   for (const auto& entry : along) {
     if (entry.second.size() != 2) continue;
@@ -155,20 +156,19 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
     const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
     // Both ends have to be on both surfaces already. Where a boolean made
     // the vertex that is exactly what it is - the two makers crossing -
-    // and where it is not, no arc of theirs belongs here.
+    // and where it is not, no arc of theirs belongs here. By the one
+    // predicate a corner on its face is asked by (AnalyticFeatures::onFace),
+    // where a grid's end was allowed its declared band - how far the mesh
+    // stands off the surface, not where the curve's end is (open item 39,
+    // R15's pattern).
     bool on = true;
     for (const Surface *s : {a, b}) {
-      for (const Vector3d *p : {&p0, &p1}) {
-        double f = 0;
-        Vector3d g;
-        const double owed = std::max(1e-9 * scale, declaredBand(s));
-        double d = 0;
-        if (!surfaceImplicit(s, *p, f, g, &d) || g.norm() < 1e-12 || d > owed) {
-          on = false;
-        }
-      }
+      for (const Vector3d *p : {&p0, &p1}) on = on && AnalyticFeatures::onFace(s, *p);
     }
-    if (!on) continue;
+    if (!on) {
+      crossing_ends_off++;
+      continue;
+    }
     // The curve at the file's resolution, two ways: one Bezier, and a spline
     // refined along it. No polynomial follows the crossing where
     // it turns a corner - a sweep's crease inside the edge, across its profile

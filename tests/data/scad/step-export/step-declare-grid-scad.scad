@@ -157,11 +157,6 @@
 // placement, open item 25.
 // KNOWN-EXPORT-WARNING: left off a surface the file writes a face of them on
 //
-// Crossings of a declared sweep the fitter does not reach at machine
-// precision, written as chords: a sweep answers by projecting, not
-// algebraically (open item 10, B1/B2).
-// KNOWN-EXPORT-WARNING: could not be written as that curve and fell back to a chord
-//
 // Four edges are seams of one declared cylinder: its face beside its own cut
 // facets, which are not in its region and stay facets - the KNOWN-EXPORT-ERROR
 // above (open item 34). They are written as the cylinder's section by the
