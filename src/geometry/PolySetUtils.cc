@@ -207,6 +207,7 @@ std::shared_ptr<const PolySet> getGeometryAsPolySet(const std::shared_ptr<const 
         // the way back out of the Nef representation: hand the declarations on
         // to whoever asked for a mesh, which is what an exporter reads
         ps->surfaces = N->surfaces;
+        ps->solid_tree = N->solid_tree;
         return ps;
       }
       LOG(message_group::Error, "Nef->PolySet failed.");

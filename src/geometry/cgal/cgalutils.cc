@@ -136,7 +136,10 @@ static std::unique_ptr<CGALNefGeometry> createNefPolyhedronFromPolySetImpl(const
 std::unique_ptr<CGALNefGeometry> createNefPolyhedronFromPolySet(const PolySet& ps)
 {
   auto N = createNefPolyhedronFromPolySetImpl(ps);
-  if (N) N->surfaces = ps.surfaces;
+  if (N) {
+    N->surfaces = ps.surfaces;
+    N->solid_tree = ps.solid_tree;
+  }
   return N;
 }
 
@@ -537,6 +540,7 @@ std::shared_ptr<const PolySet> getGeometryAsPolySet(const std::shared_ptr<const 
       if (auto ps = CGALUtils::createPolySetFromNefPolyhedron3(*N->p3)) {
         ps->setConvexity(N->getConvexity());
         ps->surfaces = N->surfaces;
+        ps->solid_tree = N->solid_tree;
         return ps;
       }
       LOG(message_group::Error, "Nef->PolySet failed.");

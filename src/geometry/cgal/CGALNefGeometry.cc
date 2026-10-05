@@ -21,6 +21,7 @@ CGALNefGeometry::CGALNefGeometry(const CGALNefGeometry& src) : Geometry(src)
 {
   if (src.p3) this->p3 = src.p3;
   this->surfaces = src.surfaces;
+  this->solid_tree = src.solid_tree;
 }
 
 std::unique_ptr<Geometry> CGALNefGeometry::copy() const
@@ -34,13 +35,15 @@ CGALNefGeometry CGALNefGeometry::operator+(const CGALNefGeometry& other) const
 {
   auto merged = this->surfaces;
   mergeSurfaces(merged, other.surfaces);
-  return {std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) + (*other.p3)), std::move(merged)};
+  return {std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) + (*other.p3)), std::move(merged),
+          SolidTree::combine(SolidTree::Op::Union, this->solid_tree, other.solid_tree)};
 }
 
 CGALNefGeometry& CGALNefGeometry::operator+=(const CGALNefGeometry& other)
 {
   this->p3 = std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) + (*other.p3));
   mergeSurfaces(this->surfaces, other.surfaces);
+  this->solid_tree = SolidTree::combine(SolidTree::Op::Union, this->solid_tree, other.solid_tree);
   return *this;
 }
 
@@ -48,6 +51,7 @@ CGALNefGeometry& CGALNefGeometry::operator*=(const CGALNefGeometry& other)
 {
   this->p3 = std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) * (*other.p3));
   mergeSurfaces(this->surfaces, other.surfaces);
+  this->solid_tree = SolidTree::combine(SolidTree::Op::Intersection, this->solid_tree, other.solid_tree);
   return *this;
 }
 
@@ -55,6 +59,7 @@ CGALNefGeometry& CGALNefGeometry::operator-=(const CGALNefGeometry& other)
 {
   this->p3 = std::make_shared<CGAL_Nef_polyhedron3>((*this->p3) - (*other.p3));
   mergeSurfaces(this->surfaces, other.surfaces);
+  this->solid_tree = SolidTree::combine(SolidTree::Op::Difference, this->solid_tree, other.solid_tree);
   return *this;
 }
 
@@ -75,6 +80,9 @@ CGALNefGeometry& CGALNefGeometry::minkowski(const CGALNefGeometry& other)
   // makes, and the one case where a record could still fit some other feature
   // of the result and be acted on wrongly.
   this->surfaces.clear();
+  // And no statement of the solid either, as on the Manifold backend: the sum
+  // is no boolean of its operands.
+  this->solid_tree = nullptr;
   return *this;
 }
 
@@ -135,6 +143,7 @@ void CGALNefGeometry::transform(const Transform3d& matrix, const Similarity& sim
       // A record may change kind, and one which cannot be represented after
       // the transform is dropped rather than left wrong. See Surface::transformed.
       this->surfaces = transformedSurfaces(this->surfaces, matrix, similarity);
+      if (this->solid_tree) this->solid_tree = this->solid_tree->transformed(matrix, similarity);
     }
   }
 }

@@ -939,7 +939,7 @@ std::unique_ptr<Geometry> union_geoms(std::vector<std::shared_ptr<PolySet>> part
       else *result += *op;
       auto p2 = CGALUtils::getNefPolyhedronFromGeometry(parts[0]);
     }
-    return std::make_unique<CGALNefGeometry>(result->p3, result->surfaces);
+    return std::make_unique<CGALNefGeometry>(result->p3, result->surfaces, result->solid_tree);
   }
 }
 
@@ -967,7 +967,7 @@ std::unique_ptr<Geometry> difference_geoms(
       else *result -= *op;
       auto p2 = CGALUtils::getNefPolyhedronFromGeometry(parts[0]);
     }
-    return std::make_unique<CGALNefGeometry>(result->p3, result->surfaces);
+    return std::make_unique<CGALNefGeometry>(result->p3, result->surfaces, result->solid_tree);
   }
 }
 

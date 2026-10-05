@@ -2,6 +2,7 @@
 
 #include "geometry/cgal/cgal.h"
 #include "geometry/Geometry.h"
+#include "geometry/SolidTree.h"
 #include "geometry/Surface.h"
 #include <cstddef>
 #include <memory>
@@ -16,8 +17,9 @@ public:
   VISITABLE_GEOMETRY();
   CGALNefGeometry() = default;
   CGALNefGeometry(std::shared_ptr<const CGAL_Nef_polyhedron3> p,
-                  std::vector<std::shared_ptr<Surface>> surfaces = {})
-    : p3(std::move(p)), surfaces(std::move(surfaces))
+                  std::vector<std::shared_ptr<Surface>> surfaces = {},
+                  std::shared_ptr<const SolidTree> solidTree = nullptr)
+    : p3(std::move(p)), surfaces(std::move(surfaces)), solid_tree(std::move(solidTree))
   {
   }
   CGALNefGeometry(const CGALNefGeometry& src);
@@ -64,4 +66,12 @@ public:
    * A Nef polyhedron is a set of half-spaces and knows nothing of these; they
    * are carried, not used, until something converts back to a PolySet. */
   std::vector<std::shared_ptr<Surface>> surfaces;
+  /*! The boolean this solid was built by, as the model states it - the same
+   * channel `PolySet::solid_tree` and `ManifoldGeometry::solid_tree_` carry,
+   * combined at every boolean and moved with every transform as they are.
+   * Without it a CGAL operand states no solid, and a maker that reads what its
+   * operands are - a hull of coaxial sectors - is mute on this backend alone,
+   * so the same model declared differently on the two (open item 39, R29;
+   * item 35). Carried, not used, as the surfaces are. */
+  std::shared_ptr<const SolidTree> solid_tree;
 };

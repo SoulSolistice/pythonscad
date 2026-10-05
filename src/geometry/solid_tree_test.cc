@@ -17,10 +17,15 @@
 #include "geometry/HullOfRevolution.h"
 #include "geometry/PolySet.h"
 #include "geometry/PolySetBuilder.h"
+#include "geometry/PolySetUtils.h"
 #include "geometry/Surface.h"
 #include "geometry/manifold/ManifoldGeometry.h"
 #include "geometry/manifold/manifoldutils.h"
 #include "geometry/recognition/Exact.h"
+#ifdef ENABLE_CGAL
+#include "geometry/cgal/CGALNefGeometry.h"
+#include "geometry/cgal/cgalutils.h"
+#endif
 
 namespace {
 
@@ -163,6 +168,50 @@ TEST_CASE("the boolean is carried through Manifold to the exported mesh", "[soli
   CHECK(tree->leaves() == 2);
   CHECK(tree->declaredLeaves() == 1);
 }
+
+#ifdef ENABLE_CGAL
+TEST_CASE("the boolean is carried through CGAL as through Manifold", "[solidtree]")
+{
+  // The same three cubes on the other backend: the tree has to be the same,
+  // or a maker reading what its operands are states one thing on one backend
+  // and nothing on the other (open item 39, R29; item 35).
+  using Op = SolidTree::Op;
+  auto block = CGALUtils::createNefPolyhedronFromPolySet(*cube({0, 0, 0}, {4, 4, 4}));
+  const auto bite = CGALUtils::createNefPolyhedronFromPolySet(*cube({3, 3, 3}, {5, 5, 5}));
+  const auto notch = CGALUtils::createNefPolyhedronFromPolySet(*cube({-1, 1, 1}, {1, 2, 2}));
+  REQUIRE(block->solid_tree != nullptr);
+
+  CGALNefGeometry cut = *block;
+  cut -= *bite;
+  cut -= *notch;
+  // Out the way an exporter takes it.
+  const auto ps = PolySetUtils::getGeometryAsPolySet(std::make_shared<const CGALNefGeometry>(cut));
+  REQUIRE(ps->solid_tree != nullptr);
+  REQUIRE(ps->solid_tree->op() == Op::Difference);
+  CHECK(ps->solid_tree->children().size() == 3);
+  CHECK(ps->solid_tree->declaredLeaves() == 3);
+  CHECK((ps->solid_tree->children()[0]->solid()->interior - Vector3d(2, 2, 2)).norm() == 0);
+
+  // A transform moves the solids with the polyhedron.
+  CGALNefGeometry moved = cut;
+  Transform3d up = Transform3d::Identity();
+  up.translate(Vector3d(0, 0, 7));
+  moved.transform(up, Similarity::by(1.0));
+  CHECK((moved.solid_tree->children()[0]->solid()->interior - Vector3d(2, 2, 9)).norm() < 1e-12);
+
+  // A union and an intersection are recorded as such.
+  CHECK((*block + *notch).solid_tree->op() == Op::Union);
+  CGALNefGeometry both = *block;
+  both *= *bite;
+  CHECK(both.solid_tree->op() == Op::Intersection);
+
+  // A minkowski sum is no boolean of its operands, and states no solid - as on
+  // the Manifold backend.
+  CGALNefGeometry sum = *block;
+  sum.minkowski(*bite);
+  CHECK(sum.solid_tree == nullptr);
+}
+#endif  // ENABLE_CGAL
 
 TEST_CASE("a faceted leaf becomes the envelope its faces span", "[solidtree][envelope]")
 {

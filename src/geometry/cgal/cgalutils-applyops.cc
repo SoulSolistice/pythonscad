@@ -78,7 +78,8 @@ std::unique_ptr<const Geometry> applyUnion3D(const CsgOpNode& node,
     if (q.size() == 1) {
       // p3 alone would leave the surface records behind, and this is where a
       // union of primitives ends up
-      return std::make_unique<CGALNefGeometry>(q.top().first->p3, q.top().first->surfaces);
+      return std::make_unique<CGALNefGeometry>(q.top().first->p3, q.top().first->surfaces,
+                                               q.top().first->solid_tree);
     } else {
       return nullptr;
     }
