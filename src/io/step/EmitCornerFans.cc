@@ -23,13 +23,22 @@ void StepKernel::BodyBuild::emitCornerFans()
         "%3$s on - a fan for a bend the face does not have",
         int(fanned_flat), fanned_flat == 1 ? "" : "s", fanned_flat == 1 ? "it stands" : "they stand");
   }
+  // A triangle the writer cannot write. The placement accepts a fan only when
+  // every triangle winds with its polygon, so none should arrive - and one
+  // dropped leaves each of its edges used once, the shell open there. Dropped
+  // in silence until 2026-10-05: named now where it happens, and brep::check
+  // names the edges it leaves unpaired (open item 39, R8).
+  std::size_t no_plane = 0, against = 0;
   for (const auto& sc : split_for_corners) {
     const std::size_t i = sc.first;
     for (const auto& corner : sc.second) {
       const int tri[3] = {corner[0], corner[1], corner[2]};
       const Vector3d e1 = vertices[tri[1]] - vertices[tri[0]];
       const Vector3d e2 = vertices[tri[2]] - vertices[tri[0]];
-      if (e1.cross(e2).norm() < area_eps) continue;
+      if (e1.cross(e2).norm() < area_eps) {
+        no_plane++;
+        continue;
+      }
       brep::Loop bound;
       bound.outer = true;
       for (int j = 0; j < 3; j++) {
@@ -52,7 +61,10 @@ void StepKernel::BodyBuild::emitCornerFans()
       // chosen fan winds with the polygon - so a disagreement here is a bug
       // rather than a case to paper over, and the triangle is dropped.
       Vector3d tn = e1.cross(e2);
-      if (tn.dot(loop_normals[i]) <= 0) continue;
+      if (tn.dot(loop_normals[i]) <= 0) {
+        against++;
+        continue;
+      }
       tn.normalize();
       Vector3d ref = e1 - tn * tn.dot(e1);
       if (ref.norm() < 1e-12) ref = AnalyticFeatures::perpendicular(tn);
@@ -67,5 +79,13 @@ void StepKernel::BodyBuild::emitCornerFans()
       face.loops.push_back(std::move(bound));
       fan_faces.push_back(std::move(face));
     }
+  }
+  if (no_plane + against > 0) {
+    LOG(message_group::Export_Error,
+        "STEP export: %1$d fan triangle%2$s the placement accepted cannot be written - %3$d with no "
+        "plane, %4$d wound against the polygon they fan - and %5$s dropped, which opens the shell "
+        "along %6$s edges",
+        int(no_plane + against), no_plane + against == 1 ? "" : "s", int(no_plane), int(against),
+        no_plane + against == 1 ? "it is" : "they are", no_plane + against == 1 ? "its" : "their");
   }
 }

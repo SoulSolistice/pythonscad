@@ -4948,7 +4948,12 @@ from coming back - landed with the fix and mutation-checked (F2).
   is held to. It should be the forward error of placing a corner at that size -
   what the machine can say, not what was picked. *Test:* a unit test on the
   derivation, at two sizes a decade apart.
-- **R8 - fan triangles dropped in silence.** `EmitCornerFans.cc` skips a
+- **R8 - fan triangles dropped in silence. Fixed 2026-10-05**, where the fans
+  moved onto the B-rep: a triangle the writer cannot write is an EXPORT-ERROR
+  where it is dropped, by reason - no plane, or wound against its polygon -
+  besides the edges brep::check finds unpaired. Neutral (0 differences over 130
+  exports); planted - every triangle refused while none is written - on
+  step-split-surface, both errors fire. `EmitCornerFans.cc` skips a
   triangle under `area_eps` and one winding against its polygon - "a bug rather
   than a case to paper over", its comment says, and then drops it, which opens the
   shell with nothing said. *Test:* the mirror's closed-shell check (step 2)
