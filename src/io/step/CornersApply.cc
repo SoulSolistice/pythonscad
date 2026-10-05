@@ -280,13 +280,11 @@ void StepKernel::BodyBuild::applyCornerMoves()
       double off_worst = 0;
       for (const auto& entry : at_held) {
         double worst = 0;
+        // By the one predicate (AnalyticFeatures::onFace), where a grid was
+        // allowed its declared band - the mesh's distance from the surface, not
+        // the file's (open item 39, R15).
         for (const Surface *sf : entry.second) {
-          Vector3d q;
-          if (!AnalyticFeatures::closestOnSurface(sf, vertices[entry.first], q)) continue;
-          const double owed =
-            std::max(1e-9 * std::max(1.0, vertices[entry.first].norm()), declaredBand(sf));
-          const double d = (q - vertices[entry.first]).norm();
-          if (d > owed) worst = std::max(worst, d);
+          worst = std::max(worst, AnalyticFeatures::offFace(sf, vertices[entry.first]));
         }
         if (worst > 0) {
           off_faces++;

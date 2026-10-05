@@ -12,6 +12,7 @@
 // nothing can recover the ordering from the mesh alone.
 
 #include "geometry/Surface.h"
+#include "geometry/AnalyticFeatures.h"
 
 #include <catch2/catch_all.hpp>
 #include <algorithm>
@@ -854,4 +855,31 @@ TEST_CASE("a grid takes a point of its own facets onto itself, certified, and no
   // projection comes.
   Vector3d far;
   CHECK_FALSE(grid.closestPoint(Vector3d(10 + 10 * allowed + 1.0, 0.0, 2.5), far));
+}
+
+TEST_CASE("a corner half a band off its grid is off it", "[surface][grid][R15]")
+{
+  // A grid publishes a band - how far its tessellation stands off the smooth
+  // surface - and the file asserts a corner *on* the surface. The move check
+  // allowed a corner anywhere within the band; the one predicate does not
+  // (AnalyticFeatures::onFace, open item 39, R15).
+  const int rows = 24, cols = 4;
+  const GridSurface grid(rows, cols, helix(rows, cols));
+  const double band = grid.membershipTolerance();
+  REQUIRE(band > 0);
+  const Vector3d p = grid.evaluate(0.5, 0.5);
+  CHECK(AnalyticFeatures::onFace(&grid, p));
+  const double h = 1e-4;
+  const Vector3d n = (grid.evaluate(0.5 + h, 0.5) - grid.evaluate(0.5 - h, 0.5))
+                       .cross(grid.evaluate(0.5, 0.5 + h) - grid.evaluate(0.5, 0.5 - h))
+                       .normalized();
+  CHECK_FALSE(AnalyticFeatures::onFace(&grid, p + n * (band / 2)));
+  CHECK(AnalyticFeatures::offFace(&grid, p + n * (band / 2)) == Catch::Approx(band / 2).epsilon(1e-3));
+
+  // and a surface with a closed form at machine precision: a corner 1e-12 off
+  // a cylinder of radius 20 is off it
+  const CylinderSurface cylinder(Vector3d::Zero(), Vector3d(0, 0, 1), 20.0);
+  CHECK(AnalyticFeatures::onFace(&cylinder, Vector3d(20, 0, 5)));
+  CHECK_FALSE(AnalyticFeatures::onFace(&cylinder, Vector3d(20 + 1e-12, 0, 5)));
+  CHECK(AnalyticFeatures::offFace(&cylinder, Vector3d(20 + 1e-12, 0, 5)) > 0);
 }

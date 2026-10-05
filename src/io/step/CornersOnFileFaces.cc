@@ -198,19 +198,16 @@ void StepKernel::BodyBuild::placeOnFileFaces()
       double worst = 0;
       const auto have = faces_at.find(v);
       if (have == faces_at.end()) return worst;
-      for (const auto& sf : have->second) {
-        Vector3d q;
-        if (!AnalyticFeatures::closestOnSurface(sf.get(), at, q)) continue;
-        // Against the surface as written, not against the band the declaration
-        // publishes. A grid's band is its tessellation's sagitta - 0.2527 on
-        // lid10's thread - and the file asserts the corner is on the *surface*,
-        // not within a sagitta of it. Measuring against the band is what let two
-        // corners 0.0367 and 0.0215 off the sweep go unreported while the rung
-        // that could have placed them was never asked.
-        const double owed = 1e-9 * std::max(1.0, at.norm());
-        const double d = (q - at).norm();
-        if (d > owed) worst = std::max(worst, d);
-      }
+      // Against the surface as written, not against the band the declaration
+      // publishes. A grid's band is its tessellation's sagitta - 0.2527 on
+      // lid10's thread - and the file asserts the corner is on the *surface*,
+      // not within a sagitta of it. Measuring against the band is what let two
+      // corners 0.0367 and 0.0215 off the sweep go unreported while the rung
+      // that could have placed them was never asked. By the one predicate the
+      // score asks (AnalyticFeatures::onFace), where it was projection within
+      // 1e-9 for every surface, quadrics included (open item 39, R15).
+      for (const auto& sf : have->second)
+        worst = std::max(worst, AnalyticFeatures::offFace(sf.get(), at));
       return worst;
     };
     auto note_left = [&](std::size_t& bucket, int v, const Vector3d& at) {
@@ -321,13 +318,10 @@ void StepKernel::BodyBuild::placeOnFileFaces()
       // curves a later pass had to write through it could not hold their ends
       // (open item 39, R5, which R11 waits on). A surface with no closed form -
       // a sweep, a patch - states no residual and is asked by projection still,
-      // which is what its fit can say (item 10, B1/B2).
+      // which is what its fit can say (item 10, B1/B2). The one predicate every
+      // check of a corner on its face asks (AnalyticFeatures::onFace, R15).
       auto on_constraint = [&](const Surface *s, const Vector3d& p) {
-        const recognition::Residual r = recognition::residualOf(s, p);
-        if (std::isfinite(r.value)) return r.exact();
-        Vector3d q;
-        return AnalyticFeatures::closestOnSurface(s, p, q) &&
-               (q - p).norm() <= 1e-9 * std::max(1.0, p.norm());
+        return AnalyticFeatures::onFace(s, p);
       };
       // Which constraints a position satisfies, counted per tier. Compared from
       // the most precise tier down.

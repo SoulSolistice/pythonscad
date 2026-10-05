@@ -55,15 +55,12 @@ void StepKernel::BodyBuild::checkMovesStayOnFaces()
         }
       }
     }
-    // How far `p` is from the surface, and what that surface allows; negative
-    // where it gives no answer.
-    auto off_face = [&](const Surface *s, const Vector3d& p, double& allowed) {
-      allowed = 1e-9;
-      Vector3d q;
-      if (s == nullptr || !AnalyticFeatures::closestOnSurface(s, p, q)) return -1.0;
-      allowed = std::max(AnalyticFeatures::declaredBand(s), 1e-9);
-      return (q - p).norm();
-    };
+    // A move may not take a corner off the surface of a face it was on - by the
+    // one predicate the arbiter scores with (AnalyticFeatures::onFace). It was
+    // a corner anywhere within a grid's declared band of the surface, and a
+    // move refused only where it ended further off than it began, so a corner
+    // already past the band was never asked about at all (open item 39, R15).
+    // A surface whose projection does not answer judges nothing.
     std::size_t deserting = 0;
     double worst_desertion = 0;
     for (auto it = moves.begin(); it != moves.end();) {
@@ -71,11 +68,10 @@ void StepKernel::BodyBuild::checkMovesStayOnFaces()
       const auto faces = bounding.find(it->first);
       if (faces != bounding.end()) {
         for (const auto& face : faces->second) {
-          double allowed = 0;
-          const double before = off_face(face, vertices[it->first], allowed);
-          const double after = off_face(face, it->second, allowed);
+          const double before = AnalyticFeatures::offFace(face, vertices[it->first]);
+          const double after = AnalyticFeatures::offFace(face, it->second);
           if (before < 0 || after < 0) continue;
-          if (after > allowed && after > before) {
+          if (before == 0 && after > 0) {
             deserts = true;
             worst_desertion = std::max(worst_desertion, after);
           }

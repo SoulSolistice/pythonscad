@@ -667,6 +667,23 @@ bool closestOnSurface(const Surface *s, const Vector3d& p, Vector3d& out);
 /*! Whether this surface states where it is algebraically. */
 bool isQuadric(const Surface *surface);
 
+/*! Whether `p` is on `s` as the file asserts a corner is on its face: at
+ * machine precision by the surface's closed-form residual wherever it states
+ * one (recognition::onExactly), and otherwise - a sweep or a patch, which
+ * answer by projecting (open item 10) - its projection within 1e-9 of the
+ * point's size, the corner ladder's floor. False where the projection does not
+ * answer. Never within a declared band: a band says how far the *mesh* stands
+ * off the surface, and the file asserts its corner on the surface.
+ *
+ * The one predicate for that question, asked by the corner arbiter's score and
+ * its report and by the check on every move (open item 39, R15). */
+bool onFace(const Surface *s, const Vector3d& p);
+
+/*! How far `p` is off `s`, zero where onFace holds: the closed-form residual
+ * where the surface states one, the distance to its projection otherwise, and
+ * -1 where the projection does not answer. */
+double offFace(const Surface *s, const Vector3d& p);
+
 /*! What a surface is entitled to be missed by, from its own declaration.
  *
  * Zero for a quadric, which states where it is exactly; a declared grid's

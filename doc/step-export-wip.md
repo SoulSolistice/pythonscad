@@ -5157,6 +5157,21 @@ from coming back - landed with the fix and mutation-checked (F2).
   (`after > before`), so a corner already beyond the allowance is never asked
   about. *Test:* one predicate with the arbiter's, unit-tested - a corner half a
   band off its surface is off it.
+  **Fixed 2026-10-05**: "is this corner on its face" is one predicate,
+  `AnalyticFeatures::onFace` - the surface's closed-form residual at machine
+  precision where it states one, its projection within the ladder's 1e-9 of the
+  point's size where it answers by projecting (item 10), never a band - and
+  `offFace` says how far where not. Four places asked it four ways: the
+  arbiter's score (residual, then projection), its "left off a surface" report
+  (projection within 1e-9 for every surface, quadrics included), the warning
+  for corners the plane veto holds (within the band), and the move check
+  (within the band, and only where a move ended further off than it began).
+  All ask `onFace` now, and the move check refuses a move that takes a corner
+  off a face it was on - on to off, which a distance cannot say once the band
+  is gone. Neutral over 132 exports and the flagship coupons: 0 differences.
+  *Test:* `grid_surface_test.cc` - a corner half a band off a grid is off it,
+  and one 1e-12 off a cylinder of radius 20; the band put back into the
+  predicate fails it.
 - **R16 - a crossing curve's fit is a sample, not a bound.**
   `intersectionArcError` (`CrossingArc.cc`) evaluates the Bezier at 4 x degree - 1
   interior parameters and returns the worst distance found there; that becomes

@@ -272,6 +272,24 @@ bool isQuadric(const Surface *surface)
   return surface != nullptr && surface->isQuadric();
 }
 
+bool onFace(const Surface *s, const Vector3d& p)
+{
+  const recognition::Residual r = recognition::residualOf(s, p);
+  if (std::isfinite(r.value)) return r.exact();
+  Vector3d q;
+  return closestOnSurface(s, p, q) && (q - p).norm() <= 1e-9 * std::max(1.0, p.norm());
+}
+
+double offFace(const Surface *s, const Vector3d& p)
+{
+  if (onFace(s, p)) return 0.0;
+  const recognition::Residual r = recognition::residualOf(s, p);
+  if (std::isfinite(r.value)) return r.value;
+  Vector3d q;
+  if (!closestOnSurface(s, p, q)) return -1.0;
+  return (q - p).norm();
+}
+
 double declaredBand(const Surface *surface)
 {
   if (const auto *grid = dynamic_cast<const GridSurface *>(surface)) {
