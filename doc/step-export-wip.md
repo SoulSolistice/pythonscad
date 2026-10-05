@@ -5025,7 +5025,8 @@ from coming back - landed with the fix and mutation-checked (F2).
   point was certified; on a grid, its envelope. *Test:* a unit case whose
   deviation peaks between samples - the certified value at least what dense
   sampling finds, which today's is not.
-- **R17 - an edge of no length is written with an invented direction.**
+- **R17 - an edge of no length is written with an invented direction. Fixed
+  2026-10-05 where the edges moved; the analytic emitters' lines wait on theirs.**
   `create_line_edge_curve` (`StepKernel.cc`) guards a zero-length edge with an
   absolute 1e-12 and writes `DIRECTION(1,0,0)` of magnitude 1 - a fabricated
   curve for an edge that should not exist. It is reachable: vertices are merged
@@ -5034,6 +5035,14 @@ from coming back - landed with the fix and mutation-checked (F2).
   papers over the defect behind it. *Test:* a contract rule in `brep::check` - a
   line from a vertex to itself - planted in a unit test, so every export's mirror
   says whether any file carries one.
+  The rule is in `brep::check` (02654172e), an EXPORT-ERROR on every export
+  through `checkBrep`, with its unit test; a circle closed on one vertex is not
+  named. The planar writer skips a mesh edge whose two corners the placement
+  made one vertex, and `lineEdge` and the translator invent no direction - a
+  line's is its two vertices', and the translator writes the B-rep's. Measured
+  at 0 differences over 130 exports: no file reaches one today. The analytic
+  emitters still make their lines through `create_line_edge_curve` and keep its
+  guard until they move; the rule names what it would paper over.
 - **R18 - entities in the file that nothing references. Fixed 2026-09-30.** Found
   asking what a translator writing from the B-rep would have to reproduce: 38 of
   120 exports held geometry no solid reached - a PLANE (with its placement, two
