@@ -57,27 +57,26 @@ void StepKernel::BodyBuild::promoteCurves()
     return dynamic_cast<const PlaneSurface *>(body.faces[f].carrier.get());
   };
 
-  // The axis and radius a quadric face implies for an edge, if it implies one:
-  // the section at the edge's own height, which exists only when both ends are
-  // at the same height and the same distance from the axis - read off the
-  // face's record, the cone's radius there its own closed form.
+  // The circle a quadric face implies for an edge, if it implies one: the
+  // section across its axis through both ends, which exists exactly when both
+  // ends are on the surface and on one plane across the axis - at machine
+  // precision, and then the radius is the surface's own there, nothing
+  // measured. Within the model's tolerance until 2026-10-05, which promoted an
+  // arc between ends up to 1e-5 apart in height: a circle missing its own
+  // endpoints (open item 39, R11).
   auto section_of = [&](std::size_t f, const Vector3d& p1, const Vector3d& p2, Vector3d& axis,
                         Vector3d& centre, double& radius) {
     const Surface *record = quadric_of(f);
     if (record == nullptr) return false;
+    if (!recognition::onExactly(record, p1) || !recognition::onExactly(record, p2)) return false;
     const auto *axial = static_cast<const AxialSurface *>(record);
     const Vector3d ax = axial->axis(), org = axial->refpt;
-    const double h1 = (p1 - org).dot(ax), h2 = (p2 - org).dot(ax);
-    if (fabs(h1 - h2) > tol) return false;
-    const Vector3d c = org + ax * h1;
-    const double r1 = (p1 - c).norm(), r2 = (p2 - c).norm();
+    const Vector3d c = org + ax * (p1 - org).dot(ax);
+    if (!recognition::onPlane(c, ax, p2)) return false;
     const auto *cone = dynamic_cast<const ConeSurface *>(record);
-    const double want =
-      cone != nullptr ? cone->radiusAt(c) : static_cast<const CylinderSurface *>(record)->r;
-    if (fabs(r1 - r2) > tol || fabs(r1 - want) > tol) return false;
     axis = ax;
     centre = c;
-    radius = want;
+    radius = cone != nullptr ? cone->radiusAt(c) : static_cast<const CylinderSurface *>(record)->r;
     return true;
   };
 
@@ -121,7 +120,7 @@ void StepKernel::BodyBuild::promoteCurves()
     brep::Edge& edge = body.edges[e];
     const Vector3d p1 = body.vertices[edge.start].point;
     const Vector3d p2 = body.vertices[edge.end].point;
-    if ((p1 - p2).norm() < 1e-12) return false;
+    if (edge.start == edge.end) return false;  // no length: brep::check names it (R17)
 
     // One quadric and one plane, and every other face at the edge has to be
     // that same plane: a conic lies in exactly one plane, so a second one
@@ -143,7 +142,7 @@ void StepKernel::BodyBuild::promoteCurves()
         const Vector3d n = pl->normdir.normalized();
         const Vector3d o = pl->refpt;
         if (have_plane) {
-          if (fabs(fabs(n.dot(pnorm)) - 1) > 1e-9 || fabs((o - ppoint).dot(pnorm)) > tol) return false;
+          if (!recognition::samePlane(o, n, ppoint, pnorm)) return false;
         } else {
           have_plane = true;
           plane_face = f;
@@ -160,33 +159,30 @@ void StepKernel::BodyBuild::promoteCurves()
     // Only a chord that is actually off its quadric. A ruling of a cone lies on
     // it exactly, and so does any edge the placement already put there; moving
     // one of those would trade an exact edge for an approximation of itself.
+    // Whether it does is a closed-form certificate (brep::curveOn: a line on a
+    // quadric where three of its points are), not a midpoint within the model's
+    // tolerance - which left a chord sagging less than 1e-5 straight, off the
+    // face it bounds by up to a hundred times OpenCASCADE's own 1e-7 (R11).
+    if (brep::curveOn(edge.curve.form, p1, p2, quadric.get())) return false;
     Vector3d q;
-    double off = 0;
-    for (const Vector3d *p : {&p1, &p2}) {
-      if (!AnalyticFeatures::closestOnSurface(quadric.get(), *p, q)) return false;
-      off = std::max(off, (q - *p).norm());
-    }
-    const Vector3d mid = (p1 + p2) / 2;
-    if (!AnalyticFeatures::closestOnSurface(quadric.get(), mid, q)) return false;
-    if ((q - mid).norm() <= tol) return false;  // the line is on the surface already
 
     // The invariant every substitution owes: the curve has to pass through the
     // run's own endpoints. A point is on the conic when it is in the plane and
-    // on the quadric, and both are asked of both ends.
+    // on the quadric, and both are asked of both ends - at machine precision,
+    // where the model's tolerance let a conic miss its own ends by 1e-5 (R11).
     for (const Vector3d *p : {&p1, &p2}) {
-      const double owed = std::max(tol, 1e-9 * std::max(1.0, p->norm()));
       if (!AnalyticFeatures::closestOnSurface(quadric.get(), *p, q)) {
         conics_declined++;
         why_noproj++;
         return false;
       }
-      if ((q - *p).norm() > owed) {
+      if (!recognition::onExactly(quadric.get(), *p)) {
         conics_declined++;
         why_offquad++;
         conic_worst_end = std::max(conic_worst_end, (q - *p).norm());
         return false;
       }
-      if (fabs((*p - ppoint).dot(pnorm)) > owed) {
+      if (!recognition::onPlane(ppoint, pnorm, *p)) {
         conics_declined++;
         why_offplane++;
         why_offplane_worst = std::max(why_offplane_worst, fabs((*p - ppoint).dot(pnorm)));
@@ -229,13 +225,12 @@ void StepKernel::BodyBuild::promoteCurves()
         axial = qaxis.norm() > 0;
       }
       if (axial) {
-        const double h1 = qaxis.dot(p1 - qbase), h2 = qaxis.dot(p2 - qbase);
-        const double scale = std::max(1.0, std::max(p1.norm(), p2.norm()));
-        const double r1 = ((p1 - qbase) - qaxis * h1).norm();
-        const double r2 = ((p2 - qbase) - qaxis * h2).norm();
-        if (fabs(h1 - h2) <= 1e-9 * scale && fabs(r1 - r2) <= 1e-9 * scale) {
+        // Both ends are on the quadric, asked above, so one plane across the
+        // axis through both makes them one circle of it - exactly (R11).
+        const Vector3d level = qbase + qaxis * qaxis.dot(p1 - qbase);
+        if (recognition::onPlane(level, qaxis, p2)) {
           pnorm = qaxis;
-          ppoint = qbase + qaxis * h1;
+          ppoint = level;
           rims_kept_circular++;
         }
       }
@@ -403,7 +398,7 @@ void StepKernel::BodyBuild::promoteCurves()
     const std::vector<std::size_t>& faces = edge_faces[e];
     const Vector3d p1 = body.vertices[edge.start].point;
     const Vector3d p2 = body.vertices[edge.end].point;
-    if ((p1 - p2).norm() < 1e-12) continue;
+    if (edge.start == edge.end) continue;  // no length: brep::check names it (R17)
 
     // A quadric among the faces proposes the arc; every face then gets a veto.
     Vector3d axis, centre;
@@ -426,12 +421,13 @@ void StepKernel::BodyBuild::promoteCurves()
         // A circle about `axis` lies in a plane only if the plane is
         // perpendicular to it, and its endpoints are in the plane already.
         const PlaneSurface *pl = plane_of(f);
-        agreed = pl != nullptr && fabs(fabs(pl->normdir.normalized().dot(axis)) - 1) < 1e-9;
+        agreed = pl != nullptr && recognition::parallel(pl->normdir, axis);
       } else {
         Vector3d other_axis, other_centre;
         double other_radius = 0.0;
         agreed = section_of(f, p1, p2, other_axis, other_centre, other_radius) &&
-                 (other_centre - centre).norm() < tol && fabs(other_radius - radius) < tol;
+                 recognition::samePoint(other_centre, centre) &&
+                 fabs(other_radius - radius) <= recognition::forwardError(9, other_radius + radius);
       }
       if (!agreed) break;
     }
@@ -446,7 +442,9 @@ void StepKernel::BodyBuild::promoteCurves()
     // shorter than half a turn, which one segment of a tessellated boundary
     // always is.
     const Vector3d normal = from.cross(to);
-    if (normal.norm() < 1e-12) {
+    // Ends and centre on a line - the two ends across a diameter - fix no
+    // plane for the arc and no sense to run it in.
+    if (!recognition::statesPlane(centre, p1, p2)) {
       arcs_declined++;
       continue;
     }

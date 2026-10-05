@@ -161,6 +161,15 @@
 // precision, written as chords: a sweep answers by projecting, not
 // algebraically (open item 10, B1/B2).
 // KNOWN-EXPORT-WARNING: could not be written as that curve and fell back to a chord
+//
+// Four edges are seams of one declared cylinder: its face beside its own cut
+// facets, which are not in its region and stay facets - the KNOWN-EXPORT-ERROR
+// above (open item 34). They are written as the cylinder's section by the
+// facet's chord plane, a boundary of nothing. Seen since 2026-10-05, when
+// curves are promoted at machine precision (open item 39, R11): within the
+// model's tolerance these chords counted as on the surface already, and were
+// left as lines off it.
+// KNOWN-EXPORT-WARNING: facets of the *same* declared surface
 
 $fn = 32;
 

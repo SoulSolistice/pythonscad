@@ -5039,6 +5039,25 @@ from coming back - landed with the fix and mutation-checked (F2).
   endpoints: SOLIDWORKS codes 17 and 7, at machine-checkable sizes. C2. *Test:* a
   natural fixture - `step-partial-cylinder` at `$fn` 1024, whose chords sag
   4.7e-6, below the tolerance: every edge on its cylinder at machine precision.
+  **Fixed 2026-10-05, after R5.** Every test in `promoteCurves` is a closed
+  form now: a chord is on its quadric where `brep::curveOn` certifies it, a
+  conic's ends are on the quadric and in the plane by their residuals, a circle
+  is two ends on the surface and on one plane across its axis with the
+  surface's own radius there, and two faces agree on it by `samePoint`; the
+  arcs' degeneracy is `statesPlane`. Its first proof is what found R5 and R30:
+  the conics it declined had ends 1e-12 off - corners solved short of the
+  machine - and two rims that fell to a chord plane's parabola missed its ends
+  by 1.96e4. Landed on exact corners, it only adds exact curves: f04 8
+  ellipses, lid10 5, step-declare-grid-scad 4, and the edges each export carries
+  off a face it bounds drop by exactly as many (17 to 9, 609 to 604, 11 to 7).
+  Two long edges of step-cap-meets-wall and step-hole-in-a-fanned-facet, which
+  the tolerance called on their cylinder, are certified not to be rulings, and
+  the ellipse their chord plane cuts misses their ends beyond the file's
+  resolution, so they stay lines and say why; and step-declare-grid-scad's 4 new
+  ellipses are seams of one cylinder beside its own cut facets (item 34), named
+  in the fixture. The planned test does not discriminate: at `$fn` 1024 the
+  partial cylinder's chords sag 4.7e-5 (r (pi/n)^2 / 2), above the old 1e-5; the
+  measured drop in edges off their faces is the test.
 - **R12 - a vertex off its own edge's curve is only a warning.** `checkAndReport`
   measures SOLIDWORKS fault code 7 against the uncertainty the file declares and
   says so as an `EXPORT-WARNING`; a systemic defect is an `EXPORT-ERROR`. It also
