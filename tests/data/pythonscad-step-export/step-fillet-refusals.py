@@ -32,10 +32,14 @@ back with twenty four splines and nothing hidden among them.
 
 The other twelve strips are the ones along the prism's top and bottom rims, and
 they stay splines for a reason of their own, which the export now states rather
-than leaving as a bare count: their two rails are equal circles in parallel
-planes whose centres are offset sideways as well as along the edge. Parallel is
-not coaxial, and the ruled surface between two such circles is an oblique
-cylinder, which is not a circular one. Refusing them is correct.
+than leaving as a bare count: at each end the rail's legs follow the cap edge
+there, and the two cap edges turn opposite ways, so the second rail is not the
+first moved along the edge. A strip's middle control points are the edge's own
+ends, so that move is the only one that could make the two one circle swept,
+and without it no cylinder is ruled between them - decided from the net in
+closed form since 2026-10-05 (open item 39, R31), where it was told from
+centres and normals within a tolerance and called "parallel but not coaxial".
+Refusing them is correct.
 
 OCCT is what closes that argument rather than the reasoning. Its canonical
 recognition reports all twenty four remaining splines as genuine splines - the
@@ -44,8 +48,9 @@ zero. Nothing is left on the table now, and the count that would say otherwise
 is the one asserted below.
 
 The twelve corners are refused for a third reason, and it is the one this
-fixture was written for: their two meridians have different radii, so they are
-blends rather than octants of any sphere.
+fixture was written for: two of their three axes meet at 120 degrees, not at
+right angles, so they are blends rather than octants of any sphere. (Their
+meridians' radii differing, which the measured test reported, follows from it.)
 
 It is also the regression guard for the fillet bug that made this shape
 exportable in the first place. bezier_patch() measured its Bezier weights in a
@@ -60,8 +65,8 @@ fails loudly if the weights ever go back into the wrong frame.
 # EXPECT: 30 Bezier patches cover 714 facets
 # EXPECT: 72 of 72 shared seams agree between the two patches meeting there
 # EXPECT: those runs border 0 whole faces, 36 stretches of a face, 72 other patches, 0 unresolved
-# EXPECT: 12 patches are not quadrics because the rails are parallel but not coaxial
-# EXPECT: 12 patches are not quadrics because its two meridians have different radii
+# EXPECT: 12 patches are not quadrics because its second rail is not its first moved along the edge, so no cylinder is ruled between them
+# EXPECT: 12 patches are not quadrics because its meridians are not at right angles
 # EXPECT: 6 of 30 patches are exactly quadrics - 6 cylindrical, 0 spherical
 # ROUNDTRIP: BSplineSurface=24 Cylinder=6 Plane=8
 # EXPECT: written as 38 faces instead of 722

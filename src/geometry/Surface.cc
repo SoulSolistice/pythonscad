@@ -571,6 +571,10 @@ BezierPatchSurface::BezierPatchSurface(int degree_u, int degree_v, std::vector<V
   this->refpt = this->net.empty() ? Vector3d::Zero() : this->net.front();
   this->normdir = Vector3d(0, 0, 1);
   boxPieces();
+  // What the patch is, decided as it is made, from its own net and weights in
+  // closed form - so every maker states it, and nothing measures it back later
+  // (open item 39, R31; checklist E9).
+  stateQuadric();
 }
 
 std::shared_ptr<Surface> BezierPatchSurface::clone() const
@@ -578,7 +582,7 @@ std::shared_ptr<Surface> BezierPatchSurface::clone() const
   return std::make_shared<BezierPatchSurface>(*this);
 }
 
-bool BezierPatchSurface::transform(const Transform3d& mat, const Similarity&)
+bool BezierPatchSurface::transform(const Transform3d& mat, const Similarity& similarity)
 {
   // A Bezier is affine invariant: transforming the control points transforms
   // the surface exactly. Unlike a cylinder, this survives a non uniform scale
@@ -586,7 +590,151 @@ bool BezierPatchSurface::transform(const Transform3d& mat, const Similarity&)
   for (auto& p : net) p = mat * p;
   refpt = net.empty() ? Vector3d::Zero() : net.front();
   boxPieces();
+  // The quadric its maker stated moves with it, as a record does - and where
+  // the map keeps no circle a circle, the patch is no longer that quadric and
+  // says so, while staying exactly itself.
+  if (quadric != nullptr) {
+    auto moved = quadric->clone();
+    if (moved->transform(mat, similarity)) {
+      quadric = moved;
+    } else {
+      quadric = nullptr;
+      not_quadric = "a map that keeps no circle a circle moved it";
+    }
+  }
   return true;
+}
+
+namespace {
+
+/*! The forward error of a value computed through some thirty rounded
+ * operations on terms of size `scale`: a leg's length, a turn's cosine, a
+ * square root - what two independent computations of one exact quantity can
+ * differ by, and nothing chosen. */
+double constructionError(double scale)
+{
+  return recognition::forwardError(30, scale);
+}
+
+}  // namespace
+
+void BezierPatchSurface::stateQuadric()
+{
+  quadric = nullptr;
+  const bool strip = degree_u == 2 && degree_v == 1;
+  const bool corner = degree_u == 2 && degree_v == 2;
+  if (!strip && !corner) {
+    not_quadric = "it is not a shape fillet() draws";
+    return;
+  }
+  if (!isRational()) {
+    not_quadric = "it is polynomial, so its arcs are parabolas";
+    return;
+  }
+  // A rational quadratic through (a, b, c) is a circular arc exactly when its
+  // legs are equal and its middle weight is cos(theta/2) of the turn between
+  // them, the turn read off the legs themselves.
+  auto arc = [](const Vector3d& a, const Vector3d& b, const Vector3d& c, double w) {
+    const Vector3d t0 = b - a, t1 = c - b;
+    const double n0 = t0.norm(), n1 = t1.norm();
+    if (!(n0 > 0) || !(n1 > 0) || !recognition::statesPlane(a, b, c)) return false;
+    if (std::fabs(n0 - n1) > constructionError(n0 + n1)) return false;
+    const double cos_theta = std::clamp(t0.dot(t1) / (n0 * n1), -1.0, 1.0);
+    return std::fabs(w - std::sqrt((1.0 + cos_theta) / 2.0)) <= constructionError(1.0);
+  };
+
+  if (strip) {
+    const Vector3d a = control(0, 0), b = control(1, 0), c = control(2, 0);
+    for (int i : {0, 2}) {
+      for (int j : {0, 1}) {
+        if (weight(i, j) != 1.0) {
+          not_quadric = "its rails do not start and end on the faces it rounds";
+          return;
+        }
+      }
+    }
+    if (!arc(a, b, c, weight(1, 0)) || !arc(control(0, 1), control(1, 1), control(2, 1), weight(1, 1))) {
+      not_quadric = "one rail is not a circular arc";
+      return;
+    }
+    // The radius of an isosceles control triangle's arc, from its legs: centre
+    // b + alpha ((a - b) + (c - b)), alpha = L^2 / (L^2 + (a - b).(c - b)).
+    auto radius_of = [](const Vector3d& a, const Vector3d& b, const Vector3d& c, Vector3d& centre) {
+      const Vector3d la = a - b, lc = c - b;
+      const double l2 = la.squaredNorm();
+      const double alpha = l2 / (l2 + la.dot(lc));
+      centre = b + (la + lc) * alpha;
+      return (a - centre).norm();
+    };
+    Vector3d c0, c1;
+    const double r0 = radius_of(a, b, c, c0),
+                 r1 = radius_of(control(0, 1), control(1, 1), control(2, 1), c1);
+    if (std::fabs(r0 - r1) > constructionError(r0 + r1)) {
+      not_quadric = "the two rails have different radii, so it is a cone";
+      return;
+    }
+    // One rail the other moved along the line between their middle points, and
+    // that line across the rail's plane: the ruled surface is then a cylinder,
+    // where a rail turned against its partner would rule a hyperboloid through
+    // the same two circles.
+    const Vector3d d = control(1, 1) - b;
+    if (!recognition::samePoint(a + d, control(0, 1)) || !recognition::samePoint(c + d, control(2, 1))) {
+      not_quadric =
+        "its second rail is not its first moved along the edge, so no cylinder is ruled between them";
+      return;
+    }
+    const Vector3d normal = (b - a).cross(c - b);
+    if (!recognition::parallel(d, normal)) {
+      not_quadric = "the rails are parallel but not coaxial";
+      return;
+    }
+    // Oriented so the rail sweeps counter clockwise about the axis: the face is
+    // then a region of the surface's own parameterisation running forwards
+    // from the reference direction, not one wrapping through its seam.
+    Vector3d axis = d.normalized();
+    if ((a - c0).cross(c - c0).dot(axis) < 0) axis = -axis;
+    quadric = std::make_shared<CylinderSurface>(c0, axis, r0);
+    not_quadric = nullptr;
+    return;
+  }
+
+  // A corner: the classical exact octant about c, apex row and all.
+  const Vector3d centre = control(0, 0) + control(0, 2) - control(0, 1);
+  const Vector3d x = control(0, 0) - centre, y = control(0, 2) - centre, z = control(2, 0) - centre;
+  if (!recognition::samePoint(control(2, 1), control(2, 0)) ||
+      !recognition::samePoint(control(2, 2), control(2, 0))) {
+    not_quadric = "its apex row is not a single point";
+    return;
+  }
+  const double rx = x.norm(), ry = y.norm(), rz = z.norm();
+  if (std::fabs(rx - ry) > constructionError(rx + ry) ||
+      std::fabs(rx - rz) > constructionError(rx + rz)) {
+    not_quadric = "its two meridians have different radii";
+    return;
+  }
+  if (!recognition::perpendicular(x, y) || !recognition::perpendicular(y, z) ||
+      !recognition::perpendicular(z, x)) {
+    not_quadric = "its meridians are not at right angles";
+    return;
+  }
+  if (!recognition::samePoint(control(1, 0), centre + x + z) ||
+      !recognition::samePoint(control(1, 1), centre + x + y + z) ||
+      !recognition::samePoint(control(1, 2), centre + y + z)) {
+    not_quadric = "its net is not an octant's";
+    return;
+  }
+  const double w = std::sqrt(0.5);
+  const double want[9] = {1.0, w, 1.0, w, w * w, w, 1.0, w, 1.0};
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 3; j++) {
+      if (std::fabs(weight(i, j) - want[i * 3 + j]) > constructionError(1.0)) {
+        not_quadric = "its weights are not a quarter circle's";
+        return;
+      }
+    }
+  }
+  quadric = std::make_shared<SphereSurface>(centre, z.normalized(), rx);
+  not_quadric = nullptr;
 }
 
 bool BezierPatchSurface::sameAs(const Surface& other) const

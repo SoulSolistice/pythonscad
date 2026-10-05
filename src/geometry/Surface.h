@@ -383,6 +383,31 @@ public:
    * apex row has. */
   [[nodiscard]] bool degenerateAt(bool along_u, bool far) const;
 
+  /*! Decide, in closed form from the net and its weights, whether this patch
+   * *is* a quadric, and state it in `quadric` - or why not in `not_quadric`.
+   * Run as the patch is made - by its constructor, so whoever makes one states
+   * it (fillet() for every patch the exporter has met; checklist E9) - and
+   * never by a consumer measuring back what the construction decides.
+   *
+   * A strip of degree (2, 1) is ruled between its two rational rails at one
+   * parameter, and is exactly a cylinder when its first rail is a circular
+   * arc - equal legs, the middle weight cos(theta/2) of the turn between them -
+   * the second is the first moved by the one vector between their middle
+   * points, and that vector is across the rail's plane. A corner of degree
+   * (2, 2) is exactly a sphere when its net is the classical octant's about
+   * c = c00 + c02 - c01 - axes x, y and z of one length and at right angles,
+   * the apex row one point, the inner points their sums, the weights
+   * cos 45 degrees and its square. Every comparison is at the forward error of
+   * the arithmetic that made the numbers compared; nothing is sampled. Until
+   * 2026-10-05 recognition measured this instead (quadricOfPatch): radii and
+   * centres within the model's tolerance and a 7 by 7 sample of the patch
+   * within it - a measurement where the net decides (open item 39, R31). */
+  void stateQuadric();
+  /*! The quadric the patch exactly is, as its maker stated it, or null. It
+   * moves with the patch, and goes where a transform keeps no circle a circle. */
+  std::shared_ptr<const Surface> quadric;
+  const char *not_quadric = "no maker stated it";
+
   int degree_u, degree_v;
   std::vector<Vector3d> net;
   std::vector<double> weights;  // empty, or parallel to net

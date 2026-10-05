@@ -506,7 +506,10 @@ void runBezier(Context& ctx)
     const auto *bez = dynamic_cast<const BezierPatchSurface *>(patches[p].surface.get());
     if (bez == nullptr) continue;
     const char *why = "no reason was given";
-    patch_quadric[p] = AnalyticFeatures::quadricOfPatch(*bez, model_tol, &why);
+    // What the patch's maker stated it is - in closed form, where it drew it
+    // (BezierPatchSurface::stateQuadric) - never measured back here (R31).
+    patch_quadric[p] = bez->quadric != nullptr ? bez->quadric->clone() : nullptr;
+    why = bez->not_quadric;
     if (patch_quadric[p] == nullptr) quadric_refusals[why]++;
   }
 

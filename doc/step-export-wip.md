@@ -5204,6 +5204,37 @@ from coming back - landed with the fix and mutation-checked (F2).
   the classes named (`FacetClass`). No export of the 120 has such a claim.
   *Test:* `reports_test.cc` - an unnamed claim is `kUnnamed`, not `kFitted`;
   with that branch removed it fails.
+- **R31 - a fillet's quadric was measured back from its patch. Fixed
+  2026-10-05.** Found auditing the chosen numbers left after R5: recognition
+  (`quadricOfPatch`) took each rational patch fillet() draws, read a candidate
+  cylinder or sphere off its net, accepted radii and centres within the model's
+  tolerance (1e-5) and then sampled the patch on a 7 by 7 grid within it - and
+  R10 had just made that quadric the face's carrier, stated derived. A
+  measurement where the construction decides: the patch is its net and weights,
+  and whether it is a quadric follows from them in closed form. So the record
+  states it as it is made (`BezierPatchSurface::stateQuadric`, run by the
+  constructor - whoever makes a patch, it says what it is): a strip of degree
+  (2, 1) is exactly a cylinder when its first rail is a circular arc - equal
+  legs, middle weight cos(theta/2) - its second rail is the first moved along
+  the edge, and the edge is across the rail's plane; a corner of degree (2, 2)
+  is exactly a sphere when its net is the classical octant's - three axes of one
+  length at right angles, the apex row one point, the inner points their sums,
+  the weights cos 45 and its square. Every comparison at the forward error of
+  the arithmetic that made the numbers; nothing sampled. The quadric moves with
+  its patch, and goes where a map keeps no circle a circle. Recognition reads
+  the statement; `quadricOfPatch` and its sampling are gone. The test that once
+  justified the sampling - "the mutation the control net alone cannot catch", a
+  rail turned against its partner - the net catches: it is not the first moved
+  along the edge. Measured: the same decisions on every fillet (step-fillet's
+  20 of 20, step-fillet-oblique's, step-fillet-refusals' 6 of 30), the centres
+  moving in their last bits; and step-fillet-refusals' reasons now name the
+  cause - its rim strips' second rail is not the first moved along the edge
+  (they were called "parallel but not coaxial", and the fixture's prose an
+  oblique cylinder, neither true of rails whose legs turn opposite ways), its
+  corners' axes meet at 120 degrees (the differing meridian radii it reported
+  follow from that). *Test:* `analytic_features_test.cc` - the strip and the
+  octant stated, the polynomial net, the turned rail and the 60 degree corner
+  refused, the quadric carried by a quarter turn and dropped by a shear.
 - **R30 - every parabola was written with the wrong focal distance. Fixed
   2026-10-05.** Found by R11's first proof: two rims no longer kept circular at
   machine precision fell to the conic the plane beside cuts, and the parabola

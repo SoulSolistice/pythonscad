@@ -437,26 +437,6 @@ std::vector<std::shared_ptr<Surface>> fitRevolved(const Mesh& mesh, const Smooth
 std::vector<SmoothRegion> uncoveredRegions(const Mesh& mesh, const std::vector<char>& consumed,
                                            double smooth_angle);
 
-/*! The quadric a rational Bezier patch lies on exactly, or nullptr.
- *
- * `FilletNode` draws its strips and corners as rational quadratics, which are
- * circular arcs rather than parabolas, so a constant radius fillet meeting
- * perpendicular faces really is a piece of a cylinder along each edge and an
- * octant of a sphere at each corner. Both go out as B_SPLINE_SURFACE_WITH_KNOTS
- * otherwise, which is valid and imports - but a CYLINDRICAL_SURFACE is what a
- * CAD kernel can offset, thread and pattern, and a B-spline is what it
- * tolerates.
- *
- * A candidate axis or centre is read off the control net, and then the patch is
- * *measured* against it on a grid: the boundary of the net does not determine
- * the interior, and the evaluation is what brings the weights into the test.
- * Anything that does not fit within `tol` returns nullptr and stays a spline,
- * which is the exporter's rule everywhere - exact fit or stay faceted.
- *
- * Returns a CylinderSurface or a SphereSurface. */
-std::shared_ptr<Surface> quadricOfPatch(const BezierPatchSurface& bez, double tol,
-                                        const char **why = nullptr);
-
 /*! The circle one curved boundary run of a patch lies on, oriented so the run
  * sweeps counter clockwise about `normal` - the direction a STEP CIRCLE is
  * written in. False when the run is not a quadratic arc.

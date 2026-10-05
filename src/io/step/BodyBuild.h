@@ -654,7 +654,8 @@ struct StepKernel::BodyBuild {
   // them. Filled by the quadric pass, read again by its writer.
   std::map<const Surface *, std::vector<step::CutPlane>> section_planes;
   // Parallel to `bezier_patches`: the exact quadric that patch lies on, or null
-  // where it is written as the spline it is in general. See quadricOfPatch.
+  // where it is written as the spline it is in general - as its maker stated
+  // it (BezierPatchSurface::stateQuadric).
   std::vector<std::shared_ptr<Surface>>& patch_quadric = rec.patch_quadric;
 
   // Views into what recognition decided.

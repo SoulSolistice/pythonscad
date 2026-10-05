@@ -536,17 +536,17 @@ TEST_CASE("a rational strip is an exact cylinder and a corner an exact sphere",
   // centre have to come out of the control net exactly, in world coordinates,
   // with nothing assumed about the frame.
   const double w = std::sqrt(0.5);  // cos 45, a quarter circle
-  const double tol = 1e-9;
 
   SECTION("an edge strip is a cylinder quadrant")
   {
     // A quarter round along the z axis at radius 1, from +x to +y.
     const Vector3d p1(0, 0, 0), p2(0, 0, 5);
     const Vector3d ea(1, 0, 0), eb(0, 1, 0);
-    const BezierPatchSurface bez(2, 1, std::vector<Vector3d>{p1 + ea, p2 + ea, p1, p2, p1 + eb, p2 + eb},
-                                 std::vector<double>{1.0, 1.0, w, w, 1.0, 1.0});
+    BezierPatchSurface bez(2, 1, std::vector<Vector3d>{p1 + ea, p2 + ea, p1, p2, p1 + eb, p2 + eb},
+                           std::vector<double>{1.0, 1.0, w, w, 1.0, 1.0});
 
-    const auto quadric = quadricOfPatch(bez, tol);
+    bez.stateQuadric();
+    const auto quadric = bez.quadric;
     REQUIRE(quadric != nullptr);
     const auto *cyl = dynamic_cast<const CylinderSurface *>(quadric.get());
     REQUIRE(cyl != nullptr);
@@ -569,12 +569,13 @@ TEST_CASE("a rational strip is an exact cylinder and a corner an exact sphere",
     // recovery which quietly assumed the centre was at zero would fail.
     const Vector3d c(3, -7, 2);
     const Vector3d x(1, 0, 0), y(0, 1, 0), z(0, 0, 1);
-    const BezierPatchSurface bez(2, 2,
-                                 std::vector<Vector3d>{c + x, c + x + y, c + y, c + x + z, c + x + y + z,
-                                                       c + y + z, c + z, c + z, c + z},
-                                 std::vector<double>{1.0, w, 1.0, w, w * w, w, 1.0, w, 1.0});
+    BezierPatchSurface bez(2, 2,
+                           std::vector<Vector3d>{c + x, c + x + y, c + y, c + x + z, c + x + y + z,
+                                                 c + y + z, c + z, c + z, c + z},
+                           std::vector<double>{1.0, w, 1.0, w, w * w, w, 1.0, w, 1.0});
 
-    const auto quadric = quadricOfPatch(bez, tol);
+    bez.stateQuadric();
+    const auto quadric = bez.quadric;
     REQUIRE(quadric != nullptr);
     const auto *sph = dynamic_cast<const SphereSurface *>(quadric.get());
     REQUIRE(sph != nullptr);
@@ -592,25 +593,29 @@ TEST_CASE("a rational strip is an exact cylinder and a corner an exact sphere",
     // mesh is on and writing one it is not.
     const Vector3d p1(0, 0, 0), p2(0, 0, 5);
     const Vector3d ea(1, 0, 0), eb(0, 1, 0);
-    const BezierPatchSurface bez(2, 1,
-                                 std::vector<Vector3d>{p1 + ea, p2 + ea, p1, p2, p1 + eb, p2 + eb});
-    CHECK(quadricOfPatch(bez, tol) == nullptr);
+    BezierPatchSurface bez(2, 1, std::vector<Vector3d>{p1 + ea, p2 + ea, p1, p2, p1 + eb, p2 + eb});
+    bez.stateQuadric();
+    CHECK(bez.quadric == nullptr);
   }
 
   SECTION("a rail turned against its partner rules a hyperboloid, not a cylinder")
   {
-    // This is the mutation the control net alone cannot catch, and the reason
-    // quadricOfPatch measures the surface rather than reading its boundary.
     // Both rails are still circles of radius 1 on the same axis - every test
     // made of centres, radii and plane normals passes - but the second is
     // turned a quarter turn against the first, so the ruled surface between
     // them is a hyperboloid that touches the cylinder only at its two ends.
+    // This was the case the patch was once sampled for, on the belief that the
+    // net alone could not catch it (open item 39, R31). It can: a cylinder's
+    // second rail is its first moved by the one vector between their middle
+    // points, and this one is not.
     const Vector3d p1(0, 0, 0), p2(0, 0, 5);
     const Vector3d ea(1, 0, 0), eb(0, 1, 0);
     const Vector3d fa(0, 1, 0), fb(-1, 0, 0);  // the same arc, rotated 90 degrees
-    const BezierPatchSurface bez(2, 1, std::vector<Vector3d>{p1 + ea, p2 + fa, p1, p2, p1 + eb, p2 + fb},
-                                 std::vector<double>{1.0, 1.0, w, w, 1.0, 1.0});
-    CHECK(quadricOfPatch(bez, tol) == nullptr);
+    BezierPatchSurface bez(2, 1, std::vector<Vector3d>{p1 + ea, p2 + fa, p1, p2, p1 + eb, p2 + fb},
+                           std::vector<double>{1.0, 1.0, w, w, 1.0, 1.0});
+    CHECK(bez.quadric == nullptr);
+    CHECK(std::string(bez.not_quadric) ==
+          "its second rail is not its first moved along the edge, so no cylinder is ruled between them");
   }
 
   SECTION("a corner whose faces are not perpendicular is not a sphere")
@@ -621,11 +626,38 @@ TEST_CASE("a rational strip is an exact cylinder and a corner an exact sphere",
     const Vector3d c(0, 0, 0);
     const Vector3d x(1, 0, 0), y(0.5, std::sqrt(3.0) / 2, 0), z(0, 0, 1);
     const double wu = std::sqrt(0.5), wv = std::sqrt((1.0 + x.dot(y)) / 2.0);
-    const BezierPatchSurface bez(2, 2,
-                                 std::vector<Vector3d>{c + x, c + x + y, c + y, c + x + z, c + x + y + z,
-                                                       c + y + z, c + z, c + z, c + z},
-                                 std::vector<double>{1.0, wv, 1.0, wu, wu * wv, wu, 1.0, wv, 1.0});
-    CHECK(quadricOfPatch(bez, tol) == nullptr);
+    BezierPatchSurface bez(2, 2,
+                           std::vector<Vector3d>{c + x, c + x + y, c + y, c + x + z, c + x + y + z,
+                                                 c + y + z, c + z, c + z, c + z},
+                           std::vector<double>{1.0, wv, 1.0, wu, wu * wv, wu, 1.0, wv, 1.0});
+    bez.stateQuadric();
+    CHECK(bez.quadric == nullptr);
+  }
+
+  SECTION("the quadric moves with the patch, and goes where no circle stays one")
+  {
+    const Vector3d p1(0, 0, 0), p2(0, 0, 5);
+    const Vector3d ea(1, 0, 0), eb(0, 1, 0);
+    BezierPatchSurface bez(2, 1, std::vector<Vector3d>{p1 + ea, p2 + ea, p1, p2, p1 + eb, p2 + eb},
+                           std::vector<double>{1.0, 1.0, w, w, 1.0, 1.0});
+    bez.stateQuadric();
+    REQUIRE(bez.quadric != nullptr);
+
+    // Turned a quarter about x: the axis goes from z to y, the centre with it.
+    BezierPatchSurface turned = bez;
+    Transform3d quarter(Eigen::AngleAxisd(M_PI / 2, Vector3d::UnitX()));
+    REQUIRE(turned.transform(quarter, Similarity::by(1.0)));
+    const auto *cyl = dynamic_cast<const CylinderSurface *>(turned.quadric.get());
+    REQUIRE(cyl != nullptr);
+    CHECK(std::fabs(std::fabs(cyl->normdir.normalized().dot(Vector3d::UnitY())) - 1) < 1e-12);
+    CHECK(distanceToAxis(quarter * Vector3d(1, 1, 3), cyl->refpt, cyl->normdir.normalized()) < 1e-12);
+
+    // Sheared, it is still exactly its patch, and no longer a cylinder.
+    BezierPatchSurface sheared = bez;
+    Transform3d shear = Transform3d::Identity();
+    shear(0, 1) = 0.5;
+    REQUIRE(sheared.transform(shear, Similarity::unstated()));
+    CHECK(sheared.quadric == nullptr);
   }
 }
 

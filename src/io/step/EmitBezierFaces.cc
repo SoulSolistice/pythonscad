@@ -28,7 +28,7 @@ void StepKernel::BodyBuild::emitBezierFaces()
     if (const auto *cyl = dynamic_cast<const CylinderSurface *>(quadric.get())) {
       // The reference direction is the radius through the start of the first
       // rail, so the face occupies theta from zero forwards rather than a
-      // stretch wrapping through the surface's own seam. quadricOfPatch has
+      // stretch wrapping through the surface's own seam. Its maker (stateQuadric) has
       // already oriented the axis to make that sweep the positive one.
       const Vector3d axis = cyl->normdir.normalized();
       const Vector3d rel = bez->control(0, 0) - cyl->refpt;
@@ -159,8 +159,8 @@ void StepKernel::BodyBuild::emitBezierFaces()
     std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
     sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
     // Written on the quadric the patch is, where recognition found one
-    // (quadricOfPatch) - a closed form of the patch, the record the face stands
-    // for - and otherwise on the patch itself.
+    // (BezierPatchSurface::stateQuadric, by its maker) - a closed form of the patch, the record the face
+    // stands for - and otherwise on the patch itself.
     registerFace(sfaces_extra.back(), patch.surface, patch.facets, std::nullopt, false, quadric,
                  quadric != nullptr);
   }
