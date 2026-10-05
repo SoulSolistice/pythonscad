@@ -30,9 +30,11 @@ void StepKernel::BodyBuild::placeOnFileFaces()
 {
   if (approximate) {
     // The distinct surfaces of the analytic faces at each corner. Bands are
-    // included by the surface their face is written from, which is the same
-    // arithmetic the writer does further down - a band states its axis, its base
-    // and the radius at each rim, and that is the surface.
+    // included by the surface their face is written on, as the band states it
+    // (Band::carrier) - the zone it closes, or the cylinder or cone its rims
+    // make. Rebuilt here from the rims until 2026-10-05, which missed the zone:
+    // on step-sphere every corner was asked to lie on the cylinder through the
+    // two polar rims, 9.0 away (open item 43, W1).
     std::map<int, std::vector<std::shared_ptr<const Surface>>> faces_at;
     auto note = [&](int v, const std::shared_ptr<const Surface>& surface) {
       if (surface == nullptr || v < 0 || std::size_t(v) >= vertices.size()) return;
@@ -55,14 +57,7 @@ void StepKernel::BodyBuild::placeOnFileFaces()
     note_patches(bezier_patches);
     for (const auto& band : bands) {
       if (!band.alive) continue;
-      const Vector3d axis = band.axis.normalized();
-      std::shared_ptr<const Surface> surface;
-      if (fabs(band.r_top - band.r_bottom) <= 1e-9 * std::max(1.0, band.r_bottom)) {
-        surface = std::make_shared<CylinderSurface>(band.base, axis, band.r_bottom);
-      } else if (fabs(band.height) > 0) {
-        surface = std::make_shared<ConeSurface>(band.base, axis, band.r_bottom,
-                                                (band.r_top - band.r_bottom) / band.height);
-      }
+      const std::shared_ptr<const Surface> surface = band.carrier();
       if (surface == nullptr) continue;
       for (const std::size_t w : band.walls) {
         if (w >= loops.size()) continue;

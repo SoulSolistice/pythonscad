@@ -5732,6 +5732,23 @@ its surface at 1.6e-15 or better (`scripts/step-corner-stray.py`). So the
 arbiter counts corners of faces that are never written, against a surface
 they are not on. A defect of the report, and on the evidence a large one: its
 own numbers are what the next placement change would be judged by.
+**Fixed 2026-10-05 for the bands**, found by item 39's R14: its first proof
+offered those corners a move onto the surface they were said to be off, and
+they went 9.0 along the sphere. The faces are written - each is a band's zone -
+but the arbiter rebuilt a band's surface from its two rims and missed the zone:
+a sphere's stack of bands keeps only its polar rims, and the cylinder through
+them, r = 0.98 the whole height, is what every corner was measured against. The
+writer, the arbiter and the move check each built a band's surface from its
+rims, with three cone-or-cylinder rules between them; now the band states it
+(`Band::carrier`: the zone it closes, or its rims' cylinder or cone) and all
+three read that. Measured over 132 exports: the warning goes from exactly the
+six fixtures above and from nothing else, no entity and no value moves, and the
+six directives came out. *Test:* `analytic_features_test.cc` - a band's
+carrier is its rims' cylinder, their cone, nothing for a cone of no height,
+and its zone once it closes one. **Left**: lid10's count is unchanged - 0.1089
+reported, a cone corner written 0.716 off, and the bayonet's 0.716 with no
+warning - so the arbiter still measures something other than the file there;
+its maker is not yet named.
 
 **W2 - the split warning fires on pieces it finds disconnected.** Its detail
 line says "two faces are correct" and the parent line warns anyway; only a

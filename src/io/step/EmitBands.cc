@@ -39,29 +39,16 @@ void StepKernel::BodyBuild::emitBands()
         break;
       }
     }
-    // The record the face stands on: the declaration its walls are claimed for,
-    // the zone it closes, or - a band on a fitted surface - the surface its own
-    // rims make, as its writer below builds it.
-    std::shared_ptr<const Surface> record =
-      claimed >= 0           ? std::shared_ptr<const Surface>(surfaces[claimed])
-      : band.zone != nullptr ? band.zone
-      : band.isCone()
-        ? std::shared_ptr<const Surface>(std::make_shared<ConeSurface>(
-            band.base, band.axis, band.r_bottom, (band.r_top - band.r_bottom) / band.height))
-        : std::shared_ptr<const Surface>(
-            std::make_shared<CylinderSurface>(band.base, band.axis, band.r_bottom));
-    // The surface the face is written on, as the writer below builds it: the
-    // zone it closes, or the cylinder or cone its own rims make. Whether that
-    // is the record it stands for is the contract's question
+    // The surface the face is written on, as the band states it (Band::carrier):
+    // the zone it closes, or the cylinder or cone its own rims make. Whether
+    // that is the record it stands for is the contract's question
     // (brep::checkAttribution), not one this writer answers by assuming it
     // (open item 39, R10).
-    const std::shared_ptr<const Surface> carrier =
-      band.zone != nullptr ? band.zone
-      : band.isCone()
-        ? std::shared_ptr<const Surface>(std::make_shared<ConeSurface>(
-            band.base, band.axis, band.r_bottom, (band.r_top - band.r_bottom) / band.height))
-        : std::shared_ptr<const Surface>(
-            std::make_shared<CylinderSurface>(band.base, band.axis, band.r_bottom));
+    const std::shared_ptr<const Surface> carrier = band.carrier();
+    // The record the face stands on: the declaration its walls are claimed for,
+    // or - a band on a fitted surface - what it is written on.
+    std::shared_ptr<const Surface> record =
+      claimed >= 0 ? std::shared_ptr<const Surface>(surfaces[claimed]) : carrier;
     const auto *whole_torus = dynamic_cast<const TorusSurface *>(band.zone.get());
     if (whole_torus != nullptr && band.seam_bottom != band.seam_top) whole_torus = nullptr;
     if (const auto *tor = whole_torus) {

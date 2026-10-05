@@ -98,12 +98,6 @@ of anything. A closure that ate those would be the bug this pass has to avoid.
 # item 26, which R0 (item 29) has not reached here.
 # KNOWN-EXPORT-WARNING: split between different kinds of recogniser
 # KNOWN-EXPORT-WARNING: so this is one connected region cut in two by pass order
-#
-# Corners the file does not write: the export writes one closed face here,
-# and every corner it does write is on its surface at about 1e-15
-# (scripts/step-corner-stray.py). The arbiter counts corners of faces that
-# are not written, against the wrong surface - open item 43, W1.
-# KNOWN-EXPORT-WARNING: left off a surface the file writes a face of them on
 from pythonscad import *
 import math
 

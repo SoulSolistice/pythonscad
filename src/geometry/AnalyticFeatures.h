@@ -123,6 +123,14 @@ struct Band {
 
   /*! A frustum rather than a cylinder. */
   [[nodiscard]] bool isCone() const;
+  /*! The surface the band's face is written on, as its writer writes it: the
+   * zone it closes where it closes one, or else the cylinder or cone its own
+   * rims make. Null for a cone of no height, which has no slope. Stated here,
+   * by the band, so that every consumer asks the same surface - the corner
+   * arbiter rebuilt it from the rims and missed the zone, and asked a
+   * sphere's corners to lie on a cylinder through its two polar rims, 9.0
+   * away (open item 43, W1). */
+  [[nodiscard]] std::shared_ptr<const Surface> carrier() const;
 };
 
 /*! Where each closed band's seam runs: `seam_bottom` and `seam_top`, the two

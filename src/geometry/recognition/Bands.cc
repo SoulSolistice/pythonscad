@@ -31,6 +31,14 @@ bool Band::isCone() const
   return fabs(r_bottom - r_top) > 1e-9 * std::max(r_bottom, r_top);
 }
 
+std::shared_ptr<const Surface> Band::carrier() const
+{
+  if (zone != nullptr) return zone;
+  if (!isCone()) return std::make_shared<CylinderSurface>(base, axis, r_bottom);
+  if (!(fabs(height) > 0)) return nullptr;
+  return std::make_shared<ConeSurface>(base, axis, r_bottom, (r_top - r_bottom) / height);
+}
+
 void settleSeams(std::vector<Band>& bands, const std::vector<Vector3d>& vertices)
 {
   // A periodic face needs a seam, and the seam has to be a ruling: both of

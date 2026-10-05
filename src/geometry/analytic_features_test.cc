@@ -1408,3 +1408,31 @@ TEST_CASE("a facet is D0 on the one surface its maker named it for", "[analytic]
   provenance.face_surface = &unnamed;
   CHECK(recognition::d0Regions(graph, surfaces, 2, provenance).empty());
 }
+
+TEST_CASE("a band states the surface its face is written on", "[analytic][W1]")
+{
+  // Its rims' cylinder, or their cone - the radius at the base and the slope
+  // between them - and, once it closes a zone, the zone: a sphere's whole stack
+  // of bands keeps only the two polar rims, and the cylinder through those is
+  // nowhere near the sphere the face is written on (open item 43, W1).
+  Band band;
+  band.axis = Vector3d(0, 0, 1);
+  band.base = Vector3d(0, 0, -9.9518);
+  band.r_bottom = band.r_top = 0.9802;
+  band.height = 19.9037;
+  const auto cylinder = std::dynamic_pointer_cast<const CylinderSurface>(band.carrier());
+  REQUIRE(cylinder != nullptr);
+  CHECK(cylinder->r == 0.9802);
+
+  band.r_top = 2.0;
+  const auto cone = std::dynamic_pointer_cast<const ConeSurface>(band.carrier());
+  REQUIRE(cone != nullptr);
+  CHECK(cone->r == 0.9802);
+  CHECK(cone->slope == (2.0 - 0.9802) / 19.9037);
+  band.height = 0;
+  CHECK(band.carrier() == nullptr);  // a cone of no height has no slope
+
+  const auto sphere = std::make_shared<SphereSurface>(Vector3d::Zero(), Vector3d(0, 0, 1), 10.0);
+  band.zone = sphere;
+  CHECK(band.carrier() == sphere);
+}
