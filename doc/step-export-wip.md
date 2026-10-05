@@ -5204,6 +5204,27 @@ from coming back - landed with the fix and mutation-checked (F2).
   the classes named (`FacetClass`). No export of the 120 has such a claim.
   *Test:* `reports_test.cc` - an unnamed claim is `kUnnamed`, not `kFitted`;
   with that branch removed it fails.
+- **R30 - every parabola was written with the wrong focal distance. Fixed
+  2026-10-05.** Found by R11's first proof: two rims no longer kept circular at
+  machine precision fell to the conic the plane beside cuts, and the parabola
+  written for it missed its ends by 1.96e4. Its maker is `planeSectionConic`'s
+  parabolic branch, three defects there and one in its caller: the focal
+  distance was |lam| / (4 |b|) where s - s0 = -(lam / 2b)(w - w0)^2 makes it
+  |b| / (2 |lam|) - a quarter, on a cone cut at its own half angle, of what it is,
+  so every parabola the file held missed its ends (open item 43's W5, the
+  roof's 24 vertices off by up to 2.43); a section was called parabolic within a
+  chosen 1e-9 of the scale squared, which took a hyperbola far from parabolic
+  for one, where det's own forward error decides it; the line-pair test was a
+  chosen 1e-12, now the linear part's forward error; and promoteCurves asked that
+  the ends be on the quadric and in the plane but never on the conic as written,
+  which it now asks of every conic it substitutes, held to what the closing
+  vertex-on-curve check holds the file to. Measured: step-roof-voronoi's 16
+  parabolas written at focal 2.4749 where they were 0.0505, all 40 edges D1 and
+  none off its curve; nothing else written moves, and no conic anywhere misses
+  an end as written. *Test:* `plane_sections_test.cc` - the cone x^2 + y^2 =
+  z^2 cut by z = x + 2 is the parabola x = y^2 / 4 - 1 worked by hand, vertex
+  (-1, 0, 1), focal sqrt 2 / 2, through its own points (the old formula gave
+  0.1768); one cut 1e-10 off it is no parabola; one across the axis its circle.
 - **R29 - a band between two declared rim cylinders claims one of them. Fixed
   2026-10-05 at its maker.** Found by R10's audit: four chamfer faces of the
   bayonet were written as a 45 degree cone from r 78 and claimed for the
@@ -5585,8 +5606,11 @@ is not known.
 
 **W5 - step-roof-voronoi's approximation tier writes 24 vertices off their own
 edges' curves**, by 1.17 median and 2.43 at worst against 1.41e-08 declared -
-SOLIDWORKS fault code 7. Unexplained; the roof's two KNOWN-EXPORT-ERRORs are the
-exact tier's and say nothing of this.
+SOLIDWORKS fault code 7. **Fixed 2026-10-05 (item 39, R30)**: every one was on a
+PARABOLA, and `planeSectionConic` wrote each parabola's focal distance as
+|lam| / (4 |b|) where it is |b| / (2 |lam|) - 0.0505 where the roof's is 2.4749.
+The fixture's directive came out the day the warning stopped, as the catch-all
+is for.
 
 **The flagship coupons too, the same day**: `step-flagship-check.py` names each
 coupon's warnings in `KNOWN_EXPORT_WARNINGS`, as it names its errors, and fails

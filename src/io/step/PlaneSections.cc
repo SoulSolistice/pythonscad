@@ -1,5 +1,6 @@
 /*! Where a plane meets a quadric about an axis - see PlaneSections.h. */
 #include "io/step/PlaneSections.h"
+#include "geometry/recognition/Exact.h"
 
 #include <algorithm>
 #include <cmath>
@@ -107,6 +108,19 @@ bool planeSectionConic(const Surface *surface, const Vector3d& normal_in, const 
 
   const double scale = std::max(fabs(A(0, 0)) + fabs(A(1, 1)), 1e-30);
   const double det = A(0, 0) * A(1, 1) - A(0, 1) * A(0, 1);
+  // What the arithmetic can say of det and of the linear part: each entry of A
+  // and B is a dot of unit vectors through M, some ten rounded operations on
+  // terms bounded by M's entries (and by d for B), and det two products of
+  // those less one another. A det within its own forward error of zero is a
+  // parabola as far as the machine can tell; one outside it has a sign, and is
+  // the ellipse or the hyperbola it says. Until 2026-10-05 the line was a chosen
+  // 1e-9 of the scale squared, which called sections a hyperbola far from
+  // parabolic a parabola - and wrote it so (open item 39, R30).
+  const double m_abs = M.cwiseAbs().sum();
+  const double entry_err = recognition::forwardError(10, m_abs);
+  const double det_err =
+    entry_err * (fabs(A(0, 0)) + fabs(A(1, 1)) + 2 * fabs(A(0, 1)) + 2 * entry_err) +
+    recognition::forwardError(3, fabs(A(0, 0) * A(1, 1)) + A(0, 1) * A(0, 1));
   const Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> es(A);
   if (es.info() != Eigen::Success) return false;
   const Eigen::Vector2d lam = es.eigenvalues();
@@ -114,17 +128,22 @@ bool planeSectionConic(const Surface *surface, const Vector3d& normal_in, const 
 
   auto in_space = [&](const Eigen::Vector2d& uv) { return on_plane + e1 * uv(0) + e2 * uv(1); };
 
-  if (fabs(det) <= 1e-9 * scale * scale) {
+  if (fabs(det) <= det_err) {
     // Parabolic: one eigenvalue is zero, and the curve has no centre. With the
     // axes turned onto the eigenvectors, lam_k w^2 + 2(b1 s + b2 w) + C = 0 for
-    // the non-zero lam_k, which is s = -(lam_k w^2 + 2 b2 w + C) / (2 b1) - a
-    // parabola of focal distance |lam_k| / (4 |b1|) about the s direction.
+    // the non-zero lam_k, which is s - s0 = -(lam_k / (2 b1)) (w - w0)^2 - a
+    // parabola s = w^2 / (4 f) of focal distance f = |b1| / (2 |lam_k|) about
+    // the s direction. Written |lam_k| / (4 |b1|) until 2026-10-05, a quarter
+    // of what it is on the cone a roof cuts at its own half angle: every
+    // parabola the file held missed its own ends (open item 39, R30; W5).
     const int k = fabs(lam(0)) >= fabs(lam(1)) ? 0 : 1;  // the curved direction
     const int z = 1 - k;
     const Eigen::Vector2d ek = vec.col(k), ez = vec.col(z);
     const double bz = B.dot(ez), bk = B.dot(ek);
-    if (fabs(bz) < 1e-12 * scale) return false;  // degenerate: a line pair, not a parabola
-    const double focal = fabs(lam(k)) / (4 * fabs(bz));
+    // A linear part within its forward error of zero along the open direction
+    // is a line pair, not a parabola.
+    if (fabs(bz) <= recognition::forwardError(10, m_abs * (d.norm() + 1))) return false;
+    const double focal = fabs(bz) / (2 * fabs(lam(k)));
     if (!(focal > 0) || !std::isfinite(focal)) return false;
     // The vertex: where the curve turns, at w = -bk / lam_k.
     const double w0 = -bk / lam(k);

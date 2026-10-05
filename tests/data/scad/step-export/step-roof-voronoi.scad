@@ -39,9 +39,10 @@
 // KNOWN-EXPORT-WARNING: a declaration that is not taken is a bug report
 // KNOWN-EXPORT-WARNING: have mesh held under another surface's name
 //
-// Unexplained: vertices of the roof's approximation tier off their own
-// edges' curves by up to 2.4 - SOLIDWORKS fault code 7 (open item 43, W5).
-// KNOWN-EXPORT-WARNING: not on the curve its own edge is written as
+// The approximation tier's 24 vertices off their own edges' curves, by up to
+// 2.43 (open item 43, W5), were its parabolas, written with a quarter of their
+// focal distance; fixed 2026-10-05 (open item 39, R30), and every edge of the
+// file is on its faces.
 roof(method = "voronoi") difference() {
   square(20, center = true);
   square(6, center = true);

@@ -114,7 +114,7 @@ void StepKernel::BodyBuild::promoteCurves()
   // being cut, or the arc would not fit.
   int facet_same_surface = 0;
   int why_noproj = 0, why_offquad = 0, why_offplane = 0, why_nosection = 0, why_shape = 0;
-  int why_branch = 0, conics_ellipse = 0, conics_hyperbola = 0, conics_parabola = 0;
+  int why_branch = 0, why_curve = 0, conics_ellipse = 0, conics_hyperbola = 0, conics_parabola = 0;
   double conic_worst_end = 0, why_offplane_worst = 0;
   auto promote_to_conic = [&](std::size_t e, const std::vector<std::size_t>& faces) {
     if (!is_line(e)) return false;
@@ -373,6 +373,19 @@ void StepKernel::BodyBuild::promoteCurves()
       if ((p1 - sec.centre).dot(minor) > (p2 - sec.centre).dot(minor)) nz = -nz;
       curve = brep::Conic{Kind::Parabola, {sec.centre, nz, sec.major}, sec.a, 0};
     }
+    // And the conic as written has to hold the run's own ends: that both are on
+    // the quadric and in the plane says the section passes through them, not
+    // that the entity built for it does. Unasked until 2026-10-05, and every
+    // parabola missed its ends - by 2.43 on the roof - with only the closing
+    // vertex-on-curve report to say so (open item 39, R30). Held to what that
+    // report holds the file to, so no substitution writes what it flags.
+    for (const Vector3d *p : {&p1, &p2}) {
+      if (brep::distanceToCurve(curve, *p) > resolution()) {
+        conics_declined++;
+        why_curve++;
+        return false;
+      }
+    }
     if (sec.kind == SectionConic::ELLIPSE) conics_ellipse++;
     else if (sec.kind == SectionConic::HYPERBOLA) conics_hyperbola++;
     else conics_parabola++;
@@ -495,7 +508,8 @@ void StepKernel::BodyBuild::promoteCurves()
     LOG(
       "STEP export:    declined: %1$d no projection, %2$d an end off the quadric, %3$d an end off "
       "the plane (worst %4$.2e), %5$d no conic from that plane, %6$d an end on the far branch, "
-      "%7$d a face that is not one",
-      why_noproj, why_offquad, why_offplane, why_offplane_worst, why_nosection, why_branch, why_shape);
+      "%7$d a face that is not one, %8$d a conic that as written misses an end",
+      why_noproj, why_offquad, why_offplane, why_offplane_worst, why_nosection, why_branch, why_shape,
+      why_curve);
   }
 }
