@@ -145,7 +145,15 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
   // edges the first time it was tried.
   for (const auto& patch : grid_faces) walk_into_along(patch);
   crossing_edges.clear();
-  crossing_ends_off = 0;  // of this decision, not the one it replaces
+  // What this decision refused, not the one it replaces: decideSections runs
+  // at recognition and again once the corners have moved (redecideSections),
+  // and these added the two - a curve refused before the placement and taken
+  // after it still counted as falling back to a chord.
+  crossing_ends_off = 0;
+  arc_refused = arc_no_fit = arc_creased = arc_uncreased = 0;
+  arc_errors.clear();
+  arc_on_quadric.clear();
+  arc_on_fitted.clear();
   crossing_corners.clear();
   for (const auto& entry : along) {
     if (entry.second.size() != 2) continue;
