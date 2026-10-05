@@ -30,6 +30,7 @@
 #include "geometry/linalg.h"
 
 class Surface;
+class SolidTree;
 struct DeclaredSolid;
 
 /*! The surfaces the hull of `operands` makes, the hull of their profiles
@@ -38,6 +39,26 @@ struct DeclaredSolid;
  * own declarations, face and evidence records alike; only faces are read. */
 std::vector<std::shared_ptr<Surface>> declareHullOfRevolution(
   const std::vector<std::vector<std::shared_ptr<Surface>>>& operands);
+
+/*! What to read each operand of a hull as: the records of the solid of
+ * revolution it is a sector of, where every operand is one and all are cut to
+ * one wedge - and otherwise `records`, unchanged.
+ *
+ * A sector is what the operand's solid tree states, read exactly: a declared
+ * solid of revolution - one lateral surface and its two caps - with at most two
+ * planes through its axis as bounds of its own (cylinder(angle = ...)), or such
+ * a solid less coaxial bores inside its lateral surface and less solids that
+ * each remove one side of a plane through the axis over the whole of it (a ring
+ * less two cubes). The wedge is what the planes keep. Over a wedge of at most
+ * half a turn every meridian half-plane holds the whole profile of each
+ * operand's solid of revolution, so the hull's boundary there is the hull of
+ * their profiles turned: what declareHullOfRevolution states of the solids of
+ * revolution themselves (open item 39, R29). Operands cut to different wedges,
+ * or one that is not such a sector, state nothing new - intent it cannot read
+ * is not guessed. `trees` is parallel to `records`. */
+std::vector<std::vector<std::shared_ptr<Surface>>> revolutionOperands(
+  const std::vector<std::vector<std::shared_ptr<Surface>>>& records,
+  const std::vector<std::shared_ptr<const SolidTree>>& trees);
 
 /*! The solid a hull of coaxial solids of revolution is, where the operands'
  * records say they are such solids: the intersection of the insides of the

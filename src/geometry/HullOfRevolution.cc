@@ -193,6 +193,201 @@ std::vector<std::shared_ptr<Surface>> declareHullOfRevolution(
   return turned(axis, hull);
 }
 
+namespace {
+
+/*! A solid of revolution's own bounds, read from a declared solid: exactly one
+ * lateral surface, exactly two planes across its axis, and every other bound a
+ * plane through its axis - which cut it to a sector, kept on its interior's
+ * side. `kept` holds those planes' normals turned to the side kept. */
+struct Revolved {
+  std::vector<std::shared_ptr<Surface>> base;  // the lateral surface and its caps
+  Axis axis;
+  OperandProfile profile;
+  const Surface *lateral = nullptr;
+  std::vector<Vector3d> kept;
+};
+
+/*! Whether `p` contains the line of `axis`, at machine precision. */
+bool throughAxis(const PlaneSurface& p, const Axis& axis)
+{
+  const Vector3d n = p.normdir.normalized();
+  return recognition::onPlane(p.refpt, n, axis.origin) &&
+         recognition::onPlane(p.refpt, n, axis.origin + axis.dir);
+}
+
+bool readRevolved(const DeclaredSolid& solid, Revolved& out)
+{
+  std::vector<std::shared_ptr<Surface>> lateral, planes;
+  for (const auto& bound : solid.bounds) {
+    if (bound == nullptr) return false;
+    if (dynamic_cast<const CylinderSurface *>(bound.get()) != nullptr ||
+        dynamic_cast<const ConeSurface *>(bound.get()) != nullptr) {
+      lateral.push_back(bound);
+    } else if (dynamic_cast<const PlaneSurface *>(bound.get()) != nullptr) {
+      planes.push_back(bound);
+    } else {
+      return false;
+    }
+  }
+  if (lateral.size() != 1) return false;
+  out.lateral = lateral.front().get();
+  out.axis.origin = out.lateral->refpt;
+  out.axis.dir = out.lateral->normdir.normalized();
+  out.base = {lateral.front()};
+  out.kept.clear();
+  for (const auto& plane : planes) {
+    const auto& p = static_cast<const PlaneSurface&>(*plane);
+    if (throughAxis(p, out.axis)) {
+      Vector3d n = p.normdir.normalized();
+      if (n.dot(solid.interior - p.refpt) < 0) n = -n;
+      out.kept.push_back(n);
+    } else {
+      out.base.push_back(plane);
+    }
+  }
+  return out.kept.size() <= 2 && profileOf(out.base, out.axis, out.profile);
+}
+
+/*! The radius of a lateral surface where `axis` passes level `t`. */
+double radiusAtLevel(const Surface *lateral, const Axis& axis, double t)
+{
+  if (const auto *cyl = dynamic_cast<const CylinderSurface *>(lateral)) return cyl->r;
+  return static_cast<const ConeSurface *>(lateral)->radiusAt(axis.origin + axis.dir * t);
+}
+
+/*! Whether the whole of `base` lies on the side of `plane` that `interior` is
+ * on: the solid is the hull of its two rims, and over a rim of centre c and
+ * radius r about unit axis a the least of m.x is m.c - r |m - (m.a) a| - in
+ * closed form, against its forward error. */
+bool baseWithin(const Revolved& base, const PlaneSurface& plane, const Vector3d& interior)
+{
+  Vector3d m = plane.normdir.normalized();
+  if (m.dot(interior - plane.refpt) < 0) m = -m;
+  const double across = (m - base.axis.dir * m.dot(base.axis.dir)).norm();
+  for (const double t : {base.profile.t0, base.profile.t1}) {
+    const Vector3d c = base.axis.origin + base.axis.dir * t;
+    const double r = radiusAtLevel(base.lateral, base.axis, t);
+    const double least = m.dot(c - plane.refpt) - r * across;
+    if (least < -forwardError(24, c.norm() + plane.refpt.norm() + r)) return false;
+  }
+  return true;
+}
+
+/*! An operand's solid tree read as a sector of a solid of revolution. */
+bool readSector(const SolidTree& tree, Revolved& out)
+{
+  if (tree.op() == SolidTree::Op::Declared)
+    return tree.solid() != nullptr && readRevolved(*tree.solid(), out);
+  if (tree.op() != SolidTree::Op::Difference || tree.children().empty()) return false;
+  const auto& first = tree.children().front();
+  if (first == nullptr || first->op() != SolidTree::Op::Declared || first->solid() == nullptr ||
+      !readRevolved(*first->solid(), out)) {
+    return false;
+  }
+  // What is cut away: each solid subtracted, a union of them being each of its
+  // members - difference() { a; b; for (...) c; } subtracts the group the loop
+  // makes.
+  std::vector<std::shared_ptr<const SolidTree>> cuts;
+  std::vector<std::shared_ptr<const SolidTree>> open(tree.children().begin() + 1, tree.children().end());
+  while (!open.empty()) {
+    const auto next = open.back();
+    open.pop_back();
+    if (next != nullptr && next->op() == SolidTree::Op::Union) {
+      open.insert(open.end(), next->children().begin(), next->children().end());
+    } else {
+      cuts.push_back(next);
+    }
+  }
+  for (const auto& cut : cuts) {
+    if (cut == nullptr || cut->op() != SolidTree::Op::Declared || cut->solid() == nullptr) return false;
+    const DeclaredSolid& solid = *cut->solid();
+    // A coaxial bore inside the lateral surface at both caps leaves every rim
+    // of the outside where it was.
+    Revolved bore;
+    if (readRevolved(solid, bore) && bore.kept.empty() && sameLine(bore.axis, out.axis)) {
+      bool inside = true;
+      for (const double t : {out.profile.t0, out.profile.t1}) {
+        const Vector3d at = out.axis.origin + out.axis.dir * t;
+        const double rb =
+          radiusAtLevel(bore.lateral, bore.axis, (at - bore.axis.origin).dot(bore.axis.dir));
+        const double ro = radiusAtLevel(out.lateral, out.axis, t);
+        inside = inside && rb < ro - forwardError(24, at.norm() + ro);
+      }
+      if (inside) continue;
+      return false;
+    }
+    // A solid removing one side of a plane through the axis, over the whole
+    // base: exactly one of its bounds is such a plane, every bound a plane,
+    // and the base within every other one - so within the base it is that
+    // half-space and nothing more. The side kept is the other one.
+    const PlaneSurface *cutting = nullptr;
+    bool half_space = true;
+    for (const auto& bound : solid.bounds) {
+      const auto *plane = dynamic_cast<const PlaneSurface *>(bound.get());
+      if (plane == nullptr) {
+        half_space = false;
+        break;
+      }
+      if (throughAxis(*plane, out.axis)) {
+        if (cutting != nullptr) {
+          half_space = false;
+          break;
+        }
+        cutting = plane;
+      } else if (!baseWithin(out, *plane, solid.interior)) {
+        half_space = false;
+        break;
+      }
+    }
+    if (!half_space || cutting == nullptr) return false;
+    Vector3d n = cutting->normdir.normalized();
+    if (n.dot(solid.interior - cutting->refpt) > 0) n = -n;
+    out.kept.push_back(n);
+  }
+  // At most two planes, and not two opposite ones: a wedge with an inside, of
+  // at most half a turn.
+  if (out.kept.size() > 2) return false;
+  if (out.kept.size() == 2 && recognition::parallel(out.kept[0], out.kept[1]) &&
+      out.kept[0].dot(out.kept[1]) < 0) {
+    return false;
+  }
+  return true;
+}
+
+/*! Whether two wedges are one: the same planes, keeping the same sides. */
+bool sameWedge(const std::vector<Vector3d>& a, const std::vector<Vector3d>& b)
+{
+  if (a.size() != b.size()) return false;
+  for (const Vector3d& n : a) {
+    bool found = false;
+    for (const Vector3d& m : b) found = found || (recognition::parallel(n, m) && n.dot(m) > 0);
+    if (!found) return false;
+  }
+  return true;
+}
+
+}  // namespace
+
+std::vector<std::vector<std::shared_ptr<Surface>>> revolutionOperands(
+  const std::vector<std::vector<std::shared_ptr<Surface>>>& records,
+  const std::vector<std::shared_ptr<const SolidTree>>& trees)
+{
+  if (trees.size() != records.size() || records.size() < 2) return records;
+  std::vector<Revolved> sectors(trees.size());
+  for (std::size_t i = 0; i < trees.size(); i++) {
+    if (trees[i] == nullptr || !readSector(*trees[i], sectors[i])) return records;
+  }
+  // Whole solids of revolution are what the operands' own records already say.
+  if (sectors.front().kept.empty()) return records;
+  for (const Revolved& s : sectors) {
+    if (!sameWedge(s.kept, sectors.front().kept)) return records;
+  }
+  std::vector<std::vector<std::shared_ptr<Surface>>> bases;
+  bases.reserve(sectors.size());
+  for (const Revolved& s : sectors) bases.push_back(s.base);
+  return bases;
+}
+
 std::vector<int> hullFacetRecords(const std::vector<std::vector<std::shared_ptr<Surface>>>& operands,
                                   const std::vector<Vector3d>& vertices,
                                   const std::vector<std::array<std::size_t, 3>>& triangles,
@@ -235,6 +430,22 @@ std::vector<int> hullFacetRecords(const std::vector<std::vector<std::shared_ptr<
 
   std::vector<int> out(triangles.size(), -1);
   for (std::size_t t = 0; t < triangles.size(); t++) {
+    // A triangle whose plane holds the axis lies in a meridian plane, and so on
+    // no turned surface: a facet of a cone or a cylinder spans two angles. A
+    // sector's cut leaves such a side, every corner of which can still be on
+    // the rings of one profile edge - three corners on the r 10 rings of a
+    // half cylinder's flat side are - so ring membership alone would name it
+    // for the cylinder (open item 39, R29).
+    bool meridian = true;
+    for (const std::size_t v : triangles[t]) meridian = meridian && v < vertices.size();
+    if (meridian) {
+      const Vector3d& a = vertices[triangles[t][0]];
+      const Vector3d& b = vertices[triangles[t][1]];
+      const Vector3d& c = vertices[triangles[t][2]];
+      meridian = recognition::coplanar(a, b, c, axis.origin) &&
+                 recognition::coplanar(a, b, c, axis.origin + dir * (1.0 + a.norm()));
+    }
+    if (meridian) continue;
     std::vector<Vector2d> rings;
     for (const std::size_t v : triangles[t]) {
       if (v >= vertices.size()) {

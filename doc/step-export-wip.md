@@ -5180,6 +5180,34 @@ from coming back - landed with the fix and mutation-checked (F2).
   the classes named (`FacetClass`). No export of the 120 has such a claim.
   *Test:* `reports_test.cc` - an unnamed claim is `kUnnamed`, not `kFitted`;
   with that branch removed it fails.
+- **R29 - a band between two declared rim cylinders claims one of them. Fixed
+  2026-10-05 at its maker.** Found by R10's audit: four chamfer faces of the
+  bayonet were written as a 45 degree cone from r 78 and claimed for the
+  declared cylinder r 79.5 - "the rims name the claim only where no cone is
+  declared; that is a missing declaration, and still misattributed" (`Bands.cc`).
+  By provenance (`faceOrigin` and the ledger) their maker is original 39, the
+  lug's `hull()` of two `smallArc`s - rings less two cubes - which declared the
+  cylinders and not the cone between them: `declareHullOfRevolution` reads only
+  whole solids of revolution, and an arc is a sector of one. Under E9 the fix is
+  the maker's (a recognition-derived cone would complete its decision by
+  position): the hull reads each operand's solid tree, exactly, as a sector - a
+  declared solid of revolution less coaxial bores inside it and less solids that
+  each remove one side of a plane through its axis over the whole of it, or a
+  `cylinder(angle = ...)` - and where every operand is cut to one wedge of at
+  most half a turn, states what the hull of their whole solids states: over that
+  wedge every meridian half-plane holds each solid's whole profile
+  (`revolutionOperands`, `HullOfRevolution.cc`). `hullFacetRecords` then names
+  no triangle in a plane through the axis - the flat sides a cut leaves, whose
+  corners can all lie on one profile edge's rings. Its prerequisite, CGAL
+  carrying the solid tree (`b29c47f89`), keeps the two backends declaring alike.
+  The bayonet's chamfer facets are claimed for the hull's cone, D1 and
+  maker-owned, where they were D3 on the cylinder named for none.
+  *Test:* `step-hull-of-sectors` - a hull of two half cylinders on one axis,
+  its cone among the declarations ("1 conical", 0 without the rule), Cone=1
+  Cylinder=1 Plane=3 and the smooth volume 844 pi / 3; and `solid_tree_test.cc`
+  - a cone stated for one wedge and for a quarter cut by a group of two boxes,
+  nothing for two wedges or for a slot that is no half-space, and the flat side's
+  triangle named for nothing.
 
 **Planned, in this order (the author, 2026-09-30): a catch-all for warnings,
 then a tripwire.** What the fixtures catch without being told: every

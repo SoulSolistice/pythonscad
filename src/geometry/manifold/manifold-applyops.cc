@@ -106,8 +106,11 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
       if (item.first) item.first->progress_report();
     }
     if (pts.empty()) return nullptr;
-    // And what the hull makes of them, where its operands state it.
-    mergeSurfaces(surfaces, declareHullOfRevolution(per_operand));
+    // And what the hull makes of them, where its operands state it: each read
+    // as the solid of revolution it is, or the sector of one their solid trees
+    // state (revolutionOperands).
+    const auto revolved = revolutionOperands(per_operand, contained);
+    mergeSurfaces(surfaces, declareHullOfRevolution(revolved));
     // A hull is one new original: whatever its operands' triangles carried, its
     // own carry the hull's id, so that id is who declared every record here.
     const auto hull = manifold::Manifold::Hull(pts);
@@ -135,7 +138,7 @@ std::shared_ptr<ManifoldGeometry> applyOperator3DManifold(const Geometry::Geomet
                         std::size_t(topology.triVerts[3 * t + 2])});
       }
       std::vector<std::shared_ptr<Surface>> derived;
-      const std::vector<int> record = hullFacetRecords(per_operand, verts, tris, derived);
+      const std::vector<int> record = hullFacetRecords(revolved, verts, tris, derived);
       // Per derived record, the derived tag it gives the kept record describing
       // the same surface - one name per record, whoever declared it first.
       std::map<int, uint32_t> tag_of;

@@ -135,6 +135,111 @@ TEST_CASE("a transform moves every declared solid, and one it cannot carry turns
   CHECK((sheared->solid()->interior - shear * Vector3d(0.5, 0.5, 0.5)).norm() < 1e-12);
 }
 
+/*! A cylinder of radius `r` from `z0` to `z1` about the z axis, as a declared
+ * leaf: its wall and its caps. Its bounds are appended to `records`, as the
+ * geometry would carry them. */
+std::shared_ptr<const SolidTree> cylinderLeaf(double r, double z0, double z1,
+                                              std::vector<std::shared_ptr<Surface>>& records)
+{
+  auto solid = std::make_shared<DeclaredSolid>();
+  solid->bounds = {std::make_shared<CylinderSurface>(Vector3d(0, 0, z0), Vector3d(0, 0, 1), r),
+                   std::make_shared<PlaneSurface>(Vector3d(0, 0, z0), Vector3d(0, 0, 1)),
+                   std::make_shared<PlaneSurface>(Vector3d(0, 0, z1), Vector3d(0, 0, 1))};
+  solid->interior = Vector3d(0, 0, (z0 + z1) / 2);
+  solid->extent = BoundingBox(Vector3d(-r, -r, z0), Vector3d(r, r, z1));
+  records.insert(records.end(), solid->bounds.begin(), solid->bounds.end());
+  return SolidTree::declared(solid);
+}
+
+/*! A box from `lo` to `hi` as a declared leaf, its planes appended to `records`. */
+std::shared_ptr<const SolidTree> boxLeaf(const Vector3d& lo, const Vector3d& hi,
+                                         std::vector<std::shared_ptr<Surface>>& records)
+{
+  auto solid = std::make_shared<DeclaredSolid>();
+  for (int i = 0; i < 3; i++) {
+    Vector3d n(0, 0, 0);
+    n[i] = 1;
+    for (const Vector3d& at : {lo, hi}) solid->bounds.push_back(std::make_shared<PlaneSurface>(at, n));
+  }
+  solid->interior = (lo + hi) / 2;
+  solid->extent = BoundingBox(lo, hi);
+  records.insert(records.end(), solid->bounds.begin(), solid->bounds.end());
+  return SolidTree::declared(solid);
+}
+
+bool statesCone(const std::vector<std::shared_ptr<Surface>>& records)
+{
+  return std::any_of(records.begin(), records.end(), [](const auto& s) {
+    return dynamic_cast<const ConeSurface *>(s.get()) != nullptr;
+  });
+}
+
+TEST_CASE("a hull of coaxial sectors cut to one wedge states the cone of their whole solids",
+          "[solidtree]")
+{
+  // step-hull-of-sectors: r 10 from z 2 to 6 and r 8 from z 0 to 4, each less a
+  // box removing x < 0 over all of it. The hull's profile edge from (8, 0) to
+  // (10, 2) turns into a cone, and the operands' records alone state nothing:
+  // each has two kinds of plane and a box's worth more (open item 39, R29).
+  using Op = SolidTree::Op;
+  std::vector<std::vector<std::shared_ptr<Surface>>> records(2);
+  std::vector<std::shared_ptr<const SolidTree>> trees;
+  trees.push_back(SolidTree::combine(Op::Difference, cylinderLeaf(10, 2, 6, records[0]),
+                                     boxLeaf({-20, -11, 1}, {0, 11, 7}, records[0])));
+  trees.push_back(SolidTree::combine(Op::Difference, cylinderLeaf(8, 0, 4, records[1]),
+                                     boxLeaf({-16, -9, -1}, {0, 9, 5}, records[1])));
+  CHECK_FALSE(statesCone(declareHullOfRevolution(records)));
+  const auto read = revolutionOperands(records, trees);
+  REQUIRE(read.size() == 2);
+  CHECK(read[0].size() == 3);  // the wall and its two caps
+  CHECK(statesCone(declareHullOfRevolution(read)));
+
+  // Two boxes as the group a for loop makes, cutting to a quarter turn on both:
+  // still one wedge.
+  std::vector<std::vector<std::shared_ptr<Surface>>> quarter(2);
+  std::vector<std::shared_ptr<const SolidTree>> qtrees;
+  for (int i = 0; i < 2; i++) {
+    const double r = i == 0 ? 10 : 8, z0 = i == 0 ? 2 : 0;
+    auto cuts =
+      SolidTree::combine(Op::Union, boxLeaf({-2 * r, -r - 1, z0 - 1}, {0, r + 1, z0 + 5}, quarter[i]),
+                         boxLeaf({-r - 1, -2 * r, z0 - 1}, {r + 1, 0, z0 + 5}, quarter[i]));
+    qtrees.push_back(SolidTree::combine(Op::Difference, cylinderLeaf(r, z0, z0 + 4, quarter[i]), cuts));
+  }
+  CHECK(statesCone(declareHullOfRevolution(revolutionOperands(quarter, qtrees))));
+
+  // Cut to different wedges - one keeps x > 0, the other y > 0 - the hull's
+  // boundary is no cone of either, and nothing new is stated.
+  std::vector<std::vector<std::shared_ptr<Surface>>> apart(2);
+  std::vector<std::shared_ptr<const SolidTree>> atrees;
+  atrees.push_back(SolidTree::combine(Op::Difference, cylinderLeaf(10, 2, 6, apart[0]),
+                                      boxLeaf({-20, -11, 1}, {0, 11, 7}, apart[0])));
+  atrees.push_back(SolidTree::combine(Op::Difference, cylinderLeaf(8, 0, 4, apart[1]),
+                                      boxLeaf({-9, -16, -1}, {9, 0, 5}, apart[1])));
+  CHECK(revolutionOperands(apart, atrees) == apart);
+
+  // A box that does not reach across the whole cylinder removes more than one
+  // side of a plane - here a slot - and the operand is no sector.
+  std::vector<std::vector<std::shared_ptr<Surface>>> slot(2);
+  std::vector<std::shared_ptr<const SolidTree>> strees;
+  strees.push_back(SolidTree::combine(Op::Difference, cylinderLeaf(10, 2, 6, slot[0]),
+                                      boxLeaf({-20, -5, 1}, {0, 5, 7}, slot[0])));
+  strees.push_back(SolidTree::combine(Op::Difference, cylinderLeaf(8, 0, 4, slot[1]),
+                                      boxLeaf({-16, -9, -1}, {0, 9, 5}, slot[1])));
+  CHECK(revolutionOperands(slot, strees) == slot);
+
+  // The flat side the cut leaves is in a meridian plane, and no triangle of it
+  // is named for a turned surface, though all three corners of this one are on
+  // the r 10 cylinder's rings.
+  std::vector<std::shared_ptr<Surface>> derived;
+  const std::vector<Vector3d> corners = {{0, 10, 6}, {0, -10, 6}, {0, 10, 2}, {10, 0, 6}, {10, 0, 2}};
+  const std::vector<std::array<std::size_t, 3>> tris = {{0, 1, 2}, {0, 2, 4}};
+  const auto named = hullFacetRecords(read, corners, tris, derived);
+  REQUIRE(named.size() == 2);
+  CHECK(named[0] == -1);
+  REQUIRE(named[1] >= 0);  // a facet of the wall between the two r 10 rings
+  CHECK(dynamic_cast<const CylinderSurface *>(derived[std::size_t(named[1])].get()) != nullptr);
+}
+
 TEST_CASE("the boolean is carried through Manifold to the exported mesh", "[solidtree]")
 {
   using Op = SolidTree::Op;
