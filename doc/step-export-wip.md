@@ -4972,6 +4972,28 @@ from coming back - landed with the fix and mutation-checked (F2).
   *Test:* built with the fix, since the case it needs is the one the fix makes
   askable: a maker's corner on a declared plane that a weaker candidate would
   move, which must stay where its maker put it.
+  **Fixed 2026-10-05**: `deserts_exact` is gone, and the placement onto a conic
+  (`placeOnMeshPlanes`, MeshConic) asks what every face meeting the corner is
+  named for - those a surface's region claimed too. A facet named for a
+  declared plane cuts the owner in that record's plane, where it was the mesh's
+  plane through the facet's corners; one named for nothing keeps the plane its
+  corners make, which it is written on; a face named for another curved surface
+  puts the corner on that surface as well, which this rung does not solve, so
+  the corner is left to the rungs that do; two plane records on one facet plane
+  are two statements it cannot choose between. Probed first: every corner the
+  rung asks, on 5 fixtures, stands on one facet named for a declared plane, and
+  on lid10 21 stand on one named for nothing (R32). Neutral in the file over 132
+  exports - 0 entity and 0 DATA differences; the arbiter, which solves every
+  face there, already had the last word - and only the count of its answers
+  that overrule the rung's moves (step-cut-cone 22 to 25, step-exact-trim 11 to
+  8, step-oblique-trim 20 to 19, step-split-surface 7 to 4). Neither refusal
+  fires on any export or flagship coupon, and neither did `deserts_exact`. The
+  case it was written for - band-fn024's bore corners given the outer wall as
+  sole owner and slid 3.0 - no longer reaches the rung: provenance names two
+  owners there now, as it does for all 72 junctions of the three-primitive
+  bore-and-frustum it recorded. *Test:* still owed. No unit test drives the
+  corner placement - it needs a BodyBuild harness - and no export found reaches
+  a single-owner corner beside a face of another curved surface.
 - **R7 - the file's resolution is a chosen number.** `resolution()`
   (`WriteShells.cc`) is 1e-9 times the part's size, "a chosen number itself",
   and it is what the file declares as its uncertainty and what every fitted curve
@@ -5285,6 +5307,17 @@ from coming back - landed with the fix and mutation-checked (F2).
   the classes named (`FacetClass`). No export of the 120 has such a claim.
   *Test:* `reports_test.cc` - an unnamed claim is `kUnnamed`, not `kFitted`;
   with that branch removed it fails.
+- **R32 - lid10 places 21 corners on a facet no maker names.** Found probing
+  R6 (2026-10-05): every corner the placement onto a conic asks on lid10 stands
+  on one unconsumed facet whose loop is named for no surface, and 20 are placed
+  where the owner crosses the plane through that facet's corners. The facet is
+  written on that plane, so the corner is on its face; but the plane is what
+  its corners make, not a maker's word, and a corner a D0 owner shares with it
+  is no better determined than that (E8). Its maker is not yet named: which
+  primitive drew the facet, and whether it declared a plane the boolean lost
+  (E1: a missing declaration is added in the primitive that makes it). *Test:*
+  once named, the facet's plane record on lid10, and the 21 corners on it at
+  machine precision.
 - **R31 - a fillet's quadric was measured back from its patch. Fixed
   2026-10-05.** Found auditing the chosen numbers left after R5: recognition
   (`quadricOfPatch`) took each rational patch fillet() draws, read a candidate

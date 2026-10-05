@@ -28,12 +28,19 @@ using AnalyticFeatures::surfaceImplicit;
 void StepKernel::BodyBuild::placeOnMeshPlanes()
 {
   if (approximate && !singleOwner.empty()) {
-    std::map<int, std::vector<std::size_t>> faces_at;
+    // The facets still to be written as planes at each corner, and every face
+    // meeting it - those claimed by a surface's region too - whose names say
+    // what the corner is on.
+    std::map<int, std::vector<std::size_t>> faces_at, named_at;
     for (std::size_t i = 0; i < loops.size(); i++) {
-      if (!loop_valid[i] || consumed[i] || loops[i].size() < 3) continue;
-      for (const int v : loops[i]) faces_at[v].push_back(i);
+      if (!loop_valid[i] || loops[i].size() < 3) continue;
+      for (const int v : loops[i]) {
+        named_at[v].push_back(i);
+        if (!consumed[i]) faces_at[v].push_back(i);
+      }
     }
-    std::size_t placed = 0, triple = 0, placed_triple = 0, plane_gave_up = 0, held_on_exact = 0;
+    std::size_t placed = 0, triple = 0, placed_triple = 0, plane_gave_up = 0;
+    std::size_t held_on_other = 0, two_records = 0;
     // Why the surface-against-line placement gives up, kept apart: these are
     // five unrelated reasons and one number for all of them says nothing about
     // which to work on. `t_unnamed` is a facet at the corner that carries no
@@ -187,6 +194,44 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
         continue;
       }
       const Surface *own = surfaces[entry.second].get();
+      // What the corner is on is what the faces meeting it are named for
+      // (checklist E9; open item 39, R6) - not what it lies near, which is what
+      // deserts_exact asked until 2026-10-05: on another declared quadric within
+      // an absolute 1e-9, which pinned a corner that merely touched one and left
+      // a corner on a maker's plane unprotected. So a facet named for a declared
+      // plane cuts the owner in that record's plane, stated exactly, where the
+      // mesh's plane through the facet's corners is a position; one named for
+      // nothing is the plane its corners make, which is the plane it is written
+      // on. A face named for a curved surface other than the owner puts the
+      // corner on that surface as well, which this rung does not solve - beside
+      // the corner such a facet is a chord of it, not a cutting plane (R13) - so
+      // the corner is left to the rungs that do; and two plane records on one
+      // facet plane are two statements this rung cannot choose between.
+      const Surface *plane_record = nullptr;
+      bool other_curved = false, two_planes = false;
+      for (const std::size_t i : named_at[v]) {
+        const Surface *named = namedFor(i);
+        if (named == nullptr || named == own || named->sameAs(*own)) continue;
+        if (dynamic_cast<const PlaneSurface *>(named) == nullptr) {
+          other_curved = true;
+          continue;
+        }
+        if (consumed[i]) continue;
+        if (plane_record == nullptr) plane_record = named;
+        else if (!named->sameAs(*plane_record)) two_planes = true;
+      }
+      if (other_curved) {
+        held_on_other++;
+        continue;
+      }
+      if (two_planes) {
+        two_records++;
+        continue;
+      }
+      if (plane_record != nullptr) {
+        pn = plane_record->normdir.normalized();
+        pd = pn.dot(plane_record->refpt);
+      }
       Vector3d p = vertices[v], qa;
       bool ok = true;
       // Alternating projection, until the point is on both at machine
@@ -219,10 +264,6 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
       const double travel = (p - vertices[v]).norm();
       if (travel > reach_here) {
         plane_gave_up++;
-        continue;
-      }
-      if (deserts_exact(v, own, p)) {
-        held_on_exact++;
         continue;
       }
       worst_plane = std::max(worst_plane, travel);
@@ -262,11 +303,12 @@ void StepKernel::BodyBuild::placeOnMeshPlanes()
         "mesh put them",
         int(placed), worst_plane, int(plane_gave_up));
     }
-    if (held_on_exact > 0) {
+    if (held_on_other > 0 || two_records > 0) {
       LOG(
-        "STEP export: %1$d corners provenance gives one owner are already on another quadric the "
-        "model declared, and stay on it rather than be placed off it",
-        int(held_on_exact));
+        "STEP export: %1$d corners provenance gives one owner bound a face named for another curved "
+        "surface as well, and %2$d a facet named for two planes, and are left to the rungs that "
+        "solve every face there",
+        int(held_on_other), int(two_records));
     }
   }
 }

@@ -302,9 +302,10 @@ struct StepKernel::BodyBuild {
    * boolean cut every facet of a bore, that owner was the wall across the cap:
    * band-fn024's 48 bore corners were slid 3.0 off the face they bound, lid10's
    * 120 chamfer corners 0.65 and 2.25, hidden only by the plane veto. That path
-   * now keeps a corner on the quadric it is already on (see deserts_exact), and
-   * this is measured to be reached by no fixture and no flagship coupon, with
-   * the veto and without it.
+   * now leaves a corner bounding a face named for another curved surface to
+   * the rungs that solve it (placeOnMeshPlanes; open item 39, R6), and this is
+   * measured to be reached by no fixture and no flagship coupon, with the veto
+   * and without it.
    *
    * So it is an error, not a report: reaching it means a placement has a defect
    * the file would carry. The move is held, so the file stays right, and the
@@ -793,35 +794,6 @@ struct StepKernel::BodyBuild {
   std::map<int, step::CornerRung> move_rung;
   // what each path added
   std::size_t on_conic = 0, on_triple = 0, on_own = 0, on_faces = 0, on_plane_face = 0;
-  /*! Whether placing corner `v` at `target` would take it off an exact surface the
-   * model declared and the corner is already on - one other than `own`, which is
-   * where it is being placed.
-   *
-   * The placement onto a conic below rests on provenance naming *one* declared
-   * owner, and provenance is per original solid, decided by whole facets: an
-   * original none of whose facets a boolean left whole owns nothing. Its surface
-   * is then invisible to the vote, and a corner on it is handed to whatever the
-   * other original at that junction owns. Measured on step-band-family at $fn
-   * 24, the ridge cuts all but 2 of the bore's facets - three are needed - so
-   * its 48 rim corners, generated on the r = 20 bore to 1e-14, were given the
-   * r = 23 outer wall as sole owner, slid 3.0 along the cap onto it, and left the
-   * bore face they bound 3.0 off its own surface. lid10 does the same to 120
-   * corners of two chamfers, 0.65 and 2.25 along its z = 95 face. On both, only
-   * the plane veto kept it out of the file - and it does not need the flagship
-   * coupons: a bore with a frustum subtracted through its whole length, three
-   * primitives, writes the bore 3.0 off itself with the veto silent.
-   *
-   * So the question is asked of the declarations rather than of the vote: a
-   * corner on a declared quadric stays on it. That is the rule the pass placing
-   * corners onto their own quadric already keeps, and the one the reroute below
-   * is named for. A surface that answers by projecting is not asked - a grid
-   * states a band, not a position, and a corner off it is its fit's business.
-   *
-   * Asked here and not of the triple-point placement, which rests on the same
-   * single owner: across every fixture and flagship coupon it moved no corner
-   * off a quadric, and a guard with nothing to refuse has regressions nothing
-   * would see. The check before the veto below covers it, loudly. */
-  bool deserts_exact(int v, const Surface *own, const Vector3d& target);
 
   // ---- the kernel methods the phases call
   EdgeCurve *create_line_edge_curve(Vertex *vert1, Vertex *vert2, bool dir)
