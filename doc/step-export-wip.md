@@ -6050,6 +6050,30 @@ extrusions 2 -> 34 of 34, step-rounded-profile 64 -> 1088 of 1092; no corner
 and no file moved. *Test:* `surface_protocol_test.cc` "[closest]", by hand;
 with the bisection's root ignored, the off-axis cases fail.
 
+**A polyhedron states the solid its faces bound** (`FacetedRegion`), each face
+the model's own plane or a piece of the declared grid it is named for - the
+threads of the bayonet, f02, f04 and the declare-grid fixtures. A declared grid
+interpolates along its sweep and is straight across its profile; it lies within
+its closed-form tessellation bound of the faces named for it. So: far from every
+face, beyond that band, the faces' winding number decides (their solid angles
+sum to whole turns); on the grid within its evaluation bound of the point its
+projection finds, On; otherwise near a named face, the side of that point -
+a stationary point of the distance, so the point lies along the surface's
+normal there, and the face's outward normal is within a right angle of it. Near
+a plane face, On; near two kinds at once, Unknown. Stated where every named face
+is named for a grid and the faces close. A raw `polyhedron()` is the same leaf
+with every face its own plane - its faces are the model's statement (E5) - and
+answers exactly.
+
+The bayonet 347 -> 1581 on a face, 1336 -> 102 undecided; f04 40 -> 1402,
+1368 -> 6; f02 and step-band-family 16 -> 697, 691 -> 10; the declare-grid
+fixtures all but 1 to 5 facets each. No phantom appeared, no file moved.
+*Tests:* `faceted_region_test.cc` - a unit cube either way round, its sides
+named for a two-station grid, and a grid curved along its sweep where a point
+past the chord is inside only by the grid's word; with the side rule flipped,
+that case fails. `solid_tree_test.cc`'s tetrahedron now asserts the region
+it is, where it asserted its box.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

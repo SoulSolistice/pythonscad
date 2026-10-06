@@ -28,6 +28,7 @@
 #include "geometry/manifold/ManifoldGeometry.h"
 #include "geometry/recognition/Exact.h"
 #include "geometry/Surface.h"
+#include "geometry/FacetedRegion.h"
 #include "geometry/SweptRegion.h"
 #include "utils/printutils.h"
 #ifdef ENABLE_CGAL
@@ -245,6 +246,49 @@ std::shared_ptr<const SolidTree> facetedSolid(const PolySet& ps,
       closed = in_end[0] || in_end[1];
     }
     if (closed) return SolidTree::region(region, what);
+  }
+  // Otherwise the faces themselves, each the model's own plane or a piece of
+  // the declared grid it is named for - where every named face is named for a
+  // grid, and no curved record the leaf carries goes unnamed (a declaration
+  // that names no face says the solid is on it, and nobody says where).
+  std::set<uint32_t> carried;
+  if (ps.surface_tags.size() == ps.indices.size())
+    carried.insert(ps.surface_tags.begin(), ps.surface_tags.end());
+  carried.erase(0);
+  bool every_record_named = true;
+  for (const auto& s : ps.surfaces) {
+    if (s == nullptr || !s->declaresFace() || dynamic_cast<const PlaneSurface *>(s.get()) != nullptr)
+      continue;
+    bool named = false;
+    for (const uint32_t t : s->tags) named = named || carried.count(t) != 0;
+    every_record_named = every_record_named && named;
+  }
+  if (every_record_named) {
+    std::vector<FacetedRegion::Face> faces;
+    std::map<const Surface *, std::shared_ptr<const GridSurface>> grids;
+    bool grids_only = true;
+    for (size_t f = 0; f < ps.indices.size() && grids_only; f++) {
+      const auto& tri = ps.indices[f];
+      if (tri.size() != 3) {
+        grids_only = false;
+        break;
+      }
+      FacetedRegion::Face face{ps.vertices[tri[0]], ps.vertices[tri[1]], ps.vertices[tri[2]], nullptr};
+      if (const Surface *record = record_of(f)) {
+        if (dynamic_cast<const GridSurface *>(record) == nullptr) {
+          grids_only = false;
+          break;
+        }
+        auto& grid = grids[record];
+        if (grid == nullptr) grid = std::dynamic_pointer_cast<const GridSurface>(record->clone());
+        face.record = grid;
+      }
+      faces.push_back(std::move(face));
+    }
+    if (grids_only) {
+      auto region = std::make_shared<FacetedRegion>(std::move(faces));
+      if (region->closed()) return SolidTree::region(region, what);
+    }
   }
   return facetedEnvelope(ps, record_of, what);
 }

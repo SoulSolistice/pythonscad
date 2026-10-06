@@ -355,16 +355,21 @@ TEST_CASE("a faceted leaf becomes the envelope its faces span", "[solidtree][env
   // would be position standing in for a name (checklist E8).
   CHECK(manifoldOf(*ps)->toPolySet()->solid_tree->op() == SolidTree::Op::Opaque);
 
-  // With nothing declared over its faces, a faceted solid lies within its
-  // corners' box: a tetrahedron's.
+  // With nothing declared over its faces, a faceted solid is its faces - each
+  // the model's own plane (open item 42): a tetrahedron's, its slanted face on
+  // 6x + 4y + 3z = 12, answering for a point exactly, and within its corners'
+  // box.
   auto tet = std::make_unique<PolySet>(3);
   tet->vertices = {{0, 0, 0}, {2, 0, 0}, {0, 3, 0}, {0, 0, 4}};
   tet->indices = {{0, 2, 1}, {0, 1, 3}, {1, 2, 3}, {0, 3, 2}};
   tet->solid_tree = SolidTree::faceted();
   const auto t = manifoldOf(*tet)->toPolySet()->solid_tree;
-  REQUIRE(t->op() == SolidTree::Op::Enveloped);
+  REQUIRE(t->op() == SolidTree::Op::Region);
+  CHECK(t->region()->classify({0.25, 0.25, 0.25}).where == SolidRegion::Where::In);
+  CHECK(t->region()->classify({1, 1, 1}).where == SolidRegion::Where::Out);  // 13 > 12
+  CHECK(t->region()->classify({1, 0, 2}).where == SolidRegion::Where::On);   // 6 + 6 = 12
   BoundingBox tb;
-  for (const auto& b : t->solid()->bounds) tb.extend(b->refpt);
+  REQUIRE(t->extent(tb));
   CHECK((tb.max() - Vector3d(2, 3, 4)).norm() == 0);
   CHECK(tb.min().norm() == 0);
   // and a transform keeps it faceted until it becomes a Manifold

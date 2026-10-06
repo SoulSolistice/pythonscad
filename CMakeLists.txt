@@ -1659,6 +1659,7 @@ set(CORE_SOURCES
   src/geometry/brep/Brep.cc
   src/geometry/SolidTree.cc
   src/geometry/SweptRegion.cc
+  src/geometry/FacetedRegion.cc
   src/geometry/ProfileRegion.cc
   src/geometry/ProfileSolids.cc
   src/geometry/PolySetUtils.cc
