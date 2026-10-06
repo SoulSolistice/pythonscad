@@ -197,6 +197,10 @@ StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)
       auto point = new Point(entities, vertices[ind]);
       step_verts[ind] = new Vertex(entities, point);
       vertex_at.emplace(key, step_verts[ind]);
+      // The B-rep may hold this point's vertex already, made by brepVertex:
+      // the entity is that vertex, not a second one beside it.
+      const auto have = brep_vertex_at.find(key);
+      if (have != brep_vertex_at.end()) reader.bind(step_verts[ind], have->second);
     }
   }
   return step_verts[ind];
@@ -204,7 +208,17 @@ StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)
 
 std::size_t StepKernel::BodyBuild::brepVertex(int ind)
 {
-  return reader.vertex(get_vertex(ind));
+  if (step_verts[ind] != nullptr) return reader.vertex(step_verts[ind]);
+  const auto key = std::make_tuple(vertices[ind][0], vertices[ind][1], vertices[ind][2]);
+  const auto made = vertex_at.find(key);
+  if (made != vertex_at.end()) return reader.vertex(made->second);
+  const auto have = brep_vertex_at.find(key);
+  if (have != brep_vertex_at.end()) return have->second;
+  brep::Vertex vertex;
+  vertex.point = vertices[ind];
+  brep_body.vertices.push_back(vertex);
+  brep_vertex_at.emplace(key, brep_body.vertices.size() - 1);
+  return brep_body.vertices.size() - 1;
 }
 
 std::size_t StepKernel::BodyBuild::lineEdge(int a, int b, bool& forward)

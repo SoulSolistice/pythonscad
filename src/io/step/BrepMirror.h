@@ -68,6 +68,9 @@ public:
   {
   }
   std::size_t vertex(const StepKernel::Vertex *v);
+  /*! `v` is the body's vertex `index` - one the B-rep holds already, which an
+   * entity made later at its point stands for. */
+  void bind(const StepKernel::Vertex *v, std::size_t index) { vertex_index.emplace(v, index); }
   std::size_t edge(const StepKernel::EdgeCurve *e);
   /*! A face a phase made as an entity, appended to the body with what its maker
    * registered, `source` - null where it registered nothing, which leaves the

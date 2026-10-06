@@ -413,8 +413,14 @@ struct StepKernel::BodyBuild {
    * and the point where entities stop being made moves upstream a phase at a
    * time, until nothing is read. */
   brep::Body brep_body;
-  /*! The B-rep's vertex for mesh vertex `ind`: its VERTEX_POINT, read. */
+  /*! The B-rep's vertex for mesh vertex `ind`, one wherever its point is, as
+   * get_vertex merges them: read off the VERTEX_POINT where an analytic face
+   * made one, else made here, on the B-rep, with no entity at all (open item
+   * 39, step 2d, the fourth move). An entity get_vertex makes later at the
+   * same point is bound to it, so the two are one vertex either way. */
   std::size_t brepVertex(int ind);
+  // The vertices brepVertex made itself, by their exact coordinates.
+  std::map<std::tuple<double, double, double>, std::size_t> brep_vertex_at;
   /*! The straight edge along mesh edge (a, b), as the B-rep's, and in `forward`
    * whether it runs from `a`. One per mesh edge, whoever names it first: the
    * one an analytic face made along it, read, or else one built here, as the

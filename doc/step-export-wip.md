@@ -4797,6 +4797,16 @@ the VERTEX_POINT `get_vertex` makes; they are the next move, with the edges the
 analytic faces make. Proven by `compare --data` against the commit before: 0
 differences over 130 exports.
 
+Fourth move, 2026-10-06: the vertices are the B-rep's own. `brepVertex` reads a
+vertex off its VERTEX_POINT only where an analytic face made one, so identity
+holds where an entity stands for the vertex; otherwise it makes the vertex on
+the B-rep, one wherever its point is, keyed as `get_vertex` keys them, and no
+entity is made for it. An entity `get_vertex` makes later at the same point is
+bound to that vertex (`BrepReader::bind`), so the two are one either way. The
+planar faces and the fans now make no entity at all. The edges the analytic
+faces make are the next move. Proven by `compare --data` against the commit
+before: 0 differences over 132 exports.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral
