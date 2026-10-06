@@ -2333,7 +2333,10 @@ bool SweepSurface::splineForm(int& degree_u, int& degree_v, int& rows_out, int& 
 
 std::shared_ptr<Surface> SweepSurface::clone() const
 {
-  return std::make_shared<SweepSurface>(refpt, normdir, ref, laws, pitch, turns, stations);
+  // A copy, as every record's: rebuilt from its parameters it lost what the
+  // record carries beside its geometry - its tags, owners and witnesses - and
+  // every facet named for the sweep was named for a tag no record held.
+  return std::make_shared<SweepSurface>(*this);
 }
 
 bool SweepSurface::transform(const Transform3d& mat, const Similarity& similarity)

@@ -883,3 +883,22 @@ TEST_CASE("a corner half a band off its grid is off it", "[surface][grid][R15]")
   CHECK_FALSE(AnalyticFeatures::onFace(&cylinder, Vector3d(20 + 1e-12, 0, 5)));
   CHECK(AnalyticFeatures::offFace(&cylinder, Vector3d(20 + 1e-12, 0, 5)) > 0);
 }
+
+TEST_CASE("a sweep's clone is the same record, identity and all", "[surface][sweepsurface][identity]")
+{
+  // What the record carries beside its geometry - the tags its facets are
+  // named by, who declared it and who only witnessed it - is the record; a
+  // clone that rebuilt the sweep from its parameters dropped all of it, and
+  // every facet named for the sweep was named for a tag no record held.
+  const std::vector<Vector2d> profile{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+  SweepSurface sweep(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0),
+                     SweepLaws::constant(10.0, profile), 4.0, 1.0, 16);
+  sweep.tags = {313, 314};
+  sweep.owners = {7};
+  sweep.witnesses = {9};
+  const auto copy = sweep.clone();
+  CHECK(copy->tags == sweep.tags);
+  CHECK(copy->owners == sweep.owners);
+  CHECK(copy->witnesses == sweep.witnesses);
+  CHECK(copy->sameAs(sweep));
+}
