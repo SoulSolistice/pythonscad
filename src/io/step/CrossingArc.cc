@@ -193,6 +193,11 @@ bool intersectionArc(const Surface *a, const Surface *b, const Vector3d& p0, con
     const Eigen::MatrixXd solved = m.colPivHouseholderQr().solve(rhs);
     ctrl.assign(degree + 1, Vector3d::Zero());
     for (int j = 0; j <= degree; j++) ctrl[j] = solved.row(j).transpose();
+    // A Bezier starts and ends at its end control points, and those are the
+    // edge's own vertices - exactly, not the solve's rounding of them: a reader
+    // checks the vertex on its edge's curve (checklist C10; open item 39, R7).
+    ctrl.front() = p0;
+    ctrl.back() = p1;
     double on_quadric = 0, on_fitted = 0;
     const double err = intersectionArcError(a, b, ctrl, &on_quadric, &on_fitted);
     if (why != nullptr && err < why->best_error) {

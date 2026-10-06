@@ -65,7 +65,12 @@
 // z = y, z = -y - so the ellipses are a closed form of the two declarations
 // (D1), where they were found by fitting the crossing, seeing the fit flat,
 // and taking the plane from the mesh's own vertices (open item 39, R7).
-// EXPECT: 0 on one taken from the mesh, 8 on one the pencil of the two surfaces it is the crossing of states (D1)
+/// EXPECT: 0 on one taken from the mesh, 8 on one the pencil of the two surfaces it is the crossing of states (D1)
+// And their class is proved, not taken from how they were found: each of the
+// twelve edges is certified on both its faces' cylinders in closed form, D1
+// (brep::stateClasses) - the routing chooses which curve is written, never its
+// class.
+// EXPECT: edges 12 D1, 0 D2, 0 D4
 //
 // And the figure none of the above can fake. The solid two equal cylinders cut
 // from each other is the Steinmetz solid, whose volume is exactly 16*r^3/3 -

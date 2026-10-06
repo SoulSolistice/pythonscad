@@ -5011,16 +5011,28 @@ from coming back - landed with the fix and mutation-checked (F2).
   is held to. It should be the forward error of placing a corner at that size -
   what the machine can say, not what was picked. *Test:* a unit test on the
   derivation, at two sizes a decade apart.
-  **Decided 2026-10-06** (the user): the figure does two jobs - the uncertainty
-  the file declares, and the target every approximated crossing is held to -
-  and the second is the chosen one. A crossing that can be declared is D0, one
-  with a closed form D1, and only one with neither is approximated, at the
-  highest precision reached economically: refined while each step gains what
-  its method's order promises - 2^(degree + 1), sixteenfold a doubling for a
-  cubic - and stopped where it does not, or at the arithmetic's floor; the file
-  then declares what it holds. Measured first: every accepted fit stopped just
-  under the target (lid10 1.1e-7 of 1.3e-7, the band family 4.6e-8 of 4.6e-8),
-  the first degree that reached it. Three steps.
+  **Decided 2026-10-06** (the user), in two rounds. First: a crossing that can
+  be declared is D0, one with a closed form D1, and only one with neither is
+  approximated - which step 1 below does. Then, on what an approximation owes:
+  not precision but consistency (checklist C10). A reader faults a vertex off
+  its edge's curve or a curve off its face's surface, against the uncertainty
+  the file declares; it never sees precision past that. So an approximated
+  crossing ends exactly on its vertices, is certified within the declared
+  uncertainty of both its surfaces (R16), and is the cheapest fit that is -
+  the old stopping rule was right, and stays. `resolution()` is the
+  declaration every entity is proved to satisfy, not a target to beat.
+  Measured on the way: refining every crossing to convergence took lid10's
+  fits from 6.6e-8 to 9.5e-12 and its file from 3.0 to 13.2 MB (its largest
+  spline 925 to 14785 control points), slowed band-fn064's export to 343 s and
+  the flagship checks to hours; the order's rate as a stopping rule stopped
+  fits before they resolved the curve - the gains hover about sixteen from
+  either side - and a capped version came out at 3.05e-6 on lid10. A SOLIDWORKS
+  round trip of the 13 MB file wrote it in 2.2 MB at a declared 1e-5, its
+  largest spline 193 control points, the ellipses become splines. What R7
+  keeps from step 2: the Bezier's ends set exactly to its vertices, where the
+  collocation solve left them to its rounding. The effort goes instead to
+  what is inconsistent - lid10's 258 vertices and 589 edges off a face they
+  bound.
   **Step 1, 2026-10-06: the conics two quadrics cross in, in closed form.** Two
   quadrics meet in a quartic, which splits into conics exactly where a member
   of their pencil is a pair of real planes (`pencilPlanes`, from each surface's
