@@ -2,7 +2,7 @@
 // (io/step/CrossingRuns). What is tested is what a file relies on and no
 // distance measures: that the curve runs along the crossing rather than back
 // over it, and that a run whose vertices are unevenly spaced is still one curve.
-#include "io/step/CrossingRuns.h"
+#include "geometry/brep/CrossingRuns.h"
 
 #include <catch2/catch_all.hpp>
 #include <algorithm>
@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "geometry/Surface.h"
-#include "io/step/CrossingArc.h"
+#include "geometry/brep/CrossingArc.h"
 
 using namespace step;
 

@@ -1,5 +1,5 @@
 /*! The planar faces - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,13 +8,13 @@
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Reports.h"
-#include "io/step/LoopGeometry.h"
-#include "io/step/PlaneSections.h"
+#include "geometry/brep/LoopGeometry.h"
+#include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
 using namespace step;
 
-void StepKernel::BodyBuild::emitPlanarFaces()
+void step::BodyBuild::emitPlanarFaces()
 {
   int planes_declared = 0, planes_by_position = 0;
 

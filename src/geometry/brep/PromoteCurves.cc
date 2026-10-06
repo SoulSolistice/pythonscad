@@ -1,5 +1,5 @@
 /*! Chords promoted to the curves they are - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,12 +9,12 @@
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
-#include "io/step/PlaneSections.h"
+#include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
 using namespace step;
 
-void StepKernel::BodyBuild::promoteCurves()
+void step::BodyBuild::promoteCurves()
 {
   // On the B-rep (open item 39, step 2d): which faces use each edge, once per
   // use, walked in the order the faces meet their edges - the B-rep's own, so no

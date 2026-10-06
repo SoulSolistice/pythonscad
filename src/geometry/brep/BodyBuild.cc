@@ -1,5 +1,5 @@
 /*! One solid's worth of STEP - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <limits>
 #include "geometry/AnalyticFeatures.h"
@@ -7,11 +7,11 @@
 #include "geometry/recognition/Seam.h"
 #include "geometry/recognition/Pipeline.h"
 #include "geometry/recognition/Reports.h"
-#include "io/step/BoundaryCycles.h"
-#include "io/step/CornerLadder.h"
-#include "io/step/CrossingArc.h"
-#include "io/step/LoopGeometry.h"
-#include "io/step/PlaneSections.h"
+#include "geometry/brep/BoundaryCycles.h"
+#include "geometry/brep/CornerLadder.h"
+#include "geometry/brep/CrossingArc.h"
+#include "geometry/brep/LoopGeometry.h"
+#include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 #include <algorithm>  // std::reverse
 #include <iostream>
@@ -42,7 +42,7 @@ using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 
 }  // namespace
 
-brep::Body StepKernel::BodyBuild::run()
+brep::Body step::BodyBuild::run()
 {
   reportDeclaredSurfaces();
 
@@ -89,14 +89,14 @@ brep::Body StepKernel::BodyBuild::run()
 // (`crossing_fit`); and it is what the file declares as its uncertainty, what a
 // reader may take two points as one within. That was 1e-5 whatever the file
 // held until 2026-09-28.
-double StepKernel::BodyBuild::resolution() const
+double step::BodyBuild::resolution() const
 {
   double size = 1.0;
   for (const Vector3d& v : vertices) size = std::max(size, v.norm());
   return 1e-9 * size;
 }
 
-int32_t StepKernel::BodyBuild::surfaceIndexOf(const Surface *record) const
+int32_t step::BodyBuild::surfaceIndexOf(const Surface *record) const
 {
   for (std::size_t i = 0; i < surfaces.size(); i++) {
     if (surfaces[i].get() == record) return int32_t(i);
@@ -107,10 +107,10 @@ int32_t StepKernel::BodyBuild::surfaceIndexOf(const Surface *record) const
   return -1;
 }
 
-brep::FaceSource StepKernel::BodyBuild::sourceOf(std::shared_ptr<const Surface> record,
-                                                 std::vector<std::size_t> facets,
-                                                 std::optional<recognition::EvidenceClass> evidence,
-                                                 bool plane_from_corners) const
+brep::FaceSource step::BodyBuild::sourceOf(std::shared_ptr<const Surface> record,
+                                           std::vector<std::size_t> facets,
+                                           std::optional<recognition::EvidenceClass> evidence,
+                                           bool plane_from_corners) const
 {
   using recognition::EvidenceClass;
   // The weakest class its facets' honoured claims state: a patch of D0 members
@@ -148,7 +148,7 @@ brep::FaceSource StepKernel::BodyBuild::sourceOf(std::shared_ptr<const Surface> 
                     plane_from_corners, record_class};
 }
 
-bool StepKernel::BodyBuild::boundWritten(std::size_t loop) const
+bool step::BodyBuild::boundWritten(std::size_t loop) const
 {
   auto outer_written = [&](std::size_t k) {
     return k < face_cnt && loop_valid[k] && !loop_is_hole[k] && !consumed[k] &&
@@ -162,15 +162,14 @@ bool StepKernel::BodyBuild::boundWritten(std::size_t loop) const
          outer_written(std::size_t(parents[loop]));
 }
 
-const Surface *StepKernel::BodyBuild::namedFor(std::size_t facet) const
+const Surface *step::BodyBuild::namedFor(std::size_t facet) const
 {
   if (facet >= faceSurface.size()) return nullptr;
   const int32_t s = faceSurface[facet];
   return s < 0 || std::size_t(s) >= surfaces.size() ? nullptr : surfaces[std::size_t(s)].get();
 }
 
-bool StepKernel::BodyBuild::flatWhereItStands(std::size_t face,
-                                              const std::function<Vector3d(int)>& at) const
+bool step::BodyBuild::flatWhereItStands(std::size_t face, const std::function<Vector3d(int)>& at) const
 {
   std::vector<int> corners(loops[face].begin(), loops[face].end());
   for (std::size_t j = 0; j < face_cnt; j++) {
@@ -189,7 +188,7 @@ bool StepKernel::BodyBuild::flatWhereItStands(std::size_t face,
   return recognition::flatWhereItStands(points, nullptr, nullptr);
 }
 
-std::size_t StepKernel::BodyBuild::brepVertex(int ind)
+std::size_t step::BodyBuild::brepVertex(int ind)
 {
   const auto key = std::make_tuple(vertices[ind][0], vertices[ind][1], vertices[ind][2]);
   const auto have = brep_vertex_at.find(key);
@@ -201,7 +200,7 @@ std::size_t StepKernel::BodyBuild::brepVertex(int ind)
   return brep_body.vertices.size() - 1;
 }
 
-std::size_t StepKernel::BodyBuild::brepLine(std::size_t from, std::size_t to)
+std::size_t step::BodyBuild::brepLine(std::size_t from, std::size_t to)
 {
   brep::Edge edge;
   edge.start = from;
@@ -215,7 +214,7 @@ std::size_t StepKernel::BodyBuild::brepLine(std::size_t from, std::size_t to)
   return brep_body.edges.size() - 1;
 }
 
-std::size_t StepKernel::BodyBuild::lineEdge(int a, int b, bool& forward)
+std::size_t step::BodyBuild::lineEdge(int a, int b, bool& forward)
 {
   const auto key = std::make_pair(std::min(a, b), std::max(a, b));
   const std::size_t from = brepVertex(a);

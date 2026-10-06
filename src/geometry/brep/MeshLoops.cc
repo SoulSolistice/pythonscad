@@ -1,5 +1,5 @@
 /*! The mesh's faces as loops - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <algorithm>
 #include <array>
@@ -10,12 +10,12 @@
 #include <utility>
 #include <vector>
 #include "geometry/recognition/Exact.h"
-#include "io/step/LoopGeometry.h"
+#include "geometry/brep/LoopGeometry.h"
 #include "utils/printutils.h"
 
 using namespace step;
 
-void StepKernel::BodyBuild::buildLoops()
+void step::BodyBuild::buildLoops()
 {
   // Vertices which share the exact same coordinates have to end up as one
   // single VERTEX_POINT. Otherwise every face brings its own copy of each

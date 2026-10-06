@@ -1,5 +1,5 @@
 /*! The recognised bands, written - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <algorithm>
 #include <cmath>
@@ -14,7 +14,7 @@
 // 39, step 2d, the eighth move): what the reader made of the entities this
 // emitter made before, value for value - a placement's directions as given, a
 // line along the unit vector from its first vertex.
-void StepKernel::BodyBuild::emitBands()
+void step::BodyBuild::emitBands()
 {
   auto placement = [](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
     brep::Frame frame;

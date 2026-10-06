@@ -58,7 +58,7 @@ holes. Most of the exporter's difficulty is in consuming that output correctly.
 
 ### The boundary machinery is in one place on purpose
 
-All of it sits in `src/io/step/BoundaryCycles.h` (it was one anonymous namespace
+All of it sits in `src/geometry/brep/BoundaryCycles.h` (it was one anonymous namespace
 at the top of `StepKernel.cc` until 2026-09-25), because the three passes that
 ask about a boundary have to get the same answer:
 
@@ -619,7 +619,7 @@ candidate for a corner - each rung's answer, the mesh position, and the solution
 of the constraints themselves taken in pairs and triples - and chooses. It
 measures each candidate against every constraint the file asserts at that corner,
 to the ladder's exactness floor of 1e-9, and takes the one that satisfies the
-most precise set. Two tables in `src/io/step/CornerLadder.h` are the whole
+most precise set. Two tables in `src/geometry/brep/CornerLadder.h` are the whole
 of the precedence, so reordering the ladder is editing a table:
 
 **`kCornerTiers`** - what kinds of constraint a corner has, and how each counts.

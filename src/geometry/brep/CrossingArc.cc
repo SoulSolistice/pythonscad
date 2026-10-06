@@ -1,5 +1,5 @@
 /*! The arc of the curve where two declared surfaces cross - see CrossingArc.h. */
-#include "io/step/CrossingArc.h"
+#include "geometry/brep/CrossingArc.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +8,7 @@
 
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/MachinePrecision.h"
-#include "io/step/Meridian.h"
+#include "geometry/brep/Meridian.h"
 
 namespace step {
 

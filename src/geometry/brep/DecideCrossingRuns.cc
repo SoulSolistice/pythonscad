@@ -1,5 +1,5 @@
 /*! The crossing edges as curves, one per run - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <algorithm>
 #include <functional>
@@ -10,13 +10,13 @@
 #include <vector>
 
 #include "geometry/AnalyticFeatures.h"
-#include "io/step/BoundaryCycles.h"
-#include "io/step/CrossingArc.h"
-#include "io/step/CrossingRuns.h"
+#include "geometry/brep/BoundaryCycles.h"
+#include "geometry/brep/CrossingArc.h"
+#include "geometry/brep/CrossingRuns.h"
 
 using namespace step;
 
-void StepKernel::BodyBuild::decideCrossingRuns()
+void step::BodyBuild::decideCrossingRuns()
 {
   crossing_pieces.clear();
   piece_of_edge.clear();
@@ -292,7 +292,7 @@ void StepKernel::BodyBuild::decideCrossingRuns()
   }
 }
 
-const std::vector<std::size_t>& StepKernel::BodyBuild::crossingEdges(const CrossingPiece& piece)
+const std::vector<std::size_t>& step::BodyBuild::crossingEdges(const CrossingPiece& piece)
 {
   if (piece.edges.empty() && !piece.curves.empty()) {
     std::size_t from = brepVertex(piece.verts.front());
@@ -319,14 +319,14 @@ const std::vector<std::size_t>& StepKernel::BodyBuild::crossingEdges(const Cross
   return piece.edges;
 }
 
-const StepKernel::BodyBuild::CrossingPiece *StepKernel::BodyBuild::pieceOf(int a, int b) const
+const step::BodyBuild::CrossingPiece *step::BodyBuild::pieceOf(int a, int b) const
 {
   const auto it = piece_of_edge.find({std::min(a, b), std::max(a, b)});
   return it == piece_of_edge.end() ? nullptr : &crossing_pieces[it->second];
 }
 
-bool StepKernel::BodyBuild::walksForward(const CrossingPiece& piece, const std::vector<int>& cycle,
-                                         std::size_t i, bool& ok) const
+bool step::BodyBuild::walksForward(const CrossingPiece& piece, const std::vector<int>& cycle,
+                                   std::size_t i, bool& ok) const
 {
   const std::size_t n = cycle.size(), k = piece.verts.size() - 1;
   bool forward = true, backward = true;
@@ -338,7 +338,7 @@ bool StepKernel::BodyBuild::walksForward(const CrossingPiece& piece, const std::
   return forward;
 }
 
-std::size_t StepKernel::BodyBuild::walkStart(const std::vector<int>& cycle) const
+std::size_t step::BodyBuild::walkStart(const std::vector<int>& cycle) const
 {
   const std::size_t n = cycle.size();
   if (n < 2) return 0;

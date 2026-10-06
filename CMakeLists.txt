@@ -1700,37 +1700,37 @@ set(CORE_SOURCES
   src/io/import_stl.cc
   src/io/import_step.cc
   src/io/StepKernel.cc
-  src/io/step/BodyBuild.cc
-  src/io/step/CrossingRuns.cc
-  src/io/step/Meridian.cc
-  src/io/step/DecideCrossingRuns.cc
-  src/io/step/CornersApply.cc
-  src/io/step/CornersStayOnFaces.cc
-  src/io/step/CornersWelded.cc
-  src/io/step/CornersOnFileFaces.cc
-  src/io/step/CornersOnMeshPlanes.cc
+  src/geometry/brep/BodyBuild.cc
+  src/geometry/brep/CrossingRuns.cc
+  src/geometry/brep/Meridian.cc
+  src/geometry/brep/DecideCrossingRuns.cc
+  src/geometry/brep/CornersApply.cc
+  src/geometry/brep/CornersStayOnFaces.cc
+  src/geometry/brep/CornersWelded.cc
+  src/geometry/brep/CornersOnFileFaces.cc
+  src/geometry/brep/CornersOnMeshPlanes.cc
   src/io/step/WriteShells.cc
   src/io/step/BrepMirror.cc
   src/io/step/BrepToStep.cc
-  src/io/step/CheckAndReport.cc
-  src/io/step/PromoteCurves.cc
-  src/io/step/AssembleFaces.cc
-  src/io/step/EmitCornerFans.cc
-  src/io/step/EmitPlanarFaces.cc
-  src/io/step/CrossingPcurves.cc
-  src/io/step/EmitQuadricFaces.cc
-  src/io/step/EmitSweepFaces.cc
-  src/io/step/EmitBezierFaces.cc
-  src/io/step/EmitBands.cc
-  src/io/step/CornerPlacement.cc
-  src/io/step/DecideSections.cc
-  src/io/step/Recognise.cc
-  src/io/step/MeshLoops.cc
-  src/io/step/SurfaceCensus.cc
-  src/io/step/BoundaryCycles.cc
-  src/io/step/CrossingArc.cc
-  src/io/step/LoopGeometry.cc
-  src/io/step/PlaneSections.cc
+  src/geometry/brep/CheckAndReport.cc
+  src/geometry/brep/PromoteCurves.cc
+  src/geometry/brep/AssembleFaces.cc
+  src/geometry/brep/EmitCornerFans.cc
+  src/geometry/brep/EmitPlanarFaces.cc
+  src/geometry/brep/CrossingPcurves.cc
+  src/geometry/brep/EmitQuadricFaces.cc
+  src/geometry/brep/EmitSweepFaces.cc
+  src/geometry/brep/EmitBezierFaces.cc
+  src/geometry/brep/EmitBands.cc
+  src/geometry/brep/CornerPlacement.cc
+  src/geometry/brep/DecideSections.cc
+  src/geometry/brep/Recognise.cc
+  src/geometry/brep/MeshLoops.cc
+  src/geometry/brep/SurfaceCensus.cc
+  src/geometry/brep/BoundaryCycles.cc
+  src/geometry/brep/CrossingArc.cc
+  src/geometry/brep/LoopGeometry.cc
+  src/geometry/brep/PlaneSections.cc
   src/io/import_svg.cc
   src/platform/PlatformUtils.cc
   src/utils/StackCheck.h

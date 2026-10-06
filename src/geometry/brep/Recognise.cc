@@ -1,12 +1,12 @@
 /*! Recognition, asked from the writer - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <memory>
 #include <vector>
 #include "geometry/recognition/Pipeline.h"
 #include "geometry/recognition/Reports.h"
 
-void StepKernel::BodyBuild::recognise()
+void step::BodyBuild::recognise()
 {
   features.consumed.assign(face_cnt, 0);  // nothing collapsed unless it says so
   if (analytic) {
@@ -49,7 +49,7 @@ void StepKernel::BodyBuild::recognise()
   }
 }
 
-void StepKernel::BodyBuild::reportRecognition()
+void step::BodyBuild::reportRecognition()
 {
   const recognition::ReportInputs report_inputs{
     features,

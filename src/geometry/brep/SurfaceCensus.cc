@@ -1,11 +1,11 @@
 /*! The census line: what the model declared - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <cstdio>
 #include <string>
 #include "utils/printutils.h"
 
-void StepKernel::BodyBuild::reportDeclaredSurfaces()
+void step::BodyBuild::reportDeclaredSurfaces()
 {
   // `curves` and `surfaces` carry the analytic geometry the model was built
   // from: a ring of N quads is exactly the mesh of an N sided prism, so the

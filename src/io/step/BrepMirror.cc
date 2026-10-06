@@ -1,15 +1,12 @@
 /*! The B-rep the file holds, read off its entities - see BodyBuild.h. */
 #include "io/step/BrepMirror.h"
 
-#include "io/step/BodyBuild.h"
-
 #include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "geometry/brep/Brep.h"
-#include "io/step/LoopGeometry.h"
 #include "utils/printutils.h"
 
 namespace {
@@ -235,62 +232,4 @@ brep::Body step::mirrorBrep(const std::vector<StepKernel::Face *>& sfaces,
   }
   for (const auto& faces : shells) body.shells.push_back(brep::Shell{faces, true});
   return body;
-}
-
-void StepKernel::BodyBuild::checkBrep()
-{
-  if (!analytic) return;
-  brep::Body& body = brep_body;
-  const brep::ClassTally t = brep::stateClasses(body);
-  const std::vector<std::string> real = brep::check(body);
-  const std::vector<std::string> misattributed = brep::checkAttribution(body);
-  const std::vector<std::string> off_curves = brep::checkVerticesOnCurves(body, resolution());
-  using recognition::EvidenceClass;
-  auto n = [](const std::array<std::size_t, 6>& by, EvidenceClass c) { return int(by[std::size_t(c)]); };
-  LOG(
-    "STEP export: the B-rep as written - %1$d vertices, %2$d edges, %3$d faces in %4$d shells; vertices "
-    "by what "
-    "decided them %5$d D0, %6$d D1, %7$d D4 - %8$d off a face they bound, %9$d on one nothing can ask; "
-    "edges "
-    "%10$d D1, %11$d D2, %12$d D4 - %13$d carried off a face they bound, %14$d on one nothing can ask "
-    "(open item "
-    "39)",
-    int(body.vertices.size()), int(body.edges.size()), int(body.faces.size()), int(body.shells.size()),
-    n(t.vertices, EvidenceClass::D0), n(t.vertices, EvidenceClass::D1), n(t.vertices, EvidenceClass::D4),
-    int(t.vertices_off), int(t.vertices_unasked), n(t.edges, EvidenceClass::D1),
-    n(t.edges, EvidenceClass::D2), n(t.edges, EvidenceClass::D4), int(t.edges_off),
-    int(t.edges_unasked));
-  if (!real.empty()) {
-    LOG(message_group::Export_Error,
-        "STEP export: the B-rep as written breaks its own contract in %1$d place%2$s (brep::check) - "
-        "first: %3$s",
-        int(real.size()), real.size() == 1 ? "" : "s", real.front().c_str());
-    for (std::size_t i = 1; i < real.size() && i < 6; i++) LOG("STEP export:   %1$s", real[i].c_str());
-  }
-  // Apart from the topology: a face can close perfectly on the wrong surface,
-  // and which surface it is on is identity, the worst thing to get wrong (open
-  // item 39, R10).
-  if (!misattributed.empty()) {
-    LOG(message_group::Export_Error,
-        "STEP export: %1$d face%2$s written on a surface that is not the record %3$s for, nor "
-        "derived from it (brep::checkAttribution) - first: %4$s",
-        int(misattributed.size()), misattributed.size() == 1 ? " is" : "s are",
-        misattributed.size() == 1 ? "it stands" : "they stand", misattributed.front().c_str());
-    for (std::size_t i = 1; i < misattributed.size() && i < 6; i++)
-      LOG("STEP export:   %1$s", misattributed[i].c_str());
-  }
-  // And every vertex on the curve of each edge it ends, to the uncertainty the
-  // file declares: the one relation a reader rejects a substituted curve on. It
-  // was an EXPORT-WARNING in checkAndReport, which a systemic defect is not
-  // (open item 39, R12).
-  if (!off_curves.empty()) {
-    LOG(message_group::Export_Error,
-        "STEP export: %1$d edge end%2$s off the curve %3$s edge is written as, against the %4$.2e the "
-        "file declares as its uncertainty (brep::checkVerticesOnCurves) - a reader calls it \"vertex "
-        "does not lie on edge's curve\"; first: %5$s",
-        int(off_curves.size()), off_curves.size() == 1 ? " is" : "s are",
-        off_curves.size() == 1 ? "its" : "their", resolution(), off_curves.front().c_str());
-    for (std::size_t i = 1; i < off_curves.size() && i < 6; i++)
-      LOG("STEP export:   %1$s", off_curves[i].c_str());
-  }
 }

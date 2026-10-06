@@ -1,5 +1,5 @@
 /*! Where a plane meets a quadric about an axis - see PlaneSections.h. */
-#include "io/step/PlaneSections.h"
+#include "geometry/brep/PlaneSections.h"
 #include "geometry/recognition/Exact.h"
 
 #include <algorithm>

@@ -7,7 +7,7 @@
  * periodic surfaces, the region each face covers, the evidence behind each - is
  * geometry, and none of it is STEP's; an IGES writer, or an SVG one writing true
  * curves, would need all of it. Until now the only B-rep was the STEP entities
- * `StepKernel::BodyBuild` builds as it decides. This is the neutral one, which a
+ * `step::BodyBuild` builds as it decides. This is the neutral one, which a
  * writer translates rather than rebuilds.
  *
  * Three rules shape it.

@@ -1,5 +1,5 @@
 /*! The plane geometry of the mesh's own loops - see LoopGeometry.h. */
-#include "io/step/LoopGeometry.h"
+#include "geometry/brep/LoopGeometry.h"
 
 #include <algorithm>
 #include <cmath>

@@ -1,10 +1,10 @@
 /*! Every face, in one list - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <vector>
 #include "utils/printutils.h"
 
-void StepKernel::BodyBuild::assembleFaces()
+void step::BodyBuild::assembleFaces()
 {
   // Each planar face: its outer loop, then the loops of its holes.
   for (auto& [i, face] : planar_faces) {

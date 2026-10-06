@@ -1,5 +1,5 @@
 /*! The fans for bent polygons - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <array>
 #include <map>
@@ -8,7 +8,7 @@
 #include "geometry/recognition/Exact.h"
 #include "utils/printutils.h"
 
-void StepKernel::BodyBuild::emitCornerFans()
+void step::BodyBuild::emitCornerFans()
 {
   // A face is fanned for a bend, and only for one: every face here must have a
   // corner off the plane it stands on, as the writer asks it. One that has none

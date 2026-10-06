@@ -1,5 +1,5 @@
 /*! The trimmed quadrics, written - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,13 +9,13 @@
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
-#include "io/step/BoundaryCycles.h"
-#include "io/step/CrossingArc.h"
-#include "io/step/PlaneSections.h"
+#include "geometry/brep/BoundaryCycles.h"
+#include "geometry/brep/CrossingArc.h"
+#include "geometry/brep/PlaneSections.h"
 
 using namespace step;
 
-void StepKernel::BodyBuild::emitQuadricFaces()
+void step::BodyBuild::emitQuadricFaces()
 {
   for (const auto& patch : quadric_faces) {
     const auto *axial = dynamic_cast<const AxialSurface *>(patch.surface.get());

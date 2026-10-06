@@ -1,5 +1,5 @@
 /*! The Bezier patches, written - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <algorithm>
 #include <map>
@@ -7,14 +7,13 @@
 #include <set>
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
-#include "io/step/BrepMirror.h"
 
 // Built on the B-rep, faces and edges alike, and made as no entity (open item
 // 39, step 2d, the fifth move): what the reader made of the entities this
 // emitter made before, value for value - a placement's directions as given, a
 // Bezier's one span, a line from its first vertex along the unit vector to its
 // second.
-void StepKernel::BodyBuild::emitBezierFaces()
+void step::BodyBuild::emitBezierFaces()
 {
   std::map<std::set<int>, std::size_t> run_edges;  // run vertices -> its B-rep edge
   auto placement = [](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {

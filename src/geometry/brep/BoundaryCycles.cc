@@ -1,5 +1,5 @@
 /*! A quadric patch's boundary, as cycles - see BoundaryCycles.h. */
-#include "io/step/BoundaryCycles.h"
+#include "geometry/brep/BoundaryCycles.h"
 
 #include <algorithm>
 #include <cmath>
@@ -7,7 +7,7 @@
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Seam.h"
-#include "io/step/PlaneSections.h"
+#include "geometry/brep/PlaneSections.h"
 
 namespace step {
 

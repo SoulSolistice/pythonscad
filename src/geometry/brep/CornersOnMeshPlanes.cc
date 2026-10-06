@@ -1,5 +1,5 @@
 /*! The corner placement's placeOnMeshPlanes - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <algorithm>
 #include <array>
@@ -12,10 +12,10 @@
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
-#include "io/step/BoundaryCycles.h"
-#include "io/step/CornerLadder.h"
-#include "io/step/LoopGeometry.h"
-#include "io/step/PlaneSections.h"
+#include "geometry/brep/BoundaryCycles.h"
+#include "geometry/brep/CornerLadder.h"
+#include "geometry/brep/LoopGeometry.h"
+#include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
 using namespace step;
@@ -25,7 +25,7 @@ using AnalyticFeatures::projectOntoBoth;
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 using AnalyticFeatures::surfaceImplicit;
 
-void StepKernel::BodyBuild::placeOnMeshPlanes()
+void step::BodyBuild::placeOnMeshPlanes()
 {
   if (approximate && !singleOwner.empty()) {
     // The facets still to be written as planes at each corner, and every face

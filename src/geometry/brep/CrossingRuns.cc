@@ -1,6 +1,6 @@
 /*! The curve two declared surfaces cross along, over a whole run - see
  * CrossingRuns.h. */
-#include "io/step/CrossingRuns.h"
+#include "geometry/brep/CrossingRuns.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,8 +10,8 @@
 #include <Eigen/SparseLU>
 
 #include "geometry/AnalyticFeatures.h"
-#include "io/step/CrossingArc.h"
-#include "io/step/Meridian.h"
+#include "geometry/brep/CrossingArc.h"
+#include "geometry/brep/Meridian.h"
 
 namespace step {
 

@@ -26,14 +26,18 @@
 #include "geometry/brep/Brep.h"
 #include "geometry/brep/FaceSource.h"
 #include "geometry/recognition/Pipeline.h"
-#include "io/step/BrepMirror.h"
-#include "io/step/BoundaryCycles.h"
-#include "io/step/CornerLadder.h"
-#include "io/step/CrossingRuns.h"
+#include "geometry/brep/BoundaryCycles.h"
+#include "geometry/brep/CornerLadder.h"
+#include "geometry/brep/CrossingRuns.h"
+#include "geometry/Curve.h"
+#include "geometry/GeometryUtils.h"
 #include "geometry/linalg.h"
-#include "io/StepKernel.h"
 
-struct StepKernel::BodyBuild {
+class SolidTree;
+
+namespace step {
+
+struct BodyBuild {
   BodyBuild(const std::vector<Vector3d>& mesh_vertices, const std::vector<IndexedFace>& faces,
             const std::vector<std::shared_ptr<Curve>>& curves,
             const std::vector<std::shared_ptr<Surface>>& surfaces,
@@ -709,3 +713,5 @@ struct StepKernel::BodyBuild {
   // others. See kCornerRungs.
   std::map<int, step::CornerRung> move_rung;
 };
+
+}  // namespace step

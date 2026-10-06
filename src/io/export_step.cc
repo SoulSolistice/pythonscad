@@ -39,7 +39,7 @@
 #include <src/geometry/Surface.h>
 #include <src/geometry/AnalyticFeatures.h>
 #include <src/geometry/recognition/Exact.h>
-#include "io/step/Meridian.h"
+#include "geometry/brep/Meridian.h"
 #include "geometry/recognition/Provenance.h"
 #ifdef ENABLE_MANIFOLD
 #include <src/geometry/manifold/manifoldutils.h>

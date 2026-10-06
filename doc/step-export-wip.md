@@ -4888,8 +4888,16 @@ the product structure - with the uncertainty the build declares
 Second, the same day: `FaceSource` and `stateSource` - what a maker states of a
 face, writer-neutral - leave the STEP mirror for `geometry/brep/FaceSource.h`,
 in namespace `brep`. Proven by `compare --data`: 0 differences over 132
-exports. Next: `BodyBuild` out of `StepKernel` and its files into
-`geometry/brep`.
+exports.
+
+Third, the same day: `BodyBuild` leaves `StepKernel` - `step::BodyBuild`, a
+class of its own - and the phases' 38 files move from `io/step` to
+`geometry/brep`, `checkBrep` with them out of the mirror's file; no file there
+includes a STEP header. `io/step` keeps what is STEP's: the translator
+(`BrepToStep`), the product structure around it (`WriteShells.cc`,
+`StepKernel::writeBody`), and the reader its round-trip tests use
+(`BrepMirror`). Proven by `compare --data`: 0 differences over 132 exports.
+Next: the phases' helper namespace, still `step`, becomes `brep`.
 
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
@@ -6790,7 +6798,7 @@ edges, and two chords in the middle of it where the per-edge fit had refused
 (`decideCrossingRuns`): chained through every vertex where nothing else meets
 them, and ended where a third edge will - another face's boundary, a facet no
 crossing region holds, the seam closing a face round its axis. A run is one edge,
-a clamped cubic interpolating the true curve (`io/step/CrossingRuns.h`), held to
+a clamped cubic interpolating the true curve (`geometry/brep/CrossingRuns.h`), held to
 the same 1e-7 against both surfaces as the per-edge Bezier, and refined where it
 misses. Where a sweep is only C0 - its declared knots of full multiplicity - the
 crossing turns a corner, and the run is fitted flank by flank and joined into one

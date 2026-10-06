@@ -1,5 +1,5 @@
 /*! Which boundary edges are written as exact curves - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,9 +11,9 @@
 
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
-#include "io/step/BoundaryCycles.h"
-#include "io/step/CrossingArc.h"
-#include "io/step/PlaneSections.h"
+#include "geometry/brep/BoundaryCycles.h"
+#include "geometry/brep/CrossingArc.h"
+#include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
 using namespace step;
@@ -21,7 +21,7 @@ using AnalyticFeatures::declaredBand;
 using AnalyticFeatures::isQuadric;
 using AnalyticFeatures::surfaceImplicit;
 
-void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatures::Patch *>& standing)
+void step::BodyBuild::decideSections(const std::vector<const AnalyticFeatures::Patch *>& standing)
 {
   // Whose facets are not there to be written as a planar face: what an
   // earlier pass consumed, plus what this one is standing to claim.
@@ -307,8 +307,8 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
   }
 }
 
-bool StepKernel::BodyBuild::boundaryLiesOnSurface(const AnalyticFeatures::Patch& patch,
-                                                  const std::set<std::set<int>>& agreed)
+bool step::BodyBuild::boundaryLiesOnSurface(const AnalyticFeatures::Patch& patch,
+                                            const std::set<std::set<int>>& agreed)
 {
   const auto *axial = dynamic_cast<const AxialSurface *>(patch.surface.get());
   if (axial == nullptr) return false;
@@ -379,7 +379,7 @@ bool StepKernel::BodyBuild::boundaryLiesOnSurface(const AnalyticFeatures::Patch&
   return true;
 }
 
-void StepKernel::BodyBuild::redecideSections()
+void step::BodyBuild::redecideSections()
 {
   if (!analytic) return;
   const std::set<std::set<int>> agreed_before = section_curves;

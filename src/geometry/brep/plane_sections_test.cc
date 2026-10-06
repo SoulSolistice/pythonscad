@@ -3,7 +3,7 @@
 // to one of its generators is a parabola, by one a hair off it a hyperbola,
 // and by one across its axis a circle. What is asserted is what a file relies
 // on: that the curve written is the section, through the section's own points.
-#include "io/step/PlaneSections.h"
+#include "geometry/brep/PlaneSections.h"
 
 #include <catch2/catch_all.hpp>
 #include <cmath>

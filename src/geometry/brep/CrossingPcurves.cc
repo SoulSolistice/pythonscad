@@ -1,16 +1,16 @@
 /*! The crossing curves' pcurves - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 
 #include <cmath>
 #include <functional>
 #include <vector>
 #include <Eigen/Dense>
-#include "io/step/CrossingRuns.h"
+#include "geometry/brep/CrossingRuns.h"
 #include "utils/printutils.h"
 
 using namespace step;
 
-void StepKernel::BodyBuild::writeCrossingPcurves()
+void step::BodyBuild::writeCrossingPcurves()
 {
   int pcurved = 0;
   for (std::size_t index = 0; index < crossing_pieces.size(); index++) {

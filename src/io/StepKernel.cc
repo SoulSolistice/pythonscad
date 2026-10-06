@@ -28,7 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
 #include <limits>
 #include "StepKernel.h"
-#include "io/step/BodyBuild.h"
+#include "geometry/brep/BodyBuild.h"
 #include "utils/printutils.h"
 #include <algorithm>  // std::reverse
 #include <iostream>
@@ -65,9 +65,9 @@ void StepKernel::build_tri_body(
 {
   // The B-rep, decided by the body build; then written, the one place its
   // geometry becomes entities (open item 39, step 3).
-  BodyBuild build(mesh_vertices, faces, curves, surfaces, faceOrigin, faceSurface, faceDerived,
-                  cornerMoves, singleOwner, owned, faceParents, faceNormals, tol, analytic, approximate,
-                  cornerOwners, solidTree);
+  step::BodyBuild build(mesh_vertices, faces, curves, surfaces, faceOrigin, faceSurface, faceDerived,
+                        cornerMoves, singleOwner, owned, faceParents, faceNormals, tol, analytic,
+                        approximate, cornerOwners, solidTree);
   const brep::Body body = build.run();
   writeBody(name, body, build.resolution());
 }

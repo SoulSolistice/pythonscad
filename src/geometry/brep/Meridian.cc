@@ -1,6 +1,6 @@
 /*! A declared sweep and a coaxial cylinder or cone in the meridian plane - see
  * Meridian.h. */
-#include "io/step/Meridian.h"
+#include "geometry/brep/Meridian.h"
 
 #include <algorithm>
 #include <cmath>
