@@ -70,11 +70,9 @@ struct StepKernel::BodyBuild {
   void run();
 
   StepKernel& kernel;
-  /*! Where every entity made here registers itself: the kernel's. */
+  /*! Where every entity made here registers itself: the kernel's. Only
+   * writeShells makes any - the translator's, and the product structure. */
   std::vector<Entity *>& entities;
-  // Where this body's entities begin: everything from here to writeShells is its
-  // B-rep's, and none of the product structure is (see writeShells).
-  const std::size_t first_entity = entities.size();
 
   // The inputs, as build_tri_body received them.
   const char *name;
@@ -404,22 +402,15 @@ struct StepKernel::BodyBuild {
    * of our own file - and the report lines for what the emitters counted. */
   void checkAndReport();
 
-  /*! The B-rep the file holds (open item 39, step 2d). The planar faces and
-   * the fans build it directly, their own straight edges with them (lineEdge);
-   * what they take from the phases before them - the analytic faces, the edges
-   * those made, and every vertex - is read off those phases' entities through
-   * `reader`, as they name it. Every phase from assembleFaces on reads and
-   * writes this and nothing else - promoteCurves, the checks, the translator -
-   * and the point where entities stop being made moves upstream a phase at a
-   * time, until nothing is read. */
+  /*! The B-rep the file holds (open item 39, step 2d). Every phase that
+   * writes builds it directly, and none makes a STEP entity: the translator
+   * (writeShells) is the one place entities are made. */
   brep::Body brep_body;
-  /*! The B-rep's vertex for mesh vertex `ind`, one wherever its point is, as
-   * get_vertex merges them: read off the VERTEX_POINT where an analytic face
-   * made one, else made here, on the B-rep, with no entity at all (open item
-   * 39, step 2d, the fourth move). An entity get_vertex makes later at the
-   * same point is bound to it, so the two are one vertex either way. */
+  /*! The B-rep's vertex for mesh vertex `ind`, one wherever its point is - see
+   * `brep_vertex_at`. */
   std::size_t brepVertex(int ind);
-  // The vertices brepVertex made itself, by their exact coordinates.
+  // The vertices brepVertex made, by their exact coordinates: two corners the
+  // placement brought together are one vertex (the comment above `loops`).
   std::map<std::tuple<double, double, double>, std::size_t> brep_vertex_at;
   /*! The straight edge along mesh edge (a, b), as the B-rep's, and in `forward`
    * whether it runs from `a`. One per mesh edge, whoever names it first, built
@@ -485,17 +476,10 @@ struct StepKernel::BodyBuild {
   // tolerance, for the same reason the map above uses them - two corners placed
   // on the same crossing of the same surfaces land on the same doubles, and a
   // tolerance would additionally merge things that are merely close.
-  std::vector<Vertex *> step_verts = std::vector<Vertex *>(mesh_vertices.size(), nullptr);
-  std::map<std::tuple<double, double, double>, Vertex *> vertex_at;
-  /*! The one VERTEX_POINT for vertex `ind`, made on first asking. */
-  Vertex *get_vertex(int ind);
+  // That is brepVertex's rule.
 
-  // The faces the analytic emitters write.
-  std::vector<Face *> sfaces_extra;
-  // The faces an emitter built on the B-rep rather than as entities, by their
-  // place in `sfaces_extra`, which holds a null there: the analytic faces enter
-  // the B-rep in that one order, whoever built them (open item 39, step 2d).
-  std::map<std::size_t, brep::Face> built_faces;
+  // The faces the analytic emitters build, in the order they enter the B-rep.
+  std::vector<brep::Face> analytic_faces;
 
   // Recognise the bands of facets that were modelled as a surface of
   // revolution. The recogniser is format neutral and lives in
@@ -543,19 +527,10 @@ struct StepKernel::BodyBuild {
   // declaration" cannot see a declaration that kept one facet of a hundred,
   // and cannot see ground a fit took.
   std::vector<unsigned char> facet_class = std::vector<unsigned char>(faces.size(), 0);
-  // What each face an emitter made as an entity stands for, registered where
-  // the face is made rather than inferred from it afterwards: the record it is
-  // on, the facets it covers, and the class that decided it. The one channel
-  // the named-facet census and the B-rep both read (open item 39); a face built
-  // on the B-rep states the same on itself. Keyed by the face for lookup only;
-  // faces are walked in `sfaces_extra` order, never this map's.
+  // What each face stands for, stated on the face where it is made rather than
+  // inferred from it afterwards: the record it is on, the facets it covers, and
+  // the class that decided it (step::stateSource).
   using FaceSource = step::FaceSource;
-  std::map<const Face *, FaceSource> face_source;
-  // What an edge's maker states about its carrier, where it states anything - a
-  // fit's error, or that it is its face's own boundary; see step::EdgeSource.
-  std::map<const EdgeCurve *, step::EdgeSource> edge_source;
-  /*! Where the B-rep takes what a phase before it made as an entity. */
-  step::BrepReader reader{brep_body, edge_source};
   /*! What a face stands for, standing on `record` over `facets`. Its class is
    * the weakest its facets' honoured claims state, unless the caller states it
    * - a planar face, which no recogniser claims. */
@@ -563,15 +538,6 @@ struct StepKernel::BodyBuild {
                                     std::vector<std::size_t> facets,
                                     std::optional<recognition::EvidenceClass> evidence = std::nullopt,
                                     bool plane_from_corners = false) const;
-  /*! Register `face`, just made as an entity, as sourceOf says - written on
-   * `carrier`, the surface its maker built it from, where that is not `record`
-   * itself; `derived` where the maker derived it from `record` in closed form
-   * (see brep::Face::carrier). */
-  void registerFace(const Face *face, std::shared_ptr<const Surface> record,
-                    std::vector<std::size_t> facets,
-                    std::optional<recognition::EvidenceClass> evidence = std::nullopt,
-                    bool plane_from_corners = false, std::shared_ptr<const Surface> carrier = nullptr,
-                    bool derived = false);
   /*! The entry of `surfaces` that is `record`, or -1: a fitted record, or a
    * plane derived from a face's corners. */
   [[nodiscard]] int32_t surfaceIndexOf(const Surface *record) const;
@@ -640,37 +606,17 @@ struct StepKernel::BodyBuild {
 
   // What a planar loop gives up to a curve an analytic face writes along it.
   /*! One run of loop edges replaced by a single arc. */
-  /*! An edge a phase hands to the planar faces: an entity a phase still
-   * makes, read when it is named, or one built on the B-rep - its index (open
-   * item 39, step 2d). */
-  struct EdgeRef {
-    EdgeRef() = default;
-    EdgeRef(EdgeCurve *e) : entity(e) {}  // NOLINT: an entity converts
-    static EdgeRef built(std::size_t index)
-    {
-      EdgeRef out;
-      out.brep = index;
-      return out;
-    }
-    EdgeCurve *entity = nullptr;
-    std::size_t brep = std::size_t(-1);
-  };
   /*! A straight edge of the B-rep from `from` to `to`, as
    * StepKernel::create_line_edge_curve made it: from its first vertex along the
    * unit vector to its second. */
   std::size_t brepLine(std::size_t from, std::size_t to);
-  /*! The B-rep's edge `ref` names. */
-  std::size_t brepEdge(const EdgeRef& ref)
-  {
-    return ref.entity != nullptr ? reader.edge(ref.entity) : ref.brep;
-  }
   struct ArcSubstitution {
     std::size_t start = 0, count = 0;
-    EdgeRef edge;
-    bool sense = true;  // orientation for this loop's own traversal
+    std::size_t edge = 0;  // the B-rep's
+    bool sense = true;     // orientation for this loop's own traversal
   };
-  std::map<std::size_t, std::pair<EdgeRef, bool>> rim_of_loop;   // whole loop -> circle
-  std::map<std::size_t, std::vector<ArcSubstitution>> arc_subs;  // runs inside a loop
+  std::map<std::size_t, std::pair<std::size_t, bool>> rim_of_loop;  // whole loop -> circle
+  std::map<std::size_t, std::vector<ArcSubstitution>> arc_subs;     // runs inside a loop
   // Rims written as chords by both faces because the face across is fanned into
   // triangles and cannot be handed the arc. See the band writer below.
   std::size_t rim_unshared = 0;
@@ -726,7 +672,9 @@ struct StepKernel::BodyBuild {
    * by a rotation.
    */
   struct CrossingSide {
-    std::size_t face = 0;  // its slot in `sfaces_extra`, the face built on the B-rep
+    // Its face in `analytic_faces`; none where the face was not written, and
+    // its pcurve then goes nowhere.
+    std::optional<std::size_t> face;
     Vector3d base, axis, ref;
     double slope = 0;  // a cone's, in its written direction; zero for a cylinder
   };

@@ -137,9 +137,9 @@ void StepKernel::BodyBuild::emitBezierFaces()
       // traversing a shared edge the same way is precisely what leaves a
       // shell open.
       if (run.kind == AnalyticFeatures::Patch::Run::WHOLE_LOOP) {
-        rim_of_loop[run.loop] = {EdgeRef::built(edge), !sense};
+        rim_of_loop[run.loop] = {edge, !sense};
       } else if (run.kind == AnalyticFeatures::Patch::Run::LOOP_RUN) {
-        arc_subs[run.loop].push_back({run.start, run.count, EdgeRef::built(edge), !sense});
+        arc_subs[run.loop].push_back({run.start, run.count, edge, !sense});
       }
     }
 
@@ -192,7 +192,6 @@ void StepKernel::BodyBuild::emitBezierFaces()
     face.same_sense = outward;
     face.form = std::move(surface);
     face.loops.push_back(std::move(loop));
-    built_faces.emplace(sfaces_extra.size(), std::move(face));
-    sfaces_extra.push_back(nullptr);
+    analytic_faces.push_back(std::move(face));
   }
 }

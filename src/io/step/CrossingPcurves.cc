@@ -109,10 +109,10 @@ void StepKernel::BodyBuild::writeCrossingPcurves()
       // on the B-rep, where it was wrapped into the entity (open item 39, step
       // 2d, the sixth move).
       for (std::size_t s = 0; s < 2; s++) {
-        const auto built = built_faces.find(sides->second[s].face);
-        if (built == built_faces.end()) continue;
+        const std::optional<std::size_t>& face = sides->second[s].face;
+        if (!face) continue;
         bool placed = false;
-        for (auto& loop : built->second.loops) {
+        for (auto& loop : analytic_faces[*face].loops) {
           for (auto& c : loop.coedges) {
             if (placed || c.edge != e) continue;
             c.pcurve = on_both[s];

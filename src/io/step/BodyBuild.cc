@@ -92,18 +92,6 @@ int32_t StepKernel::BodyBuild::surfaceIndexOf(const Surface *record) const
   return -1;
 }
 
-void StepKernel::BodyBuild::registerFace(const Face *face, std::shared_ptr<const Surface> record,
-                                         std::vector<std::size_t> facets,
-                                         std::optional<recognition::EvidenceClass> evidence,
-                                         bool plane_from_corners, std::shared_ptr<const Surface> carrier,
-                                         bool derived)
-{
-  FaceSource source = sourceOf(std::move(record), std::move(facets), evidence, plane_from_corners);
-  source.carrier = std::move(carrier);
-  source.carrier_derived = derived;
-  face_source[face] = std::move(source);
-}
-
 step::FaceSource StepKernel::BodyBuild::sourceOf(std::shared_ptr<const Surface> record,
                                                  std::vector<std::size_t> facets,
                                                  std::optional<recognition::EvidenceClass> evidence,
@@ -186,32 +174,9 @@ bool StepKernel::BodyBuild::flatWhereItStands(std::size_t face,
   return recognition::flatWhereItStands(points, nullptr, nullptr);
 }
 
-StepKernel::Vertex *StepKernel::BodyBuild::get_vertex(int ind)
-{
-  if (step_verts[ind] == nullptr) {
-    const auto key = std::make_tuple(vertices[ind][0], vertices[ind][1], vertices[ind][2]);
-    const auto it = vertex_at.find(key);
-    if (it != vertex_at.end()) {
-      step_verts[ind] = it->second;
-    } else {
-      auto point = new Point(entities, vertices[ind]);
-      step_verts[ind] = new Vertex(entities, point);
-      vertex_at.emplace(key, step_verts[ind]);
-      // The B-rep may hold this point's vertex already, made by brepVertex:
-      // the entity is that vertex, not a second one beside it.
-      const auto have = brep_vertex_at.find(key);
-      if (have != brep_vertex_at.end()) reader.bind(step_verts[ind], have->second);
-    }
-  }
-  return step_verts[ind];
-}
-
 std::size_t StepKernel::BodyBuild::brepVertex(int ind)
 {
-  if (step_verts[ind] != nullptr) return reader.vertex(step_verts[ind]);
   const auto key = std::make_tuple(vertices[ind][0], vertices[ind][1], vertices[ind][2]);
-  const auto made = vertex_at.find(key);
-  if (made != vertex_at.end()) return reader.vertex(made->second);
   const auto have = brep_vertex_at.find(key);
   if (have != brep_vertex_at.end()) return have->second;
   brep::Vertex vertex;
@@ -245,7 +210,7 @@ std::size_t StepKernel::BodyBuild::lineEdge(int a, int b, bool& forward)
     edge.start = from;
     edge.end = brepVertex(b);
     // From its first vertex, along the unit vector to its second. Two
-    // vertices are one wherever their points are (get_vertex), so the two
+    // vertices are one wherever their points are (brepVertex), so the two
     // differ and the direction is theirs: a line of no length is not asked
     // for (the planar writer skips it) and no direction is invented for one
     // (open item 39, R17).

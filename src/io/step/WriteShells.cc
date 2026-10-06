@@ -29,23 +29,18 @@ double StepKernel::BodyBuild::resolution() const
 void StepKernel::BodyBuild::writeShells()
 {
   // The file's faces are the B-rep's, written by its translator (open item 39,
-  // step 2c): whatever entities the phases still build were read into the B-rep
-  // and are set aside - every one this body made so far is its geometry, and
-  // nothing of the product structure, which is made below - and the translator
-  // writes the B-rep afresh. A CLOSED_SHELL has to be a single connected shell,
-  // so each of the body's shells - its connected components - is one
-  // MANIFOLD_SOLID_BREP.
+  // step 2c), the one place this body's geometry becomes entities: the phases
+  // build the B-rep and make none (step 2d). A CLOSED_SHELL has to be a single
+  // connected shell, so each of the body's shells - its connected components -
+  // is one MANIFOLD_SOLID_BREP.
   const brep::Body& body = brep_body;
-  const std::size_t before = entities.size();
   ParametricContext *context = nullptr;
   const std::vector<Face *> written = step::writeBrep(entities, body, context);
-  for (std::size_t i = first_entity; i < before; i++) entities[i]->live = false;
   if (written.size() != body.faces.size()) {
-    // A face or an edge the B-rep carries on no form - an entity the reader
-    // has no form for, which brep::check has named as an EXPORT-ERROR. There is
-    // nothing else to write: the planar faces were never entities, and the
-    // file states the B-rep or nothing. It says so rather than write a solid
-    // with faces missing.
+    // A face or an edge the B-rep carries on no form, which brep::check has
+    // named as an EXPORT-ERROR. There is nothing else to write: the file
+    // states the B-rep or nothing. It says so rather than write a solid with
+    // faces missing.
     LOG(message_group::Export_Error,
         "STEP export: the B-rep has a face or an edge on no form the translator can write, so the "
         "file holds no solid for it (open item 39)");

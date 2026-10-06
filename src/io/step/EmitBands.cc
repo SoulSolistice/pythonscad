@@ -50,8 +50,7 @@ void StepKernel::BodyBuild::emitBands()
     loop.outer = true;
     loop.coedges = std::move(coedges);
     face.loops.push_back(std::move(loop));
-    built_faces.emplace(sfaces_extra.size(), std::move(face));
-    sfaces_extra.push_back(nullptr);
+    analytic_faces.push_back(std::move(face));
   };
   for (std::size_t i = 0; i < bands.size(); i++) {
     const AnalyticFeatures::Band& band = bands[i];
@@ -295,7 +294,7 @@ void StepKernel::BodyBuild::emitBands()
           }
         }
         rim_edge[side] = rim_circle();
-        rim_of_loop.emplace(rim.loop, std::make_pair(EdgeRef::built(rim_edge[side]), !rim.wall_ccw));
+        rim_of_loop.emplace(rim.loop, std::make_pair(rim_edge[side], !rim.wall_ccw));
       } else {
         // An arc, from one end of the rim to the other. A CIRCLE is counter
         // clockwise about its own axis, so the arc is always written that way
@@ -353,8 +352,7 @@ void StepKernel::BodyBuild::emitBands()
             }
           }
           rim_edge[side] = rim_arc();
-          arc_subs[rim.loop].push_back(
-            {rim.start, rim.count, EdgeRef::built(rim_edge[side]), !rim.wall_ccw});
+          arc_subs[rim.loop].push_back({rim.start, rim.count, rim_edge[side], !rim.wall_ccw});
         }
       }
     }

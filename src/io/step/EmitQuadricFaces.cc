@@ -69,8 +69,9 @@ void StepKernel::BodyBuild::emitQuadricFaces()
       out.ref = towards;
       return out;
     };
-    // The slot this face takes among the analytic faces.
-    const std::size_t slot = sfaces_extra.size();
+    // Its sides of the crossings it is bounded by, given this face once it is
+    // written - and none, if it is not.
+    std::vector<std::pair<std::size_t, CrossingSide>> sides;
     brep::SurfaceForm surface;
     if (elliptic != nullptr) {
       // The section across the sweep, swept: its ELLIPSE in its own principal
@@ -290,8 +291,8 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             // `at_j` is where the run sits in that face's loop, found above -
             // the same search, done once, and binding rather than advisory.
             const std::size_t span = bs.count - 1;
-            if (span == loops[bs.loop].size()) rim_of_loop[bs.loop] = {EdgeRef::built(edge), !dir};
-            else arc_subs[bs.loop].push_back({at_j, span, EdgeRef::built(edge), !dir});
+            if (span == loops[bs.loop].size()) rim_of_loop[bs.loop] = {edge, !dir};
+            else arc_subs[bs.loop].push_back({at_j, span, edge, !dir});
           }
           step += bs.count - 1;
           continue;
@@ -321,12 +322,11 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             // written its own and both pcurves can be built. Only a cylinder or a
             // cone: the pcurve is written from their parameters.
             CrossingSide side;
-            side.face = slot;
             side.base = base;
             side.axis = cone != nullptr && cone->slope < 0 ? Vector3d(-axis) : axis;
             side.ref = ref;
             side.slope = cone != nullptr ? fabs(cone->slope) : 0.0;
-            crossing_sides[std::size_t(piece - crossing_pieces.data())].push_back(side);
+            sides.emplace_back(std::size_t(piece - crossing_pieces.data()), side);
           }
         }
         if (chain.empty()) {
@@ -406,7 +406,10 @@ void StepKernel::BodyBuild::emitQuadricFaces()
       bounds.push_back(std::move(joined));
       band_seams++;
     }
-    if (bounds.empty()) continue;
+    if (bounds.empty()) {
+      for (const auto& [piece, side] : sides) crossing_sides[piece].push_back(side);
+      continue;
+    }
 
     // Which way the face points. A cylinder's own normal is radially outward,
     // so the mesh decides by whether one of its facets agrees.
@@ -433,7 +436,10 @@ void StepKernel::BodyBuild::emitQuadricFaces()
     face.same_sense = outward;
     face.form = std::move(surface);
     face.loops = std::move(bounds);
-    built_faces.emplace(slot, std::move(face));
-    sfaces_extra.push_back(nullptr);
+    for (auto& [piece, side] : sides) {
+      side.face = analytic_faces.size();
+      crossing_sides[piece].push_back(side);
+    }
+    analytic_faces.push_back(std::move(face));
   }
 }

@@ -354,7 +354,6 @@ void StepKernel::BodyBuild::emitSweepFaces()
     face.same_sense = outward;
     face.form = std::move(net);
     face.loops = std::move(bounds);
-    built_faces.emplace(sfaces_extra.size(), std::move(face));
-    sfaces_extra.push_back(nullptr);
+    analytic_faces.push_back(std::move(face));
   }
 }

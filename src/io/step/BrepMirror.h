@@ -2,12 +2,12 @@
 
 /*! The B-rep a STEP file holds, read off its entities (open item 39, step 2).
  *
- * The bridge while the writer's phases still build STEP entities as they
- * decide: what the file asserts, as the neutral B-rep (geometry/brep/Brep.h),
- * so brep::check can hold it to the contract every writer shares, and so the
- * translator that replaces the phases' own entities can be proven against it.
- * It shrinks as the phases fill the B-rep themselves, and goes when nothing is
- * left to read.
+ * The bridge while the writer's phases built STEP entities as they decided:
+ * what the file asserted, as the neutral B-rep (geometry/brep/Brep.h). Since
+ * step 2d's tenth move no phase makes an entity and the writer reads none; what
+ * is left is the translator's inverse, which its round-trip tests read a
+ * written body back with (brep_mirror_test.cc) - and the statement of a face's
+ * source (FaceSource, stateSource), which every maker uses.
  */
 
 #include <cstddef>
@@ -51,12 +51,10 @@ struct EdgeSource {
  * the facets, and the classes. */
 void stateSource(brep::Face& face, const FaceSource& source);
 
-/*! The B-rep, built as the phases decide it (open item 39, step 2d): a phase
- * that builds B-rep entities itself names the entities it still takes from a
- * phase before it through this, and each is read off its STEP entity once - its
- * vertices, curve, pcurves and surface form as the entity holds them, the edge's
- * maker's statement from `edge_sources` - and is the same B-rep entity every
- * time it is named again. As phases convert, less is read, until nothing is.
+/*! Entities read into a B-rep as they are named: each is read off its STEP
+ * entity once - its vertices, curve, pcurves and surface form as the entity
+ * holds them, the edge's maker's statement from `edge_sources` - and is the
+ * same B-rep entity every time it is named again.
  *
  * An index is identity, not order: what is written follows the faces, their
  * loops and their coedges, never the order entities were first named in. */
@@ -68,9 +66,6 @@ public:
   {
   }
   std::size_t vertex(const StepKernel::Vertex *v);
-  /*! `v` is the body's vertex `index` - one the B-rep holds already, which an
-   * entity made later at its point stands for. */
-  void bind(const StepKernel::Vertex *v, std::size_t index) { vertex_index.emplace(v, index); }
   std::size_t edge(const StepKernel::EdgeCurve *e);
   /*! A face a phase made as an entity, appended to the body with what its maker
    * registered, `source` - null where it registered nothing, which leaves the

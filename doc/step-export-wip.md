@@ -4861,6 +4861,21 @@ rim lesson of the eighth move, applied before it could bite. No phase makes a
 STEP entity now. Proven by `compare --data` against the commit before: 0
 differences over 132 exports.
 
+Tenth move, 2026-10-06: the mirror shrinks to nothing in the writer. With no
+entity to read, `BodyBuild` loses the reader and everything that fed it -
+`get_vertex`, the entity-vertex maps, `registerFace` and `face_source`,
+`edge_source`, `EdgeRef`, and the null slots of `sfaces_extra`; the analytic
+faces are a list of B-rep faces in emission order, and `writeShells` has
+nothing of the phases' to set aside. One thing the slots hid is settled in
+passing: a crossing side named its face by the slot it would take, so a face
+not written after all left its slot to the next face, which could then be
+handed the first one's pcurve. A side is now given its face once the face is
+written, and none if it is not - which is what the entity code did, where the
+pcurve stood on a surface no face used and was never read. `step::BrepReader`
+and `mirrorBrep` stay as the translator's inverse, read only by its round-trip
+tests. Proven by `compare --data` against the commit before: 0 differences over
+132 exports. Step 2d is done: the writer builds the B-rep and nothing else.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral
