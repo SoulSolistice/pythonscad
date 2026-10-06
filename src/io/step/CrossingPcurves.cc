@@ -20,10 +20,10 @@ void StepKernel::BodyBuild::writeCrossingPcurves()
     // Each edge of the piece in its own right: they meet where the curve turns
     // a corner, and each is fitted on its own either side of it.
     for (std::size_t link = 0; link < piece.edges.size(); link++) {
-      EdgeCurve *edge = piece.edges[link];
+      const std::size_t e = piece.edges[link];
       const CurveFit& fit = piece.fits[link];
-      auto *curve = dynamic_cast<BSplineCurve *>(edge->round);
-      if (curve == nullptr || curve->pts.size() < 2) continue;
+      const auto *curve = std::get_if<brep::BSpline>(&brep_body.edges[e].curve.form);
+      if (curve == nullptr || curve->points.size() < 2) continue;
 
       // The curve at the points it was fitted through, and how the same curve in
       // a surface's parameters is fitted through their images there: then the
@@ -35,14 +35,14 @@ void StepKernel::BodyBuild::writeCrossingPcurves()
       const bool bezier = fit.ctrl.empty();
       Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr;
       if (bezier) {
-        const int degree = int(curve->pts.size()) - 1;
+        const int degree = int(curve->points.size()) - 1;
         on_curve.resize(degree + 1);
         for (int i = 0; i <= degree; i++) {
           const double t = double(i) / degree;
           Vector3d p = Vector3d::Zero();
           double binom = 1;
           for (int j = 0; j <= degree; j++) {
-            p += curve->pts[j]->pt * (binom * pow(t, j) * pow(1 - t, degree - j));
+            p += curve->points[j] * (binom * pow(t, j) * pow(1 - t, degree - j));
             binom = binom * (degree - j) / (j + 1);
           }
           on_curve[i] = p;
@@ -88,7 +88,7 @@ void StepKernel::BodyBuild::writeCrossingPcurves()
           uv[i] = Eigen::Vector2d(u, rel.dot(side.axis));
         }
         const std::vector<Eigen::Vector2d> solved = fit_flat(uv);
-        if (solved.size() != curve->pts.size()) break;
+        if (solved.size() != curve->points.size()) break;
         // As the reader made it of the BSplineCurve2d this wrote before: a
         // Bezier's one span, or the fit's own knots.
         brep::BSpline2 flat;
@@ -108,7 +108,6 @@ void StepKernel::BodyBuild::writeCrossingPcurves()
       // Each on its own face's use of the edge, where that face was written -
       // on the B-rep, where it was wrapped into the entity (open item 39, step
       // 2d, the sixth move).
-      const std::size_t e = reader.edge(edge);
       for (std::size_t s = 0; s < 2; s++) {
         const auto built = built_faces.find(sides->second[s].face);
         if (built == built_faces.end()) continue;

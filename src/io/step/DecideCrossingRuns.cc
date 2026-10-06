@@ -191,16 +191,27 @@ void StepKernel::BodyBuild::decideCrossingRuns()
         if (k + 1 == run.size()) close_part(vertices[run[k]]);
       }
     }
+    // Each curve stating its fit's own error where it is made; its edge is built
+    // when a face first names it (crossingEdges).
+    auto add_curve = [&](std::vector<Vector3d> points, int degree, std::vector<double> knots,
+                         std::vector<int> mults, double error) {
+      brep::BSpline spline;
+      spline.points = std::move(points);
+      spline.degree = degree;
+      spline.knots = std::move(knots);
+      spline.mults = std::move(mults);
+      brep::Curve curve;
+      curve.form = std::move(spline);
+      curve.carrier_error = error;
+      piece.curves.push_back(std::move(curve));
+    };
     const bool one_bezier = arc;
     if (one_bezier) {
       crossing_fit = std::max(crossing_fit, arc_error);
       piece.verts = {key.first, key.second};
-      std::vector<Point *> cp;
-      cp.reserve(ctrl.size());
-      for (const auto& c : ctrl) cp.push_back(new Point(entities, c));
-      piece.edges = {new EdgeCurve(entities, get_vertex(key.first), get_vertex(key.second),
-                                   new BSplineCurve(entities, "", cp), true)};
-      edge_source[piece.edges.back()] = step::EdgeSource{arc_error, false};
+      // One span, `degree + 1` points along it.
+      const int n = int(ctrl.size());
+      add_curve(ctrl, n - 1, {0, 1}, {n, n}, arc_error);
       piece.fits = {CurveFit()};
     } else {
       if (!fitted) {
@@ -215,21 +226,17 @@ void StepKernel::BodyBuild::decideCrossingRuns()
       } else {
         crossing_fit = std::max(crossing_fit, parts_error);
         piece.verts = run;
-        Vertex *from = get_vertex(run.front());
         for (std::size_t k = 0; k < parts.size(); k++) {
           const CurveFit& part = parts[k];
-          Vertex *to = k + 1 < parts.size()
-                         ? new Vertex(entities, new Point(entities, part.points.back()))
-                         : get_vertex(run.back());
-          std::vector<Point *> cp;
-          cp.reserve(part.ctrl.size());
-          for (const auto& c : part.ctrl) cp.push_back(new Point(entities, c));
-          auto curve = new BSplineCurve(entities, "", cp);
-          curve->setKnots(CurveFit::degree, part.knots, part.mults);
-          piece.edges.push_back(new EdgeCurve(entities, from, to, curve, true));
-          edge_source[piece.edges.back()] = step::EdgeSource{part_errors[k], false};
+          if (part.knots.empty()) {
+            const int n = int(part.ctrl.size());
+            add_curve(part.ctrl, n - 1, {0, 1}, {n, n}, part_errors[k]);
+          } else {
+            add_curve(part.ctrl, CurveFit::degree, part.knots, part.mults, part_errors[k]);
+          }
+          // A corner of the curve inside a mesh edge: a vertex of its own.
+          if (k + 1 < parts.size()) piece.corners.push_back(part.points.back());
           piece.fits.push_back(part);
-          from = to;
         }
       }
     }
@@ -238,8 +245,8 @@ void StepKernel::BodyBuild::decideCrossingRuns()
       const int u = piece.verts[k], w = piece.verts[k + 1];
       piece_of_edge[{std::min(u, w), std::max(u, w)}] = index;
     }
-    if (!piece.edges.empty()) {
-      crossing_written += int(piece.edges.size());
+    if (!piece.curves.empty()) {
+      crossing_written += int(piece.curves.size());
       crossing_mesh_edges += piece.verts.size() - 1;
     }
     crossing_pieces.push_back(std::move(piece));
@@ -283,6 +290,33 @@ void StepKernel::BodyBuild::decideCrossingRuns()
     const auto& ab = crossing_edges.at(edge);
     make_piece(run, ab.first, ab.second);
   }
+}
+
+const std::vector<std::size_t>& StepKernel::BodyBuild::crossingEdges(const CrossingPiece& piece)
+{
+  if (piece.edges.empty() && !piece.curves.empty()) {
+    std::size_t from = brepVertex(piece.verts.front());
+    for (std::size_t k = 0; k < piece.curves.size(); k++) {
+      std::size_t to = 0;
+      if (k < piece.corners.size()) {
+        brep::Vertex corner;
+        corner.point = piece.corners[k];
+        brep_body.vertices.push_back(corner);
+        to = brep_body.vertices.size() - 1;
+      } else {
+        to = brepVertex(piece.verts.back());
+      }
+      brep::Edge edge;
+      edge.start = from;
+      edge.end = to;
+      edge.same_sense = true;
+      edge.curve = piece.curves[k];
+      brep_body.edges.push_back(std::move(edge));
+      piece.edges.push_back(brep_body.edges.size() - 1);
+      from = to;
+    }
+  }
+  return piece.edges;
 }
 
 const StepKernel::BodyBuild::CrossingPiece *StepKernel::BodyBuild::pieceOf(int a, int b) const

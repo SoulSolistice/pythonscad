@@ -239,14 +239,15 @@ void StepKernel::BodyBuild::emitSweepFaces()
         std::vector<Link> links;
         std::size_t spans = 1;  // mesh edges these edges of the file cover
         const CrossingPiece *piece = pieceOf(a, b);
-        if (piece != nullptr && !piece->edges.empty()) {
+        if (piece != nullptr && !piece->curves.empty()) {
           bool ok = false;
           const bool forward = walksForward(*piece, cycle, i, ok);
           if (ok) {
-            for (std::size_t k = 0; k < piece->edges.size(); k++) {
-              const std::size_t at = forward ? k : piece->edges.size() - 1 - k;
+            const std::vector<std::size_t>& edges = crossingEdges(*piece);
+            for (std::size_t k = 0; k < edges.size(); k++) {
+              const std::size_t at = forward ? k : edges.size() - 1 - k;
               const CurveFit *fit = piece->fits[at].ctrl.empty() ? nullptr : &piece->fits[at];
-              links.push_back({reader.edge(piece->edges[at]), forward, fit});
+              links.push_back({edges[at], forward, fit});
             }
             spans = piece->verts.size() - 1;
           } else {

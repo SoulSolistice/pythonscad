@@ -4852,6 +4852,15 @@ difference of the first proof: as an entity it was made and never read into the
 body. Proven by `compare --data` against the commit before: 0 differences over
 132 exports.
 
+Ninth move, 2026-10-06: the crossing curves. `decideCrossingRuns` states each
+piece's curves - B-splines with their fit's own error, and the corners a curve
+turns inside a mesh edge - and makes no entity; `crossingEdges` builds them as
+edges of the B-rep the first time a face names them, so a piece no written face
+is bounded by is no edge of the body, as its entity was never read into it - the
+rim lesson of the eighth move, applied before it could bite. No phase makes a
+STEP entity now. Proven by `compare --data` against the commit before: 0
+differences over 132 exports.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral

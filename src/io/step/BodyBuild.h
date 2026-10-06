@@ -689,16 +689,24 @@ struct StepKernel::BodyBuild {
   struct CrossingPiece {
     std::vector<int> verts;  // along the curve; front() == back() for a closed one
     const Surface *a = nullptr, *b = nullptr;
-    /*! The file's edges along it, in order from verts.front() to verts.back():
+    /*! The file's curves along it, in order from verts.front() to verts.back():
      * one, and one more for every corner the curve turns inside a mesh edge,
      * where a vertex of the file stands - a kernel wants each edge's curve G1.
      * Empty: written as chords. */
-    std::vector<EdgeCurve *> edges;
-    std::vector<step::CurveFit> fits;  // parallel to `edges`; empty for one Bezier
+    std::vector<brep::Curve> curves;
+    std::vector<Vector3d> corners;     // where curves[k] ends and curves[k + 1] starts
+    std::vector<step::CurveFit> fits;  // parallel to `curves`; empty for one Bezier
+    /*! The curves as edges of the B-rep, built the first time a face names
+     * them (crossingEdges): a curve no written face is bounded by is not in the
+     * body, as an entity nothing named was never read into it. */
+    mutable std::vector<std::size_t> edges;
   };
   std::vector<CrossingPiece> crossing_pieces;
   std::map<std::pair<int, int>, std::size_t> piece_of_edge;  // mesh edge (lo, hi) -> piece
   std::size_t crossing_mesh_edges = 0;                       // the mesh edges the pieces cover
+  /*! The piece's edges on the B-rep, built on first asking (open item 39, step
+   * 2d, the ninth move). */
+  const std::vector<std::size_t>& crossingEdges(const CrossingPiece& piece);
   /*! The piece mesh edge (a, b) belongs to, or null. */
   const CrossingPiece *pieceOf(int a, int b) const;
   /*! Where to start walking a boundary cycle so that no piece straddles the

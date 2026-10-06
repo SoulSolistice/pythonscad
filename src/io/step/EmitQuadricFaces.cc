@@ -303,13 +303,13 @@ void StepKernel::BodyBuild::emitQuadricFaces()
         // The piece of a crossing this edge belongs to, decided once for both
         // faces - see decideCrossingRuns.
         const CrossingPiece *piece = pieceOf(a, b);
-        if (piece != nullptr && !piece->edges.empty()) {
+        if (piece != nullptr && !piece->curves.empty()) {
           bool ok = false;
           const bool forward = walksForward(*piece, cycle, i, ok);
           if (ok) {
-            for (std::size_t k = 0; k < piece->edges.size(); k++) {
-              chain.emplace_back(reader.edge(piece->edges[forward ? k : piece->edges.size() - 1 - k]),
-                                 forward);
+            const std::vector<std::size_t>& edges = crossingEdges(*piece);
+            for (std::size_t k = 0; k < edges.size(); k++) {
+              chain.emplace_back(edges[forward ? k : edges.size() - 1 - k], forward);
             }
             spans = piece->verts.size() - 1;
             closed_piece = closed_piece || piece->verts.front() == piece->verts.back();
