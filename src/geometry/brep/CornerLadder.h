@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <limits>
 
-namespace step {
+namespace brep {
 
 /*! The rungs of the corner placement, and the precision they rank at.
  *
@@ -161,4 +161,4 @@ inline bool tierHard(ConstraintTier tier)
   return false;
 }
 
-}  // namespace step
+}  // namespace brep

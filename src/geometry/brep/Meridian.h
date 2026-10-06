@@ -24,7 +24,7 @@
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
 
-namespace step {
+namespace brep {
 
 struct Meridian {
   const SweepSurface *sweep = nullptr;
@@ -65,4 +65,4 @@ private:
   [[nodiscard]] double residual(double t, const Vector2d& q) const;
 };
 
-}  // namespace step
+}  // namespace brep

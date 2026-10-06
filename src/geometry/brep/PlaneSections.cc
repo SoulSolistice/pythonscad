@@ -11,7 +11,7 @@
 
 #include "geometry/AnalyticFeatures.h"
 
-namespace step {
+namespace brep {
 
 bool planeSectionEllipse(const Surface *surface, const Vector3d& normal, const Vector3d& on_plane,
                          SectionEllipse& out)
@@ -415,4 +415,4 @@ std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
   return out;
 }
 
-}  // namespace step
+}  // namespace brep

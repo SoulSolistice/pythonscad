@@ -13,7 +13,7 @@
 // emitter made before, value for value - a placement's directions as given, a
 // Bezier's one span, a line from its first vertex along the unit vector to its
 // second.
-void step::BodyBuild::emitBezierFaces()
+void brep::BodyBuild::emitBezierFaces()
 {
   std::map<std::set<int>, std::size_t> run_edges;  // run vertices -> its B-rep edge
   auto placement = [](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {

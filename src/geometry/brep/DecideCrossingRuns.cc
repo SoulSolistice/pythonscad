@@ -14,9 +14,9 @@
 #include "geometry/brep/CrossingArc.h"
 #include "geometry/brep/CrossingRuns.h"
 
-using namespace step;
+using namespace brep;
 
-void step::BodyBuild::decideCrossingRuns()
+void brep::BodyBuild::decideCrossingRuns()
 {
   crossing_pieces.clear();
   piece_of_edge.clear();
@@ -292,7 +292,7 @@ void step::BodyBuild::decideCrossingRuns()
   }
 }
 
-const std::vector<std::size_t>& step::BodyBuild::crossingEdges(const CrossingPiece& piece)
+const std::vector<std::size_t>& brep::BodyBuild::crossingEdges(const CrossingPiece& piece)
 {
   if (piece.edges.empty() && !piece.curves.empty()) {
     std::size_t from = brepVertex(piece.verts.front());
@@ -319,13 +319,13 @@ const std::vector<std::size_t>& step::BodyBuild::crossingEdges(const CrossingPie
   return piece.edges;
 }
 
-const step::BodyBuild::CrossingPiece *step::BodyBuild::pieceOf(int a, int b) const
+const brep::BodyBuild::CrossingPiece *brep::BodyBuild::pieceOf(int a, int b) const
 {
   const auto it = piece_of_edge.find({std::min(a, b), std::max(a, b)});
   return it == piece_of_edge.end() ? nullptr : &crossing_pieces[it->second];
 }
 
-bool step::BodyBuild::walksForward(const CrossingPiece& piece, const std::vector<int>& cycle,
+bool brep::BodyBuild::walksForward(const CrossingPiece& piece, const std::vector<int>& cycle,
                                    std::size_t i, bool& ok) const
 {
   const std::size_t n = cycle.size(), k = piece.verts.size() - 1;
@@ -338,7 +338,7 @@ bool step::BodyBuild::walksForward(const CrossingPiece& piece, const std::vector
   return forward;
 }
 
-std::size_t step::BodyBuild::walkStart(const std::vector<int>& cycle) const
+std::size_t brep::BodyBuild::walkStart(const std::vector<int>& cycle) const
 {
   const std::size_t n = cycle.size();
   if (n < 2) return 0;

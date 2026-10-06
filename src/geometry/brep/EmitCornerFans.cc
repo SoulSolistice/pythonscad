@@ -8,7 +8,7 @@
 #include "geometry/recognition/Exact.h"
 #include "utils/printutils.h"
 
-void step::BodyBuild::emitCornerFans()
+void brep::BodyBuild::emitCornerFans()
 {
   // A face is fanned for a bend, and only for one: every face here must have a
   // corner off the plane it stands on, as the writer asks it. One that has none

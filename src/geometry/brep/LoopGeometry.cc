@@ -7,7 +7,7 @@
 
 #include "geometry/AnalyticFeatures.h"
 
-namespace step {
+namespace brep {
 
 Vector3d polygonNormal(const std::vector<Vector3d>& vertices, const std::vector<int>& poly)
 {
@@ -285,4 +285,4 @@ std::vector<std::array<int, 3>> triangulateWithHoles(const std::vector<std::vect
   return out;
 }
 
-}  // namespace step
+}  // namespace brep

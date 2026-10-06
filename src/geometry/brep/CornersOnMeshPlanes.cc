@@ -18,14 +18,14 @@
 #include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 using AnalyticFeatures::declaredBand;
 using AnalyticFeatures::isQuadric;
 using AnalyticFeatures::projectOntoBoth;
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 using AnalyticFeatures::surfaceImplicit;
 
-void step::BodyBuild::placeOnMeshPlanes()
+void brep::BodyBuild::placeOnMeshPlanes()
 {
   if (approximate && !singleOwner.empty()) {
     // The facets still to be written as planes at each corner, and every face

@@ -1,9 +1,9 @@
 /*! The corner placement - see BodyBuild.h. */
 #include "geometry/brep/BodyBuild.h"
 
-using namespace step;
+using namespace brep;
 
-void step::BodyBuild::placeCorners()
+void brep::BodyBuild::placeCorners()
 {
   for (const auto& m : cornerMoves) move_rung[m.first] = CornerRung::Provenance;
   placeOnMeshPlanes();

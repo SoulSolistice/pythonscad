@@ -13,9 +13,9 @@
 #include "geometry/brep/CrossingArc.h"
 #include "geometry/brep/PlaneSections.h"
 
-using namespace step;
+using namespace brep;
 
-void step::BodyBuild::emitQuadricFaces()
+void brep::BodyBuild::emitQuadricFaces()
 {
   for (const auto& patch : quadric_faces) {
     const auto *axial = dynamic_cast<const AxialSurface *>(patch.surface.get());

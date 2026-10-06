@@ -18,14 +18,14 @@
 #include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 using AnalyticFeatures::declaredBand;
 using AnalyticFeatures::isQuadric;
 using AnalyticFeatures::projectOntoBoth;
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 using AnalyticFeatures::surfaceImplicit;
 
-void step::BodyBuild::holdWeldedVertices()
+void brep::BodyBuild::holdWeldedVertices()
 {
   std::size_t held = 0;
   for (auto it = moves.begin(); it != moves.end();) {

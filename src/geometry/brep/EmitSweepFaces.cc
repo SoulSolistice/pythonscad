@@ -11,13 +11,13 @@
 #include "geometry/brep/CrossingArc.h"
 #include "geometry/brep/CrossingRuns.h"
 
-using namespace step;
+using namespace brep;
 
 // Built on the B-rep, faces and edges alike, and made as no entity (open item
 // 39, step 2d, the seventh move): what the reader made of the entities this
 // emitter made before, value for value - a net's knots as given, or a Bezier's
 // one span; a pcurve on the use of its edge by the face it is on.
-void step::BodyBuild::emitSweepFaces()
+void brep::BodyBuild::emitSweepFaces()
 {
   // Pcurves given each edge so far. A SURFACE_CURVE carried at most two, and a
   // third was not written (open item 39, step 2d, the seventh move: kept as it

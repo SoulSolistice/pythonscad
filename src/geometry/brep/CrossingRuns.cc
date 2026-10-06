@@ -13,7 +13,7 @@
 #include "geometry/brep/CrossingArc.h"
 #include "geometry/brep/Meridian.h"
 
-namespace step {
+namespace brep {
 
 namespace {
 
@@ -452,4 +452,4 @@ bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector
   return best <= target;
 }
 
-}  // namespace step
+}  // namespace brep

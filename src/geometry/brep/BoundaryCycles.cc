@@ -9,7 +9,7 @@
 #include "geometry/recognition/Seam.h"
 #include "geometry/brep/PlaneSections.h"
 
-namespace step {
+namespace brep {
 
 void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
                   const std::vector<CutPlane>& planes, BoundaryCycle& cycle,
@@ -281,4 +281,4 @@ std::map<std::size_t, BoundaryCycle> boundaryCycles(
   return out;
 }
 
-}  // namespace step
+}  // namespace brep

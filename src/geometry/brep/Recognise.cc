@@ -6,7 +6,7 @@
 #include "geometry/recognition/Pipeline.h"
 #include "geometry/recognition/Reports.h"
 
-void step::BodyBuild::recognise()
+void brep::BodyBuild::recognise()
 {
   features.consumed.assign(face_cnt, 0);  // nothing collapsed unless it says so
   if (analytic) {
@@ -49,7 +49,7 @@ void step::BodyBuild::recognise()
   }
 }
 
-void step::BodyBuild::reportRecognition()
+void brep::BodyBuild::reportRecognition()
 {
   const recognition::ReportInputs report_inputs{
     features,

@@ -13,7 +13,7 @@
 #include "geometry/brep/Brep.h"
 #include "geometry/recognition/Exact.h"
 
-using namespace step;
+using namespace brep;
 
 namespace {
 
@@ -101,7 +101,7 @@ TEST_CASE("a boundary's planar stretch holds only what is on its plane", "[plane
   const Vector3d axis(0, 0, 1);
   auto longest = [&](const std::vector<Vector3d>& at) {
     std::size_t most = 0;
-    for (const auto& st : step::coplanarStretches(cycle, at, axis, 0.0)) most = std::max(most, st.count);
+    for (const auto& st : brep::coplanarStretches(cycle, at, axis, 0.0)) most = std::max(most, st.count);
     return most;
   };
   CHECK(longest(vertices) == 6);
@@ -114,7 +114,7 @@ TEST_CASE("a boundary's planar stretch holds only what is on its plane", "[plane
   // not a stretch; one across it is the circle the arc pass writes.
   std::vector<Vector3d> wall{{100, 0, 0},  {100, 0, 10}, {100, 0, 20},
                              {100, 0, 30}, {50, 50, 30}, {50, 50, 0}};
-  CHECK(step::coplanarStretches({0, 1, 2, 3, 4, 5}, wall, axis, 0.0).empty());
+  CHECK(brep::coplanarStretches({0, 1, 2, 3, 4, 5}, wall, axis, 0.0).empty());
 }
 
 TEST_CASE("two quadrics cross in planes exactly where their pencil holds a pair of them",

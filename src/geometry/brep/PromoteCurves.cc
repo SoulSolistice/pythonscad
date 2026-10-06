@@ -12,9 +12,9 @@
 #include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 
-void step::BodyBuild::promoteCurves()
+void brep::BodyBuild::promoteCurves()
 {
   // On the B-rep (open item 39, step 2d): which faces use each edge, once per
   // use, walked in the order the faces meet their edges - the B-rep's own, so no

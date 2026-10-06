@@ -16,12 +16,12 @@
 #include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 using AnalyticFeatures::declaredBand;
 using AnalyticFeatures::isQuadric;
 using AnalyticFeatures::surfaceImplicit;
 
-void step::BodyBuild::decideSections(const std::vector<const AnalyticFeatures::Patch *>& standing)
+void brep::BodyBuild::decideSections(const std::vector<const AnalyticFeatures::Patch *>& standing)
 {
   // Whose facets are not there to be written as a planar face: what an
   // earlier pass consumed, plus what this one is standing to claim.
@@ -307,7 +307,7 @@ void step::BodyBuild::decideSections(const std::vector<const AnalyticFeatures::P
   }
 }
 
-bool step::BodyBuild::boundaryLiesOnSurface(const AnalyticFeatures::Patch& patch,
+bool brep::BodyBuild::boundaryLiesOnSurface(const AnalyticFeatures::Patch& patch,
                                             const std::set<std::set<int>>& agreed)
 {
   const auto *axial = dynamic_cast<const AxialSurface *>(patch.surface.get());
@@ -379,7 +379,7 @@ bool step::BodyBuild::boundaryLiesOnSurface(const AnalyticFeatures::Patch& patch
   return true;
 }
 
-void step::BodyBuild::redecideSections()
+void brep::BodyBuild::redecideSections()
 {
   if (!analytic) return;
   const std::set<std::set<int>> agreed_before = section_curves;

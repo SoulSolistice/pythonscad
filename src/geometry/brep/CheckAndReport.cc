@@ -8,9 +8,9 @@
 #include <vector>
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 
-void step::BodyBuild::checkAndReport()
+void brep::BodyBuild::checkAndReport()
 {
   // Every edge against its own two vertices is the contract's question now
   // (brep::checkVerticesOnCurves, asked by checkBrep as an EXPORT-ERROR; open
@@ -156,7 +156,7 @@ void step::BodyBuild::checkAndReport()
   }
 }
 
-void step::BodyBuild::checkBrep()
+void brep::BodyBuild::checkBrep()
 {
   if (!analytic) return;
   brep::Body& body = brep_body;

@@ -14,7 +14,7 @@
 #include "geometry/Surface.h"
 #include "geometry/brep/CrossingArc.h"
 
-using namespace step;
+using namespace brep;
 
 namespace {
 

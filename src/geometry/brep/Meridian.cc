@@ -8,7 +8,7 @@
 
 #include "geometry/MachinePrecision.h"
 
-namespace step {
+namespace brep {
 
 bool Meridian::of(const Surface *a, const Surface *b, Meridian& out)
 {
@@ -167,4 +167,4 @@ std::vector<Vector3d> Meridian::corners(const Vector3d& p0, const Vector3d& p1) 
   return out;
 }
 
-}  // namespace step
+}  // namespace brep

@@ -555,9 +555,9 @@ void reportOwnership(const PolySet& ps, std::map<int32_t, std::vector<std::size_
       // what decides, and it is the same test either way.
       // A declared sweep and a coaxial surface of revolution cross in closed
       // form, and the corner keeps its station on it - see Meridian::place.
-      step::Meridian meridian;
+      brep::Meridian meridian;
       Vector3d exact;
-      if (step::Meridian::of(a, b, meridian) && meridian.place(p, exact)) {
+      if (brep::Meridian::of(a, b, meridian) && meridian.place(p, exact)) {
         p = exact;
       } else {
         AnalyticFeatures::projectOntoBoth(a, b, p, solve_tol);

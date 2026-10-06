@@ -19,14 +19,14 @@
 #include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 using AnalyticFeatures::declaredBand;
 using AnalyticFeatures::isQuadric;
 using AnalyticFeatures::projectOntoBoth;
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 using AnalyticFeatures::surfaceImplicit;
 
-void step::BodyBuild::placeOnFileFaces()
+void brep::BodyBuild::placeOnFileFaces()
 {
   if (approximate) {
     // The distinct surfaces of the analytic faces at each corner. Bands are
@@ -371,9 +371,9 @@ void step::BodyBuild::placeOnFileFaces()
           Vector3d p = vertices[v];
           // A declared sweep and a coaxial surface of revolution cross in closed
           // form, and the corner keeps its station on it - see Meridian::place.
-          step::Meridian meridian;
+          brep::Meridian meridian;
           Vector3d exact;
-          if (step::Meridian::of(constraints[a].surface, constraints[b].surface, meridian) &&
+          if (brep::Meridian::of(constraints[a].surface, constraints[b].surface, meridian) &&
               meridian.place(p, exact)) {
             p = exact;
           } else {

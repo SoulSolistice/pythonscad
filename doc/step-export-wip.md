@@ -4897,7 +4897,13 @@ includes a STEP header. `io/step` keeps what is STEP's: the translator
 (`BrepToStep`), the product structure around it (`WriteShells.cc`,
 `StepKernel::writeBody`), and the reader its round-trip tests use
 (`BrepMirror`). Proven by `compare --data`: 0 differences over 132 exports.
-Next: the phases' helper namespace, still `step`, becomes `brep`.
+
+Fourth, the same day: the phases' namespace, still `step`, becomes `brep` -
+`brep::BodyBuild` and its helpers beside the types they build. `step` is now
+what it says: the translator, the reader and the product structure. Inside
+`brep`, `Curve` is the B-rep's edge carrier, so the model's curves are named
+`::Curve` where the build takes them. Proven by `compare --data`: 0 differences
+over 132 exports.
 
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in

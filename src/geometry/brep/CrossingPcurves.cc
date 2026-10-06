@@ -8,9 +8,9 @@
 #include "geometry/brep/CrossingRuns.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 
-void step::BodyBuild::writeCrossingPcurves()
+void brep::BodyBuild::writeCrossingPcurves()
 {
   int pcurved = 0;
   for (std::size_t index = 0; index < crossing_pieces.size(); index++) {

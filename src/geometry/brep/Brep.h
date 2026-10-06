@@ -6,9 +6,9 @@
  * where each corner goes, which exact curve bounds each face, the seams of
  * periodic surfaces, the region each face covers, the evidence behind each - is
  * geometry, and none of it is STEP's; an IGES writer, or an SVG one writing true
- * curves, would need all of it. Until now the only B-rep was the STEP entities
- * `step::BodyBuild` builds as it decides. This is the neutral one, which a
- * writer translates rather than rebuilds.
+ * curves, would need all of it. The only B-rep was once the STEP entities the
+ * body build made as it decided; this is the neutral one, which the body build
+ * (brep::BodyBuild) now builds and a writer translates rather than rebuilds.
  *
  * Three rules shape it.
  *

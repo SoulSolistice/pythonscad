@@ -31,7 +31,7 @@
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
 
-namespace step {
+namespace brep {
 
 /*! A clamped cubic B-spline interpolating `points` at `params`. */
 struct CurveFit {
@@ -90,4 +90,4 @@ std::vector<Vector3d> creaseCorners(const Surface *a, const Surface *b, const Ve
 bool fitCrossingRun(const Surface *a, const Surface *b, const std::vector<Vector3d>& run, double target,
                     CurveFit& out, double& achieved);
 
-}  // namespace step
+}  // namespace brep

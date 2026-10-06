@@ -13,7 +13,7 @@
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
 
-namespace step {
+namespace brep {
 
 /*! One run of a boundary cycle that lies in one plane section. */
 struct BoundarySection {
@@ -127,4 +127,4 @@ std::map<std::size_t, BoundaryCycle> boundaryCycles(
   const std::set<std::pair<int, int>>& spoken_for, bool bind_ends = false,
   SectionStats *stats = nullptr);
 
-}  // namespace step
+}  // namespace brep

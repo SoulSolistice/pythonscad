@@ -18,14 +18,14 @@
 #include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 using AnalyticFeatures::declaredBand;
 using AnalyticFeatures::isQuadric;
 using AnalyticFeatures::projectOntoBoth;
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 using AnalyticFeatures::surfaceImplicit;
 
-void step::BodyBuild::checkMovesStayOnFaces()
+void brep::BodyBuild::checkMovesStayOnFaces()
 {
   if (approximate && !moves.empty()) {
     std::map<int, std::vector<const Surface *>> bounding;

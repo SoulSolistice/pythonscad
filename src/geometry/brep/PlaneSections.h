@@ -12,7 +12,7 @@
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
 
-namespace step {
+namespace brep {
 
 /*! The ellipse a plane cuts from a cylinder or a cone.
  *
@@ -130,4 +130,4 @@ std::vector<PlaneStretch> coplanarStretches(const std::vector<int>& cycle,
                                             const std::vector<Vector3d>& vertices, const Vector3d& axis,
                                             double min_cos_tilt);
 
-}  // namespace step
+}  // namespace brep

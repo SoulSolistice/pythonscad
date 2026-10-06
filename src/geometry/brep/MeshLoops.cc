@@ -13,9 +13,9 @@
 #include "geometry/brep/LoopGeometry.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 
-void step::BodyBuild::buildLoops()
+void brep::BodyBuild::buildLoops()
 {
   // Vertices which share the exact same coordinates have to end up as one
   // single VERTEX_POINT. Otherwise every face brings its own copy of each

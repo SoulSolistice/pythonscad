@@ -25,7 +25,7 @@
 #include <functional>
 #include <iomanip>  // put_time
 
-using namespace step;
+using namespace brep;
 
 namespace {
 
@@ -42,7 +42,7 @@ using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 
 }  // namespace
 
-brep::Body step::BodyBuild::run()
+brep::Body brep::BodyBuild::run()
 {
   reportDeclaredSurfaces();
 
@@ -89,14 +89,14 @@ brep::Body step::BodyBuild::run()
 // (`crossing_fit`); and it is what the file declares as its uncertainty, what a
 // reader may take two points as one within. That was 1e-5 whatever the file
 // held until 2026-09-28.
-double step::BodyBuild::resolution() const
+double brep::BodyBuild::resolution() const
 {
   double size = 1.0;
   for (const Vector3d& v : vertices) size = std::max(size, v.norm());
   return 1e-9 * size;
 }
 
-int32_t step::BodyBuild::surfaceIndexOf(const Surface *record) const
+int32_t brep::BodyBuild::surfaceIndexOf(const Surface *record) const
 {
   for (std::size_t i = 0; i < surfaces.size(); i++) {
     if (surfaces[i].get() == record) return int32_t(i);
@@ -107,7 +107,7 @@ int32_t step::BodyBuild::surfaceIndexOf(const Surface *record) const
   return -1;
 }
 
-brep::FaceSource step::BodyBuild::sourceOf(std::shared_ptr<const Surface> record,
+brep::FaceSource brep::BodyBuild::sourceOf(std::shared_ptr<const Surface> record,
                                            std::vector<std::size_t> facets,
                                            std::optional<recognition::EvidenceClass> evidence,
                                            bool plane_from_corners) const
@@ -148,7 +148,7 @@ brep::FaceSource step::BodyBuild::sourceOf(std::shared_ptr<const Surface> record
                     plane_from_corners, record_class};
 }
 
-bool step::BodyBuild::boundWritten(std::size_t loop) const
+bool brep::BodyBuild::boundWritten(std::size_t loop) const
 {
   auto outer_written = [&](std::size_t k) {
     return k < face_cnt && loop_valid[k] && !loop_is_hole[k] && !consumed[k] &&
@@ -162,14 +162,14 @@ bool step::BodyBuild::boundWritten(std::size_t loop) const
          outer_written(std::size_t(parents[loop]));
 }
 
-const Surface *step::BodyBuild::namedFor(std::size_t facet) const
+const Surface *brep::BodyBuild::namedFor(std::size_t facet) const
 {
   if (facet >= faceSurface.size()) return nullptr;
   const int32_t s = faceSurface[facet];
   return s < 0 || std::size_t(s) >= surfaces.size() ? nullptr : surfaces[std::size_t(s)].get();
 }
 
-bool step::BodyBuild::flatWhereItStands(std::size_t face, const std::function<Vector3d(int)>& at) const
+bool brep::BodyBuild::flatWhereItStands(std::size_t face, const std::function<Vector3d(int)>& at) const
 {
   std::vector<int> corners(loops[face].begin(), loops[face].end());
   for (std::size_t j = 0; j < face_cnt; j++) {
@@ -188,7 +188,7 @@ bool step::BodyBuild::flatWhereItStands(std::size_t face, const std::function<Ve
   return recognition::flatWhereItStands(points, nullptr, nullptr);
 }
 
-std::size_t step::BodyBuild::brepVertex(int ind)
+std::size_t brep::BodyBuild::brepVertex(int ind)
 {
   const auto key = std::make_tuple(vertices[ind][0], vertices[ind][1], vertices[ind][2]);
   const auto have = brep_vertex_at.find(key);
@@ -200,7 +200,7 @@ std::size_t step::BodyBuild::brepVertex(int ind)
   return brep_body.vertices.size() - 1;
 }
 
-std::size_t step::BodyBuild::brepLine(std::size_t from, std::size_t to)
+std::size_t brep::BodyBuild::brepLine(std::size_t from, std::size_t to)
 {
   brep::Edge edge;
   edge.start = from;
@@ -214,7 +214,7 @@ std::size_t step::BodyBuild::brepLine(std::size_t from, std::size_t to)
   return brep_body.edges.size() - 1;
 }
 
-std::size_t step::BodyBuild::lineEdge(int a, int b, bool& forward)
+std::size_t brep::BodyBuild::lineEdge(int a, int b, bool& forward)
 {
   const auto key = std::make_pair(std::min(a, b), std::max(a, b));
   const std::size_t from = brepVertex(a);

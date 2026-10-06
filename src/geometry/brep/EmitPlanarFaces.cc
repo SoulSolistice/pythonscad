@@ -12,9 +12,9 @@
 #include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 
-void step::BodyBuild::emitPlanarFaces()
+void brep::BodyBuild::emitPlanarFaces()
 {
   int planes_declared = 0, planes_by_position = 0;
 

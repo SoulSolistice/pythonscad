@@ -5,7 +5,7 @@
 #include <string>
 #include "utils/printutils.h"
 
-void step::BodyBuild::reportDeclaredSurfaces()
+void brep::BodyBuild::reportDeclaredSurfaces()
 {
   // `curves` and `surfaces` carry the analytic geometry the model was built
   // from: a ring of N quads is exactly the mesh of an N sided prism, so the

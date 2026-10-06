@@ -12,7 +12,7 @@
 
 #include "geometry/linalg.h"
 
-namespace step {
+namespace brep {
 
 // Newell's method. In contrast to the cross product of the first two edges it
 // is stable for concave corners (where the cross product points the wrong way)
@@ -89,4 +89,4 @@ std::vector<std::array<int, 3>> triangulateWithHoles(const std::vector<std::vect
                                                      const std::function<Vector3d(int)>& at,
                                                      const Vector3d& normal);
 
-}  // namespace step
+}  // namespace brep

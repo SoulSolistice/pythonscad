@@ -35,11 +35,11 @@
 
 class SolidTree;
 
-namespace step {
+namespace brep {
 
 struct BodyBuild {
   BodyBuild(const std::vector<Vector3d>& mesh_vertices, const std::vector<IndexedFace>& faces,
-            const std::vector<std::shared_ptr<Curve>>& curves,
+            const std::vector<std::shared_ptr<::Curve>>& curves,
             const std::vector<std::shared_ptr<Surface>>& surfaces,
             const std::vector<int32_t>& faceOrigin, const std::vector<int32_t>& faceSurface,
             const std::vector<char>& faceDerived, const std::map<int, Vector3d>& cornerMoves,
@@ -75,7 +75,7 @@ struct BodyBuild {
   // The inputs, as build_tri_body received them.
   const std::vector<Vector3d>& mesh_vertices;
   const std::vector<IndexedFace>& faces;
-  const std::vector<std::shared_ptr<Curve>>& curves;
+  const std::vector<std::shared_ptr<::Curve>>& curves;
   const std::vector<std::shared_ptr<Surface>>& surfaces;
   const std::vector<int32_t>& faceOrigin;
   /*! Per face, the declared surface it was made on, as an index into
@@ -565,7 +565,7 @@ struct BodyBuild {
   // The planes that cut each quadric surface, gathered once so that every face
   // of that surface sees the same list and they agree about the curve between
   // them. Filled by the quadric pass, read again by its writer.
-  std::map<const Surface *, std::vector<step::CutPlane>> section_planes;
+  std::map<const Surface *, std::vector<brep::CutPlane>> section_planes;
   // Parallel to `bezier_patches`: the exact quadric that patch lies on, or null
   // where it is written as the spline it is in general - as its maker stated
   // it (BezierPatchSurface::stateQuadric).
@@ -634,7 +634,7 @@ struct BodyBuild {
      * Empty: written as chords. */
     std::vector<brep::Curve> curves;
     std::vector<Vector3d> corners;     // where curves[k] ends and curves[k + 1] starts
-    std::vector<step::CurveFit> fits;  // parallel to `curves`; empty for one Bezier
+    std::vector<brep::CurveFit> fits;  // parallel to `curves`; empty for one Bezier
     /*! The curves as edges of the B-rep, built the first time a face names
      * them (crossingEdges): a curve no written face is bounded by is not in the
      * body, as an entity nothing named was never read into it. */
@@ -682,7 +682,7 @@ struct BodyBuild {
   std::size_t reseamed = 0, reseam_full = 0;
   std::map<std::set<int>, std::size_t> section_edges;  // run vertices -> its B-rep conic
   // What binding the written sections' ends to the surface cost - see SectionStats.
-  step::SectionStats section_stats;
+  brep::SectionStats section_stats;
   // Sections the far face could not be handed, and which are therefore
   // written as chords by both rather than as a conic by one. Reached only
   // where a planar loop no longer carries the run - see below.
@@ -711,7 +711,7 @@ struct BodyBuild {
   std::map<int, Vector3d> moves = cornerMoves;
   // Which rung placed each move, so the arbiter can weigh it against the
   // others. See kCornerRungs.
-  std::map<int, step::CornerRung> move_rung;
+  std::map<int, brep::CornerRung> move_rung;
 };
 
-}  // namespace step
+}  // namespace brep

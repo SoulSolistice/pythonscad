@@ -4,7 +4,7 @@
 #include <vector>
 #include "utils/printutils.h"
 
-void step::BodyBuild::assembleFaces()
+void brep::BodyBuild::assembleFaces()
 {
   // Each planar face: its outer loop, then the loops of its holes.
   for (auto& [i, face] : planar_faces) {

@@ -10,7 +10,7 @@
 #include "geometry/MachinePrecision.h"
 #include "geometry/brep/Meridian.h"
 
-namespace step {
+namespace brep {
 
 using AnalyticFeatures::projectOntoBoth;
 using AnalyticFeatures::surfaceImplicit;
@@ -259,4 +259,4 @@ double intersectionArcError(const Surface *a, const Surface *b, const std::vecto
   return worst;
 }
 
-}  // namespace step
+}  // namespace brep

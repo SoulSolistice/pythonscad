@@ -9,7 +9,7 @@
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
 
-namespace step {
+namespace brep {
 
 /*! Why a crossing arc came out as it did.
  *
@@ -83,4 +83,4 @@ bool onCrossing(const Surface *a, const Surface *b, Vector3d& q, const Vector3d&
 double intersectionArcError(const Surface *a, const Surface *b, const std::vector<Vector3d>& ctrl,
                             double *on_quadric = nullptr, double *on_fitted = nullptr);
 
-}  // namespace step
+}  // namespace brep

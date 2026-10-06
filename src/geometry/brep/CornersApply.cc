@@ -18,14 +18,14 @@
 #include "geometry/brep/PlaneSections.h"
 #include "utils/printutils.h"
 
-using namespace step;
+using namespace brep;
 using AnalyticFeatures::declaredBand;
 using AnalyticFeatures::isQuadric;
 using AnalyticFeatures::projectOntoBoth;
 using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 using AnalyticFeatures::surfaceImplicit;
 
-void step::BodyBuild::applyCornerMoves()
+void brep::BodyBuild::applyCornerMoves()
 {
   if (approximate && !moves.empty()) {
     auto at_moved = [&](int v) -> const Vector3d& {

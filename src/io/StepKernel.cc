@@ -65,7 +65,7 @@ void StepKernel::build_tri_body(
 {
   // The B-rep, decided by the body build; then written, the one place its
   // geometry becomes entities (open item 39, step 3).
-  step::BodyBuild build(mesh_vertices, faces, curves, surfaces, faceOrigin, faceSurface, faceDerived,
+  brep::BodyBuild build(mesh_vertices, faces, curves, surfaces, faceOrigin, faceSurface, faceDerived,
                         cornerMoves, singleOwner, owned, faceParents, faceNormals, tol, analytic,
                         approximate, cornerOwners, solidTree);
   const brep::Body body = build.run();
