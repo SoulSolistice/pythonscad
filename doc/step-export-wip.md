@@ -5471,6 +5471,22 @@ from coming back - landed with the fix and mutation-checked (F2).
   every corner lies on a declared plane - 86 cut planes on lid10, 16 on the
   bayonet, 6 on step-exchange-never-surrender - so the plane was declared and
   the facet carries no name for it; the boolean or the primitive dropped it.
+- **R33 - the corner arbiter took a plane by position as the maker's word.
+  Fixed 2026-10-06.** Found checking, at the user's asking, that no routing
+  of R7 could pass a misattribution or a false class through a back door.
+  Classes cannot: an edge is D1 only where its curve is certified on every
+  face's record, a vertex as its records hold it (`brep::stateClasses`), and
+  the routing only chooses what is written. But the arbiter, deciding where a
+  corner goes, made every written facet whose corners all lie on a declared
+  plane a `DeclaredFace` constraint, named for that plane or for nothing, and
+  R13's derived cut planes the same - position weighing as identity. Now a
+  facet named for a declared plane is that record, `DeclaredFace`; one named
+  for nothing found on one by position is `DerivedFace`, a tier of its own (D1)
+  below every statement - declared faces and interpolants - and above fits; a
+  derived cut plane likewise; a facet named for a curved surface is a chord.
+  Neutral over 132 exports and the flagship coupons: no corner has a derived
+  plane contesting a stronger constraint today. *Test:* owed, as R6's and
+  R14's - no unit test drives the arbiter.
 - **R31 - a fillet's quadric was measured back from its patch. Fixed
   2026-10-05.** Found auditing the chosen numbers left after R5: recognition
   (`quadricOfPatch`) took each rational patch fillet() draws, read a candidate

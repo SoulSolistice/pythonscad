@@ -270,7 +270,10 @@ void StepKernel::BodyBuild::placeOnFileFaces()
           if (!cp.declared) continue;
           if (!recognition::onPlane(cp.on_plane, cp.normal, vertices[v])) continue;
           keep_alive.push_back(std::make_shared<PlaneSurface>(cp.on_plane, cp.normal));
-          add(keep_alive.back().get(), ConstraintTier::DeclaredFace);
+          // A cut plane found by the facet's corners, the facet named for
+          // nothing, is a derivation (R13), and weighs as one (R33).
+          add(keep_alive.back().get(),
+              cp.derived ? ConstraintTier::DerivedFace : ConstraintTier::DeclaredFace);
         }
       }
       const auto owners = cornerOwners.find(v);
@@ -291,17 +294,31 @@ void StepKernel::BodyBuild::placeOnFileFaces()
             // let lid10's z = 95 cap - declared by the cylinder whose top it is -
             // go soft, and the corners of its hole were placed 0.65 below it on
             // the outer wall, leaving an annulus of no width no fan could cut.
-            const PlaneSurface *declared = nullptr;
-            for (const auto& d : surfaces) {
-              const auto *pl = dynamic_cast<const PlaneSurface *>(d.get());
-              if (pl == nullptr) continue;
-              if (!recognition::onPlane(pl->refpt, pl->normdir, vertices, loops[i])) continue;
-              declared = pl;
-              break;
-            }
-            if (declared != nullptr) {
-              add(declared, ConstraintTier::DeclaredFace);
+            //
+            // Which plane is the facet's name: one named for a declared plane is
+            // that record, the maker's word. One named for nothing whose every
+            // corner lies on a declared plane stands on it by position only - a
+            // derivation (D1), weighed as one; it was a declaration as much as
+            // the named face until 2026-10-06 (open item 39, R33). One named for
+            // a curved surface is a chord of it.
+            const Surface *named = namedFor(i);
+            if (const auto *record = dynamic_cast<const PlaneSurface *>(named)) {
+              add(record, ConstraintTier::DeclaredFace);
               continue;
+            }
+            if (named == nullptr) {
+              const PlaneSurface *declared = nullptr;
+              for (const auto& d : surfaces) {
+                const auto *pl = dynamic_cast<const PlaneSurface *>(d.get());
+                if (pl == nullptr) continue;
+                if (!recognition::onPlane(pl->refpt, pl->normdir, vertices, loops[i])) continue;
+                declared = pl;
+                break;
+              }
+              if (declared != nullptr) {
+                add(declared, ConstraintTier::DerivedFace);
+                continue;
+              }
             }
             keep_alive.push_back(std::make_shared<PlaneSurface>(vertices[loops[i][0]], n));
             add(keep_alive.back().get(), ConstraintTier::MeshPlane);

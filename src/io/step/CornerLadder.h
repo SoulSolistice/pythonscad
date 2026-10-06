@@ -76,6 +76,10 @@ inline int cornerRungRank(CornerRung rung)
  *   DeclaredInterpolant  a declare_grid sweep or a Bezier patch: declared, but
  *                    interpolated through the model's stations, publishing a
  *                    band - exactness takes precedence over it
+ *   DerivedFace      a declared plane a written face stands on by its corners
+ *                    alone, the face named for nothing: the record is the
+ *                    maker's, the attribution a derivation (D1) - below every
+ *                    statement, and above a fit (open item 39, R33)
  *   FittedFace       the surface of an analytic face the approximation fitted.
  *                    Less precise than a declaration, but the file asserts it:
  *                    a corner off it is a vertex off its own face's surface
@@ -94,11 +98,12 @@ inline int cornerRungRank(CornerRung rung)
 enum class ConstraintTier : int {
   DeclaredFace,
   DeclaredInterpolant,
+  DerivedFace,
   FittedFace,
   ProvenanceOwner,
   MeshPlane
 };
-constexpr std::size_t kConstraintTierCount = 5;
+constexpr std::size_t kConstraintTierCount = 6;
 struct ConstraintTierSpec {
   ConstraintTier tier;
   std::size_t rank;  // an index into the score, 0 the most precise
@@ -127,9 +132,12 @@ struct ConstraintTierSpec {
 // 1.4e-12 to 1.9 apart in the mesh, and a fan could not cut a ring with a side
 // of no length. Unused, none of that occurs (open item 23).
 constexpr ConstraintTierSpec kCornerTiers[kConstraintTierCount] = {
-  {ConstraintTier::DeclaredFace, 0, false, true}, {ConstraintTier::DeclaredInterpolant, 1, false, true},
-  {ConstraintTier::FittedFace, 2, false, true},   {ConstraintTier::ProvenanceOwner, 3, false, true},
-  {ConstraintTier::MeshPlane, 4, false, false},
+  {ConstraintTier::DeclaredFace, 0, false, true},
+  {ConstraintTier::DeclaredInterpolant, 1, false, true},
+  {ConstraintTier::DerivedFace, 2, false, true},
+  {ConstraintTier::FittedFace, 3, false, true},
+  {ConstraintTier::ProvenanceOwner, 4, false, true},
+  {ConstraintTier::MeshPlane, 5, false, false},
 };
 inline std::size_t tierRank(ConstraintTier tier)
 {
