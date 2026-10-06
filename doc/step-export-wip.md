@@ -4821,6 +4821,19 @@ face an emitter built takes its slot in `sfaces_extra` (a null there,
 whoever built them. Proven by `compare --data`: 0 differences over 132 exports.
 Next: the sweeps, the quadrics, the bands, and the crossing curves.
 
+Sixth move, 2026-10-06: the trimmed quadrics, and the crossing pcurves with them.
+The emitters are moved from the last of their order backwards - quadrics before
+sweeps, since a chord the sweeps make is read through `edge_map` by `lineEdge`
+and one the quadrics built would not be found by the sweeps' own map.
+`emitQuadricFaces` builds its surfaces, section conics, chords and seams on the
+B-rep and makes no entity; the crossing pieces it bounds by are still entities,
+read. A crossing's pcurves were wrapped into its entity edge as a SURFACE_CURVE
+keyed by the SURFACE the side wrote; a side now names its face's slot, and
+`writeCrossingPcurves` puts each pcurve on that face's use of the edge - where
+the translator writes it from. `conic_placement` went with its last caller.
+Proven by `compare --data` against the commit before: 0 differences over 132
+exports.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral

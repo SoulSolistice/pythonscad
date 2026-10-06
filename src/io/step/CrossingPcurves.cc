@@ -70,7 +70,7 @@ void StepKernel::BodyBuild::writeCrossingPcurves()
         fit_flat = [&](const std::vector<Eigen::Vector2d>& uv) { return interpolateLike(fit, uv); };
       }
 
-      std::vector<PCurve *> on_both;
+      std::vector<brep::BSpline2> on_both;
       for (const CrossingSide& side : sides->second) {
         const Vector3d ref2 = side.axis.cross(side.ref);
         std::vector<Eigen::Vector2d> uv(on_curve.size());
@@ -89,16 +89,38 @@ void StepKernel::BodyBuild::writeCrossingPcurves()
         }
         const std::vector<Eigen::Vector2d> solved = fit_flat(uv);
         if (solved.size() != curve->pts.size()) break;
-        std::vector<Point2d *> cp;
-        for (const auto& c : solved) cp.push_back(new Point2d(entities, c.x(), c.y()));
-        auto flat = new BSplineCurve2d(entities, cp);
-        if (!bezier) flat->setKnots(CurveFit::degree, fit.knots, fit.mults);
-        if (param_context == nullptr) param_context = new ParametricContext(entities);
-        auto rep = new DefinitionalRepresentation(entities, flat, param_context);
-        on_both.push_back(new PCurve(entities, side.surface, rep));
+        // As the reader made it of the BSplineCurve2d this wrote before: a
+        // Bezier's one span, or the fit's own knots.
+        brep::BSpline2 flat;
+        for (const auto& c : solved) flat.points.emplace_back(c.x(), c.y());
+        if (bezier) {
+          flat.degree = int(solved.size()) - 1;
+          flat.knots = {0, 1};
+          flat.mults = {int(solved.size()), int(solved.size())};
+        } else {
+          flat.degree = CurveFit::degree;
+          flat.knots = fit.knots;
+          flat.mults = fit.mults;
+        }
+        on_both.push_back(std::move(flat));
       }
       if (on_both.size() != 2) continue;
-      edge->round = new SurfaceCurve(entities, curve, on_both);
+      // Each on its own face's use of the edge, where that face was written -
+      // on the B-rep, where it was wrapped into the entity (open item 39, step
+      // 2d, the sixth move).
+      const std::size_t e = reader.edge(edge);
+      for (std::size_t s = 0; s < 2; s++) {
+        const auto built = built_faces.find(sides->second[s].face);
+        if (built == built_faces.end()) continue;
+        bool placed = false;
+        for (auto& loop : built->second.loops) {
+          for (auto& c : loop.coedges) {
+            if (placed || c.edge != e) continue;
+            c.pcurve = on_both[s];
+            placed = true;
+          }
+        }
+      }
       pcurved++;
     }
   }

@@ -221,6 +221,20 @@ std::size_t StepKernel::BodyBuild::brepVertex(int ind)
   return brep_body.vertices.size() - 1;
 }
 
+std::size_t StepKernel::BodyBuild::brepLine(std::size_t from, std::size_t to)
+{
+  brep::Edge edge;
+  edge.start = from;
+  edge.end = to;
+  edge.same_sense = true;
+  const Vector3d p = brep_body.vertices[from].point;
+  Vector3d v = brep_body.vertices[to].point - p;
+  v /= v.norm();
+  edge.curve.form = brep::Line{p, v};
+  brep_body.edges.push_back(std::move(edge));
+  return brep_body.edges.size() - 1;
+}
+
 std::size_t StepKernel::BodyBuild::lineEdge(int a, int b, bool& forward)
 {
   const auto key = std::make_pair(std::min(a, b), std::max(a, b));

@@ -662,6 +662,10 @@ struct StepKernel::BodyBuild {
     EdgeCurve *entity = nullptr;
     std::size_t brep = std::size_t(-1);
   };
+  /*! A straight edge of the B-rep from `from` to `to`, as
+   * StepKernel::create_line_edge_curve made it: from its first vertex along the
+   * unit vector to its second. */
+  std::size_t brepLine(std::size_t from, std::size_t to);
   /*! The B-rep's edge `ref` names. */
   std::size_t brepEdge(const EdgeRef& ref)
   {
@@ -721,7 +725,7 @@ struct StepKernel::BodyBuild {
    * by a rotation.
    */
   struct CrossingSide {
-    SurfaceType *surface = nullptr;
+    std::size_t face = 0;  // its slot in `sfaces_extra`, the face built on the B-rep
     Vector3d base, axis, ref;
     double slope = 0;  // a cone's, in its written direction; zero for a cylinder
   };
@@ -737,7 +741,7 @@ struct StepKernel::BodyBuild {
   // The plane sections written, and what the quadric emitter counted.
   // Sweep faces whose seam was moved to a column their boundary does not cross.
   std::size_t reseamed = 0, reseam_full = 0;
-  std::map<std::set<int>, EdgeCurve *> section_edges;
+  std::map<std::set<int>, std::size_t> section_edges;  // run vertices -> its B-rep conic
   // What binding the written sections' ends to the surface cost - see SectionStats.
   step::SectionStats section_stats;
   // Sections the far face could not be handed, and which are therefore
@@ -751,9 +755,6 @@ struct StepKernel::BodyBuild {
   // Boundary sections refused because their plane was a facet of something
   // curved rather than a plane. See open item 26.
   int sections_on_facet = 0;
-  /*! The placement of a conic at `origin`, its plane's normal `dir`, its
-   * reference direction `towards`. */
-  Axis2Placement *conic_placement(const Vector3d& origin, const Vector3d& dir, const Vector3d& towards);
 
   // Each facet loop as a loop of the B-rep, and each outer one's face - its
   // plane and what the plane stands for, its loops added by assembleFaces; see

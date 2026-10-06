@@ -58,38 +58,39 @@ void StepKernel::BodyBuild::emitQuadricFaces()
       if (ref.norm() > 0.5) break;
     }
     if (ref.norm() < 0.5) ref = AnalyticFeatures::perpendicular(axis);
-    // The placement a cylinder or a cone is written in; an elliptic cylinder
-    // carries its ellipse's own, and would leave these referenced by nothing
-    // (open item 39, R18).
-    // Made one after another, in the order they always were: an entity's id is
-    // its place in the file, and argument evaluation order is not fixed.
-    auto placed = [&](const Vector3d& along) {
-      auto point = new Point(entities, base);
-      auto dir_ref = new Direction(entities, ref);
-      auto dir_axis = new Direction(entities, along);
-      return new Axis2Placement(entities, dir_axis, dir_ref, point);
+    // Built on the B-rep, faces and edges alike, and made as no entity (open
+    // item 39, step 2d, the sixth move): what the reader made of the entities
+    // this emitter made before, value for value - a placement's directions as
+    // given.
+    auto frame = [](const Vector3d& origin, const Vector3d& along, const Vector3d& towards) {
+      brep::Frame out;
+      out.origin = origin;
+      out.axis = along;
+      out.ref = towards;
+      return out;
     };
-    SurfaceType *surface = nullptr;
+    // The slot this face takes among the analytic faces.
+    const std::size_t slot = sfaces_extra.size();
+    brep::SurfaceForm surface;
     if (elliptic != nullptr) {
       // The section across the sweep, swept: its ELLIPSE in its own principal
       // frame, and the sweep as a unit vector.
       Vector3d e1, e2;
       elliptic->frame(e1, e2);
-      auto ellipse =
-        new Ellipse(entities, "",
-                    new Axis2Placement(entities, new Direction(entities, axis),
-                                       new Direction(entities, e1), new Point(entities, base)),
-                    elliptic->a(), elliptic->b());
-      surface = new SurfaceOfLinearExtrusion(entities, "", ellipse,
-                                             new Vector(entities, new Direction(entities, axis), 1.0));
+      brep::Extrusion extrusion;
+      extrusion.curve =
+        brep::Conic{brep::Conic::Kind::Ellipse, frame(base, axis, e1), elliptic->a(), elliptic->b()};
+      extrusion.direction = axis;
+      extrusion.length = 1.0;
+      surface = std::move(extrusion);
     } else if (cyl != nullptr) {
-      surface = new CylindricalSurface(entities, "", placed(axis), cyl->r);
+      surface = brep::Cylinder{frame(base, axis, ref), cyl->r};
     } else {
       // ISO 10303 wants a half angle in (0, pi/2) and a radius growing along the
       // placement's axis, so a cone narrowing that way is written from its other
       // end - the same convention the band pass follows.
-      surface = new ConicalSurface(entities, "", placed(cone->slope > 0 ? axis : Vector3d(-axis)),
-                                   cone->r, atan(fabs(cone->slope)));
+      surface = brep::Cone{frame(base, cone->slope > 0 ? axis : Vector3d(-axis), ref), cone->r,
+                           atan(fabs(cone->slope))};
     }
 
     // Which cycle is the outer bound is a question about the surface's own
@@ -117,8 +118,11 @@ void StepKernel::BodyBuild::emitQuadricFaces()
       }
     }
 
-    std::vector<FaceBound *> bounds;
-    std::vector<std::pair<const BoundaryCycle *, std::vector<OrientedEdge *>>> seam_rims;
+    std::vector<brep::Loop> bounds;
+    std::vector<std::pair<const BoundaryCycle *, std::vector<brep::Coedge>>> seam_rims;
+    auto coedge = [](std::size_t edge, bool forward) {
+      return brep::Coedge{edge, forward, std::nullopt};
+    };
     for (const auto& entry : boundary) {
       const std::vector<int>& cycle = entry.second.verts;
       const std::size_t n = cycle.size();
@@ -140,7 +144,7 @@ void StepKernel::BodyBuild::emitQuadricFaces()
         if (section_curves.find(key) == section_curves.end()) continue;
         starts_at[bs.start] = int(k);
       }
-      std::vector<OrientedEdge *> loop;
+      std::vector<brep::Coedge> loop;
       // From where no crossing piece straddles the start, since each is one
       // edge. A section never contains a crossing edge, so this start is never
       // inside a section either.
@@ -210,12 +214,12 @@ void StepKernel::BodyBuild::emitQuadricFaces()
               continue;
             }
           }
-          EdgeCurve *edge = nullptr;
+          std::size_t edge = 0;
           bool dir = true;
           const auto found = section_edges.find(key);
           if (found != section_edges.end()) {
             edge = found->second;
-            dir = edge->vert1 == get_vertex(a);
+            dir = brep_body.edges[edge].start == brepVertex(a);
           } else {
             // Counted, not refused, for the reason the promotion pass gives:
             // the conic is the wrong curve but lies on the quadric, and the
@@ -230,8 +234,6 @@ void StepKernel::BodyBuild::emitQuadricFaces()
               starts_at[i] = -1;  // fall back to the chords, which is what was there
               continue;
             }
-            auto ell =
-              new Ellipse(entities, "", conic_placement(sec.centre, bs.normal, sec.major), sec.a, sec.b);
             // An ELLIPSE runs counter clockwise about its own axis, so the edge
             // says whether it agrees - decided by whether the section's middle
             // lies on the counter clockwise side of its two ends.
@@ -264,14 +266,21 @@ void StepKernel::BodyBuild::emitQuadricFaces()
               // the shorter one.
               dir = ccw(ta, tb) <= M_PI;
             }
-            edge = new EdgeCurve(entities, get_vertex(dir ? a : b), get_vertex(dir ? b : a), ell, true);
+            brep::Edge conic;
+            conic.start = brepVertex(dir ? a : b);
+            conic.end = brepVertex(dir ? b : a);
+            conic.same_sense = true;
+            conic.curve.form = brep::Conic{brep::Conic::Kind::Ellipse,
+                                           frame(sec.centre, bs.normal, sec.major), sec.a, sec.b};
+            brep_body.edges.push_back(std::move(conic));
+            edge = brep_body.edges.size() - 1;
             section_edges.emplace(key, edge);
             if (bs.declared) sections_declared++;
             else if (bs.pencil) sections_pencil++;
             else sections_fitted++;
             if (bs.derived) sections_derived++;
           }
-          loop.push_back(new OrientedEdge(entities, edge, dir));
+          loop.push_back(coedge(edge, dir));
           // And the planar face across it gives up the segments the curve
           // replaces, the same way a band's rim does. The region's boundary is
           // walked the way its own facets go, so the far face necessarily goes
@@ -281,15 +290,16 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             // `at_j` is where the run sits in that face's loop, found above -
             // the same search, done once, and binding rather than advisory.
             const std::size_t span = bs.count - 1;
-            if (span == loops[bs.loop].size()) rim_of_loop[bs.loop] = {edge, !dir};
-            else arc_subs[bs.loop].push_back({at_j, span, edge, !dir});
+            if (span == loops[bs.loop].size()) rim_of_loop[bs.loop] = {EdgeRef::built(edge), !dir};
+            else arc_subs[bs.loop].push_back({at_j, span, EdgeRef::built(edge), !dir});
           }
           step += bs.count - 1;
           continue;
         }
         const int a = cycle[i], b = cycle[(i + 1) % n];
-        std::size_t spans = 1;                            // mesh edges these edges of the file cover
-        std::vector<std::pair<EdgeCurve *, bool>> chain;  // the edges, and which way each is used
+        std::size_t spans = 1;  // mesh edges these edges of the file cover
+        std::vector<std::pair<std::size_t, bool>>
+          chain;  // the B-rep's edges, and which way each is used
         // The piece of a crossing this edge belongs to, decided once for both
         // faces - see decideCrossingRuns.
         const CrossingPiece *piece = pieceOf(a, b);
@@ -298,7 +308,8 @@ void StepKernel::BodyBuild::emitQuadricFaces()
           const bool forward = walksForward(*piece, cycle, i, ok);
           if (ok) {
             for (std::size_t k = 0; k < piece->edges.size(); k++) {
-              chain.emplace_back(piece->edges[forward ? k : piece->edges.size() - 1 - k], forward);
+              chain.emplace_back(reader.edge(piece->edges[forward ? k : piece->edges.size() - 1 - k]),
+                                 forward);
             }
             spans = piece->verts.size() - 1;
             closed_piece = closed_piece || piece->verts.front() == piece->verts.back();
@@ -310,7 +321,7 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             // written its own and both pcurves can be built. Only a cylinder or a
             // cone: the pcurve is written from their parameters.
             CrossingSide side;
-            side.surface = surface;
+            side.face = slot;
             side.base = base;
             side.axis = cone != nullptr && cone->slope < 0 ? Vector3d(-axis) : axis;
             side.ref = ref;
@@ -320,12 +331,10 @@ void StepKernel::BodyBuild::emitQuadricFaces()
         }
         if (chain.empty()) {
           bool dir = true;
-          chain.emplace_back(
-            get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt), dir);
+          const std::size_t line = lineEdge(a, b, dir);
+          chain.emplace_back(line, dir);
         }
-        for (const auto& link : chain) {
-          loop.push_back(new OrientedEdge(entities, link.first, link.second));
-        }
+        for (const auto& link : chain) loop.push_back(coedge(link.first, link.second));
         step += spans;
       }
       // A rim that is one whole section, or one whole crossing, is one closed
@@ -363,11 +372,13 @@ void StepKernel::BodyBuild::emitQuadricFaces()
         // A winding number, so it is an integer: round the axis once, or not.
         if (!through_apex && fabs(turn) > M_PI) {
           // Where the loop starts and ends, which is where it was walked from.
-          Vertex *start = get_vertex(cycle[walkStart(cycle)]);
-          auto tip = new Vertex(entities, new Point(entities, apex));
-          EdgeCurve *seam = create_line_edge_curve(start, tip, true);
-          loop.push_back(new OrientedEdge(entities, seam, true));
-          loop.push_back(new OrientedEdge(entities, seam, false));
+          const std::size_t start = brepVertex(cycle[walkStart(cycle)]);
+          brep::Vertex tip;
+          tip.point = apex;
+          brep_body.vertices.push_back(tip);
+          const std::size_t seam = brepLine(start, brep_body.vertices.size() - 1);
+          loop.push_back(coedge(seam, true));
+          loop.push_back(coedge(seam, false));
           apex_seams++;
         }
       }
@@ -375,19 +386,24 @@ void StepKernel::BodyBuild::emitQuadricFaces()
         seam_rims.emplace_back(&entry.second, std::move(loop));
         continue;
       }
-      auto edge_loop = new EdgeLoop(entities, loop);
-      bounds.push_back(new FaceBound(entities, edge_loop, true, entry.first == outer));
+      brep::Loop bound;
+      bound.outer = entry.first == outer;
+      bound.coedges = std::move(loop);
+      bounds.push_back(std::move(bound));
     }
     if (seam_rims.size() == 2) {
       // One rim, up the seam, the other rim, and back down: each rim starts
       // where the seam meets it (sealWithSeam), so the four close.
       const int from = seam_rims[0].first->verts[0], to = seam_rims[1].first->verts[0];
-      EdgeCurve *seam = create_line_edge_curve(get_vertex(from), get_vertex(to), true);
-      std::vector<OrientedEdge *> joined = seam_rims[0].second;
-      joined.push_back(new OrientedEdge(entities, seam, true));
-      joined.insert(joined.end(), seam_rims[1].second.begin(), seam_rims[1].second.end());
-      joined.push_back(new OrientedEdge(entities, seam, false));
-      bounds.push_back(new FaceBound(entities, new EdgeLoop(entities, joined), true, true));
+      const std::size_t seam = brepLine(brepVertex(from), brepVertex(to));
+      brep::Loop joined;
+      joined.outer = true;
+      joined.coedges = seam_rims[0].second;
+      joined.coedges.push_back(coedge(seam, true));
+      joined.coedges.insert(joined.coedges.end(), seam_rims[1].second.begin(),
+                            seam_rims[1].second.end());
+      joined.coedges.push_back(coedge(seam, false));
+      bounds.push_back(std::move(joined));
       band_seams++;
     }
     if (bounds.empty()) continue;
@@ -412,15 +428,12 @@ void StepKernel::BodyBuild::emitQuadricFaces()
       }
     }
 
-    sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
-    registerFace(sfaces_extra.back(), patch.surface, patch.facets);
+    brep::Face face;
+    step::stateSource(face, sourceOf(patch.surface, patch.facets, std::nullopt, false));
+    face.same_sense = outward;
+    face.form = std::move(surface);
+    face.loops = std::move(bounds);
+    built_faces.emplace(slot, std::move(face));
+    sfaces_extra.push_back(nullptr);
   }
-}
-
-StepKernel::Axis2Placement *StepKernel::BodyBuild::conic_placement(const Vector3d& origin,
-                                                                   const Vector3d& dir,
-                                                                   const Vector3d& towards)
-{
-  return new Axis2Placement(entities, new Direction(entities, dir), new Direction(entities, towards),
-                            new Point(entities, origin));
 }
