@@ -310,6 +310,7 @@ public:
   [[nodiscard]] recognition::Residual signedResidual(const Vector3d& p) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
+  bool closestPoint(const Vector3d& p, Vector3d& out) const override;
 };
 
 /*! A tensor-product Bezier patch, declared by the generator that drew it.
@@ -690,6 +691,7 @@ public:
                                     const std::vector<double>& hi) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
+  bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
   [[nodiscard]] bool isQuadric() const override { return true; }
   bool quadricForm(Matrix3d& M, Vector3d& origin, double& constant) const override;

@@ -478,3 +478,36 @@ TEST_CASE("a curve's distance from a surface is bounded over all of it, not samp
   const TorusSurface torus(Vector3d::Zero(), Vector3d(0, 0, 1), 3.0, 1.0);
   CHECK_FALSE(torus.residualAlong(arc, 0.0, bound));
 }
+
+TEST_CASE("a torus and an elliptic cylinder each take a point onto themselves", "[surface][closest]")
+{
+  // A torus about z, R = 10, r = 2: the nearest point of its centre circle,
+  // then out by 2 towards the point.
+  const TorusSurface torus(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10, 2);
+  Vector3d on;
+  REQUIRE(torus.closestPoint(Vector3d(15, 0, 0), on));
+  CHECK((on - Vector3d(12, 0, 0)).norm() < 1e-14);
+  REQUIRE(torus.closestPoint(Vector3d(10, 0, 5), on));
+  CHECK((on - Vector3d(10, 0, 2)).norm() < 1e-14);
+  CHECK_FALSE(torus.closestPoint(Vector3d(0, 0, 3), on));  // on the axis
+
+  // An elliptic cylinder along z, semi-axes 4 along x and 2 along y.
+  const EllipticCylinderSurface ell(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(4, 0, 0),
+                                    Vector3d(0, 2, 0));
+  REQUIRE(ell.closestPoint(Vector3d(10, 0, 3), on));
+  CHECK((on - Vector3d(4, 0, 3)).norm() < 1e-14);
+  REQUIRE(ell.closestPoint(Vector3d(0, -5, 1), on));
+  CHECK((on - Vector3d(0, -2, 1)).norm() < 1e-14);
+  // Inside, on the major axis: the normal from (4/3, y) on the ellipse passes
+  // through (1, 0) - x = e0 * e0 y0 / (e0^2 - e1^2), y = e1 sqrt(1 - (x / e0)^2).
+  REQUIRE(ell.closestPoint(Vector3d(1, 0, 0), on));
+  CHECK((on - Vector3d(4.0 / 3, 2 * std::sqrt(8.0 / 9), 0)).norm() < 1e-14);
+  // Off both axes: the answer lies on the ellipse, and the point is on its
+  // normal there - (p - q) parallel to the gradient (x / 16, y / 4).
+  const Vector3d p(3, 2.5, 7);
+  REQUIRE(ell.closestPoint(p, on));
+  CHECK(std::fabs(on[0] * on[0] / 16 + on[1] * on[1] / 4 - 1) < 1e-14);
+  CHECK(on[2] == 7);
+  const Vector3d grad(on[0] / 16, on[1] / 4, 0);
+  CHECK((p - on).cross(grad).norm() < 1e-13);
+}

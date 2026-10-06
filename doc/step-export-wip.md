@@ -6038,6 +6038,18 @@ put it - a declaration carried through, so every point is known at the end.
 *Tests:* `profile_region_test.cc`, by hand; without the segments' parity the
 disc and the hole tests fail.
 
+What the regions left open on the extrusions and revolutions was not theirs:
+existence takes each facet point onto the surface it was made on, and the
+torus and the elliptic cylinder could not - "no closest point". Both have one
+now: the torus in closed form (the nearest point of the tube's centre circle,
+out by the tube's radius), the elliptic cylinder by Eberly's robust root across
+the section - a function monotone in one variable, bracketed and halved until
+the bracket cannot shrink in doubles, so no tolerance and no iteration count
+decides it. step-torus 0 -> 1024 of 1024 on a face, the ellipse and oblique
+extrusions 2 -> 34 of 34, step-rounded-profile 64 -> 1088 of 1092; no corner
+and no file moved. *Test:* `surface_protocol_test.cc` "[closest]", by hand;
+with the bisection's root ignored, the off-axis cases fail.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

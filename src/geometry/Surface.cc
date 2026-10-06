@@ -2826,6 +2826,82 @@ bool SphereSurface::normalAt(const Vector3d& p, Vector3d& out) const
   return true;
 }
 
+bool TorusSurface::closestPoint(const Vector3d& p, Vector3d& out) const
+{
+  // The nearest point of the tube's centre circle, and from it towards p by
+  // the tube's radius: the torus's closest point, in closed form.
+  const Vector3d axis = normdir.normalized();
+  const Vector3d rel = p - refpt;
+  const Vector3d radial = rel - axis * rel.dot(axis);
+  if (radial.norm() < 1e-12) return false;  // on the axis: every ring point is as near
+  const Vector3d ring = refpt + radial.normalized() * r_major;
+  const Vector3d off = p - ring;
+  if (off.norm() < 1e-12) return false;  // on the centre circle: the whole tube is as near
+  out = ring + off.normalized() * r_minor;
+  return true;
+}
+
+bool EllipticCylinderSurface::closestPoint(const Vector3d& p, Vector3d& out) const
+{
+  // Across the sweep, the closest point of the section's ellipse; along it,
+  // p's own height. The ellipse's is Eberly's robust root: in the first
+  // quadrant, with e0 >= e1, the root of a function monotone in one variable,
+  // bracketed and halved until the bracket cannot shrink in doubles.
+  double x = 0, y = 0;
+  section(p, x, y);
+  const double along = (p - refpt).dot(normdir);
+  double e0 = a(), e1 = b();
+  const bool swapped = e0 < e1;
+  if (swapped) {
+    std::swap(e0, e1);
+    std::swap(x, y);
+  }
+  if (!(e1 > 0)) return false;
+  const double y0 = std::fabs(x), y1 = std::fabs(y);
+  double x0 = 0, x1 = 0;
+  if (y1 > 0) {
+    if (y0 > 0) {
+      const double z0 = y0 / e0, z1 = y1 / e1, g = z0 * z0 + z1 * z1 - 1;
+      if (g != 0) {
+        const double r0 = (e0 / e1) * (e0 / e1), n0 = r0 * z0;
+        double s0 = z1 - 1, s1 = g < 0 ? 0 : std::hypot(n0, z1) - 1, s = 0;
+        for (int i = 0; i < 2200; i++) {
+          s = (s0 + s1) / 2;
+          if (s == s0 || s == s1) break;
+          const double ratio0 = n0 / (s + r0), ratio1 = z1 / (s + 1);
+          const double gs = ratio0 * ratio0 + ratio1 * ratio1 - 1;
+          if (gs > 0) s0 = s;
+          else if (gs < 0) s1 = s;
+          else break;
+        }
+        x0 = r0 * y0 / (s + r0);
+        x1 = y1 / (s + 1);
+      } else {
+        x0 = y0;
+        x1 = y1;
+      }
+    } else {
+      x0 = 0;
+      x1 = e1;
+    }
+  } else {
+    const double numer0 = e0 * y0, denom0 = (e0 - e1) * (e0 + e1);
+    if (numer0 < denom0) {
+      const double xde0 = numer0 / denom0;
+      x0 = e0 * xde0;
+      x1 = e1 * std::sqrt(std::max(0.0, 1 - xde0 * xde0));
+    } else {
+      x0 = e0;
+      x1 = 0;
+    }
+  }
+  x0 = std::copysign(x0, x);
+  x1 = std::copysign(x1, y);
+  if (swapped) std::swap(x0, x1);
+  out = refpt + normdir * along + major.normalized() * x0 + minor.normalized() * x1;
+  return true;
+}
+
 bool TorusSurface::normalAt(const Vector3d& p, Vector3d& out) const
 {
   const Vector3d axis = normdir.normalized();
