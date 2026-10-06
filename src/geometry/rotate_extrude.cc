@@ -20,6 +20,8 @@
 #include "geometry/PolySetUtils.h"
 #include "geometry/Polygon2d.h"
 #include "geometry/Profile2d.h"
+#include "geometry/ProfileRegion.h"
+#include "geometry/ProfileSolids.h"
 #include "geometry/SweptSurfaces.h"
 #include "geometry/Barcode1d.h"
 #include "geometry/Surface.h"
@@ -182,7 +184,24 @@ static void declareSurfacesOfRevolution(const RotateExtrudeNode& node, const Pol
   for (auto& surface : revolve(profile, sweep, &every_curve, &faces)) {
     polyset.surfaces.push_back(std::move(surface));
   }
-  if (every_curve && statesEveryEdge(profile)) polyset.solid_tree = SolidTree::faceted(node.toString());
+  if (!every_curve || !statesEveryEdge(profile)) return;
+  // The profile's exact region turned: stated where the region is the one the
+  // profile declares and lies on the positive side of the axis, which is the
+  // side a point's radius reads it from. Otherwise the faces still say which
+  // envelope the solid lies within.
+  auto region = std::make_shared<const ProfileRegion>(profile);
+  bool positive = true;
+  for (const auto& loop : profile.loops) {
+    for (const auto& e : loop) positive = positive && e.a[0] >= 0;
+  }
+  if (region->exact() && positive) {
+    polyset.solid_tree = SolidTree::region(
+      std::make_shared<RevolvedRegion>(region, node.start, node.angle,
+                                       sweptRecords(profile, faces, polyset.surfaces, first_record)),
+      node.toString());
+    return;
+  }
+  polyset.solid_tree = SolidTree::faceted(node.toString());
 }
 
 /*! Name each triangle by the record it is made on (checklist E8, open item

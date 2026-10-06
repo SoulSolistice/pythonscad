@@ -6019,6 +6019,25 @@ closed-form inverse - their region is the next question, not this one's.
 *Tests:* `swept_region_test.cc`, every expectation read off the declaration
 by hand; the end-plane rule removed, the end test fails.
 
+**The extruders' regions, next.** A profile's exact region is its polygon with
+each chord its maker named for a recorded circle or ellipse standing for its
+minor arc (`ProfileRegion`): between a chord and its arc lies a segment - the
+disc cut by the chord's line on the side away from the centre - and a point is
+in the region where it is in the polygon XOR in an odd number of segments, an
+outward bulge adding and an inward one taking away. A chord is no boundary;
+within its error of one the arc's bulge decides, so the two parities cannot
+disagree there by rounding. A Bezier chord is not answered. `rotate_extrude`
+states the profile turned (`RevolvedRegion`: a point's radius and height asked
+of the profile, its angle against a partial turn's ends) where the profile lies
+at x >= 0; `linear_extrude` the profile carried along its line
+(`ExtrudedRegion`: one 3x3 inverse to the profile's plane and the station,
+the taper undone by the station's scale). Both hold an affine frame and carry a
+point back through its inverse, every later transform composed into the frame:
+the first leaves that no transform with an inverse makes opaque, as the author
+put it - a declaration carried through, so every point is known at the end.
+*Tests:* `profile_region_test.cc`, by hand; without the segments' parity the
+disc and the hole tests fail.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

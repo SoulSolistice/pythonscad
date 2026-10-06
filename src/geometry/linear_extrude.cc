@@ -19,6 +19,8 @@
 #include "geometry/PolySetBuilder.h"
 #include "geometry/PolySetUtils.h"
 #include "geometry/Profile2d.h"
+#include "geometry/ProfileRegion.h"
+#include "geometry/ProfileSolids.h"
 #include "geometry/SweptSurfaces.h"
 #include "geometry/Surface.h"
 #include "geometry/linalg.h"
@@ -151,7 +153,25 @@ void declareExtrudedSurfaces(const LinearExtrudeNode& node, const Polygon2d& pro
   for (auto& surface : extrude(classified, sweep, &every_curve, &faces))
     polyset.surfaces.push_back(std::move(surface));
   if (node.twist == 0 && every_curve && statesEveryEdge(classified)) {
-    polyset.solid_tree = SolidTree::faceted(node.toString());
+    // The profile's exact region carried along the line, where the region is
+    // the one the profile declares: placed by the profile's own transform, its
+    // plane's two axes and the height as the third. Otherwise the faces still
+    // say which envelope the solid lies within.
+    auto region = std::make_shared<const ProfileRegion>(classified);
+    Transform3d frame = Transform3d::Identity();
+    frame.linear().col(0) = sweep.placement.linear() * Vector3d(1, 0, 0);
+    frame.linear().col(1) = sweep.placement.linear() * Vector3d(0, 1, 0);
+    frame.linear().col(2) = sweep.height;
+    frame.translation() = sweep.placement.translation() + sweep.base;
+    if (region->exact() && frame.linear().determinant() != 0) {
+      polyset.solid_tree =
+        SolidTree::region(std::make_shared<ExtrudedRegion>(
+                            region, node.scale_x, node.scale_y,
+                            sweptRecords(classified, faces, polyset.surfaces, first_record), frame),
+                          node.toString());
+    } else {
+      polyset.solid_tree = SolidTree::faceted(node.toString());
+    }
   }
   nameExtrudedFacets(polyref, num_slices, faces, first_record, polyset);
 }
