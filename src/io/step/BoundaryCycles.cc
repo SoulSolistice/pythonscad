@@ -4,13 +4,12 @@
 #include <algorithm>
 #include <cmath>
 
+#include "geometry/AnalyticFeatures.h"
+#include "geometry/recognition/Exact.h"
 #include "geometry/recognition/Seam.h"
 #include "io/step/PlaneSections.h"
 
 namespace step {
-
-using AnalyticFeatures::declaredBand;
-using AnalyticFeatures::surfaceImplicit;
 
 void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
                   const std::vector<CutPlane>& planes, BoundaryCycle& cycle,
@@ -37,16 +36,17 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
   // The tolerance is the one the crossing-arc pass already holds its endpoints
   // to, and for the same reason: a declared surface owes its own band, and
   // anything else owes the scale of the point.
+  //
+  // On it by the one predicate a corner on its face is asked by
+  // (AnalyticFeatures::onFace), where a declared surface's band was allowed -
+  // how far the mesh stands off it, not where the curve's end is (open item
+  // 39, R15's pattern).
   std::vector<char> on_surface(n, 0);
   std::vector<double> stray(n, 0);
   for (std::size_t k = 0; k < n; k++) {
     const Vector3d& p = vertices[cycle.verts[k]];
-    const double scale = std::max(1.0, p.norm());
-    const double owed = std::max(1e-9 * scale, declaredBand(surface));
-    double f = 0, d = 0;
-    Vector3d g;
-    on_surface[k] = surfaceImplicit(surface, p, f, g, &d) && g.norm() >= 1e-12 && d <= owed;
-    stray[k] = d;
+    on_surface[k] = AnalyticFeatures::onFace(surface, p);
+    stray[k] = on_surface[k] ? 0.0 : AnalyticFeatures::offFace(surface, p);
   }
 
   // It is the run's *ends* this binds, and only they: the vertices between them
@@ -82,8 +82,11 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
   const bool circles_across = axial == nullptr || axial->circularSections();
   std::vector<double> scale(planes.size(), 0);
   for (std::size_t p = 0; p < planes.size(); p++) {
+    // Across the axis at machine precision, where it was within 1e-9 of across
+    // (open item 39, R2).
     const double cos_tilt = fabs(planes[p].normal.dot(axis));
-    if (cos_tilt < floor_tilt || (circles_across && cos_tilt > 1 - 1e-9)) continue;
+    if (cos_tilt < floor_tilt || (circles_across && recognition::parallel(planes[p].normal, axis)))
+      continue;
     SectionEllipse sec;
     if (!planeSectionEllipse(surface, planes[p].normal, planes[p].on_plane, sec)) continue;
     scale[p] = sec.a;
@@ -96,13 +99,14 @@ void findSections(const Surface *surface, const std::vector<Vector3d>& vertices,
     // available the crossing curve is the truer answer and takes the edge.
     const int eu = cycle.verts[e], ev = cycle.verts[(e + 1) % n];
     if (spoken_for.count({std::min(eu, ev), std::max(eu, ev)}) != 0) continue;
+    // Both ends in the plane at machine precision, where they were within
+    // 1e-9 of the section's semi-axis (open item 39, R2).
     for (std::size_t p = 0; p < planes.size(); p++) {
       if (scale[p] <= 0) continue;
-      const double tol = 1e-9 * scale[p];
       const Vector3d& u = vertices[cycle.verts[e]];
       const Vector3d& v = vertices[cycle.verts[(e + 1) % n]];
-      if (fabs((u - planes[p].on_plane).dot(planes[p].normal)) > tol) continue;
-      if (fabs((v - planes[p].on_plane).dot(planes[p].normal)) > tol) continue;
+      if (!recognition::onPlane(planes[p].on_plane, planes[p].normal, u)) continue;
+      if (!recognition::onPlane(planes[p].on_plane, planes[p].normal, v)) continue;
       plane_of[e] = int(p);
       break;
     }
