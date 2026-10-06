@@ -6,8 +6,7 @@
  * what the file asserted, as the neutral B-rep (geometry/brep/Brep.h). Since
  * step 2d's tenth move no phase makes an entity and the writer reads none; what
  * is left is the translator's inverse, which its round-trip tests read a
- * written body back with (brep_mirror_test.cc) - and the statement of a face's
- * source (FaceSource, stateSource), which every maker uses.
+ * written body back with (brep_mirror_test.cc).
  */
 
 #include <cstddef>
@@ -16,6 +15,7 @@
 #include <vector>
 
 #include "geometry/brep/Brep.h"
+#include "geometry/brep/FaceSource.h"
 #include "geometry/recognition/Ledger.h"
 #include "io/StepKernel.h"
 
@@ -23,20 +23,7 @@ class Surface;
 
 namespace step {
 
-/*! What a face the file holds stands for, registered where the face is made
- * rather than inferred from it afterwards: the record it is on, the facets it
- * covers, and the class that decided it. */
-struct FaceSource {
-  std::shared_ptr<const Surface> record;
-  std::vector<std::size_t> facets;
-  recognition::EvidenceClass evidence = recognition::EvidenceClass::Unstated;
-  bool plane_from_corners = false;  // see brep::Face
-  recognition::EvidenceClass record_evidence = recognition::EvidenceClass::Unstated;
-  // The surface the maker wrote the face on, and whether it states it derived
-  // from `record` - see brep::Face::carrier. The record itself where unstated.
-  std::shared_ptr<const Surface> carrier;
-  bool carrier_derived = false;
-};
+using brep::FaceSource;
 
 /*! What an edge's maker states about its carrier, where it states anything:
  * the error of a fit (a crossing curve's, from its fitter), or that the carrier
@@ -46,10 +33,6 @@ struct EdgeSource {
   double fit = 0;
   bool stated_exact = false;
 };
-
-/*! What its maker registered of a face, stated on the B-rep's face: the record,
- * the facets, and the classes. */
-void stateSource(brep::Face& face, const FaceSource& source);
 
 /*! Entities read into a B-rep as they are named: each is read off its STEP
  * entity once - its vertices, curve, pcurves and surface form as the entity

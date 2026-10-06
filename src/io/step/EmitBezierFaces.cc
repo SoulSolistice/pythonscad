@@ -185,10 +185,10 @@ void StepKernel::BodyBuild::emitBezierFaces()
     // (BezierPatchSurface::stateQuadric, by its maker) - a closed form of the
     // patch, the record the face stands for - and otherwise on the patch itself.
     brep::Face face;
-    step::FaceSource source = sourceOf(patch.surface, patch.facets, std::nullopt, false);
+    brep::FaceSource source = sourceOf(patch.surface, patch.facets, std::nullopt, false);
     source.carrier = quadric;
     source.carrier_derived = quadric != nullptr;
-    step::stateSource(face, source);
+    brep::stateSource(face, source);
     face.same_sense = outward;
     face.form = std::move(surface);
     face.loops.push_back(std::move(loop));

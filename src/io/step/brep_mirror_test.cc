@@ -24,7 +24,7 @@ namespace {
 struct Graph {
   std::vector<K::Entity *> ents;
   std::vector<K::Face *> faces;
-  std::map<const K::Face *, step::FaceSource> sources;
+  std::map<const K::Face *, brep::FaceSource> sources;
   ~Graph()
   {
     for (auto *e : ents) delete e;
@@ -78,7 +78,7 @@ void cube(Graph& g, int reversed_face = -1)
     auto *face = new K::Face(g.ents, bounds,
                              new K::Plane(g.ents, g.axis(at[c[0]], n, (at[c[1]] - at[c[0]]))), true);
     g.faces.push_back(face);
-    g.sources[face] = step::FaceSource{std::make_shared<PlaneSurface>(at[c[0]], n),
+    g.sources[face] = brep::FaceSource{std::make_shared<PlaneSurface>(at[c[0]], n),
                                        {f},
                                        recognition::EvidenceClass::D0,
                                        false,
@@ -147,7 +147,7 @@ TEST_CASE("a face built on the B-rep and a face read off entities meet on one ed
   step::BrepReader reader(body, none);
   for (std::size_t f = 0; f < 3; f++) {
     brep::Face face;
-    step::stateSource(face, g.sources.at(g.faces[f]));
+    brep::stateSource(face, g.sources.at(g.faces[f]));
     face.form = brep::Plane{};
     brep::Loop loop;
     for (const K::OrientedEdge *oe : g.faces[f]->faceBounds[0]->edgeLoop->faces)
@@ -275,7 +275,7 @@ TEST_CASE("a body translated to STEP reads back as the same body, entity for ent
   std::vector<K::Entity *> out;
   K::ParametricContext *made = nullptr;
   const std::vector<K::Face *> faces = step::writeBrep(out, body, made);
-  std::map<const K::Face *, step::FaceSource> sources;
+  std::map<const K::Face *, brep::FaceSource> sources;
   for (std::size_t i = 0; i < faces.size(); i++) sources[faces[i]] = g.sources.at(g.faces[i]);
   const brep::Body back = step::mirrorBrep(faces, sources, oneShell(faces.size()));
 

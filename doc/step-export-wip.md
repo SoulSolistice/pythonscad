@@ -4883,9 +4883,13 @@ entity list and no name; `StepKernel::build_tri_body` hands the body to
 `StepKernel::writeBody` - the translator, one MANIFOLD_SOLID_BREP per shell, and
 the product structure - with the uncertainty the build declares
 (`BodyBuild::resolution`). `StepKernel::create_line_edge_curve` and
-`get_line_from_map` went with their last callers. Next: `BodyBuild` out of
-`StepKernel` and its files into `geometry/brep`, with `FaceSource` and
-`stateSource` (in `BrepMirror.h` today, writer-neutral) ahead of them.
+`get_line_from_map` went with their last callers.
+
+Second, the same day: `FaceSource` and `stateSource` - what a maker states of a
+face, writer-neutral - leave the STEP mirror for `geometry/brep/FaceSource.h`,
+in namespace `brep`. Proven by `compare --data`: 0 differences over 132
+exports. Next: `BodyBuild` out of `StepKernel` and its files into
+`geometry/brep`.
 
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in

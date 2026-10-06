@@ -107,7 +107,7 @@ int32_t StepKernel::BodyBuild::surfaceIndexOf(const Surface *record) const
   return -1;
 }
 
-step::FaceSource StepKernel::BodyBuild::sourceOf(std::shared_ptr<const Surface> record,
+brep::FaceSource StepKernel::BodyBuild::sourceOf(std::shared_ptr<const Surface> record,
                                                  std::vector<std::size_t> facets,
                                                  std::optional<recognition::EvidenceClass> evidence,
                                                  bool plane_from_corners) const

@@ -432,7 +432,7 @@ void StepKernel::BodyBuild::emitQuadricFaces()
     }
 
     brep::Face face;
-    step::stateSource(face, sourceOf(patch.surface, patch.facets, std::nullopt, false));
+    brep::stateSource(face, sourceOf(patch.surface, patch.facets, std::nullopt, false));
     face.same_sense = outward;
     face.form = std::move(surface);
     face.loops = std::move(bounds);

@@ -73,8 +73,8 @@ void StepKernel::BodyBuild::emitCornerFans()
       // A triangle of a polygon the placement bent, on the plane its corners
       // are on: as good as they are, D4 until they state their own class.
       brep::Face face;
-      stateSource(face, sourceOf(std::make_shared<PlaneSurface>(vertices[tri[0]], tn), {i},
-                                 recognition::EvidenceClass::D4, true));
+      brep::stateSource(face, sourceOf(std::make_shared<PlaneSurface>(vertices[tri[0]], tn), {i},
+                                       recognition::EvidenceClass::D4, true));
       face.form = brep::Plane{{vertices[tri[0]], tn, ref}};
       face.same_sense = true;
       face.loops.push_back(std::move(bound));

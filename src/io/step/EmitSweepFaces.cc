@@ -350,7 +350,7 @@ void StepKernel::BodyBuild::emitSweepFaces()
     }
 
     brep::Face face;
-    step::stateSource(face, sourceOf(patch.surface, patch.facets, std::nullopt, false));
+    brep::stateSource(face, sourceOf(patch.surface, patch.facets, std::nullopt, false));
     face.same_sense = outward;
     face.form = std::move(net);
     face.loops = std::move(bounds);

@@ -199,7 +199,7 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     // the faces are assembled.
     if (!loop_is_hole[i]) {
       brep::Face face;
-      stateSource(face, sourceOf(record, {i}, decided, from_corners));
+      brep::stateSource(face, sourceOf(record, {i}, decided, from_corners));
       face.form = brep::Plane{{on_plane, norm, ref}};
       face.same_sense = true;
       planar_faces.emplace(i, std::move(face));

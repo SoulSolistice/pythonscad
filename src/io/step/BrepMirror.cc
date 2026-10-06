@@ -143,17 +143,6 @@ brep::SurfaceForm surfaceOf(const K::SurfaceType *surface)
 
 }  // namespace
 
-void step::stateSource(brep::Face& face, const FaceSource& source)
-{
-  face.surface = source.record;
-  face.facets = source.facets;
-  face.evidence = source.evidence;
-  face.plane_from_corners = source.plane_from_corners;
-  face.record_evidence = source.record_evidence;
-  face.carrier = source.carrier != nullptr ? source.carrier : source.record;
-  face.carrier_derived = source.carrier_derived;
-}
-
 std::size_t step::BrepReader::vertex(const StepKernel::Vertex *v)
 {
   const auto it = vertex_index.find(v);
@@ -190,7 +179,7 @@ std::size_t step::BrepReader::face(const StepKernel::Face *face, const FaceSourc
 {
   using SurfaceCurve = StepKernel::SurfaceCurve;
   brep::Face out;
-  if (source != nullptr) stateSource(out, *source);
+  if (source != nullptr) brep::stateSource(out, *source);
   out.same_sense = face->dir;
   out.form = surfaceOf(face->surface);
   for (const StepKernel::FaceBound *bound : face->faceBounds) {

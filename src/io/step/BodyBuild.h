@@ -24,6 +24,7 @@
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/Surface.h"
 #include "geometry/brep/Brep.h"
+#include "geometry/brep/FaceSource.h"
 #include "geometry/recognition/Pipeline.h"
 #include "io/step/BrepMirror.h"
 #include "io/step/BoundaryCycles.h"
@@ -517,8 +518,8 @@ struct StepKernel::BodyBuild {
   std::vector<unsigned char> facet_class = std::vector<unsigned char>(faces.size(), 0);
   // What each face stands for, stated on the face where it is made rather than
   // inferred from it afterwards: the record it is on, the facets it covers, and
-  // the class that decided it (step::stateSource).
-  using FaceSource = step::FaceSource;
+  // the class that decided it (brep::stateSource).
+  using FaceSource = brep::FaceSource;
   /*! What a face stands for, standing on `record` over `facets`. Its class is
    * the weakest its facets' honoured claims state, unless the caller states it
    * - a planar face, which no recogniser claims. */

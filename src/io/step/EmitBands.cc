@@ -41,9 +41,9 @@ void StepKernel::BodyBuild::emitBands()
                    const std::shared_ptr<const Surface>& record, const std::vector<std::size_t>& covered,
                    const std::shared_ptr<const Surface>& carrier) {
     brep::Face face;
-    step::FaceSource source = sourceOf(record, covered, std::nullopt, false);
+    brep::FaceSource source = sourceOf(record, covered, std::nullopt, false);
     source.carrier = carrier;
-    step::stateSource(face, source);
+    brep::stateSource(face, source);
     face.same_sense = outward;
     face.form = std::move(form);
     brep::Loop loop;
