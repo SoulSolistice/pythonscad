@@ -60,6 +60,16 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
   switch (tree.op()) {
   case Op::Opaque:   return of(Where::Unknown, &tree);
   case Op::Declared: return leaf(tree, p);
+  // A region its declaration bounds answers for itself, as exactly.
+  case Op::Region:   {
+    const SolidRegion::Answer a = tree.region()->classify(p);
+    switch (a.where) {
+    case SolidRegion::Where::In:  return of(Where::In, &tree);
+    case SolidRegion::Where::Out: return of(Where::Out, &tree);
+    case SolidRegion::Where::On:  return Classification{Where::On, a.on, &tree};
+    default:                      return of(Where::Unknown, &tree);
+    }
+  }
   case Op::Faceted:
     return of(Where::Unknown, &tree);  // resolved where it became a Manifold
   // Known to lie within its envelope, and to contain every solid it holds:

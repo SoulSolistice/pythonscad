@@ -30,6 +30,14 @@ std::shared_ptr<const SolidTree> SolidTree::declared(std::shared_ptr<const Decla
   return std::shared_ptr<const SolidTree>(new SolidTree(Op::Declared, {}, std::move(solid), what));
 }
 
+std::shared_ptr<const SolidTree> SolidTree::region(std::shared_ptr<const SolidRegion> region,
+                                                   const std::string& what)
+{
+  if (region == nullptr) return opaque(what);
+  return std::shared_ptr<const SolidTree>(
+    new SolidTree(Op::Region, {}, nullptr, what, std::move(region)));
+}
+
 std::shared_ptr<const SolidTree> SolidTree::faceted(const std::string& what)
 {
   return std::shared_ptr<const SolidTree>(new SolidTree(Op::Faceted, {}, nullptr, what));
@@ -65,7 +73,8 @@ bool SolidTree::extent(BoundingBox& out) const
     if (solid_->extent.isEmpty()) return false;
     out = solid_->extent;
     return true;
-  case Op::Union: {
+  case Op::Region: return region_->extent(out);
+  case Op::Union:  {
     BoundingBox joined;
     for (const auto& child : children_) {
       BoundingBox b;
@@ -131,6 +140,7 @@ std::shared_ptr<const SolidTree> SolidTree::transformed(const Transform3d& mat,
   switch (op_) {
   case Op::Opaque:    return opaque(what_);
   case Op::Declared:  return declared(solid_->transformed(mat, similarity), what_);
+  case Op::Region:    return region(region_->transformed(mat, similarity), what_);
   case Op::Faceted:   return faceted(what_);
   case Op::Enveloped: {
     auto solid = solid_->transformed(mat, similarity);
@@ -160,7 +170,7 @@ std::size_t SolidTree::leaves() const
 
 std::size_t SolidTree::declaredLeaves() const
 {
-  if (op_ == Op::Declared) return 1;
+  if (op_ == Op::Declared || op_ == Op::Region) return 1;
   if (op_ == Op::Enveloped) return 0;
   std::size_t n = 0;
   for (const auto& child : children_) n += child->declaredLeaves();

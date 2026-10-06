@@ -59,6 +59,14 @@ manifold::Manifold withFreshTags(const manifold::Manifold& mani,
 std::shared_ptr<const SolidTree> facetedEnvelope(const PolySet& ps,
                                                  const std::function<const Surface *(size_t)>& record_of,
                                                  const std::string& what);
+/*! A faceted leaf's solid, as its declarations state it: the region a
+ * declared sweep bounds (SweptRegion), where every face is named for that one
+ * sweep or lies in one of its two end planes - the sweep and its ends being a
+ * closed boundary, the volume is the declaration's own. Otherwise its
+ * envelope (facetedEnvelope), from which only Out follows. */
+std::shared_ptr<const SolidTree> facetedSolid(const PolySet& ps,
+                                              const std::function<const Surface *(size_t)>& record_of,
+                                              const std::string& what);
 /*! Which record its maker named a face of `ps` for (PolySet::surface_tags),
  * or null - never by position (checklist E8). For a PolySet not yet a
  * Manifold. */

@@ -5994,6 +5994,31 @@ no residual, and a residual that cannot be asked is now "not askable", not off
 clone is the same record" - fails on tags, owners and witnesses with the
 rebuilt clone.
 
+**The swept region landed the same day.** A leaf may now state a region that
+no intersection of insides describes (`SolidRegion`, `SolidTree::region`): it
+answers for a point itself, In, Out or On, against the forward error of
+computing it. The first is `SweptRegion`: a point's angle and turn give each
+station t it could belong to, and its meridional offset (dr, dz) is asked
+against the profile interpolated there - within an edge's computed error On,
+else by its crossings; at t = 0 or 1, within t's own error, a point the
+profile holds is On the end's plane. A faceted leaf states it
+(`ManifoldUtils::facetedSolid`) where every face is named for one declared
+sweep and every face named for none lies, corner by corner, in one of its two
+end planes at machine precision (`recognition::onPlane`) - the model checked
+against its own declaration (E3), not read off its faces. lid10's thread
+closes so; its far end's corners lie 2.8e-14 off the computed plane, inside
+the bound.
+
+On lid10, of 2077 facets made on a declared surface: 371 -> 1606 on a face the
+model has, 1642 -> 407 undecided, phantoms 64 unchanged. The thread leaves 3
+open; "a point on two surfaces" fell 203 -> 24, since a union with an operand
+that stated nothing decided nothing near it. What still states nothing on
+lid10: `hull()` 251, the crush bead's `rotate_extrude` 129. The bayonet's and
+f04's threads are `declare_grid`, an interpolant through stations with no
+closed-form inverse - their region is the next question, not this one's.
+*Tests:* `swept_region_test.cc`, every expectation read off the declaration
+by hand; the end-plane rule removed, the end test fails.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

@@ -1658,6 +1658,7 @@ set(CORE_SOURCES
   src/geometry/Surface.cc
   src/geometry/brep/Brep.cc
   src/geometry/SolidTree.cc
+  src/geometry/SweptRegion.cc
   src/geometry/PolySetUtils.cc
   src/geometry/Polygon2d.cc
   src/geometry/Barcode1d.cc

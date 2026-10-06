@@ -28,6 +28,7 @@
 #include "geometry/manifold/ManifoldGeometry.h"
 #include "geometry/recognition/Exact.h"
 #include "geometry/Surface.h"
+#include "geometry/SweptRegion.h"
 #include "utils/printutils.h"
 #ifdef ENABLE_CGAL
 #include "geometry/cgal/cgalutils.h"
@@ -150,7 +151,7 @@ std::shared_ptr<ManifoldGeometry> createManifoldFromTriangularPolySet(const Poly
       if (record == nullptr || !record->declaresFace()) continue;  // a label is no record
       for (const uint32_t t : record->tags) by_tag.emplace(t, record.get());
     }
-    solid = ManifoldUtils::facetedEnvelope(
+    solid = ManifoldUtils::facetedSolid(
       ps,
       [&](size_t f) -> const Surface * {
         const auto it = by_tag.find(tag_of(f));
@@ -205,6 +206,47 @@ std::shared_ptr<const SolidTree> facetedEnvelope(const PolySet& ps,
     if (!named) return SolidTree::opaque(what + ", under a declaration that names none of its faces");
   }
   return SolidTree::box(box, what);
+}
+
+std::shared_ptr<const SolidTree> facetedSolid(const PolySet& ps,
+                                              const std::function<const Surface *(size_t)>& record_of,
+                                              const std::string& what)
+{
+  // One declared sweep every named face is for, and the faces named for none.
+  const SweepSurface *sweep = nullptr;
+  std::vector<size_t> unnamed;
+  bool one_sweep = true;
+  for (size_t f = 0; f < ps.indices.size() && one_sweep; f++) {
+    const Surface *record = record_of(f);
+    if (record == nullptr) {
+      unnamed.push_back(f);
+      continue;
+    }
+    const auto *s = dynamic_cast<const SweepSurface *>(record);
+    one_sweep = s != nullptr && (sweep == nullptr || sweep->sameAs(*s));
+    if (sweep == nullptr) sweep = s;
+  }
+  if (one_sweep && sweep != nullptr) {
+    auto own = std::dynamic_pointer_cast<SweepSurface>(sweep->clone());
+    auto region = own != nullptr ? std::make_shared<SweptRegion>(own) : nullptr;
+    // Each face named for none is the model's own plane, and closes the
+    // sweep only where it is one of its ends: every corner of it in one end's
+    // plane, as exactly as the arithmetic can say (checklist E3).
+    bool closed = region != nullptr;
+    for (const size_t f : unnamed) {
+      if (!closed) break;
+      bool in_end[2] = {true, true};
+      for (const int v : ps.indices[f]) {
+        for (const bool last : {false, true}) {
+          const PlaneSurface& end = region->end(last);
+          in_end[last] = in_end[last] && recognition::onPlane(end.refpt, end.normdir, ps.vertices[v]);
+        }
+      }
+      closed = in_end[0] || in_end[1];
+    }
+    if (closed) return SolidTree::region(region, what);
+  }
+  return facetedEnvelope(ps, record_of, what);
 }
 
 std::function<const Surface *(size_t)> recordByName(const PolySet& ps)

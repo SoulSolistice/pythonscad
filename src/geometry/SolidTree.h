@@ -61,10 +61,34 @@ struct DeclaredSolid {
                                                                  const Similarity& similarity) const;
 };
 
+/*! A solid its declaration bounds that no intersection of insides describes -
+ * the region a closed profile encloses, carried along a sweep, say. Every
+ * contribution states its solid, and this is how one that is not convex does:
+ * by answering, for a point, where it is - exactly, against the forward error
+ * of computing it, or not at all. No tolerance, and never a guess. */
+class SolidRegion
+{
+public:
+  enum class Where { In, Out, On, Unknown };
+  struct Answer {
+    Where where = Where::Unknown;
+    /*! Where On: the surfaces of the region's boundary the point is on. */
+    std::vector<const Surface *> on;
+  };
+  virtual ~SolidRegion() = default;
+  [[nodiscard]] virtual Answer classify(const Vector3d& p) const = 0;
+  /*! This region moved by `mat`, or null where it cannot be represented
+   * afterwards - the leaf is then opaque, not wrong. */
+  [[nodiscard]] virtual std::shared_ptr<const SolidRegion> transformed(
+    const Transform3d& mat, const Similarity& similarity) const = 0;
+  /*! A box the region lies within; false where it states none. */
+  virtual bool extent(BoundingBox& out) const = 0;
+};
+
 class SolidTree
 {
 public:
-  enum class Op { Opaque, Declared, Faceted, Enveloped, Union, Intersection, Difference };
+  enum class Op { Opaque, Declared, Region, Faceted, Enveloped, Union, Intersection, Difference };
 
   // Every leaf carries `what`: a short name its generator gives it - the
   // node's own description, "polyhedron (12 points)", "hull()" - so that a
@@ -77,6 +101,10 @@ public:
   /*! A leaf whose solid its generator declared. */
   [[nodiscard]] static std::shared_ptr<const SolidTree> declared(
     std::shared_ptr<const DeclaredSolid> solid, const std::string& what = "");
+  /*! A leaf whose solid its declaration bounds, and which answers for itself:
+   * see SolidRegion. */
+  [[nodiscard]] static std::shared_ptr<const SolidTree> region(std::shared_ptr<const SolidRegion> region,
+                                                               const std::string& what = "");
   /*! A leaf whose generator declares that its faces are its solid's own
    * boundary - each an exact plane, unless a record declares it a piece of a
    * curved surface - as polyhedron() does. It states no solid a point can be
@@ -124,6 +152,8 @@ public:
   /*! The declared solid of a Declared leaf, the envelope of an Enveloped one;
    * null otherwise. */
   [[nodiscard]] const DeclaredSolid *solid() const { return solid_.get(); }
+  /*! The region of a Region leaf; null otherwise. */
+  [[nodiscard]] const SolidRegion *region() const { return region_.get(); }
   /*! A leaf's name, from its generator; empty for a node, or where none was given. */
   [[nodiscard]] const std::string& what() const { return what_; }
   /*! How many leaves, and how many of them declared. */
@@ -137,13 +167,19 @@ public:
 
 private:
   SolidTree(Op op, std::vector<std::shared_ptr<const SolidTree>> children,
-            std::shared_ptr<const DeclaredSolid> solid, std::string what = "")
-    : op_(op), children_(std::move(children)), solid_(std::move(solid)), what_(std::move(what))
+            std::shared_ptr<const DeclaredSolid> solid, std::string what = "",
+            std::shared_ptr<const SolidRegion> region = nullptr)
+    : op_(op),
+      children_(std::move(children)),
+      solid_(std::move(solid)),
+      region_(std::move(region)),
+      what_(std::move(what))
   {
   }
 
   Op op_;
   std::vector<std::shared_ptr<const SolidTree>> children_;
   std::shared_ptr<const DeclaredSolid> solid_;
+  std::shared_ptr<const SolidRegion> region_;
   std::string what_;
 };
