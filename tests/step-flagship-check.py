@@ -164,7 +164,7 @@ KNOWN_EXPORT_WARNINGS = {
     "lid10": BAND + [CHORD, HOLE] + SPLIT + [
         # A loop nothing encloses is an outer bound and keeps the winding it
         # arrived with - reversing it is what put edges in twice the same way
-        # (src/io/step/MeshLoops.cc).
+        # (src/geometry/brep/MeshLoops.cc).
         "without an enclosing face as their own face",
         # A cone the approximation re-fits, its declaration refused upstream
         # (open item 19).

@@ -20,7 +20,8 @@ assumes both.
 | --- | --- |
 | `src/io/export_step.cc` | entry point: mesh to `StepKernel`, then the ISO-10303-21 header |
 | `src/io/StepKernel.cc/.h` | the entity model and the reader |
-| `src/io/step/` | turning recognised surfaces into entities: `BodyBuild` (what was `build_tri_body`) runs one phase per file - loops, recognition, the corner placement's rungs, one emitter per kind of face, the crossing runs, the planar faces, the reports - over the helpers `LoopGeometry`, `CornerLadder`, `PlaneSections`, `CrossingArc`, `CrossingRuns`, `BoundaryCycles`, `CurveChecks` |
+| `src/geometry/brep/` | the neutral B-rep (`Brep.h`) and the body build that makes it: `brep::BodyBuild` (what was `build_tri_body`) runs one phase per file - loops, recognition, the corner placement's rungs, one emitter per kind of face, the crossing runs, the planar faces, the checks and reports - over the helpers `LoopGeometry`, `CornerLadder`, `PlaneSections`, `CrossingArc`, `CrossingRuns`, `BoundaryCycles`; it makes no STEP entity |
+| `src/io/step/` | what is STEP's: the translator from the B-rep to entities (`BrepToStep`), the product structure around it (`WriteShells.cc`, `StepKernel::writeBody`), and the reader the translator's round-trip tests use (`BrepMirror`) |
 | `src/geometry/AnalyticFeatures.cc/.h` | the recogniser: which facets were modelled as a surface |
 | `src/geometry/recognition/` | the recognition module: `FacetGraph`, `Provenance`, `Ledger`, `Arbiter`, `Pipeline` (the stages and their checked table), `Reports`. See `doc/step-recognition-design.md`, *The recognition module, as built* |
 | `src/io/import_step.cc` | the reader, useful as a round-trip oracle |
