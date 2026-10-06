@@ -45,6 +45,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <src/geometry/Curve.h>
 #include <src/geometry/Surface.h>
 
+namespace brep {
+struct Body;
+}
+
 class SolidTree;
 
 // Format a double as an ISO 10303-21 REAL literal.
@@ -2100,8 +2104,6 @@ public:
   StepKernel();
   virtual ~StepKernel();
 
-  StepKernel::EdgeCurve *create_line_edge_curve(StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
-                                                bool dir);
   StepKernel::EdgeCurve *create_arc_edge_curve(StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
                                                bool dir);
 
@@ -2120,9 +2122,10 @@ public:
                       double tol, bool analytic = false, bool approximate = false,
                       const std::map<int, std::vector<std::size_t>>& cornerOwners = {},
                       const SolidTree *solidTree = nullptr);
-  EdgeCurve *get_line_from_map(std::map<std::pair<int, int>, StepKernel::EdgeCurve *>& edge_map,
-                               int ind1, int ind2, StepKernel::Vertex *vert1, StepKernel::Vertex *vert2,
-                               bool& edge_dir, int& merge_cnt);
+  /*! `body` as this file's solid: its faces through the translator, one
+   * MANIFOLD_SOLID_BREP per shell, and the product structure and contexts
+   * around them, declaring `uncertainty` (io/step/WriteShells.cc). */
+  void writeBody(const char *name, const brep::Body& body, double uncertainty);
   std::string read_line(std::ifstream& stp_file, bool skip_all_space);
   void read_step(std::string file_name);
   std::vector<Entity *> entities;

@@ -42,7 +42,7 @@ using AnalyticFeatures::projectOntoSurfaceAndPlanes;
 
 }  // namespace
 
-void StepKernel::BodyBuild::run()
+brep::Body StepKernel::BodyBuild::run()
 {
   reportDeclaredSurfaces();
 
@@ -78,7 +78,22 @@ void StepKernel::BodyBuild::run()
 
   checkAndReport();
 
-  writeShells();
+  return std::move(brep_body);
+}
+
+// Corners are placed on their faces to the corner ladder's floor, 1e-9 of their
+// size (CornerLadder.h - a chosen number itself, to go with open item 39): that
+// is how exactly the file states where anything is, and an approximation finer
+// than the corners it runs between gains nothing a reader can see. So the
+// crossing curves are held to it, and say how closely they came
+// (`crossing_fit`); and it is what the file declares as its uncertainty, what a
+// reader may take two points as one within. That was 1e-5 whatever the file
+// held until 2026-09-28.
+double StepKernel::BodyBuild::resolution() const
+{
+  double size = 1.0;
+  for (const Vector3d& v : vertices) size = std::max(size, v.norm());
+  return 1e-9 * size;
 }
 
 int32_t StepKernel::BodyBuild::surfaceIndexOf(const Surface *record) const

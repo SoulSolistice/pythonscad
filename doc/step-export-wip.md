@@ -4876,6 +4876,17 @@ and `mirrorBrep` stay as the translator's inverse, read only by its round-trip
 tests. Proven by `compare --data` against the commit before: 0 differences over
 132 exports. Step 2d is done: the writer builds the B-rep and nothing else.
 
+**Step 3, how it moves.** The phases leave `io/step` for `geometry/brep`, free
+of `StepKernel`, each increment neutral by `compare --data`. First, 2026-10-06:
+the body build returns its B-rep (`BodyBuild::run`) and holds no kernel, no
+entity list and no name; `StepKernel::build_tri_body` hands the body to
+`StepKernel::writeBody` - the translator, one MANIFOLD_SOLID_BREP per shell, and
+the product structure - with the uncertainty the build declares
+(`BodyBuild::resolution`). `StepKernel::create_line_edge_curve` and
+`get_line_from_map` went with their last callers. Next: `BodyBuild` out of
+`StepKernel` and its files into `geometry/brep`, with `FaceSource` and
+`stateSource` (in `BrepMirror.h` today, writer-neutral) ahead of them.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral

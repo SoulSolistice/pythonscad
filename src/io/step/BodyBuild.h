@@ -33,8 +33,8 @@
 #include "io/StepKernel.h"
 
 struct StepKernel::BodyBuild {
-  BodyBuild(StepKernel& kernel, const char *name, const std::vector<Vector3d>& mesh_vertices,
-            const std::vector<IndexedFace>& faces, const std::vector<std::shared_ptr<Curve>>& curves,
+  BodyBuild(const std::vector<Vector3d>& mesh_vertices, const std::vector<IndexedFace>& faces,
+            const std::vector<std::shared_ptr<Curve>>& curves,
             const std::vector<std::shared_ptr<Surface>>& surfaces,
             const std::vector<int32_t>& faceOrigin, const std::vector<int32_t>& faceSurface,
             const std::vector<char>& faceDerived, const std::map<int, Vector3d>& cornerMoves,
@@ -43,10 +43,7 @@ struct StepKernel::BodyBuild {
             const std::vector<int>& faceParents, const std::vector<Vector4d>& faceNormals, double tol,
             bool analytic, bool approximate, const std::map<int, std::vector<std::size_t>>& cornerOwners,
             const SolidTree *solidTree)
-    : kernel(kernel),
-      entities(kernel.entities),
-      name(name),
-      mesh_vertices(mesh_vertices),
+    : mesh_vertices(mesh_vertices),
       faces(faces),
       curves(curves),
       surfaces(surfaces),
@@ -66,16 +63,11 @@ struct StepKernel::BodyBuild {
   {
   }
 
-  /*! Every phase, in order. */
-  void run();
-
-  StepKernel& kernel;
-  /*! Where every entity made here registers itself: the kernel's. Only
-   * writeShells makes any - the translator's, and the product structure. */
-  std::vector<Entity *>& entities;
+  /*! Every phase, in order, and the B-rep they built - checked and reported,
+   * for a writer to write. Makes no entity of any kind (open item 39, step 3). */
+  brep::Body run();
 
   // The inputs, as build_tri_body received them.
-  const char *name;
   const std::vector<Vector3d>& mesh_vertices;
   const std::vector<IndexedFace>& faces;
   const std::vector<std::shared_ptr<Curve>>& curves;
@@ -425,10 +417,6 @@ struct StepKernel::BodyBuild {
    * and edge's class stated. */
   void checkBrep();
 
-  /*! The faces as closed shells - one per connected component, since a
-   * CLOSED_SHELL has to be connected - each a MANIFOLD_SOLID_BREP, and the
-   * product structure and contexts around them. */
-  void writeShells();
   /*! The file's resolution: how exactly its corners are placed on their faces,
    * the corner ladder's floor at the part's size - see writeShells. What every
    * approximation in the file is held to, and what it declares as its

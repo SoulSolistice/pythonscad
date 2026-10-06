@@ -53,26 +53,6 @@ StepKernel::~StepKernel()
   entities.clear();
 }
 
-StepKernel::EdgeCurve *StepKernel::create_line_edge_curve(StepKernel::Vertex *vert1,
-                                                          StepKernel::Vertex *vert2, bool dir)
-{
-  // curve 1
-  auto line_point1 = new Point(entities, vert1->point->pt);
-  Vector3d v = vert2->point->pt - vert1->point->pt;
-  const double len = v.norm();
-  // A DIRECTION must have a non zero magnitude. Without this guard a zero
-  // length edge is written as DIRECTION('',(0.,0.,0.)), which importers report
-  // as a degenerated face.
-  if (len < 1e-12) v = Vector3d(1, 0, 0);
-  else v /= len;
-
-  auto line_dir1 = new Direction(entities, v);
-  auto line_vector1 = new Vector(entities, line_dir1, len > 1e-12 ? len : 1.0);
-  auto line1 = new Line(entities, line_point1, line_vector1);
-  //  auto surf_curve1 = new SurfaceCurve(entities, line1);
-  return new EdgeCurve(entities, vert1, vert2, line1, dir);
-}
-
 void StepKernel::build_tri_body(
   const char *name, const std::vector<Vector3d>& mesh_vertices, const std::vector<IndexedFace>& faces,
   const std::vector<std::shared_ptr<Curve>>& curves,
@@ -83,32 +63,13 @@ void StepKernel::build_tri_body(
   const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate,
   const std::map<int, std::vector<std::size_t>>& cornerOwners, const SolidTree *solidTree)
 {
-  BodyBuild(*this, name, mesh_vertices, faces, curves, surfaces, faceOrigin, faceSurface, faceDerived,
-            cornerMoves, singleOwner, owned, faceParents, faceNormals, tol, analytic, approximate,
-            cornerOwners, solidTree)
-    .run();
-}
-
-StepKernel::EdgeCurve *StepKernel::get_line_from_map(
-  std::map<std::pair<int, int>, StepKernel::EdgeCurve *>& edge_map, int ind1, int ind2,
-  StepKernel::Vertex *vert1, StepKernel::Vertex *vert2, bool& edge_dir, int& merge_cnt)
-{
-  // Keyed on the (deduplicated) vertex indices: the previous key was built from
-  // the raw coordinates, which only matches when the two faces meeting at the
-  // edge store bit identical doubles.
-  const auto key = std::make_pair(std::min(ind1, ind2), std::max(ind1, ind2));
-  edge_dir = true;
-
-  auto it = edge_map.find(key);
-  if (it != edge_map.end()) {
-    edge_dir = (it->second->vert1 == vert1);
-    merge_cnt++;
-    return it->second;
-  }
-
-  StepKernel::EdgeCurve *edge_curve = create_line_edge_curve(vert1, vert2, true);
-  edge_map.emplace(key, edge_curve);
-  return edge_curve;
+  // The B-rep, decided by the body build; then written, the one place its
+  // geometry becomes entities (open item 39, step 3).
+  BodyBuild build(mesh_vertices, faces, curves, surfaces, faceOrigin, faceSurface, faceDerived,
+                  cornerMoves, singleOwner, owned, faceParents, faceNormals, tol, analytic, approximate,
+                  cornerOwners, solidTree);
+  const brep::Body body = build.run();
+  writeBody(name, body, build.resolution());
 }
 
 std::string StepKernel::read_line(std::ifstream& stp_file, bool skip_all_space)

@@ -1,39 +1,18 @@
-/*! The shells, and the product around them - see BodyBuild.h. */
-#include "io/step/BodyBuild.h"
-
-#include <algorithm>
-#include <map>
+/*! The shells, and the product around them - see StepKernel::writeBody. */
 #include <string>
 #include <vector>
+#include "geometry/brep/Brep.h"
+#include "io/StepKernel.h"
 #include "io/step/BrepToStep.h"
-#include "io/step/LoopGeometry.h"
 #include "utils/printutils.h"
 
-using namespace step;
-
-// Corners are placed on their faces to the corner ladder's floor, 1e-9 of their
-// size (CornerLadder.h - a chosen number itself, to go with open item 39): that
-// is how exactly the file states where anything is, and an approximation finer
-// than the corners it runs between gains nothing a reader can see. So the
-// crossing curves are held to it, and say how closely they came
-// (`crossing_fit`); and it is what the file declares as its uncertainty, what a
-// reader may take two points as one within. That was 1e-5 whatever the file
-// held until 2026-09-28.
-double StepKernel::BodyBuild::resolution() const
-{
-  double size = 1.0;
-  for (const Vector3d& v : vertices) size = std::max(size, v.norm());
-  return 1e-9 * size;
-}
-
-void StepKernel::BodyBuild::writeShells()
+void StepKernel::writeBody(const char *name, const brep::Body& body, double uncertainty_value)
 {
   // The file's faces are the B-rep's, written by its translator (open item 39,
   // step 2c), the one place this body's geometry becomes entities: the phases
   // build the B-rep and make none (step 2d). A CLOSED_SHELL has to be a single
   // connected shell, so each of the body's shells - its connected components -
   // is one MANIFOLD_SOLID_BREP.
-  const brep::Body& body = brep_body;
   ParametricContext *context = nullptr;
   const std::vector<Face *> written = step::writeBrep(entities, body, context);
   if (written.size() != body.faces.size()) {
@@ -56,7 +35,7 @@ void StepKernel::BodyBuild::writeShells()
   auto length_unit = new SiUnit(entities, SiUnit::LENGTH);
   auto angle_unit = new SiUnit(entities, SiUnit::PLANE_ANGLE);
   auto solid_angle_unit = new SiUnit(entities, SiUnit::SOLID_ANGLE);
-  auto uncertainty = new UncertaintyMeasure(entities, length_unit, resolution());
+  auto uncertainty = new UncertaintyMeasure(entities, length_unit, uncertainty_value);
   auto geom_context =
     new GeometricContext(entities, uncertainty, length_unit, angle_unit, solid_angle_unit);
 
