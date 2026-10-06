@@ -735,9 +735,6 @@ struct StepKernel::BodyBuild {
   // it meets the piece: the two faces then disagree about an edge.
   std::size_t crossing_unwalked = 0;
 
-  // One per file - nothing about a 2D parametric context varies.
-  ParametricContext *param_context = nullptr;
-
   // The plane sections written, and what the quadric emitter counted.
   // Sweep faces whose seam was moved to a column their boundary does not cross.
   std::size_t reseamed = 0, reseam_full = 0;

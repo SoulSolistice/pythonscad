@@ -13,8 +13,16 @@
 
 using namespace step;
 
+// Built on the B-rep, faces and edges alike, and made as no entity (open item
+// 39, step 2d, the seventh move): what the reader made of the entities this
+// emitter made before, value for value - a net's knots as given, or a Bezier's
+// one span; a pcurve on the use of its edge by the face it is on.
 void StepKernel::BodyBuild::emitSweepFaces()
 {
+  // Pcurves given each edge so far. A SURFACE_CURVE carried at most two, and a
+  // third was not written (open item 39, step 2d, the seventh move: kept as it
+  // was, a move being neutral).
+  std::map<std::size_t, int> pcurves_on;
   for (const auto& patch : grid_faces) {
     const auto *grid = dynamic_cast<const GridSurface *>(patch.surface.get());
     if (grid == nullptr) continue;
@@ -154,16 +162,25 @@ void StepKernel::BodyBuild::emitSweepFaces()
       }
     }
 
-    std::vector<std::vector<Point *>> net;
+    brep::SplineSurface net;
     for (int i = 0; i < nu; i++) {
-      std::vector<Point *> row;
-      for (int j = 0; j < nv; j++) {
-        row.push_back(new Point(entities, ctrl[std::size_t(i) * nv + j]));
-      }
-      net.push_back(row);
+      std::vector<Vector3d> row;
+      for (int j = 0; j < nv; j++) row.push_back(ctrl[std::size_t(i) * nv + j]);
+      net.points.push_back(std::move(row));
     }
-    auto surface = new BSplineSurface(entities, "", du, dv, net);
-    surface->setKnots(knots_u, mults_u, knots_v, mults_v);
+    net.degree_u = du;
+    net.degree_v = dv;
+    if (knots_u.empty() || knots_v.empty()) {
+      // A Bezier patch: one span each way, `degree + 1` points along it.
+      net.knots_u = net.knots_v = {0, 1};
+      net.mults_u = {du + 1, du + 1};
+      net.mults_v = {dv + 1, dv + 1};
+    } else {
+      net.knots_u = knots_u;
+      net.knots_v = knots_v;
+      net.mults_u = mults_u;
+      net.mults_v = mults_v;
+    }
 
     // The boundary, one cycle at a time. Patch::Run carries them in order with
     // consecutive runs sharing an endpoint, so a cycle is its runs' vertices
@@ -174,7 +191,7 @@ void StepKernel::BodyBuild::emitSweepFaces()
       for (std::size_t i = 0; i + 1 < run.verts.size(); i++) cycle.push_back(run.verts[i]);
     }
 
-    std::vector<FaceBound *> bounds;
+    std::vector<brep::Loop> bounds;
     // Which cycle is the outer bound is a question about the surface's own
     // parameters, not about the model: a hole in a face is a hole in its
     // parameter rectangle. The largest area there is the one that contains the
@@ -208,14 +225,14 @@ void StepKernel::BodyBuild::emitSweepFaces()
       const std::size_t n = cycle.size();
       // From where no crossing piece straddles the start, since each is one edge.
       const std::size_t start = walkStart(cycle);
-      std::vector<OrientedEdge *> loop;
+      std::vector<brep::Coedge> loop;
       for (std::size_t step = 0; step < n;) {
         const std::size_t i = (start + step) % n;
         const int a = cycle[i], b = cycle[(i + 1) % n];
         // The edges of the file this stretch is: the chain of the crossing
         // piece it belongs to, decided once for both faces, or one mesh edge.
         struct Link {
-          EdgeCurve *edge;
+          std::size_t edge;  // the B-rep's
           bool dir;
           const CurveFit *fit;  // the curve's own fit, or null for a chord or one Bezier
         };
@@ -229,7 +246,7 @@ void StepKernel::BodyBuild::emitSweepFaces()
             for (std::size_t k = 0; k < piece->edges.size(); k++) {
               const std::size_t at = forward ? k : piece->edges.size() - 1 - k;
               const CurveFit *fit = piece->fits[at].ctrl.empty() ? nullptr : &piece->fits[at];
-              links.push_back({piece->edges[at], forward, fit});
+              links.push_back({reader.edge(piece->edges[at]), forward, fit});
             }
             spans = piece->verts.size() - 1;
           } else {
@@ -238,22 +255,17 @@ void StepKernel::BodyBuild::emitSweepFaces()
         }
         if (links.empty()) {
           bool dir = true;
-          EdgeCurve *edge =
-            get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+          const std::size_t edge = lineEdge(a, b, dir);
           links.push_back({edge, dir, nullptr});
         }
         step += spans;
         for (const Link& link : links) {
-          EdgeCurve *edge = link.edge;
-          loop.push_back(new OrientedEdge(entities, edge, link.dir));
-          auto attach = [&](PCurve *pcurve) {
-            // An edge between two sweep faces is on both of them, and STEP
-            // allows a SURFACE_CURVE to say so.
-            if (auto *already = dynamic_cast<SurfaceCurve *>(edge->round)) {
-              if (already->on.size() < 2) already->on.push_back(pcurve);
-            } else {
-              edge->round = new SurfaceCurve(entities, edge->round, {pcurve});
-            }
+          const std::size_t edge = link.edge;
+          loop.push_back(brep::Coedge{edge, link.dir, std::nullopt});
+          auto attach = [&](brep::PCurve pcurve) {
+            // An edge between two sweep faces is on both of them, each pcurve
+            // on its own face's use of it.
+            if (pcurves_on[edge]++ < 2) loop.back().pcurve = std::move(pcurve);
           };
           if (link.fit != nullptr) {
             // A fitted curve across the surface, and its pcurve is that curve's
@@ -271,13 +283,18 @@ void StepKernel::BodyBuild::emitSweepFaces()
                                                          ? interpolateLike(*link.fit, uv)
                                                          : std::vector<Eigen::Vector2d>{};
             if (!ctrl2.empty()) {
-              std::vector<Point2d *> cp;
-              for (const auto& c : ctrl2) cp.push_back(new Point2d(entities, c.x(), c.y()));
-              auto flat = new BSplineCurve2d(entities, cp);
-              flat->setKnots(CurveFit::degree, link.fit->knots, link.fit->mults);
-              if (param_context == nullptr) param_context = new ParametricContext(entities);
-              attach(new PCurve(entities, surface,
-                                new DefinitionalRepresentation(entities, flat, param_context)));
+              brep::BSpline2 flat;
+              for (const auto& c : ctrl2) flat.points.emplace_back(c.x(), c.y());
+              if (link.fit->knots.empty()) {
+                flat.degree = int(ctrl2.size()) - 1;
+                flat.knots = {0, 1};
+                flat.mults = {int(ctrl2.size()), int(ctrl2.size())};
+              } else {
+                flat.degree = CurveFit::degree;
+                flat.knots = link.fit->knots;
+                flat.mults = link.fit->mults;
+              }
+              attach(std::move(flat));
             }
             continue;
           }
@@ -292,25 +309,24 @@ void StepKernel::BodyBuild::emitSweepFaces()
           // disagrees with the direction of the curve it belongs to is worse
           // than none.
           double ua = 0, va = 0, ub = 0, vb = 0;
-          if (!parameters(edge->vert1->point->pt, ua, va)) continue;
-          if (!parameters(edge->vert2->point->pt, ub, vb)) continue;
+          if (!parameters(brep_body.vertices[brep_body.edges[edge].start].point, ua, va)) continue;
+          if (!parameters(brep_body.vertices[brep_body.edges[edge].end].point, ub, vb)) continue;
           const double su = ub - ua, sv = vb - va;
           const double plen = sqrt(su * su + sv * sv);
           // A DIRECTION has to have a magnitude, and an edge whose ends land on
           // the same parameters says nothing about where it runs anyway.
           if (plen < 1e-12) continue;
-          if (param_context == nullptr) param_context = new ParametricContext(entities);
-          attach(new PCurve(
-            entities, surface,
-            new DefinitionalRepresentation(
-              entities,
-              new Line2d(entities, new Point2d(entities, ua, va),
-                         new Vector2d(entities, new Direction2d(entities, su / plen, sv / plen), plen)),
-              param_context)));
+          brep::Line2 line;
+          line.origin = Eigen::Vector2d(ua, va);
+          line.direction = Eigen::Vector2d(su / plen, sv / plen);
+          line.length = plen;
+          attach(line);
         }
       }
-      auto edge_loop = new EdgeLoop(entities, loop);
-      bounds.push_back(new FaceBound(entities, edge_loop, true, entry.first == outer));
+      brep::Loop bound;
+      bound.outer = entry.first == outer;
+      bound.coedges = std::move(loop);
+      bounds.push_back(std::move(bound));
     }
     if (bounds.empty()) continue;
 
@@ -332,7 +348,12 @@ void StepKernel::BodyBuild::emitSweepFaces()
       outward = d_u.cross(d_v).dot(loop_normals[patch.facets.front()]) > 0;
     }
 
-    sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
-    registerFace(sfaces_extra.back(), patch.surface, patch.facets);
+    brep::Face face;
+    step::stateSource(face, sourceOf(patch.surface, patch.facets, std::nullopt, false));
+    face.same_sense = outward;
+    face.form = std::move(net);
+    face.loops = std::move(bounds);
+    built_faces.emplace(sfaces_extra.size(), std::move(face));
+    sfaces_extra.push_back(nullptr);
   }
 }

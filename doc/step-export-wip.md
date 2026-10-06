@@ -4834,6 +4834,13 @@ the translator writes it from. `conic_placement` went with its last caller.
 Proven by `compare --data` against the commit before: 0 differences over 132
 exports.
 
+Seventh move, 2026-10-06: the declared sweeps. `emitSweepFaces` builds its
+spline nets, chords and pcurves on the B-rep; a pcurve goes on the face's own use
+of the edge, as the reader assigned it from the SURFACE_CURVE before, and an
+edge still takes at most two - the cap the SURFACE_CURVE had, kept because a
+move is neutral. `param_context` went with its last caller. Proven by `compare
+--data` against the commit before: 0 differences over 132 exports.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral
