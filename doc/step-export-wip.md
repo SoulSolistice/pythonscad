@@ -4807,6 +4807,20 @@ planar faces and the fans now make no entity at all. The edges the analytic
 faces make are the next move. Proven by `compare --data` against the commit
 before: 0 differences over 132 exports.
 
+Fifth move, 2026-10-06: the analytic emitters one at a time, each with its faces
+and edges together, since an emitter's edges live in its faces' loops. The
+Bezier patches first: `emitBezierFaces` builds its faces and edges on the
+B-rep - what the reader made of its entities, value for value: a placement's
+directions as given, a Bezier's one span, a line along the unit vector from its
+first vertex, the patch's rows and circles stated exact - and makes no entity.
+Two pieces of plumbing the next emitters reuse: an edge handed to the planar
+faces is an `EdgeRef`, an entity read when named or a B-rep edge, so emitters
+still making entities and those that no longer do share the same rims; and a
+face an emitter built takes its slot in `sfaces_extra` (a null there,
+`built_faces` holding it), so the analytic faces enter the B-rep in one order
+whoever built them. Proven by `compare --data`: 0 differences over 132 exports.
+Next: the sweeps, the quadrics, the bands, and the crossing curves.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral

@@ -7,15 +7,32 @@
 #include <set>
 #include <vector>
 #include "geometry/AnalyticFeatures.h"
+#include "io/step/BrepMirror.h"
 
+// Built on the B-rep, faces and edges alike, and made as no entity (open item
+// 39, step 2d, the fifth move): what the reader made of the entities this
+// emitter made before, value for value - a placement's directions as given, a
+// Bezier's one span, a line from its first vertex along the unit vector to its
+// second.
 void StepKernel::BodyBuild::emitBezierFaces()
 {
-  std::map<std::set<int>, EdgeCurve *> run_edges;  // run vertices -> its curve
-  auto placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
-    auto point = new Point(entities, origin);
-    auto dir_axis = new Direction(entities, dir);
-    auto dir_ref = new Direction(entities, towards);
-    return new Axis2Placement(entities, dir_axis, dir_ref, point);
+  std::map<std::set<int>, std::size_t> run_edges;  // run vertices -> its B-rep edge
+  auto placement = [](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
+    brep::Frame frame;
+    frame.origin = origin;
+    frame.axis = dir;
+    frame.ref = towards;
+    return frame;
+  };
+  auto add_edge = [&](std::size_t from, std::size_t to, brep::CurveForm form, bool stated_exact) {
+    brep::Edge edge;
+    edge.start = from;
+    edge.end = to;
+    edge.same_sense = true;
+    edge.curve.form = std::move(form);
+    edge.curve.stated_exact = stated_exact;
+    brep_body.edges.push_back(std::move(edge));
+    return brep_body.edges.size() - 1;
   };
   for (std::size_t pi = 0; pi < bezier_patches.size(); pi++) {
     const AnalyticFeatures::Patch& patch = bezier_patches[pi];
@@ -24,7 +41,7 @@ void StepKernel::BodyBuild::emitBezierFaces()
     if (bez == nullptr) continue;
     const std::shared_ptr<Surface> quadric = pi < patch_quadric.size() ? patch_quadric[pi] : nullptr;
 
-    SurfaceType *surface = nullptr;
+    brep::SurfaceForm surface;
     if (const auto *cyl = dynamic_cast<const CylinderSurface *>(quadric.get())) {
       // The reference direction is the radius through the start of the first
       // rail, so the face occupies theta from zero forwards rather than a
@@ -33,7 +50,7 @@ void StepKernel::BodyBuild::emitBezierFaces()
       const Vector3d axis = cyl->normdir.normalized();
       const Vector3d rel = bez->control(0, 0) - cyl->refpt;
       const Vector3d ref = (rel - axis * axis.dot(rel)).normalized();
-      surface = new CylindricalSurface(entities, "", placement(cyl->refpt, axis, ref), cyl->r);
+      surface = brep::Cylinder{placement(cyl->refpt, axis, ref), cyl->r};
     } else if (const auto *sph = dynamic_cast<const SphereSurface *>(quadric.get())) {
       // The polar axis is the patch's apex, so the octant is the (theta, phi)
       // rectangle below the pole and its three bounding arcs are two
@@ -41,37 +58,46 @@ void StepKernel::BodyBuild::emitBezierFaces()
       const Vector3d axis = sph->normdir.normalized();
       const Vector3d rel = bez->control(0, 0) - sph->refpt;
       const Vector3d ref = (rel - axis * axis.dot(rel)).normalized();
-      surface = new SphericalSurface(entities, "", placement(sph->refpt, axis, ref), sph->r);
+      surface = brep::Sphere{placement(sph->refpt, axis, ref), sph->r};
     } else {
-      std::vector<std::vector<Point *>> net;
-      std::vector<std::vector<double>> wnet;
+      brep::SplineSurface net;
       for (int i = 0; i <= bez->degree_u; i++) {
-        std::vector<Point *> row;
+        std::vector<Vector3d> row;
         std::vector<double> row_w;
         for (int j = 0; j <= bez->degree_v; j++) {
-          row.push_back(new Point(entities, bez->control(i, j)));
+          row.push_back(bez->control(i, j));
           row_w.push_back(bez->weight(i, j));
         }
-        net.push_back(row);
-        if (bez->isRational()) wnet.push_back(row_w);
+        net.points.push_back(row);
+        if (bez->isRational()) net.weights.push_back(row_w);
       }
       // A fillet's patch is rational - its middle weight is what makes the arc a
       // circle rather than a parabola - and the weights have to be written, or
       // the face describes a different surface from the mesh it replaces.
-      surface = new BSplineSurface(entities, "", bez->degree_u, bez->degree_v, net, wnet);
+      // One span each way, `degree + 1` points along it.
+      net.degree_u = bez->degree_u;
+      net.degree_v = bez->degree_v;
+      net.knots_u = net.knots_v = {0, 1};
+      net.mults_u = {bez->degree_u + 1, bez->degree_u + 1};
+      net.mults_v = {bez->degree_v + 1, bez->degree_v + 1};
+      surface = std::move(net);
     }
 
-    std::vector<OrientedEdge *> loop;
+    brep::Loop loop;
+    loop.outer = true;
     for (const auto& run : patch.runs) {
       const std::set<int> key(run.verts.begin(), run.verts.end());
-      Vertex *from = get_vertex(run.verts.front());
-      Vertex *to = get_vertex(run.verts.back());
-      EdgeCurve *edge = nullptr;
+      const std::size_t from = brepVertex(run.verts.front());
+      const std::size_t to = brepVertex(run.verts.back());
+      std::size_t edge = 0;
       const auto known = run_edges.find(key);
       if (known != run_edges.end()) {
         edge = known->second;
       } else if (run.straight) {
-        edge = create_line_edge_curve(from, to, true);
+        const Vector3d p = brep_body.vertices[from].point;
+        Vector3d v = brep_body.vertices[to].point - p;
+        v /= v.norm();
+        edge = add_edge(from, to, brep::Line{p, v}, false);
         run_edges.emplace(key, edge);
       } else {
         // On a quadric face the run is a circular arc lying on that quadric,
@@ -86,24 +112,24 @@ void StepKernel::BodyBuild::emitBezierFaces()
         if (circular_runs.count(key) &&
             AnalyticFeatures::runCircle(patch, run, vertices, centre, normal, radius)) {
           const Vector3d ref = (vertices[run.verts.front()] - centre).normalized();
-          auto circle = new Circle(entities, "", placement(centre, normal, ref), radius);
-          edge = new EdgeCurve(entities, from, to, circle, true);
-          edge_source[edge] = step::EdgeSource{0, true};  // the patch's own boundary
+          // the patch's own boundary
+          edge = add_edge(
+            from, to,
+            brep::Conic{brep::Conic::Kind::Circle, placement(centre, normal, ref), radius, radius},
+            true);
         } else {
-          std::vector<Point *> cp;
-          std::vector<double> cw;
-          for (const auto& c : AnalyticFeatures::runControlPoints(patch, run, vertices, &cw)) {
-            cp.push_back(new Point(entities, c));
-          }
-          auto curve = new BSplineCurve(entities, "", cp, cw);
-          edge = new EdgeCurve(entities, from, to, curve, true);
-          edge_source[edge] = step::EdgeSource{0, true};  // a row of the patch's own net
+          brep::BSpline spline;
+          spline.points = AnalyticFeatures::runControlPoints(patch, run, vertices, &spline.weights);
+          spline.degree = int(spline.points.size()) - 1;
+          spline.knots = {0, 1};
+          spline.mults = {int(spline.points.size()), int(spline.points.size())};
+          edge = add_edge(from, to, std::move(spline), true);  // a row of the patch's own net
         }
         run_edges.emplace(key, edge);
       }
       // The curve was built running from whichever patch reached it first.
-      const bool sense = edge->vert1 == from;
-      loop.push_back(new OrientedEdge(entities, edge, sense));
+      const bool sense = brep_body.edges[edge].start == from;
+      loop.coedges.push_back(brep::Coedge{edge, sense, std::nullopt});
 
       // and the neighbouring planar face gives up the segments it replaces
       // The region boundary is walked in the direction its own facets go, so
@@ -111,9 +137,9 @@ void StepKernel::BodyBuild::emitBezierFaces()
       // traversing a shared edge the same way is precisely what leaves a
       // shell open.
       if (run.kind == AnalyticFeatures::Patch::Run::WHOLE_LOOP) {
-        rim_of_loop[run.loop] = {edge, !sense};
+        rim_of_loop[run.loop] = {EdgeRef::built(edge), !sense};
       } else if (run.kind == AnalyticFeatures::Patch::Run::LOOP_RUN) {
-        arc_subs[run.loop].push_back({run.start, run.count, edge, !sense});
+        arc_subs[run.loop].push_back({run.start, run.count, EdgeRef::built(edge), !sense});
       }
     }
 
@@ -155,13 +181,18 @@ void StepKernel::BodyBuild::emitBezierFaces()
       }
     }
 
-    auto edge_loop = new EdgeLoop(entities, loop);
-    std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
-    sfaces_extra.push_back(new Face(entities, bounds, surface, outward));
     // Written on the quadric the patch is, where recognition found one
-    // (BezierPatchSurface::stateQuadric, by its maker) - a closed form of the patch, the record the face
-    // stands for - and otherwise on the patch itself.
-    registerFace(sfaces_extra.back(), patch.surface, patch.facets, std::nullopt, false, quadric,
-                 quadric != nullptr);
+    // (BezierPatchSurface::stateQuadric, by its maker) - a closed form of the
+    // patch, the record the face stands for - and otherwise on the patch itself.
+    brep::Face face;
+    step::FaceSource source = sourceOf(patch.surface, patch.facets, std::nullopt, false);
+    source.carrier = quadric;
+    source.carrier_derived = quadric != nullptr;
+    step::stateSource(face, source);
+    face.same_sense = outward;
+    face.form = std::move(surface);
+    face.loops.push_back(std::move(loop));
+    built_faces.emplace(sfaces_extra.size(), std::move(face));
+    sfaces_extra.push_back(nullptr);
   }
 }

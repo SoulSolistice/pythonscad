@@ -31,8 +31,8 @@ void StepKernel::BodyBuild::emitPlanarFaces()
     // the reader, and each straight edge the B-rep's own (lineEdge).
     brep::Loop& bound = planar_loops[i];
     bound.outer = !loop_is_hole[i];
-    auto use = [&](EdgeCurve *edge, bool sense) {
-      bound.coedges.push_back(brep::Coedge{reader.edge(edge), sense, std::nullopt});
+    auto use = [&](const EdgeRef& edge, bool sense) {
+      bound.coedges.push_back(brep::Coedge{brepEdge(edge), sense, std::nullopt});
     };
     auto line = [&](int a, int b) {
       // Two corners the placement brought onto one point are one vertex, and
@@ -232,11 +232,21 @@ void StepKernel::BodyBuild::emitPlanarFaces()
   // made - the planar ones just now, the curved ones before them.
   std::vector<int32_t> written_on(face_cnt, -1);
   for (const auto& [i, face] : planar_faces) written_on[i] = surfaceIndexOf(face.surface.get());
-  for (const Face *face : sfaces_extra) {
-    const auto source = face_source.find(face);
-    if (source == face_source.end()) continue;
-    const int32_t s = surfaceIndexOf(source->second.record.get());
-    for (const std::size_t f : source->second.facets) {
+  for (std::size_t k = 0; k < sfaces_extra.size(); k++) {
+    const Surface *record = nullptr;
+    const std::vector<std::size_t> *facets = nullptr;
+    if (sfaces_extra[k] == nullptr) {
+      const brep::Face& built = built_faces.at(k);
+      record = built.surface.get();
+      facets = &built.facets;
+    } else {
+      const auto source = face_source.find(sfaces_extra[k]);
+      if (source == face_source.end()) continue;
+      record = source->second.record.get();
+      facets = &source->second.facets;
+    }
+    const int32_t s = surfaceIndexOf(record);
+    for (const std::size_t f : *facets) {
       if (f < written_on.size()) written_on[f] = s;
     }
   }

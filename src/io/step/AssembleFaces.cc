@@ -23,12 +23,19 @@ void StepKernel::BodyBuild::assembleFaces()
         "machine precision - by up to %3$.4f; a bound bent by something other than the merge",
         int(planes_off_plane), planes_off_plane == 1 ? "" : "s", worst_plane_off);
   }
-  // The analytic faces are faces of the same shell, read off the entities
-  // their emitters made; then the fans.
-  for (const Face *face : sfaces_extra) {
+  // The analytic faces are faces of the same shell, in the order their
+  // emitters made them: read off the entities an emitter made, or as an
+  // emitter built them on the B-rep; then the fans.
+  for (std::size_t k = 0; k < sfaces_extra.size(); k++) {
+    const Face *face = sfaces_extra[k];
+    if (face == nullptr) {
+      brep_body.faces.push_back(std::move(built_faces.at(k)));
+      continue;
+    }
     const auto source = face_source.find(face);
     reader.face(face, source != face_source.end() ? &source->second : nullptr);
   }
+  built_faces.clear();
   for (auto& face : fan_faces) brep_body.faces.push_back(std::move(face));
   fan_faces.clear();
 

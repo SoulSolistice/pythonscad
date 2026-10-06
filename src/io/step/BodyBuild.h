@@ -493,6 +493,10 @@ struct StepKernel::BodyBuild {
 
   // The faces the analytic emitters write.
   std::vector<Face *> sfaces_extra;
+  // The faces an emitter built on the B-rep rather than as entities, by their
+  // place in `sfaces_extra`, which holds a null there: the analytic faces enter
+  // the B-rep in that one order, whoever built them (open item 39, step 2d).
+  std::map<std::size_t, brep::Face> built_faces;
 
   // Shared by every emitter because a partial
   // cylinder's two end edges are ordinary straight edges shared with a
@@ -643,13 +647,33 @@ struct StepKernel::BodyBuild {
 
   // What a planar loop gives up to a curve an analytic face writes along it.
   /*! One run of loop edges replaced by a single arc. */
+  /*! An edge a phase hands to the planar faces: an entity a phase still
+   * makes, read when it is named, or one built on the B-rep - its index (open
+   * item 39, step 2d). */
+  struct EdgeRef {
+    EdgeRef() = default;
+    EdgeRef(EdgeCurve *e) : entity(e) {}  // NOLINT: an entity converts
+    static EdgeRef built(std::size_t index)
+    {
+      EdgeRef out;
+      out.brep = index;
+      return out;
+    }
+    EdgeCurve *entity = nullptr;
+    std::size_t brep = std::size_t(-1);
+  };
+  /*! The B-rep's edge `ref` names. */
+  std::size_t brepEdge(const EdgeRef& ref)
+  {
+    return ref.entity != nullptr ? reader.edge(ref.entity) : ref.brep;
+  }
   struct ArcSubstitution {
     std::size_t start = 0, count = 0;
-    EdgeCurve *edge = nullptr;
+    EdgeRef edge;
     bool sense = true;  // orientation for this loop's own traversal
   };
-  std::map<std::size_t, std::pair<EdgeCurve *, bool>> rim_of_loop;  // whole loop -> circle
-  std::map<std::size_t, std::vector<ArcSubstitution>> arc_subs;     // runs inside a loop
+  std::map<std::size_t, std::pair<EdgeRef, bool>> rim_of_loop;   // whole loop -> circle
+  std::map<std::size_t, std::vector<ArcSubstitution>> arc_subs;  // runs inside a loop
   // Rims written as chords by both faces because the face across is fanned into
   // triangles and cannot be handed the arc. See the band writer below.
   std::size_t rim_unshared = 0;
