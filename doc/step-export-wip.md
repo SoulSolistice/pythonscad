@@ -4841,6 +4841,17 @@ edge still takes at most two - the cap the SURFACE_CURVE had, kept because a
 move is neutral. `param_context` went with its last caller. Proven by `compare
 --data` against the commit before: 0 differences over 132 exports.
 
+Eighth move, 2026-10-06: the bands, and the edge map with them. `emitBands`
+builds its surfaces, rims, seams and chords on the B-rep and makes no entity;
+`lineEdge` is now the one straight edge per mesh edge, and `edge_map`,
+`get_line_from_map` and `create_line_edge_curve` went with their last callers.
+A rim's curve is built where a face uses it. Built eagerly at first, a rim
+given up as chords - the loop across it not written - became an edge no face
+uses, and `brep::check` named it on step-hole-in-a-fanned-facet, the one
+difference of the first proof: as an entity it was made and never read into the
+body. Proven by `compare --data` against the commit before: 0 differences over
+132 exports.
+
 **Found on the way: the phases held against the doctrine.** Moving a phase is
 neutral by rule (A8), so what the review finds is recorded here and fixed in
 commits of its own - after the move, so the fix is made once, in the neutral

@@ -10,8 +10,49 @@
 #include "geometry/AnalyticFeatures.h"
 #include "utils/printutils.h"
 
+// Built on the B-rep, faces and edges alike, and made as no entity (open item
+// 39, step 2d, the eighth move): what the reader made of the entities this
+// emitter made before, value for value - a placement's directions as given, a
+// line along the unit vector from its first vertex.
 void StepKernel::BodyBuild::emitBands()
 {
+  auto placement = [](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
+    brep::Frame frame;
+    frame.origin = origin;
+    frame.axis = dir;
+    frame.ref = towards;
+    return frame;
+  };
+  auto add_edge = [&](std::size_t from, std::size_t to, brep::CurveForm form) {
+    brep::Edge edge;
+    edge.start = from;
+    edge.end = to;
+    edge.same_sense = true;
+    edge.curve.form = std::move(form);
+    brep_body.edges.push_back(std::move(edge));
+    return brep_body.edges.size() - 1;
+  };
+  auto circle = [](const brep::Frame& frame, double r) {
+    return brep::Conic{brep::Conic::Kind::Circle, frame, r, r};
+  };
+  auto coedge = [](std::size_t edge, bool forward) { return brep::Coedge{edge, forward, std::nullopt}; };
+  // The face, in its slot among the analytic faces.
+  auto build = [&](brep::SurfaceForm form, std::vector<brep::Coedge> coedges, bool outward,
+                   const std::shared_ptr<const Surface>& record, const std::vector<std::size_t>& covered,
+                   const std::shared_ptr<const Surface>& carrier) {
+    brep::Face face;
+    step::FaceSource source = sourceOf(record, covered, std::nullopt, false);
+    source.carrier = carrier;
+    step::stateSource(face, source);
+    face.same_sense = outward;
+    face.form = std::move(form);
+    brep::Loop loop;
+    loop.outer = true;
+    loop.coedges = std::move(coedges);
+    face.loops.push_back(std::move(loop));
+    built_faces.emplace(sfaces_extra.size(), std::move(face));
+    sfaces_extra.push_back(nullptr);
+  };
   for (std::size_t i = 0; i < bands.size(); i++) {
     const AnalyticFeatures::Band& band = bands[i];
     if (!band.alive) continue;
@@ -61,38 +102,23 @@ void StepKernel::BodyBuild::emitBands()
       // the point on the tube's centre circle nearest the corner
       const Vector3d tube = centre + radial * tor->r_major;
 
-      auto placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
-        auto point = new Point(entities, origin);
-        auto dir_axis = new Direction(entities, dir);
-        auto dir_ref = new Direction(entities, towards);
-        return new Axis2Placement(entities, dir_axis, dir_ref, point);
-      };
-
-      auto surface =
-        new ToroidalSurface(entities, "", placement(centre, axis, radial), tor->r_major, tor->r_minor);
-      Vertex *vert = get_vertex(band.seam_bottom);
+      const brep::Torus surface{placement(centre, axis, radial), tor->r_major, tor->r_minor};
+      const std::size_t vert = brepVertex(band.seam_bottom);
 
       // the major circle: round the axis, through the corner
-      auto major = new Circle(entities, "", placement(centre + axis * along, axis, radial),
-                              (rel - axis * along).norm());
-      auto edge_major = new EdgeCurve(entities, vert, vert, major, true);
+      const std::size_t edge_major = add_edge(
+        vert, vert, circle(placement(centre + axis * along, axis, radial), (rel - axis * along).norm()));
 
       // the meridian circle: round the tube, in the plane the axis and the
       // radial direction span
-      auto meridian = new Circle(
-        entities, "", placement(tube, radial.cross(axis), (corner - tube).normalized()), tor->r_minor);
-      auto edge_meridian = new EdgeCurve(entities, vert, vert, meridian, true);
+      const std::size_t edge_meridian = add_edge(
+        vert, vert,
+        circle(placement(tube, radial.cross(axis), (corner - tube).normalized()), tor->r_minor));
 
-      std::vector<OrientedEdge *> loop{
-        new OrientedEdge(entities, edge_major, true),
-        new OrientedEdge(entities, edge_meridian, true),
-        new OrientedEdge(entities, edge_major, false),
-        new OrientedEdge(entities, edge_meridian, false),
-      };
-      auto edge_loop = new EdgeLoop(entities, loop);
-      std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
-      sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
-      registerFace(sfaces_extra.back(), record, covered, std::nullopt, false, carrier);
+      build(surface,
+            {coedge(edge_major, true), coedge(edge_meridian, true), coedge(edge_major, false),
+             coedge(edge_meridian, false)},
+            band.outward, record, covered, carrier);
       continue;
     }
 
@@ -122,34 +148,25 @@ void StepKernel::BodyBuild::emitBands()
         const Vector3d rel = vertices[band.seam_bottom] - centre;
         const Vector3d radial = (rel - axis * rel.dot(axis)).normalized();
 
-        auto placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
-          auto point = new Point(entities, origin);
-          auto dir_axis = new Direction(entities, dir);
-          auto dir_ref = new Direction(entities, towards);
-          return new Axis2Placement(entities, dir_axis, dir_ref, point);
-        };
-
-        auto surface = new SphericalSurface(entities, "", placement(centre, axis, radial), sph->r);
-        auto south = new Vertex(entities, new Point(entities, centre - axis * sph->r));
-        auto north = new Vertex(entities, new Point(entities, centre + axis * sph->r));
+        const brep::Sphere surface{placement(centre, axis, radial), sph->r};
+        brep::Vertex pole;
+        pole.point = centre - axis * sph->r;
+        brep_body.vertices.push_back(pole);
+        const std::size_t south = brep_body.vertices.size() - 1;
+        pole.point = centre + axis * sph->r;
+        brep_body.vertices.push_back(pole);
+        const std::size_t north = brep_body.vertices.size() - 1;
 
         // Parameterised from the south pole, so that a quarter turn reaches the
         // seam's own longitude and a half turn the north pole. `radial x axis`
         // is the normal that makes that the positive sweep; the other way round
         // the arc runs down the far side of the sphere, and the face is bounded
         // by the wrong half of the great circle.
-        auto meridian =
-          new Circle(entities, "", placement(centre, radial.cross(axis), Vector3d(-axis)), sph->r);
-        auto edge_seam = new EdgeCurve(entities, south, north, meridian, true);
+        const std::size_t edge_seam =
+          add_edge(south, north, circle(placement(centre, radial.cross(axis), Vector3d(-axis)), sph->r));
 
-        std::vector<OrientedEdge *> loop{
-          new OrientedEdge(entities, edge_seam, true),
-          new OrientedEdge(entities, edge_seam, false),
-        };
-        auto edge_loop = new EdgeLoop(entities, loop);
-        std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
-        sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
-        registerFace(sfaces_extra.back(), record, covered, std::nullopt, false, carrier);
+        build(surface, {coedge(edge_seam, true), coedge(edge_seam, false)}, band.outward, record,
+              covered, carrier);
         continue;
       }
     }
@@ -157,19 +174,12 @@ void StepKernel::BodyBuild::emitBands()
     const Vector3d top_centre = band.base + band.axis * band.height;
     const bool is_cone = band.isCone();
 
-    auto placement = [&](const Vector3d& origin, const Vector3d& dir, const Vector3d& towards) {
-      auto point = new Point(entities, origin);
-      auto dir_axis = new Direction(entities, dir);
-      auto dir_ref = new Direction(entities, towards);
-      return new Axis2Placement(entities, dir_axis, dir_ref, point);
-    };
-
     // a radial direction to measure the surface's own parameterisation from
     const int ref_vertex = band.closed ? band.seam_bottom : band.bottom_set.front();
     const Vector3d rel = vertices[ref_vertex] - band.base;
     const Vector3d ref = (rel - band.axis * band.axis.dot(rel)).normalized();
 
-    SurfaceType *surface = nullptr;
+    brep::SurfaceForm surface;
     if (const auto *tor = dynamic_cast<const TorusSurface *>(band.zone.get())) {
       // A partial torus: the placement comes from the record, not from the
       // band's rims. Its own axis and a radial direction through the seam are
@@ -178,14 +188,12 @@ void StepKernel::BodyBuild::emitBands()
       const Vector3d axis = tor->normdir.normalized();
       const Vector3d rel_seam = vertices[band.seam_bottom] - tor->refpt;
       const Vector3d radial = (rel_seam - axis * rel_seam.dot(axis)).normalized();
-      surface = new ToroidalSurface(entities, "", placement(tor->refpt, axis, radial), tor->r_major,
-                                    tor->r_minor);
+      surface = brep::Torus{placement(tor->refpt, axis, radial), tor->r_major, tor->r_minor};
     } else if (band.zone != nullptr) {
       const auto *sph = dynamic_cast<const SphereSurface *>(band.zone.get());
-      surface = new SphericalSurface(entities, "", placement(sph->refpt, band.axis, ref), sph->r);
+      surface = brep::Sphere{placement(sph->refpt, band.axis, ref), sph->r};
     } else if (!is_cone) {
-      surface =
-        new CylindricalSurface(entities, "", placement(band.base, band.axis, ref), band.r_bottom);
+      surface = brep::Cylinder{placement(band.base, band.axis, ref), band.r_bottom};
     } else {
       // ISO 10303 wants a half angle in (0, pi/2), so a cone which narrows
       // along the axis is written from its other end instead.
@@ -194,16 +202,16 @@ void StepKernel::BodyBuild::emitBands()
       const Vector3d dir = widens ? band.axis : Vector3d(-band.axis);
       const double r0 = widens ? band.r_bottom : band.r_top;
       const double half_angle = atan(fabs(band.r_top - band.r_bottom) / band.height);
-      surface = new ConicalSurface(entities, "", placement(origin, dir, ref), r0, half_angle);
+      surface = brep::Cone{placement(origin, dir, ref), r0, half_angle};
     }
 
     // the rims
-    EdgeCurve *rim_edge[2] = {nullptr, nullptr};
+    std::size_t rim_edge[2] = {0, 0};
     bool rim_sense[2] = {true, true};
     // The mesh's own chords along a rim, where the arc cannot be handed to the
     // face across it - see below. Empty whenever the rim is written as the arc
     // it is, which is every rim on every fixture measured.
-    std::vector<std::pair<EdgeCurve *, bool>> rim_chords[2];
+    std::vector<std::pair<std::size_t, bool>> rim_chords[2];
     for (int side = 0; side < 2; side++) {
       const bool bottom = side == 0;
       const AnalyticFeatures::RimRef& rim = bottom ? rims[i].first : rims[i].second;
@@ -223,7 +231,7 @@ void StepKernel::BodyBuild::emitBands()
       if (band.closed) {
         const int seam = bottom ? band.seam_bottom : band.seam_top;
         const Vector3d seam_rel = vertices[seam] - centre;
-        RoundType *curve = nullptr;
+        brep::CurveForm curve;
         if (!bottom && band.top_tilted) {
           // The rim is the section of the cylinder by a plane which is not
           // perpendicular to the axis, so it is an ellipse. Its minor axis has
@@ -239,15 +247,21 @@ void StepKernel::BodyBuild::emitBands()
           const Vector3d n = band.top_normal;
           const double cos_tilt = n.dot(band.axis);
           const Vector3d major = (band.axis - n * cos_tilt).normalized();
-          curve = new Ellipse(entities, "", placement(centre, n, major), radius / cos_tilt, radius);
+          curve = brep::Conic{brep::Conic::Kind::Ellipse, placement(centre, n, major), radius / cos_tilt,
+                              radius};
         } else {
-          curve = new Circle(entities, "", placement(centre, band.axis, seam_rel.normalized()), radius);
+          curve = circle(placement(centre, band.axis, seam_rel.normalized()), radius);
         }
-        Vertex *vert = get_vertex(seam);
-        // a full circle is one edge whose two ends are the same vertex
-        rim_edge[side] = new EdgeCurve(entities, vert, vert, curve, true);
+        // A full circle is one edge whose two ends are the same vertex. Built
+        // where a face uses it: a rim given up as chords below is no edge of
+        // the body, as the entity it was before was never read into it.
+        auto rim_circle = [&] {
+          const std::size_t vert = brepVertex(seam);
+          return add_edge(vert, vert, std::move(curve));
+        };
         rim_sense[side] = rim.wall_ccw;
         if (rim.kind == AnalyticFeatures::RimRef::OTHER_BAND) {
+          rim_edge[side] = rim_circle();
           shared_rim_edges.emplace(key, rim_edge[side]);
           continue;
         }
@@ -273,27 +287,31 @@ void StepKernel::BodyBuild::emitBands()
               const int a = ring[forward ? (s + k) % m : (s + m - k) % m];
               const int b = ring[forward ? (s + k + 1) % m : (s + 2 * m - k - 1) % m];
               bool dir = true;
-              EdgeCurve *chord =
-                get_line_from_map(edge_map, a, b, get_vertex(a), get_vertex(b), dir, merged_edge_cnt);
+              const std::size_t chord = lineEdge(a, b, dir);
               rim_chords[side].emplace_back(chord, dir);
             }
             rim_unshared++;
             continue;
           }
         }
-        rim_of_loop.emplace(rim.loop, std::make_pair(rim_edge[side], !rim.wall_ccw));
+        rim_edge[side] = rim_circle();
+        rim_of_loop.emplace(rim.loop, std::make_pair(EdgeRef::built(rim_edge[side]), !rim.wall_ccw));
       } else {
         // An arc, from one end of the rim to the other. A CIRCLE is counter
         // clockwise about its own axis, so the arc is always written that way
         // and the face's own direction is carried by rim_sense.
         const int from = rim.ccw_start, to = rim.ccw_end;
-        auto circle = new Circle(
-          entities, "", placement(centre, band.axis, (vertices[from] - centre).normalized()), radius);
-        rim_edge[side] = new EdgeCurve(entities, get_vertex(from), get_vertex(to), circle, true);
+        // Built where a face uses it, as the full circle above.
+        auto rim_arc = [&] {
+          return add_edge(
+            brepVertex(from), brepVertex(to),
+            circle(placement(centre, band.axis, (vertices[from] - centre).normalized()), radius));
+        };
         rim_sense[side] = rim.wall_ccw;
         if (rim.kind == AnalyticFeatures::RimRef::OTHER_BAND_ARC) {
           // shared with another partial band: one arc, two curved faces, no
           // planar loop anywhere along it
+          rim_edge[side] = rim_arc();
           shared_rim_edges.emplace(key, rim_edge[side]);
         } else {
           // A loop that will be fanned into triangles cannot take this arc. The
@@ -326,8 +344,7 @@ void StepKernel::BodyBuild::emitBands()
             }
             for (std::size_t k = 0; k + 1 < walk.size(); k++) {
               bool dir = true;
-              EdgeCurve *chord = get_line_from_map(edge_map, walk[k], walk[k + 1], get_vertex(walk[k]),
-                                                   get_vertex(walk[k + 1]), dir, merged_edge_cnt);
+              const std::size_t chord = lineEdge(walk[k], walk[k + 1], dir);
               rim_chords[side].emplace_back(chord, dir);
             }
             if (!rim_chords[side].empty()) {
@@ -335,21 +352,21 @@ void StepKernel::BodyBuild::emitBands()
               continue;
             }
           }
-          arc_subs[rim.loop].push_back({rim.start, rim.count, rim_edge[side], !rim.wall_ccw});
+          rim_edge[side] = rim_arc();
+          arc_subs[rim.loop].push_back(
+            {rim.start, rim.count, EdgeRef::built(rim_edge[side]), !rim.wall_ccw});
         }
       }
     }
 
-    std::vector<OrientedEdge *> loop;
+    std::vector<brep::Coedge> loop;
     // A rim as the one curve it is, or as the chords it was given up as.
     auto walk_rim = [&](int side) {
       if (rim_chords[side].empty()) {
-        loop.push_back(new OrientedEdge(entities, rim_edge[side], rim_sense[side]));
+        loop.push_back(coedge(rim_edge[side], rim_sense[side]));
         return;
       }
-      for (const auto& chord : rim_chords[side]) {
-        loop.push_back(new OrientedEdge(entities, chord.first, chord.second));
-      }
+      for (const auto& chord : rim_chords[side]) loop.push_back(coedge(chord.first, chord.second));
     };
     if (band.closed) {
       // The seam of a periodic face has to lie *on* the surface. Up a cylinder
@@ -362,7 +379,7 @@ void StepKernel::BodyBuild::emitBands()
       // Nothing else refers to the seam: it is used twice by this one face and
       // by nothing at all in the mesh, so replacing the line costs no
       // neighbouring loop a rewrite.
-      EdgeCurve *edge_seam = nullptr;
+      std::size_t edge_seam = 0;
       if (const auto *tor = dynamic_cast<const TorusSurface *>(band.zone.get())) {
         // Over a torus the seam is a meridian: an arc of the tube's own circle,
         // about the point on the tube's centre circle at the seam's longitude.
@@ -375,10 +392,8 @@ void StepKernel::BodyBuild::emitBands()
         const Vector3d from = (vertices[band.seam_bottom] - tube).normalized();
         const Vector3d to = (vertices[band.seam_top] - tube).normalized();
         const Vector3d normal = from.cross(to);
-        auto meridian =
-          new Circle(entities, "", placement(tube, normal.normalized(), from), tor->r_minor);
-        edge_seam = new EdgeCurve(entities, get_vertex(band.seam_bottom), get_vertex(band.seam_top),
-                                  meridian, true);
+        edge_seam = add_edge(brepVertex(band.seam_bottom), brepVertex(band.seam_top),
+                             circle(placement(tube, normal.normalized(), from), tor->r_minor));
       } else if (band.zone != nullptr) {
         const auto *sph = dynamic_cast<const SphereSurface *>(band.zone.get());
         const Vector3d from = (vertices[band.seam_bottom] - sph->refpt).normalized();
@@ -387,18 +402,15 @@ void StepKernel::BodyBuild::emitBands()
         // counter clockwise and shorter than half a turn, which a zone's
         // latitude range always is - the flat cap at either end sees to that
         const Vector3d normal = from.cross(to);
-        auto meridian =
-          new Circle(entities, "", placement(sph->refpt, normal.normalized(), from), sph->r);
-        edge_seam = new EdgeCurve(entities, get_vertex(band.seam_bottom), get_vertex(band.seam_top),
-                                  meridian, true);
+        edge_seam = add_edge(brepVertex(band.seam_bottom), brepVertex(band.seam_top),
+                             circle(placement(sph->refpt, normal.normalized(), from), sph->r));
       } else {
-        edge_seam =
-          create_line_edge_curve(get_vertex(band.seam_bottom), get_vertex(band.seam_top), true);
+        edge_seam = brepLine(brepVertex(band.seam_bottom), brepVertex(band.seam_top));
       }
       walk_rim(0);
-      loop.push_back(new OrientedEdge(entities, edge_seam, true));
+      loop.push_back(coedge(edge_seam, true));
       walk_rim(1);
-      loop.push_back(new OrientedEdge(entities, edge_seam, false));
+      loop.push_back(coedge(edge_seam, false));
     } else {
       // walk along the bottom rim, up the end edge, back along the top rim,
       // down the other end edge - so the ends are where one rim's traversal
@@ -409,22 +421,16 @@ void StepKernel::BodyBuild::emitBands()
       const int t_to = rims[i].second.traversalEnd();
 
       bool up_dir = true, down_dir = true;
-      EdgeCurve *edge_up = get_line_from_map(edge_map, b_to, t_from, get_vertex(b_to),
-                                             get_vertex(t_from), up_dir, merged_edge_cnt);
-      EdgeCurve *edge_down = get_line_from_map(edge_map, t_to, b_from, get_vertex(t_to),
-                                               get_vertex(b_from), down_dir, merged_edge_cnt);
+      const std::size_t edge_up = lineEdge(b_to, t_from, up_dir);
+      const std::size_t edge_down = lineEdge(t_to, b_from, down_dir);
       walk_rim(0);
-      loop.push_back(new OrientedEdge(entities, edge_up, up_dir));
+      loop.push_back(coedge(edge_up, up_dir));
       walk_rim(1);
-      loop.push_back(new OrientedEdge(entities, edge_down, down_dir));
+      loop.push_back(coedge(edge_down, down_dir));
     }
-
-    auto edge_loop = new EdgeLoop(entities, loop);
-    std::vector<FaceBound *> bounds{new FaceBound(entities, edge_loop, true, true)};
 
     // The surface normal of a cylinder or a cone points away from its axis, so
     // a bore - where the material is outside it - is the opposite sense.
-    sfaces_extra.push_back(new Face(entities, bounds, surface, band.outward));
-    registerFace(sfaces_extra.back(), record, covered, std::nullopt, false, carrier);
+    build(std::move(surface), std::move(loop), band.outward, record, covered, carrier);
   }
 }

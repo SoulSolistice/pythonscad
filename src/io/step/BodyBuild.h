@@ -422,10 +422,9 @@ struct StepKernel::BodyBuild {
   // The vertices brepVertex made itself, by their exact coordinates.
   std::map<std::tuple<double, double, double>, std::size_t> brep_vertex_at;
   /*! The straight edge along mesh edge (a, b), as the B-rep's, and in `forward`
-   * whether it runs from `a`. One per mesh edge, whoever names it first: the
-   * one an analytic face made along it, read, or else one built here, as the
-   * line from its first vertex to its second - which is what the edge map
-   * made as an entity before (StepKernel::create_line_edge_curve). Asked only
+   * whether it runs from `a`. One per mesh edge, whoever names it first, built
+   * as the line from its first vertex to its second - which is what the edge
+   * map made as an entity before (StepKernel::create_line_edge_curve). Asked only
    * of two corners that are two vertices: where the placement made them one,
    * there is no edge between them (open item 39, R17). */
   std::size_t lineEdge(int a, int b, bool& forward);
@@ -497,12 +496,6 @@ struct StepKernel::BodyBuild {
   // place in `sfaces_extra`, which holds a null there: the analytic faces enter
   // the B-rep in that one order, whoever built them (open item 39, step 2d).
   std::map<std::size_t, brep::Face> built_faces;
-
-  // Shared by every emitter because a partial
-  // cylinder's two end edges are ordinary straight edges shared with a
-  // neighbouring planar face, so both have to come from the same map.
-  std::map<std::pair<int, int>, EdgeCurve *> edge_map;
-  int merged_edge_cnt = 0;
 
   // Recognise the bands of facets that were modelled as a surface of
   // revolution. The recogniser is format neutral and lives in
@@ -681,7 +674,7 @@ struct StepKernel::BodyBuild {
   // Rims written as chords by both faces because the face across is fanned into
   // triangles and cannot be handed the arc. See the band writer below.
   std::size_t rim_unshared = 0;
-  std::map<std::set<int>, EdgeCurve *> shared_rim_edges;  // rim vertices -> circle
+  std::map<std::set<int>, std::size_t> shared_rim_edges;  // rim vertices -> its B-rep circle
 
   // The crossing curves, decided once and keyed by the run of mesh edges each
   // one is written for - see decideCrossingRuns.
@@ -770,15 +763,4 @@ struct StepKernel::BodyBuild {
   // Which rung placed each move, so the arbiter can weigh it against the
   // others. See kCornerRungs.
   std::map<int, step::CornerRung> move_rung;
-
-  // ---- the kernel methods the phases call
-  EdgeCurve *create_line_edge_curve(Vertex *vert1, Vertex *vert2, bool dir)
-  {
-    return kernel.create_line_edge_curve(vert1, vert2, dir);
-  }
-  EdgeCurve *get_line_from_map(std::map<std::pair<int, int>, EdgeCurve *>& edge_map, int ind1, int ind2,
-                               Vertex *vert1, Vertex *vert2, bool& edge_dir, int& merge_cnt)
-  {
-    return kernel.get_line_from_map(edge_map, ind1, ind2, vert1, vert2, edge_dir, merge_cnt);
-  }
 };

@@ -241,26 +241,19 @@ std::size_t StepKernel::BodyBuild::lineEdge(int a, int b, bool& forward)
   const std::size_t from = brepVertex(a);
   auto it = line_edges.find(key);
   if (it == line_edges.end()) {
-    std::size_t e;
-    const auto made = edge_map.find(key);
-    if (made != edge_map.end()) {
-      e = reader.edge(made->second);
-    } else {
-      brep::Edge edge;
-      edge.start = from;
-      edge.end = brepVertex(b);
-      // From its first vertex, along the unit vector to its second. Two
-      // vertices are one wherever their points are (get_vertex), so the two
-      // differ and the direction is theirs: a line of no length is not asked
-      // for (the planar writer skips it) and no direction is invented for one
-      // (open item 39, R17).
-      const Vector3d p = brep_body.vertices[edge.start].point;
-      edge.curve.form = brep::Line{p, (brep_body.vertices[edge.end].point - p).normalized()};
-      edge.same_sense = true;
-      brep_body.edges.push_back(std::move(edge));
-      e = brep_body.edges.size() - 1;
-    }
-    it = line_edges.emplace(key, e).first;
+    brep::Edge edge;
+    edge.start = from;
+    edge.end = brepVertex(b);
+    // From its first vertex, along the unit vector to its second. Two
+    // vertices are one wherever their points are (get_vertex), so the two
+    // differ and the direction is theirs: a line of no length is not asked
+    // for (the planar writer skips it) and no direction is invented for one
+    // (open item 39, R17).
+    const Vector3d p = brep_body.vertices[edge.start].point;
+    edge.curve.form = brep::Line{p, (brep_body.vertices[edge.end].point - p).normalized()};
+    edge.same_sense = true;
+    brep_body.edges.push_back(std::move(edge));
+    it = line_edges.emplace(key, brep_body.edges.size() - 1).first;
   }
   forward = brep_body.edges[it->second].start == from;
   return it->second;
