@@ -5964,6 +5964,36 @@ the next reason - the polyhedron's leaf of the model's solid states only an
 envelope, never "on a face". A faceted leaf whose every face is named for a
 record states, in principle, the solid those records bound.
 
+**2026-10-06, with the author: declaration first, then what remains.** A model
+is a volume, bounded in the ideal case by closed descriptions; OpenSCAD's own
+CSG tree already decides which side of every surface is material, and the
+exporter carries that decision (`SolidTree`). If every contribution's
+declaration is carried through, every point is known - undecided marks only
+where a declaration was dropped: a generator that states no solid, a transform
+that cannot re-express a bound (to be carried as the transform itself, a point
+classified by its inverse), and two operands on one point (the half-spaces
+each keeps). A declared sweep is the first: the sweep of a closed profile is
+closed round, its ends are the profile curves at t = 0 and 1, each bounding a
+flat region in its meridional plane - so the surface and its ends bound a
+volume, the declaration's own, with nothing added.
+
+**Found on the way, and fixed first in a commit of its own: a sweep's clone
+dropped its identity.** `SweepSurface::clone` rebuilt the record from its
+parameters, so every copy - `stampTags`, every transform - lost its tags,
+owners and witnesses. lid10's thread faces were named for tag 313, which no
+record held after stamping (the stamped copy carried only 314): the whole
+thread was named for nothing, silently, since `bindLabels` first named it.
+Every other surface copies itself. Measured against the commit before: no
+file moved; lid10 and step-sweep-law-corners alone report differently - their
+sweep facets are named for the sweep, existence asks about them (lid10 777
+more, undecided until the thread states its solid), and lid10's contention
+report loses the one facet "a declared sweep" held by pass order. The D0
+column of the ledger read the newly named facets "off by inf": a sweep states
+no residual, and a residual that cannot be asked is now "not askable", not off
+(as `brep::stateClasses` has it). *Test:* `grid_surface_test.cc`, "a sweep's
+clone is the same record" - fails on tags, owners and witnesses with the
+rebuilt clone.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

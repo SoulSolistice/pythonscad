@@ -10,6 +10,7 @@
 #include "geometry/recognition/Reports.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <map>
@@ -92,6 +93,9 @@ void dumpLedger(const ReportInputs& in)
       bool exact = true;
       for (const int v : loops[c.facet]) {
         const Residual res = residualOf(surfaces[c.surface_index].get(), vertices[v]);
+        // A surface that states no residual - a sweep, a grid - cannot be
+        // asked, which is not the same as off it (as brep::stateClasses).
+        if (!std::isfinite(res.value)) return "not askable";
         if (!res.exact()) exact = false;
         if (res.value > worst) {
           worst = res.value;
