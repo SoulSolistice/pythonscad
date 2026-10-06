@@ -5011,6 +5011,40 @@ from coming back - landed with the fix and mutation-checked (F2).
   is held to. It should be the forward error of placing a corner at that size -
   what the machine can say, not what was picked. *Test:* a unit test on the
   derivation, at two sizes a decade apart.
+  **Decided 2026-10-06** (the user): the figure does two jobs - the uncertainty
+  the file declares, and the target every approximated crossing is held to -
+  and the second is the chosen one. A crossing that can be declared is D0, one
+  with a closed form D1, and only one with neither is approximated, at the
+  highest precision reached economically: refined while each step gains what
+  its method's order promises - 2^(degree + 1), sixteenfold a doubling for a
+  cubic - and stopped where it does not, or at the arithmetic's floor; the file
+  then declares what it holds. Measured first: every accepted fit stopped just
+  under the target (lid10 1.1e-7 of 1.3e-7, the band family 4.6e-8 of 4.6e-8),
+  the first degree that reached it. Three steps.
+  **Step 1, 2026-10-06: the conics two quadrics cross in, in closed form.** Two
+  quadrics meet in a quartic, which splits into conics exactly where a member
+  of their pencil is a pair of real planes (`pencilPlanes`, from each surface's
+  own form about its reference point - a cone by radius and slope, since its
+  apex form cancels to nothing near a cylinder: on lid10 a cone 7875 from its
+  apex put the plane 1.0e-9 off the circle's points). Coaxial surfaces of
+  revolution meet in circles whatever their radii, by identity
+  (`coaxialRevolution`), where the pencil is ill conditioned. Such an edge is
+  not fitted: a circle is the arc pass's (promoteCurves, every face proposing
+  it from its own surface and agreeing), any other conic the section pass's,
+  handed the plane as a cutting plane of both (`CutPlane::pencil`, D1). It was
+  fitted and handed back where the fit's control points were flat within 1e-9
+  of the size - routing the same circles by measurement; with that gone, a
+  first version that sent every pencil plane to the section pass lost lid10's
+  coaxial circles, since the section pass writes no circle, and a gate in its
+  place was refused. Measured over 132 exports: step-cylinder-cross writes its
+  8 ellipses on its pencil's planes z = +/-y, not on planes taken from the mesh;
+  step-cap-meets-wall and step-hole-in-a-fanned-facet write 4 longer crossings
+  where 8 shorter ones stood among chords the flatness test had cut out (LINE
+  16 to 12, certified to 1.71e-8); lid10 and the bayonet unchanged in the file.
+  *Test:* `plane_sections_test.cc` - the crossing cylinders' planes, none for
+  unequal radii or axes that miss, the sphere and coaxial bore's z = +/-8, and
+  the 1e5-from-its-apex cone told coaxial with its cylinder; step-cylinder-cross
+  asserts its sections on the pencil's planes, and fails with the pencil off.
 - **R8 - fan triangles dropped in silence. Fixed 2026-10-05**, where the fans
   moved onto the B-rep: a triangle the writer cannot write is an EXPORT-ERROR
   where it is dropped, by reason - no plane, or wound against its polygon -

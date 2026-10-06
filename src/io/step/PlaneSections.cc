@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
+#include <utility>
 
 #include <Eigen/Eigenvalues>
 
@@ -190,6 +192,136 @@ bool planeSectionConic(const Surface *surface, const Vector3d& normal_in, const 
   out.centre = in_space(c);
   out.normal = n;
   return out.a > 0 && std::isfinite(out.a) && std::isfinite(out.b);
+}
+
+namespace {
+
+/*! A quadric as the symmetric 4 x 4 Q with X' Q X = 0 on it, X = (x, 1), in
+ * the form its own residual is written in, about its own reference point:
+ * y' M y + l . y + c with y = x - refpt. A cylinder and a cone are
+ * |perp|^2 - W^2, W = r + slope (normdir . y) - the cone by its radius and
+ * slope, as it is stored, and not about its apex: quadricForm's apex form
+ * cancels to nothing as a cone nears a cylinder, and on lid10 a cone whose
+ * apex is 7875 away put its pencil's plane 1.0e-9 off the crossing's own
+ * points. A sphere is |y|^2 - r^2; an elliptic cylinder, which states its
+ * form about a point of its axis, is that form. */
+bool homogeneous(const Surface *s, Eigen::Matrix4d& Q)
+{
+  Matrix3d M;
+  Vector3d l = Vector3d::Zero(), o;
+  double c = 0;
+  if (const auto *sphere = dynamic_cast<const SphereSurface *>(s)) {
+    M = Matrix3d::Identity();
+    o = sphere->refpt;
+    c = -sphere->r * sphere->r;
+  } else if (const auto *cyl = dynamic_cast<const CylinderSurface *>(s)) {
+    const Vector3d a = cyl->normdir.normalized();
+    M = Matrix3d::Identity() - a * a.transpose();
+    o = cyl->refpt;
+    c = -cyl->r * cyl->r;
+  } else if (const auto *cone = dynamic_cast<const ConeSurface *>(s)) {
+    const Vector3d a = cone->normdir.normalized();
+    const Vector3d& d = cone->normdir;
+    M = Matrix3d::Identity() - a * a.transpose() - cone->slope * cone->slope * d * d.transpose();
+    l = -2 * cone->r * cone->slope * d;
+    o = cone->refpt;
+    c = -cone->r * cone->r;
+  } else if (s != nullptr && s->quadricForm(M, o, c)) {
+    c = -c;
+  } else {
+    return false;
+  }
+  // y = x - o: y' M y + l . y + c = x' M x + (l - 2 M o) . x + (o' M o - l . o + c).
+  const Vector3d Mo = M * o;
+  const Vector3d lin = l - 2 * Mo;
+  Q.setZero();
+  Q.topLeftCorner<3, 3>() = M;
+  Q.topRightCorner<3, 1>() = lin / 2;
+  Q.bottomLeftCorner<1, 3>() = lin.transpose() / 2;
+  Q(3, 3) = o.dot(Mo) - l.dot(o) + c;
+  return true;
+}
+
+}  // namespace
+
+bool coaxialRevolution(const Surface *a, const Surface *b)
+{
+  // The axis line of a surface of revolution whose sections across it are
+  // circles; a sphere has every line through its centre, so it states a point.
+  auto axis_of = [](const Surface *s, Vector3d& origin, Vector3d& dir) {
+    const auto *axial = dynamic_cast<const AxialSurface *>(s);
+    if (axial == nullptr || !axial->circularSections()) return false;
+    origin = axial->refpt;
+    dir = axial->axis();
+    return true;
+  };
+  const auto *sa = dynamic_cast<const SphereSurface *>(a);
+  const auto *sb = dynamic_cast<const SphereSurface *>(b);
+  Vector3d oa, da, ob, db;
+  if (sa != nullptr && sb != nullptr) return recognition::samePoint(sa->refpt, sb->refpt);
+  if (sa != nullptr) return axis_of(b, ob, db) && recognition::onLine(ob, db, sa->refpt);
+  if (sb != nullptr) return axis_of(a, oa, da) && recognition::onLine(oa, da, sb->refpt);
+  return axis_of(a, oa, da) && axis_of(b, ob, db) && recognition::sameLine(oa, da, ob, db);
+}
+
+std::vector<std::pair<Vector3d, Vector3d>> pencilPlanes(const Surface *a, const Surface *b)
+{
+  std::vector<std::pair<Vector3d, Vector3d>> out;
+  Eigen::Matrix4d A, B;
+  if (!homogeneous(a, A) || !homogeneous(b, B)) return out;
+  // Each to unit size, so that the bounds below are relative to the matrices
+  // and the eigenvalues of the pencil are of order one.
+  A /= A.norm();
+  B /= B.norm();
+  // Where the pencil is singular: the generalized eigenvalues of (A, B). Only a
+  // real one can be a pair of real planes; it is real where its imaginary part
+  // is within what the QZ step can say of it - backward stable, as below, at
+  // n^3 = 64 roundings of the unit matrices.
+  const Eigen::GeneralizedEigenSolver<Eigen::Matrix4d> qz(A, B, false);
+  if (qz.info() != Eigen::Success) return out;
+  const auto alphas = qz.alphas();
+  const auto betas = qz.betas();
+  for (int k = 0; k < 4; k++) {
+    const double beta = betas(k);
+    if (beta == 0) continue;  // the member B itself: a cylinder, a cone - rank 3 or 4, never two planes
+    const std::complex<double> lam = alphas(k) / beta;
+    if (fabs(lam.imag()) > recognition::forwardError(64, std::abs(lam) + 1)) continue;
+    const double l = lam.real();
+    // The member at it, and its eigenvalues: two at zero is a pair of planes.
+    // Zero to the eigensolvers' backward error: each is backward stable at a
+    // multiple of the unit roundoff that grows as n^3 for an n x n matrix, so
+    // n^3 = 64 roundings of the member's size, which the normalisation makes
+    // 1 + |lambda|.
+    const Eigen::Matrix4d S = A - l * B;
+    const Eigen::SelfAdjointEigenSolver<Eigen::Matrix4d> es(S);
+    if (es.info() != Eigen::Success) continue;
+    const double zero = recognition::forwardError(64, 1 + fabs(l));
+    std::vector<int> big;
+    for (int j = 0; j < 4; j++) {
+      if (fabs(es.eigenvalues()(j)) > zero) big.push_back(j);
+    }
+    if (big.size() != 2) continue;
+    const double e0 = es.eigenvalues()(big[0]), e1 = es.eigenvalues()(big[1]);
+    // Of one sign the two planes are imaginary and meet in a line: no conic.
+    if (!(e0 * e1 < 0)) continue;
+    const Eigen::Vector4d u = es.eigenvectors().col(big[0]) * sqrt(fabs(e0));
+    const Eigen::Vector4d v = es.eigenvectors().col(big[1]) * sqrt(fabs(e1));
+    // S = u u' - v v' (signs aside) = (u + v)(u - v)' symmetrised: the planes
+    // (u + v) . X = 0 and (u - v) . X = 0.
+    for (const Eigen::Vector4d& h : {Eigen::Vector4d(u + v), Eigen::Vector4d(u - v)}) {
+      const Vector3d n = h.head<3>();
+      const double len = n.norm();
+      if (!(len > 0)) continue;  // the plane at infinity
+      const Vector3d normal = n / len;
+      const Vector3d on_plane = -h(3) / len * normal;
+      bool have = false;
+      for (const auto& seen : out) {
+        have = have || recognition::samePlane(seen.first, seen.second, on_plane, normal);
+      }
+      if (!have) out.emplace_back(on_plane, normal);
+    }
+  }
+  return out;
 }
 
 double sectionTiltFloor(const Surface *surface)

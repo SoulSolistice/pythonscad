@@ -22,6 +22,7 @@ struct BoundarySection {
   int loop = -1;          // the planar face across it, or -1 where another quadric is
   bool declared = false;  // the plane came from the model, not from the mesh
   bool derived = false;   // ...by the facet's corners on it, its name being nothing
+  bool pencil = false;    // a plane of the two surfaces' pencil (pencilPlanes): closed form, D1
 };
 
 /*! A plane that cuts a quadric, taken from a face rather than fitted.
@@ -40,6 +41,10 @@ struct CutPlane {
    * taken because every corner of the facet lies on the declaration, which
    * derives it (D1) rather than states it (open item 39, R13). */
   bool derived = false;
+  /*! A plane of the pencil of this surface and another it crosses: no face's,
+   * nor the mesh's, but stated in closed form by the two declarations (D1;
+   * open item 39, R7). */
+  bool pencil = false;
 };
 
 struct BoundaryCycle {

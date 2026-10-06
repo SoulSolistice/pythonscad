@@ -267,6 +267,7 @@ void StepKernel::BodyBuild::emitQuadricFaces()
             edge = new EdgeCurve(entities, get_vertex(dir ? a : b), get_vertex(dir ? b : a), ell, true);
             section_edges.emplace(key, edge);
             if (bs.declared) sections_declared++;
+            else if (bs.pencil) sections_pencil++;
             else sections_fitted++;
             if (bs.derived) sections_derived++;
           }

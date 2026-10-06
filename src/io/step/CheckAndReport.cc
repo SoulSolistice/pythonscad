@@ -109,7 +109,7 @@ void StepKernel::BodyBuild::checkAndReport()
     LOG("STEP export: %1$d cone face%2$s closed round %3$s apex by a seam up a generator",
         int(apex_seams), apex_seams == 1 ? "" : "s", apex_seams == 1 ? "its" : "their");
   }
-  if (sections_declared + sections_fitted > 0) {
+  if (sections_declared + sections_fitted + sections_pencil > 0) {
     // Where each section's plane came from, because it is the difference
     // between a curve that is exact and one that is only as good as the mesh
     // it was fitted to. A declared plane cannot move; a fitted one moves with
@@ -122,9 +122,11 @@ void StepKernel::BodyBuild::checkAndReport()
     LOG(
       "STEP export: %1$d plane section%2$s written as the conic it is - %3$d on a plane the "
       "model declared (%4$d named for it, %5$d on it by position alone, which derives the plane - "
-      "D1), %6$d on one taken from the mesh",
-      sections_declared + sections_fitted, sections_declared + sections_fitted == 1 ? "" : "s",
-      sections_declared, sections_declared - sections_derived, sections_derived, sections_fitted);
+      "D1), %6$d on one taken from the mesh, %7$d on one the pencil of the two surfaces it is "
+      "the crossing of states (D1)",
+      sections_declared + sections_fitted + sections_pencil,
+      sections_declared + sections_fitted + sections_pencil == 1 ? "" : "s", sections_declared,
+      sections_declared - sections_derived, sections_derived, sections_fitted, sections_pencil);
     if (section_unshared > 0) {
       LOG(message_group::Export_Warning,
           "STEP export: %1$d plane section%2$s written as chords by both faces instead of as the "

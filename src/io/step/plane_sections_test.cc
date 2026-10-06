@@ -11,6 +11,7 @@
 
 #include "geometry/Surface.h"
 #include "geometry/brep/Brep.h"
+#include "geometry/recognition/Exact.h"
 
 using namespace step;
 
@@ -114,4 +115,57 @@ TEST_CASE("a boundary's planar stretch holds only what is on its plane", "[plane
   std::vector<Vector3d> wall{{100, 0, 0},  {100, 0, 10}, {100, 0, 20},
                              {100, 0, 30}, {50, 50, 30}, {50, 50, 0}};
   CHECK(step::coplanarStretches({0, 1, 2, 3, 4, 5}, wall, axis, 0.0).empty());
+}
+
+TEST_CASE("two quadrics cross in planes exactly where their pencil holds a pair of them",
+          "[planesections][R7]")
+{
+  // Two cylinders of radius 10 along z and along y, x^2 + y^2 = 100 and
+  // x^2 + z^2 = 100: their difference y^2 - z^2 is the planes z = y and
+  // z = -y, and each cuts either cylinder in the same ellipse (open item 39, R7).
+  const CylinderSurface along_z(Vector3d::Zero(), Vector3d(0, 0, 1), 10);
+  const CylinderSurface along_y(Vector3d::Zero(), Vector3d(0, 1, 0), 10);
+  const auto planes = pencilPlanes(&along_z, &along_y);
+  REQUIRE(planes.size() == 2);
+  for (const auto& pl : planes) {
+    CHECK((recognition::parallel(pl.second, Vector3d(0, 1, 1)) ||
+           recognition::parallel(pl.second, Vector3d(0, 1, -1))));
+    CHECK(recognition::onPlane(pl.first, pl.second, Vector3d::Zero()));
+    // the crossing's own points lie on one of the two
+    CHECK(recognition::onPlane(pl.first, pl.second, Vector3d(10, 0, 0)));
+  }
+  CHECK_FALSE(
+    recognition::samePlane(planes[0].first, planes[0].second, planes[1].first, planes[1].second));
+
+  // Unequal radii cross in a quartic that splits into nothing.
+  const CylinderSurface thinner(Vector3d::Zero(), Vector3d(0, 1, 0), 6);
+  CHECK(pencilPlanes(&along_z, &thinner).empty());
+  // Equal radii whose axes miss each other: no planes either.
+  const CylinderSurface aside(Vector3d(3, 0, 0), Vector3d(0, 1, 0), 10);
+  CHECK(pencilPlanes(&along_z, &aside).empty());
+
+  // A sphere of radius 10 and a coaxial cylinder of radius 6 meet in two
+  // circles, at z = 8 and z = -8: the planes across the axis.
+  const SphereSurface sphere(Vector3d::Zero(), Vector3d(0, 0, 1), 10);
+  const CylinderSurface bore(Vector3d::Zero(), Vector3d(0, 0, 1), 6);
+  const auto rings = pencilPlanes(&sphere, &bore);
+  REQUIRE(rings.size() == 2);
+  for (const auto& pl : rings) CHECK(recognition::parallel(pl.second, Vector3d(0, 0, 1)));
+  const bool upper = recognition::onPlane(rings[0].first, rings[0].second, Vector3d(6, 0, 8));
+  CHECK(
+    recognition::onPlane(rings[upper ? 1 : 0].first, rings[upper ? 1 : 0].second, Vector3d(6, 0, -8)));
+  CHECK((upper || recognition::onPlane(rings[1].first, rings[1].second, Vector3d(6, 0, 8))));
+
+  // A cone so nearly a cylinder that its apex is 1e5 away - radius 10 at z = 0,
+  // widening 1e-4 a unit - and a coaxial cylinder of radius 10.0065 meet in the
+  // circle at z = 65. Their pencil is ill conditioned, and its plane missed
+  // that circle's own points; the pair is told by its axis instead, which says
+  // circles whatever the slope.
+  const ConeSurface taper(Vector3d::Zero(), Vector3d(0, 0, 1), 10.0, 1e-4);
+  const CylinderSurface wall(Vector3d::Zero(), Vector3d(0, 0, 1), 10.0065);
+  CHECK(coaxialRevolution(&taper, &wall));
+  CHECK(coaxialRevolution(&sphere, &bore));
+  CHECK_FALSE(coaxialRevolution(&along_z, &along_y));
+  const CylinderSurface beside(Vector3d(1e-6, 0, 0), Vector3d(0, 0, 1), 6);
+  CHECK_FALSE(coaxialRevolution(&sphere, &beside));
 }

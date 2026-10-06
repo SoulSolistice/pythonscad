@@ -6,6 +6,7 @@
  * surface from a facet lying along it. */
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "geometry/Surface.h"
@@ -69,6 +70,29 @@ struct SectionConic {
 
 bool planeSectionConic(const Surface *surface, const Vector3d& normal_in, const Vector3d& on_plane,
                        SectionConic& out);
+
+/*! The real planes two quadrics' crossing lies in, where it lies in planes -
+ * empty where it does not.
+ *
+ * Two quadrics meet in a quartic curve, which in general no STEP entity
+ * states; it splits into two conics exactly when a member of their pencil,
+ * A - lambda B in homogeneous form, is a pair of real planes - two equal
+ * cylinders whose axes cross, in the planes bisecting them; a sphere and a
+ * coaxial cylinder, in the two planes across the axis. Each of those planes
+ * cuts either quadric in the same conic, which the section pass writes. A
+ * closed form from the two declarations (D1), where the crossing was fitted
+ * and then handed back if the fit's control points came out flat within 1e-9
+ * (open item 39, R7). Each plane as (a point on it, its unit normal). */
+std::vector<std::pair<Vector3d, Vector3d>> pencilPlanes(const Surface *a, const Surface *b);
+
+/*! Whether `a` and `b` are surfaces of revolution about one axis - cylinders,
+ * cones and spheres whose sections across it are circles, the axes one line
+ * at machine precision, a sphere's centre on it. Such a pair meets in circles
+ * across the axis whatever its radii and slopes: by identity, with no plane to
+ * compute. Their pencil is ill conditioned there - the member that splits is
+ * the difference of two nearly equal forms - and on a cone 1e5 from its apex
+ * its planes came out off the circles' own points (open item 39, R7). */
+bool coaxialRevolution(const Surface *a, const Surface *b);
 
 /*! How far off perpendicular a plane may tilt and still cut a closed section. */
 double sectionTiltFloor(const Surface *surface);

@@ -9,12 +9,11 @@
 #include <utility>
 #include <vector>
 
-#include <Eigen/Eigenvalues>
-
 #include "geometry/AnalyticFeatures.h"
 #include "geometry/recognition/Exact.h"
 #include "io/step/BoundaryCycles.h"
 #include "io/step/CrossingArc.h"
+#include "io/step/PlaneSections.h"
 #include "utils/printutils.h"
 
 using namespace step;
@@ -155,13 +154,15 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
   arc_on_quadric.clear();
   arc_on_fitted.clear();
   crossing_corners.clear();
+  // The planes each pair of quadrics' pencil states, worked out once a pair.
+  std::map<std::pair<const Surface *, const Surface *>, std::vector<std::pair<Vector3d, Vector3d>>>
+    pencils;
   for (const auto& entry : along) {
     if (entry.second.size() != 2) continue;
     const Surface *a = entry.second[0], *b = entry.second[1];
     if (a == b) continue;
     const Vector3d& p0 = vertices[entry.first.first];
     const Vector3d& p1 = vertices[entry.first.second];
-    const double scale = std::max(1.0, std::max(p0.norm(), p1.norm()));
     // Both ends have to be on both surfaces already. Where a boolean made
     // the vertex that is exactly what it is - the two makers crossing -
     // and where it is not, no arc of theirs belongs here. By the one
@@ -176,6 +177,55 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
     if (!on) {
       crossing_ends_off++;
       continue;
+    }
+    // Where two quadrics cross in planes, the crossing is the conic either
+    // plane cuts from either quadric - a closed form from the two declarations
+    // (D1), written by the pass that writes that conic: a circle - two
+    // surfaces of revolution about one axis, or a plane across the axis of a
+    // surface whose sections there are circles - by the arc pass
+    // (promoteCurves), each face proposing it from its own surface and every
+    // face agreeing; any other conic by the section pass, which is handed the
+    // plane as a cutting plane of both surfaces. So the edge is not fitted. It was fitted until
+    // 2026-10-06 and handed back where the fit's control points were flat within 1e-9 of the part's
+    // size, a measurement standing in for the algebra (open item 39, R7). About one axis the crossing is
+    // circles, by identity (coaxialRevolution).
+    if (coaxialRevolution(a, b)) continue;
+    if (isQuadric(a) && isQuadric(b)) {
+      const auto key = std::make_pair(std::min(a, b), std::max(a, b));
+      auto found = pencils.find(key);
+      if (found == pencils.end()) found = pencils.emplace(key, pencilPlanes(a, b)).first;
+      bool conic = false;
+      for (const auto& pl : found->second) {
+        if (!recognition::onPlane(pl.first, pl.second, p0) ||
+            !recognition::onPlane(pl.first, pl.second, p1)) {
+          continue;
+        }
+        // A plane across the axis of one surface whose sections are circles is
+        // a circle of it, and the other surface's too - the arc pass's.
+        bool circle = false;
+        for (const Surface *s : {a, b}) {
+          const auto *axial = dynamic_cast<const AxialSurface *>(s);
+          circle = circle || (axial != nullptr && axial->circularSections() &&
+                              recognition::parallel(pl.second, axial->axis()));
+        }
+        for (const Surface *s : {a, b}) {
+          if (circle) break;  // the arc pass's, which takes no cutting plane
+          std::vector<CutPlane>& list = section_planes[s];
+          bool have = false;
+          for (const auto& seen : list) {
+            have = have || recognition::samePlane(seen.on_plane, seen.normal, pl.first, pl.second);
+          }
+          if (have) continue;
+          CutPlane cp;
+          cp.on_plane = pl.first;
+          cp.normal = pl.second;
+          cp.pencil = true;
+          list.push_back(cp);
+        }
+        conic = true;
+        break;
+      }
+      if (conic) continue;
     }
     // The curve at the file's resolution, two ways: one Bezier, and a spline
     // refined along it. No polynomial follows the crossing where
@@ -231,32 +281,6 @@ void StepKernel::BodyBuild::decideSections(const std::vector<const AnalyticFeatu
       }
       continue;
     }
-    // Where the crossing curve is *planar* it is a conic, and a conic has
-    // an entity of its own: the plane-section pass writes it exactly,
-    // where this would write a fitted B-spline through it. Two equal
-    // cylinders crossing meet in a pair of true ellipses, and taking them
-    // here would be trading an exact curve for an approximation of the
-    // same curve. Planarity is the whole test, and it is a property of the
-    // two surfaces rather than of anything this pass chose.
-    Vector3d centroid = Vector3d::Zero();
-    for (const auto& c : ctrl) centroid += c;
-    centroid /= double(ctrl.size());
-    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
-    for (const auto& c : ctrl) cov += (c - centroid) * (c - centroid).transpose();
-    const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
-    // The smallest eigenvalue is the sum of squared distances to the best
-    // plane, so its root over the count is the RMS off it.
-    const double flat = sqrt(std::max(0.0, es.eigenvalues()(0)) / double(ctrl.size()));
-    // ...but only between two of them. The sentence above is a statement
-    // about quadrics: two of those meeting in a planar curve meet in a
-    // conic, which ELLIPSE states exactly. A *sweep* cut by a plane is
-    // not a conic and no pass in this exporter writes one for it, so
-    // skipping it here does not hand the edge to something better - it
-    // hands it back to the chord it was. Measured on the band family at
-    // $fn 32: all 640 edges where the sweep meets the bore pass every
-    // other gate and every one of them is planar to 1e-9, because each
-    // spans a single facet and a short arc of anything is flat.
-    if (flat <= 1e-9 * scale && isQuadric(a) && isQuadric(b)) continue;
     crossing_edges.emplace(entry.first, std::make_pair(a, b));
   }
   crossing_keys.clear();

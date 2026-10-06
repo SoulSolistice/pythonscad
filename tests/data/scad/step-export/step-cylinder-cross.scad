@@ -58,7 +58,14 @@
 // quadrant splits, is 8 arcs; two rulings on each cylinder is 4 lines; 12
 // distinct edges, every one of them shared by exactly two of the eight faces.
 // ROUNDTRIP: Cylinder=8
-// EDGES: Ellipse=8 Line=4
+/// EDGES: Ellipse=8 Line=4
+//
+// And the two planes are the model's, not the mesh's: the pencil of the two
+// cylinders, x^2 + y^2 - 100 less x^2 + z^2 - 100, is y^2 - z^2 - the pair
+// z = y, z = -y - so the ellipses are a closed form of the two declarations
+// (D1), where they were found by fitting the crossing, seeing the fit flat,
+// and taking the plane from the mesh's own vertices (open item 39, R7).
+// EXPECT: 0 on one taken from the mesh, 8 on one the pencil of the two surfaces it is the crossing of states (D1)
 //
 // And the figure none of the above can fake. The solid two equal cylinders cut
 // from each other is the Steinmetz solid, whose volume is exactly 16*r^3/3 -
