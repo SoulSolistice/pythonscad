@@ -226,39 +226,41 @@ FacetedRegion::Hit FacetedRegion::inPiece(const Surface *record, const Vector3d&
   // The piece a face stands for is what the record's nearest point takes it
   // to; q is in it where the record's normal at q meets the face within its
   // band - the face's point there is one q is the nearest point of.
+  //
+  // On a crease of the record - a grid's profile corner - the pieces either
+  // side each have their normal, and a point of a face along either is one q
+  // is the nearest point of. A record that states no normal states no piece.
   Hit out;
-  Vector3d m;
-  if (!record->normalAt(q, m)) {
-    // A grid states no normal. Its nearest point is asked only within the
-    // band of its own net (GridSurface::closestPoint), whose cells are the
-    // faces named for it as the sweeps that declare one make them; a
-    // polyhedron naming only some of a grid's cells is not told apart here.
-    // Without a normal, it states no side.
-    out.found = dynamic_cast<const GridSurface *>(record) != nullptr;
-    return out;
-  }
-  m.normalize();
-  for (std::size_t i = 0; i < faces_.size(); i++) {
-    const Face& f = faces_[i];
-    if (!sameRecord(f, record)) continue;
-    const Vector3d n = (f.b - f.a).cross(f.c - f.a);
-    const double across = m.dot(n);
-    const double cosine = std::fabs(across) / n.norm();
-    if (!(cosine > 0)) continue;
-    const double s = (f.a - q).dot(n) / across;
-    if (std::fabs(s) > band_[i] + err) continue;
-    const Vector3d x = q + m * s;
-    const double reach = err / cosine;
-    if ((nearestOnTriangle(x, f.a, f.b, f.c) - x).norm() > reach) continue;
-    if (!out.found) out.outward = m.dot(outwardOf(f)) >= 0 ? m : Vector3d(-m);
-    out.found = true;
-    // Inside the piece, not where it ends: no border edge within reach.
-    const Vector3d corners[3] = {f.a, f.b, f.c};
-    bool inner = true;
-    for (int k = 0; k < 3; k++) {
-      if (border_[i][k] && toSegment(x, corners[k], corners[(k + 1) % 3]) <= reach) inner = false;
+  Vector3d normals[4];
+  int count = 0;
+  if (const auto *grid = dynamic_cast<const GridSurface *>(record)) count = grid->normalsAt(q, normals);
+  else if (record->normalAt(q, normals[0])) count = 1;
+  for (int c = 0; c < count; c++) {
+    const Vector3d m = normals[c].normalized();
+    for (std::size_t i = 0; i < faces_.size(); i++) {
+      const Face& f = faces_[i];
+      if (!sameRecord(f, record)) continue;
+      const Vector3d n = (f.b - f.a).cross(f.c - f.a);
+      const double across = m.dot(n);
+      const double cosine = std::fabs(across) / n.norm();
+      if (!(cosine > 0)) continue;
+      const double s = (f.a - q).dot(n) / across;
+      if (std::fabs(s) > band_[i] + err) continue;
+      const Vector3d x = q + m * s;
+      const double reach = err / cosine;
+      if ((nearestOnTriangle(x, f.a, f.b, f.c) - x).norm() > reach) continue;
+      // One outward normal only where the record has one there: a crease is
+      // two bounds, which this does not state.
+      if (!out.found && count == 1) out.outward = m.dot(outwardOf(f)) >= 0 ? m : Vector3d(-m);
+      out.found = true;
+      // Inside the piece, not where it ends: no border edge within reach.
+      const Vector3d corners[3] = {f.a, f.b, f.c};
+      bool inner = true;
+      for (int k = 0; k < 3; k++) {
+        if (border_[i][k] && toSegment(x, corners[k], corners[(k + 1) % 3]) <= reach) inner = false;
+      }
+      out.inner = out.inner || inner;
     }
-    out.inner = out.inner || inner;
   }
   return out;
 }

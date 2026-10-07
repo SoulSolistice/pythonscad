@@ -774,6 +774,17 @@ public:
    * it. Nothing is accepted further: a projection that lands there has found
    * some other fold, and there is no point. D1, as the grid is. */
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
+  /*! The normals of the smooth pieces of this surface through `p`, a point
+   * on it: one inside a span of the profile, two on a corner of it - a crease,
+   * where the pieces either side meet - each the cross product of the
+   * surface's derivatives (derivatives()) at the parameters project() finds.
+   * Where no cubic was fitted the surface is bilinear between stations,
+   * creased at each as well: up to four. None where the projection fails or
+   * the derivatives span no plane. Unit, and oriented as the parameters are,
+   * not by any solid. */
+  [[nodiscard]] virtual int normalsAt(const Vector3d& p, Vector3d out[4]) const;
+  /*! The one normal of a smooth piece through `p`; false on a crease. */
+  bool normalAt(const Vector3d& p, Vector3d& out) const override;
   [[nodiscard]] bool sameAs(const Surface& other) const override;
 
   [[nodiscard]] const Vector3d& at(int row, int col) const { return net[row * cols + col]; }
@@ -1007,6 +1018,9 @@ public:
   [[nodiscard]] Vector3d evaluate(double u, double v) const override;
   bool project(const Vector3d& pt, double& u, double& v) const override;
   [[nodiscard]] bool onSurface(const Vector3d& pt, double tol) const override;
+  /*! None: the inherited net is a rendering of this closed form, and its
+   * spline's derivatives are not this surface's. */
+  [[nodiscard]] int normalsAt(const Vector3d& p, Vector3d out[4]) const override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat, const Similarity& similarity) override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;

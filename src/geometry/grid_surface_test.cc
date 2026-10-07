@@ -958,3 +958,89 @@ TEST_CASE("a grid's derivatives are its spline's, in closed form", "[surface][gr
   // And what evaluate() says, where v is in the span.
   CHECK((S - grid->evaluate(0.675, 0.3)).norm() <= 2 * grid->evaluationBound());
 }
+
+TEST_CASE("a grid states its normals: one in a span, one each side of a crease",
+          "[surface][grid][normal]")
+{
+  // The unit square, closed, swept straight up z. Collinear stations
+  // interpolate to their line, so the walls are the planes x = 0, x = 1, y = 0,
+  // y = 1: on the wall x = 1 the normal is x, and on its corner with y = 0, x
+  // and y - a piece either side.
+  const auto along = [](const Vector3d& n, const Vector3d& axis) { return std::fabs(n.dot(axis)); };
+  const auto square = [](int stations) {
+    std::vector<std::vector<Vector3d>> rows;
+    for (int i = 0; i < stations; i++)
+      rows.push_back({{0, 0, double(i)}, {1, 0, double(i)}, {1, 1, double(i)}, {0, 1, double(i)}});
+    return rows;
+  };
+  std::string why;
+  const auto cubic = GridSurface::fromRows(square(5), true, why);
+  REQUIRE(cubic != nullptr);
+  REQUIRE(cubic->interpolated());
+  Vector3d n[4];
+  REQUIRE(cubic->normalsAt({1, 0.3, 2.7}, n) == 1);
+  CHECK(along(n[0], {1, 0, 0}) == Catch::Approx(1).margin(1e-12));
+  REQUIRE(cubic->normalsAt({1, 0, 2.7}, n) == 2);
+  CHECK(along(n[0], {0, 1, 0}) + along(n[1], {0, 1, 0}) == Catch::Approx(1).margin(1e-12));
+  CHECK(along(n[0], {1, 0, 0}) + along(n[1], {1, 0, 0}) == Catch::Approx(1).margin(1e-12));
+  Vector3d one;
+  CHECK_FALSE(cubic->normalAt({1, 0, 2.7}, one));  // a crease has no one normal
+
+  // Three stations: no cubic, bilinear between them, creased at the middle
+  // one too - where both cells' normals are the wall's.
+  const auto flat = GridSurface::fromRows(square(3), true, why);
+  REQUIRE(flat != nullptr);
+  REQUIRE_FALSE(flat->interpolated());
+  REQUIRE(flat->normalsAt({1, 0.5, 1}, n) == 2);
+  CHECK(along(n[0], {1, 0, 0}) == Catch::Approx(1).margin(1e-12));
+  CHECK(along(n[1], {1, 0, 0}) == Catch::Approx(1).margin(1e-12));
+  CHECK(flat->normalsAt({1, 0, 1}, n) == 4);
+
+  // Curved along the sweep: a square profile, radius 9 to 11, at five
+  // stations 45 degrees apart round z. The stations are symmetric about the
+  // middle one at 90 degrees, so is the cubic through them, and there its
+  // derivative is along x: the outer wall's normal at (0, 11, 0) is y.
+  std::vector<std::vector<Vector3d>> ring;
+  const double profile[4][2] = {{9, -1}, {11, -1}, {11, 1}, {9, 1}};
+  for (int k = 0; k < 5; k++) {
+    const double t = M_PI / 4 * k;
+    ring.emplace_back();
+    for (const auto& q : profile) ring.back().emplace_back(q[0] * cos(t), q[0] * sin(t), q[1]);
+  }
+  const auto bent = GridSurface::fromRows(ring, true, why);
+  REQUIRE(bent != nullptr);
+  REQUIRE(bent->normalsAt(ring[2][1] * 0.5 + ring[2][2] * 0.5, n) == 1);
+  CHECK(along(n[0], {0, 1, 0}) == Catch::Approx(1).margin(1e-12));
+  // On the seam of the closed profile, its first column at (0, 9, -1): the
+  // last span, the inner wall, ends there - normal y, by the same symmetry -
+  // and the first, the bottom, starts there - normal z.
+  REQUIRE(bent->normalsAt(ring[2][0], n) == 2);
+  CHECK(along(n[0], {0, 1, 0}) + along(n[1], {0, 1, 0}) == Catch::Approx(1).margin(1e-12));
+  CHECK(along(n[0], {0, 0, 1}) + along(n[1], {0, 0, 1}) == Catch::Approx(1).margin(1e-12));
+  // Off that symmetry - the seam's column and the last at different radii,
+  // rising 0.3 a station, between stations - their tangents differ, and
+  // what any grid says still holds: both pieces at the seam contain its
+  // column's curve, so both normals are at right angles to its tangent.
+  std::vector<std::vector<Vector3d>> rising;
+  const double uneven[4][2] = {{9, -1}, {11, -1}, {11, 1}, {10, 1}};
+  for (int k = 0; k < 9; k++) {
+    const double t = M_PI / 8 * k;
+    rising.emplace_back();
+    for (const auto& q : uneven)
+      rising.back().emplace_back(q[0] * cos(t), q[0] * sin(t), q[1] + 0.3 * k);
+  }
+  const auto climb = GridSurface::fromRows(rising, true, why);
+  REQUIRE(climb != nullptr);
+  Vector3d S, tangent, Sv;
+  climb->derivatives(0.37, 0.0, 0, -1, S, tangent, Sv);
+  REQUIRE(climb->normalsAt(climb->evaluate(0.37, 0.0), n) == 2);
+  CHECK(along(n[0], tangent.normalized()) <= 1e-12);
+  CHECK(along(n[1], tangent.normalized()) <= 1e-12);
+
+  // A sweep's net is a rendering of its closed form: its spline's normal is
+  // not the sweep's, and none is stated.
+  const std::vector<Vector2d> section{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+  SweepSurface sweep(Vector3d(0, 0, 0), Vector3d(0, 0, 1), Vector3d(1, 0, 0),
+                     SweepLaws::constant(10.0, section), 4.0, 1.0, 16);
+  CHECK(sweep.normalsAt(sweep.evaluate(0.5, 0.375), n) == 0);
+}

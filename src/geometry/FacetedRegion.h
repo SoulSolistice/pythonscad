@@ -30,7 +30,8 @@
  * the solid is in all their half-spaces) or on the outer (concave: in any).
  * Each face is taken by its direction from the point - a plane face's
  * centre, a named face's centre along the record's tangent plane, which is
- * what its piece's tangent cone is. Where a record states no normal, where
+ * what its piece's tangent cone is. Where a record states no normal or is
+ * creased there (a grid's profile corner), where
  * the point is where a piece ends short of a plane face - the gap between a
  * chord and its arc - or where the faces are neither, it says nothing.
  *

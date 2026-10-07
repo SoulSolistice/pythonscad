@@ -285,3 +285,29 @@ TEST_CASE("an On answer states the side the solid keeps there", "[faceted-region
   REQUIRE(rim.where == W::On);
   CHECK(rim.sides.empty());
 }
+
+TEST_CASE("a grid's piece is where its faces stand, by its own normals", "[faceted-region][normal]")
+{
+  // The unit square swept straight up z at five stations, z = 0 to 4 - its
+  // walls the planes x = 0, x = 1, y = 0, y = 1 - and a prism naming only its
+  // cells below z = 2. A point taken onto the grid is on the solid where the
+  // grid's normal there meets a face named for it, and nowhere else on it.
+  std::vector<std::vector<Vector3d>> rows;
+  for (int i = 0; i < 5; i++)
+    rows.push_back({{0, 0, double(i)}, {1, 0, double(i)}, {1, 1, double(i)}, {0, 1, double(i)}});
+  std::string why;
+  std::shared_ptr<const GridSurface> grid = GridSurface::fromRows(rows, true, why);
+  REQUIRE(grid != nullptr);
+  const FacetedRegion half(prism({{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}}, grid, 2));
+  REQUIRE(half.closed());
+  const std::vector<const Surface *> on{grid.get()};
+  const auto wall = half.classifyOn({1, 0.5, 1}, on);
+  REQUIRE(wall.where == W::On);
+  CHECK(states(wall, {{1, 0, 0}}));  // and the grid's normal is the side it keeps
+  CHECK(half.classifyOn({1, 0.5, 3}, on).where == W::Out);
+  // On a crease of the grid, a corner of its profile: on, by either piece's
+  // normal, and no one side stated.
+  const auto edge = half.classifyOn({1, 0, 1}, on);
+  REQUIRE(edge.where == W::On);
+  CHECK(edge.sides.empty());
+}

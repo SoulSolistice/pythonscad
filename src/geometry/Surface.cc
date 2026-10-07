@@ -1581,6 +1581,66 @@ bool GridSurface::closestPoint(const Vector3d& p, Vector3d& out) const
   return true;
 }
 
+int GridSurface::normalsAt(const Vector3d& p, Vector3d out[4]) const
+{
+  if (rows < 2 || cols < 2) return 0;
+  double u = 0, v = 0;
+  if (!project(p, u, v)) return 0;
+  const int segs = vspans();
+  const bool cubic = !poles.empty();
+  const int span = std::min(int(v * segs), segs - 1);
+  const int cell = cubic ? -1 : std::min(int(u * (rows - 1)), rows - 2);
+  Vector3d S, Su, Sv, T, Tu, Tv;
+  derivatives(u, v, span, cell, S, Su, Sv);
+  const double on = 2 * evaluationBound() + recognition::forwardError(9, 2 * p.norm());
+  // The pieces through the point along the sweep: the cubic is one, smooth
+  // through its knots; the bilinear fallback is creased at each inner station,
+  // so two where the point is on one's own profile.
+  std::vector<std::pair<int, double>> along{{cell, u}};
+  if (!cubic) {
+    for (const int station : {cell, cell + 1}) {
+      if (station <= 0 || station >= rows - 1) continue;
+      const double at_station = double(station) / (rows - 1);
+      derivatives(at_station, v, span, cell, T, Tu, Tv);
+      if ((T - S).norm() <= on) along = {{station - 1, at_station}, {station, at_station}};
+    }
+  }
+  // Across the profile, ruled: the span it is in, or the two either side of
+  // a corner it is on - unless that is an open profile's first or last
+  // column, the surface's edge.
+  std::vector<std::pair<int, double>> across{{span, v}};
+  for (const int corner : {span, span + 1}) {
+    const double at_corner = double(corner) / segs;
+    derivatives(u, at_corner, span, cell, T, Tu, Tv);
+    if ((T - S).norm() > on) continue;
+    across.clear();
+    // Each piece read at its own end: the span before the corner at its last
+    // v, the one after at its first - on a closed profile's seam the last
+    // span ends at v = 1 and the first starts at v = 0.
+    const int before = (corner - 1 + segs) % segs, after = corner % segs;
+    if (corner > 0 || closed_v) across.emplace_back(before, double(before + 1) / segs);
+    if (corner < segs || closed_v) across.emplace_back(after, double(after) / segs);
+  }
+  int count = 0;
+  for (const auto& [c, at_u] : along) {
+    for (const auto& [sp, at_v] : across) {
+      derivatives(at_u, at_v, sp, c, T, Tu, Tv);
+      const Vector3d n = Tu.cross(Tv);
+      if (!(n.norm() > 0)) return 0;  // the derivatives span no plane: no normal there
+      out[count++] = n.normalized();
+    }
+  }
+  return count;
+}
+
+bool GridSurface::normalAt(const Vector3d& p, Vector3d& out) const
+{
+  Vector3d n[4];
+  if (normalsAt(p, n) != 1) return false;
+  out = n[0];
+  return true;
+}
+
 bool GridSurface::envelope(const std::vector<Vector3d>&, BoundingBox& box) const
 {
   // The flat tessellation of the net lies within the net's box, and the
@@ -2255,6 +2315,11 @@ bool SweepSurface::project(const Vector3d& pt, double& u, double& v) const
   u = std::clamp(t, 0.0, 1.0);
   v = at;
   return true;
+}
+
+int SweepSurface::normalsAt(const Vector3d&, Vector3d[4]) const
+{
+  return 0;
 }
 
 bool SweepSurface::onSurface(const Vector3d& pt, double tol) const

@@ -6210,6 +6210,35 @@ rule now running where it stopped. What still says On without a side, traced
 on lid10: the ridge's grid polyhedron (1252 points - a grid states no normal),
 the hull (564) and a rotate_extrude's profile region (360).
 
+**A grid's normals, and its projection first.** A grid is a cubic B-spline
+along its sweep and ruled across its profile, so its normal has a closed
+form: the cross product of its derivatives, the cubic basis's derivative from
+the quadratic basis at the same span (`GridSurface::derivatives`). At a corner of
+the profile it is creased, two pieces with a normal each; the bilinear
+fallback is creased at every inner station too, so up to four
+(`GridSurface::normalsAt`). Which pieces a point is on is a question about its
+own parameters, and asking it showed that `project()` did not find them: its
+descent on one profile span was clamped only to [0, 1], stepped past the
+span's edge onto the next piece, and was rejected there - a point on a crease
+of a closed ring was approached and never reached, 9.5e-9 off where the
+arithmetic allows 1.7e-13. Held to its span (182e22f43) every point the
+surface makes is found again to machine precision. Measured, that clamp was
+the cause and the finite differences were not: with it they reach machine
+precision too, and exact derivatives without it miss by 9.9e-5. The
+derivatives then replaced the chosen step h = 1e-6 (68bd743a5); both moved
+ten files in their last digits, mostly onto exact values, and the bayonet
+gained two D0 vertices. One thing that showed: for a point millimetres off a
+sweep, `project()` finds the local minimum its coarse sample per span leads
+to, not a global nearest point - the worst refused facet middle on the
+bayonet moved 6.8819 -> 6.8847 when the descent's last digits did. Open.
+
+With the normals, a grid's piece is decided as a cylinder's is: where a normal
+of the grid at the point meets a face named for it. The trust it was taken
+on, that a grid's cells are all named, is gone; a polyhedron naming only some
+of them is told apart. On a crease the point is in the piece by either
+normal and states no one side. A sweep (SweepSurface) states no normal: its
+net is a rendering of its closed form, not the surface.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`
