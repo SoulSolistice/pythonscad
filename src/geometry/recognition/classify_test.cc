@@ -3,8 +3,11 @@
 #include "geometry/recognition/Classify.h"
 
 #include <catch2/catch_all.hpp>
+#include <cmath>
 #include <memory>
+#include <vector>
 
+#include "geometry/FacetedRegion.h"
 #include "geometry/HullOfRevolution.h"
 #include "geometry/SolidTree.h"
 #include "geometry/Surface.h"
@@ -277,4 +280,65 @@ TEST_CASE("a curved bound tangent to a plane is decided where the cells disagree
   const auto cusp =
     SolidTree::combine(Op::Difference, box({-5, 0, 0}, {5, 10, 4}), cylinder(10, 10, 0, 4));
   CHECK(at(cusp, 0, 10, 2) == Where::Unknown);
+}
+
+namespace {
+
+/*! A prism over a polygon counter clockwise in xy, star shaped from its first
+ * corner, z from 0 to `top`, as a faceted region: its walls named for `wall`,
+ * its caps its own planes. */
+std::shared_ptr<const SolidTree> prism(const std::vector<Vector3d>& polygon, double top,
+                                       const std::shared_ptr<const Surface>& wall = nullptr)
+{
+  const Vector3d up(0, 0, top);
+  const std::size_t n = polygon.size();
+  std::vector<FacetedRegion::Face> faces;
+  for (std::size_t i = 0; i < n; i++) {
+    const Vector3d& b0 = polygon[i];
+    const Vector3d& b1 = polygon[(i + 1) % n];
+    faces.push_back({b0, b1, b1 + up, wall});
+    faces.push_back({b0, b1 + up, b0 + up, wall});
+  }
+  for (std::size_t k = 1; k + 1 < n; k++) {
+    faces.push_back({polygon[0], polygon[k + 1], polygon[k], nullptr});
+    faces.push_back({polygon[0] + up, polygon[k] + up, polygon[k + 1] + up, nullptr});
+  }
+  return SolidTree::region(std::make_shared<FacetedRegion>(std::move(faces)), "prism");
+}
+
+}  // namespace
+
+TEST_CASE("a region states the side it keeps at a point on two operands", "[classify][neighbourhood]")
+{
+  // An L, [0, 2] x [0, 1] and [0, 1] x [0, 2], z from 0 to 1, and the box
+  // [1, 2]^2 that fills its notch: at the L's concave edge (1, 1) both are on
+  // the planes x = 1 and y = 1. The L keeps any of x < 1, y < 1; the box both
+  // of x > 1, y > 1; every direction is in one of them, and the union - the
+  // square [0, 2]^2 - holds the point.
+  const auto ell = prism({{0, 0, 0}, {2, 0, 0}, {2, 1, 0}, {1, 1, 0}, {1, 2, 0}, {0, 2, 0}}, 1);
+  const auto square = SolidTree::combine(Op::Union, ell, box({1, 1, 0}, {2, 2, 1}));
+  CHECK(at(square, 1, 1, 0.5) == Where::In);
+  // The L less the box: nothing of the box is the L's, and the edge is the
+  // L's own.
+  const auto same = SolidTree::combine(Op::Difference, ell, box({1, 1, 0}, {2, 2, 1}));
+  CHECK(at(same, 1, 1, 0.5) == Where::On);
+
+  // A hexagonal prism, 0 <= z <= 5, its walls named for the cylinder r = 10 -
+  // the solid that cylinder bounds, by the model's word - taken from that
+  // declared cylinder: nothing is left. Mid wall, at 30 degrees, both are on
+  // one cylinder, the same surface twice, not two tangent to each other: the
+  // point is out.
+  const auto wall = std::make_shared<const CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  std::vector<Vector3d> hexagon;
+  for (int k = 0; k < 6; k++) {
+    const double t = k * M_PI / 3;
+    hexagon.emplace_back(10 * std::cos(t), 10 * std::sin(t), 0);
+  }
+  const auto hex = prism(hexagon, 5, wall);
+  const double t = M_PI / 6;
+  const Vector3d mid(10 * std::cos(t), 10 * std::sin(t), 2.5);
+  const auto nothing = SolidTree::combine(Op::Difference, cylinder(10, 10, 0, 5), hex);
+  CHECK(classify(*nothing, mid).where == Where::Out);
+  const auto both = SolidTree::combine(Op::Union, cylinder(10, 10, 0, 5), hex);
+  CHECK(classify(*both, mid).where == Where::On);
 }

@@ -190,3 +190,98 @@ TEST_CASE("a face named for a declared cylinder is that cylinder's, where its fa
   squash.scale(Vector3d(2, 1, 1));
   CHECK(region.transformed(squash, scaleSimilarity(Vector3d(2, 1, 1))) == nullptr);
 }
+
+namespace {
+
+/*! A prism over a polygon counter clockwise in xy, star shaped from its first
+ * corner, from z = 0 to 1 - or to `top`: its walls named for `wall`, its caps
+ * its own planes. */
+std::vector<FacetedRegion::Face> prism(const std::vector<Vector3d>& polygon,
+                                       const std::shared_ptr<const Surface>& wall = nullptr,
+                                       double top = 1)
+{
+  const Vector3d up(0, 0, top);
+  const std::size_t n = polygon.size();
+  std::vector<FacetedRegion::Face> out;
+  for (std::size_t i = 0; i < n; i++) {
+    const Vector3d& b0 = polygon[i];
+    const Vector3d& b1 = polygon[(i + 1) % n];
+    out.push_back({b0, b1, b1 + up, wall});
+    out.push_back({b0, b1 + up, b0 + up, wall});
+  }
+  for (std::size_t k = 1; k + 1 < n; k++) {
+    out.push_back({polygon[0], polygon[k + 1], polygon[k], nullptr});
+    out.push_back({polygon[0] + up, polygon[k] + up, polygon[k + 1] + up, nullptr});
+  }
+  return out;
+}
+
+/*! Whether `a` states exactly these outward normals, in any order. */
+bool states(const SolidRegion::Answer& a, const std::vector<Vector3d>& normals)
+{
+  if (a.sides.size() != normals.size()) return false;
+  for (const Vector3d& n : normals) {
+    bool found = false;
+    for (const auto& side : a.sides) found = found || (side.outward.normalized() - n).norm() < 1e-12;
+    if (!found) return false;
+  }
+  return true;
+}
+
+}  // namespace
+
+TEST_CASE("an On answer states the side the solid keeps there", "[faceted-region][sides]")
+{
+  // The unit cube: on a face its normal; on an edge, at a corner, the two
+  // and three faces' through it, convex - the solid is in all their
+  // half-spaces.
+  const FacetedRegion cube_region(cube());
+  const auto face = cube_region.classify({1, 0.5, 0.5});
+  REQUIRE(face.where == W::On);
+  CHECK(states(face, {{1, 0, 0}}));
+  const auto edge = cube_region.classify({1, 1, 0.5});
+  CHECK(states(edge, {{1, 0, 0}, {0, 1, 0}}));
+  CHECK(edge.all);
+  const auto corner = cube_region.classify({1, 1, 1});
+  CHECK(states(corner, {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}));
+  CHECK(corner.all);
+
+  // An L: [0, 2] x [0, 1] and [0, 1] x [0, 2]. At (1, 1) its walls y = 1 and
+  // x = 1 meet concave - the solid is in either half-space - and on the
+  // convex edge at (2, 1) in both.
+  const FacetedRegion ell(prism({{0, 0, 0}, {2, 0, 0}, {2, 1, 0}, {1, 1, 0}, {1, 2, 0}, {0, 2, 0}}));
+  REQUIRE(ell.closed());
+  const auto reflex = ell.classify({1, 1, 0.5});
+  REQUIRE(reflex.where == W::On);
+  CHECK(states(reflex, {{0, 1, 0}, {1, 0, 0}}));
+  CHECK_FALSE(reflex.all);
+  const auto salient = ell.classify({2, 1, 0.5});
+  CHECK(states(salient, {{1, 0, 0}, {0, 1, 0}}));
+  CHECK(salient.all);
+
+  // The hexagonal prism named for r = 10: mid wall, the cylinder's own
+  // normal; at a corner of the top, where wall and cap meet on the cylinder,
+  // both, convex; on the top rim between corners, where the cap's chord stands
+  // 1.34 inside the rim, the gap between them is a bound nobody states.
+  const auto cyl = std::make_shared<const CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  const auto polar = [](double r, double degrees, double z) {
+    const double t = degrees * M_PI / 180;
+    return Vector3d(r * cos(t), r * sin(t), z);
+  };
+  std::vector<Vector3d> hexagon;
+  for (int k = 0; k < 6; k++) hexagon.push_back(polar(10, 60 * k, 0));
+  const FacetedRegion hex(prism(hexagon, cyl, 5));
+  REQUIRE(hex.closed());
+  const auto wall = hex.classify(polar(10, 30, 2.5));
+  REQUIRE(wall.where == W::On);
+  CHECK(states(wall, {polar(1, 30, 0)}));
+  REQUIRE(wall.sides.size() == 1);
+  CHECK(wall.sides.front().bound == cyl.get());
+  const auto rim_corner = hex.classify(polar(10, 60, 5));
+  REQUIRE(rim_corner.where == W::On);
+  CHECK(states(rim_corner, {polar(1, 60, 0), {0, 0, 1}}));
+  CHECK(rim_corner.all);
+  const auto rim = hex.classify(polar(10, 30, 5));
+  REQUIRE(rim.where == W::On);
+  CHECK(rim.sides.empty());
+}

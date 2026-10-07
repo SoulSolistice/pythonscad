@@ -23,10 +23,22 @@
  *  - near a plane face alone it is On it; near faces of two records, or near
  *    a record beyond the piece its faces stand for, Unknown - never a guess.
  *
+ * An On answer states the side the solid keeps there where it can: on one
+ * face, its outward normal - a plane face's own, a record's where it states
+ * one; on an edge or corner of faces through the point, their normals, and
+ * whether every face lies on the inner side of every other's bound (convex:
+ * the solid is in all their half-spaces) or on the outer (concave: in any).
+ * Each face is taken by its direction from the point - a plane face's
+ * centre, a named face's centre along the record's tangent plane, which is
+ * what its piece's tangent cone is. Where a record states no normal, where
+ * the point is where a piece ends short of a plane face - the gap between a
+ * chord and its arc - or where the faces are neither, it says nothing.
+ *
  * Stated only where every named face's band is stated, and the faces close
  * (every edge used twice): see ManifoldUtils::facetedSolid.
  */
 
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -60,12 +72,29 @@ public:
   [[nodiscard]] bool closed() const { return closed_; }
 
 private:
-  /*! Whether `q`, on `record`, is in the piece of it the faces named for it
+  /*! Where `q`, on `record`, is in the piece of it the faces named for it
    * stand for, as exactly as `err` lets the arithmetic say. */
-  [[nodiscard]] bool inPiece(const Surface *record, const Vector3d& q, double err) const;
+  struct Hit {
+    bool found = false;
+    bool inner = false;         //!< away from every edge the piece ends at
+    Vector3d outward{0, 0, 0};  //!< the record's outward normal there; zero where it states none
+  };
+  [[nodiscard]] Hit inPiece(const Surface *record, const Vector3d& q, double err) const;
+  /*! On `record` at p, in its piece where `hit` says: On, with the side kept. */
+  [[nodiscard]] Answer onRecord(const Surface *record, const Vector3d& p, const Hit& hit,
+                                double err) const;
+  /*! The side kept at p by the plane faces within `err` of it and - where
+   * `curved` is not zero - by `record`'s piece, outward normal `curved`. */
+  void stateSides(const Vector3d& p, double err, const Surface *record, const Vector3d& curved,
+                  Answer& a) const;
+  [[nodiscard]] bool sameRecord(const Face& f, const Surface *record) const;
+  [[nodiscard]] Vector3d outwardOf(const Face& f) const;
 
   std::vector<Face> faces_;
   std::vector<double> band_;  // how far each face's record may lie from it
+  /*! Per face, per edge (a b, b c, c a): whether its neighbour across it is
+   * not a face of the same record - where a record's piece ends. */
+  std::vector<std::array<bool, 3>> border_;
   bool closed_ = false;
   double orientation_ = 1;  // the sign of the faces' signed volume
   double reach_ = 0;        // how far from the origin any vertex is

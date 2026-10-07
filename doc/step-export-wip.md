@@ -6184,6 +6184,32 @@ is the next step. step-exchange-never-surrender 87 -> 12 undecided; one facet
 of step-declare-grid-two-bands face -> undecided, by the plane rule. No file
 moved.
 
+**A region states its side.** The half-space rule at a point on several
+operands takes each one's half-spaces there, and only a declared primitive
+gave them: a region answered On and stopped it. A region's On answer now
+carries the side it keeps where it can say (`SolidRegion::Answer::sides`):
+the bounds through the point by their outward normals, and whether the solid
+there is in all their half-spaces or in any - a declared primitive is always
+the first, a region's concave edge the second. The faceted region reads it off
+its faces: on one face its normal - a plane face's own, a record's where the
+record states one; on an edge or corner, every face through the point taken by
+its direction from it (a plane face's centre; a named face's along the
+record's tangent plane, which is its piece's tangent cone), convex where each
+lies on the inner side of every other bound, concave where on the outer, and
+nothing where any lies on another's plane. Where a record states no normal (a
+grid), or the point is where a piece ends short of the plane face beyond -
+the gap between a chord and its arc - it says nothing. And one surface on a
+tangent plane is counted once: a declared cylinder and the faces named for it
+are one bound, not two tangent to each other.
+
+lid10's channel now states its side at every point it is on; of the 132
+facets it had stopped, 20 read "crosses the model's boundary" - a facet the
+model's edge runs through, for excision to split. step-exchange-never-
+surrender 12 -> 2 undecided. No file moved; the measure 559 s -> 614 s, the
+rule now running where it stopped. What still says On without a side, traced
+on lid10: the ridge's grid polyhedron (1252 points - a grid states no normal),
+the hull (564) and a rotate_extrude's profile region (360).
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

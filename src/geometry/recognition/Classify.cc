@@ -102,6 +102,24 @@ Classification leaf(const SolidTree& tree, const Vector3d& p)
   return out;
 }
 
+/*! A region's own answer at p - asked as lying on the bounds it was
+ * constructed on, where it was. */
+SolidRegion::Answer regionAt(const SolidTree& tree, const Vector3d& p)
+{
+  return constructed_on != nullptr ? tree.region()->classifyOn(p, *constructed_on)
+                                   : tree.region()->classify(p);
+}
+
+Classification ofAnswer(const SolidRegion::Answer& a, const SolidTree& tree)
+{
+  switch (a.where) {
+  case SolidRegion::Where::In:  return of(Where::In, &tree);
+  case SolidRegion::Where::Out: return of(Where::Out, &tree);
+  case SolidRegion::Where::On:  return Classification{Where::On, a.on, &tree};
+  default:                      return of(Where::Unknown, &tree);
+  }
+}
+
 /*! The one operand that is On, where every other is `rest` - or Unknown where
  * more than one is On, which needs the half-space each keeps, and which no
  * one operand is the reason for. */
@@ -118,8 +136,9 @@ Classification oneOn(const std::vector<Classification>& parts, Where rest)
 
 /*! A tangent plane through the point, with every leaf bound on it. */
 struct TangentPlane {
-  Vector3d m;  // unit, the first bound's outward normal
-  std::vector<const Surface *> bounds;
+  Vector3d m;                           // unit, the first bound's outward normal
+  std::vector<const Surface *> bounds;  // the records on it; a region's own plane face is none
+  std::size_t count = 0;                // the bounds on it, one surface counted once
   bool curved = false;
 };
 
@@ -134,7 +153,10 @@ struct TangentPlane {
  * plane says there to second order: the cells, open cones of directions, are
  * still right where they disagree - the point is On - but where they all agree
  * a cusp between the two may still touch the point, and that is Unknown. So is
- * more than three planes, or an operand on the point that states no side. */
+ * more than three planes, or an operand on the point that states no side. A
+ * declared leaf keeps the inside of every bound it is on; a region states its
+ * side itself (SolidRegion::Answer::sides) - all its bounds' half-spaces at a
+ * convex edge, any of them at a concave one - or says nothing. */
 Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
 {
   using Op = SolidTree::Op;
@@ -142,7 +164,8 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
   // Each leaf's own answer at p, and the outward normal of each bound it is on.
   struct LeafAt {
     Classification c;
-    std::vector<Vector3d> normals;  // parallel to c.on
+    std::vector<Vector3d> normals;  // outward, of the bounds it is on
+    bool all = true;                // in every half-space they bound, or in any
   };
   std::map<const SolidTree *, LeafAt> leaves;
   bool stated = true;
@@ -156,35 +179,67 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
       return;
     default: break;
     }
-    LeafAt at{classify(t, p), {}};
+    // A bound through the point, by its outward normal: on the tangent plane
+    // it shares with others, one surface counted once.
+    auto place = [&](const Vector3d& n, const Surface *b) {
+      const bool curved = b != nullptr && dynamic_cast<const PlaneSurface *>(b) == nullptr;
+      bool placed = false;
+      for (auto& plane : planes) {
+        if (!parallel(plane.m, n)) continue;
+        placed = true;
+        const bool seen = b != nullptr && std::any_of(plane.bounds.begin(), plane.bounds.end(),
+                                                      [&](const Surface *x) { return x->sameAs(*b); });
+        if (seen) continue;
+        if (b != nullptr) plane.bounds.push_back(b);
+        plane.count++;
+        plane.curved = plane.curved || curved;
+      }
+      if (!placed) {
+        TangentPlane plane{n, {}, 1, curved};
+        if (b != nullptr) plane.bounds.push_back(b);
+        planes.push_back(std::move(plane));
+      }
+    };
+    LeafAt at;
+    SolidRegion::Answer region;
+    if (t.op() == Op::Region) {
+      region = regionAt(t, p);
+      at.c = ofAnswer(region, t);
+    } else {
+      at.c = classify(t, p);
+    }
     if (at.c.where == Where::Unknown) {
       stated = false;
       return;
     }
     if (at.c.where == Where::On) {
-      // Only a declared leaf states which side of its bound it keeps.
-      if (t.op() != Op::Declared) {
-        stated = false;
-        return;
-      }
-      for (const Surface *b : at.c.on) {
-        Vector3d n;
-        if (!normalOf(b, p, n)) {
+      if (t.op() == Op::Region) {
+        if (region.sides.empty()) {
           stated = false;
           return;
         }
-        n.normalize();
-        if (n.dot(t.solid()->interior - p) > 0) n = -n;
-        at.normals.push_back(n);
-        const bool curved = dynamic_cast<const PlaneSurface *>(b) == nullptr;
-        bool placed = false;
-        for (auto& plane : planes) {
-          if (!parallel(plane.m, n)) continue;
-          plane.bounds.push_back(b);
-          plane.curved = plane.curved || curved;
-          placed = true;
+        at.all = region.all;
+        for (const auto& side : region.sides) {
+          const Vector3d n = side.outward.normalized();
+          at.normals.push_back(n);
+          place(n, side.bound);
         }
-        if (!placed) planes.push_back(TangentPlane{n, {b}, curved});
+      } else if (t.op() != Op::Declared) {
+        // Only a declared leaf and a region state which side they keep.
+        stated = false;
+        return;
+      } else {
+        for (const Surface *b : at.c.on) {
+          Vector3d n;
+          if (!normalOf(b, p, n)) {
+            stated = false;
+            return;
+          }
+          n.normalize();
+          if (n.dot(t.solid()->interior - p) > 0) n = -n;
+          at.normals.push_back(n);
+          place(n, b);
+        }
       }
     }
     leaves.emplace(&t, std::move(at));
@@ -193,7 +248,7 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
   if (!stated || planes.empty() || planes.size() > 3) return of(Where::Unknown);
   bool curved_tangency = false;
   for (const auto& plane : planes)
-    curved_tangency = curved_tangency || (plane.curved && plane.bounds.size() > 1);
+    curved_tangency = curved_tangency || (plane.curved && plane.count > 1);
   // A direction in each cell: m_i . d = s_i, and nothing along the directions
   // the planes leave free.
   const std::size_t k = planes.size();
@@ -234,10 +289,11 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
     }
     const LeafAt& at = leaves.at(&t);
     if (at.c.where != Where::On) return at.c.where == Where::In;
+    // Never 0: d is a cell's, off every plane.
     for (const Vector3d& n : at.normals) {
-      if (n.dot(d) >= 0) return false;  // never 0: d is a cell's, off every plane
+      if ((n.dot(d) < 0) != at.all) return !at.all;
     }
-    return true;
+    return at.all;
   };
   const std::size_t cells = std::size_t(1) << k;
   std::vector<char> inside(cells, 0);
@@ -279,17 +335,7 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
   case Op::Opaque:   return of(Where::Unknown, &tree);
   case Op::Declared: return leaf(tree, p);
   // A region its declaration bounds answers for itself, as exactly.
-  case Op::Region:   {
-    const SolidRegion::Answer a = constructed_on != nullptr
-                                    ? tree.region()->classifyOn(p, *constructed_on)
-                                    : tree.region()->classify(p);
-    switch (a.where) {
-    case SolidRegion::Where::In:  return of(Where::In, &tree);
-    case SolidRegion::Where::Out: return of(Where::Out, &tree);
-    case SolidRegion::Where::On:  return Classification{Where::On, a.on, &tree};
-    default:                      return of(Where::Unknown, &tree);
-    }
-  }
+  case Op::Region:   return ofAnswer(regionAt(tree, p), tree);
   case Op::Faceted:
     return of(Where::Unknown, &tree);  // resolved where it became a Manifold
   // Known to lie within its envelope, and to contain every solid it holds:

@@ -70,10 +70,22 @@ class SolidRegion
 {
 public:
   enum class Where { In, Out, On, Unknown };
+  /*! A bound through an On point: its outward normal there, and the record it
+   * is, or null for a face that is its own plane. */
+  struct Side {
+    Vector3d outward;
+    const Surface *bound = nullptr;
+  };
   struct Answer {
     Where where = Where::Unknown;
     /*! Where On: the surfaces of the region's boundary the point is on. */
     std::vector<const Surface *> on;
+    /*! Where On, the side the region keeps there, where it can say: the
+     * bounds through the point, and whether the solid near it is in all their
+     * half-spaces - a face, or an edge or corner that is convex - or in any
+     * of them, one that is concave. Empty where the region does not say. */
+    std::vector<Side> sides;
+    bool all = true;
   };
   virtual ~SolidRegion() = default;
   [[nodiscard]] virtual Answer classify(const Vector3d& p) const = 0;
