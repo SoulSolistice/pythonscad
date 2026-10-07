@@ -3,10 +3,14 @@
 
 #include <cmath>
 #include <cstddef>
+#include <functional>
+#include <map>
+#include <vector>
 
 #include "geometry/Surface.h"
 #include "geometry/recognition/Support.h"
 #include "geometry/MachinePrecision.h"
+#include "geometry/recognition/Exact.h"
 
 namespace recognition {
 
@@ -52,6 +56,161 @@ Classification oneOn(const std::vector<Classification>& parts, Where rest)
     on = &c;
   }
   return on != nullptr ? *on : of(rest, parts.empty() ? nullptr : parts.front().because);
+}
+
+/*! A tangent plane through the point, with every leaf bound on it. */
+struct TangentPlane {
+  Vector3d m;  // unit, the first bound's outward normal
+  std::vector<const Surface *> bounds;
+  bool curved = false;
+};
+
+/*! Where `p` is, at a point on more than one operand's boundary: each operand
+ * keeps the half-space its tangent plane there bounds, and the boolean of
+ * those decides (Requicha's neighbourhood classification). The planes through
+ * the point - at most three, independent - part the directions into cells;
+ * the tree is asked in one direction of each. Every cell in: In; every cell
+ * out: Out; else On, and On those planes that part an inside cell from an
+ * outside one. Two coinciding planes are one plane - the eps = 0 case,
+ * decided exactly - but a curved bound tangent to another is not what its
+ * tangent plane says there, and is Unknown; so is more than three planes, or
+ * an operand on the point that states no side. */
+Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
+{
+  using Op = SolidTree::Op;
+  std::vector<TangentPlane> planes;
+  // Each leaf's own answer at p, and the outward normal of each bound it is on.
+  struct LeafAt {
+    Classification c;
+    std::vector<Vector3d> normals;  // parallel to c.on
+  };
+  std::map<const SolidTree *, LeafAt> leaves;
+  bool stated = true;
+  std::function<void(const SolidTree&)> gather = [&](const SolidTree& t) {
+    if (!stated) return;
+    switch (t.op()) {
+    case Op::Union:
+    case Op::Intersection:
+    case Op::Difference:
+      for (const auto& child : t.children()) gather(*child);
+      return;
+    default: break;
+    }
+    LeafAt at{classify(t, p), {}};
+    if (at.c.where == Where::Unknown) {
+      stated = false;
+      return;
+    }
+    if (at.c.where == Where::On) {
+      // Only a declared leaf states which side of its bound it keeps.
+      if (t.op() != Op::Declared) {
+        stated = false;
+        return;
+      }
+      for (const Surface *b : at.c.on) {
+        // A plane's normal is its own; a curved bound's, its normal at p.
+        Vector3d n;
+        const auto *plane = dynamic_cast<const PlaneSurface *>(b);
+        if (plane != nullptr) n = plane->normdir;
+        else if (!b->normalAt(p, n)) n = Vector3d::Zero();
+        if (n.norm() == 0) {
+          stated = false;
+          return;
+        }
+        n.normalize();
+        if (n.dot(t.solid()->interior - p) > 0) n = -n;
+        at.normals.push_back(n);
+        const bool curved = dynamic_cast<const PlaneSurface *>(b) == nullptr;
+        bool placed = false;
+        for (auto& plane : planes) {
+          if (!parallel(plane.m, n)) continue;
+          plane.bounds.push_back(b);
+          plane.curved = plane.curved || curved;
+          placed = true;
+        }
+        if (!placed) planes.push_back(TangentPlane{n, {b}, curved});
+      }
+    }
+    leaves.emplace(&t, std::move(at));
+  };
+  gather(tree);
+  if (!stated || planes.empty() || planes.size() > 3) return of(Where::Unknown);
+  for (const auto& plane : planes) {
+    if (plane.curved && plane.bounds.size() > 1) return of(Where::Unknown);
+  }
+  // A direction in each cell: m_i . d = s_i, and nothing along the directions
+  // the planes leave free.
+  const std::size_t k = planes.size();
+  Matrix3d rows = Matrix3d::Zero();
+  for (std::size_t i = 0; i < k; i++) rows.row(long(i)) = planes[i].m.transpose();
+  if (k == 1) {
+    const Vector3d e1 = planes[0].m.unitOrthogonal();
+    rows.row(1) = e1.transpose();
+    rows.row(2) = planes[0].m.cross(e1).transpose();
+  } else if (k == 2) {
+    const Vector3d e = planes[0].m.cross(planes[1].m);
+    if (e.norm() == 0) return of(Where::Unknown);
+    rows.row(2) = e.normalized().transpose();
+  }
+  if (std::fabs(rows.determinant()) <= forwardError(12, 1.0)) return of(Where::Unknown);
+  const Matrix3d inverse = rows.inverse();
+  // Whether a direction d from p goes into the subtree's solid.
+  std::function<bool(const SolidTree&, const Vector3d&)> into = [&](const SolidTree& t,
+                                                                    const Vector3d& d) -> bool {
+    switch (t.op()) {
+    case Op::Union:
+      for (const auto& child : t.children()) {
+        if (into(*child, d)) return true;
+      }
+      return false;
+    case Op::Intersection:
+      for (const auto& child : t.children()) {
+        if (!into(*child, d)) return false;
+      }
+      return true;
+    case Op::Difference:
+      if (!into(*t.children().front(), d)) return false;
+      for (std::size_t c = 1; c < t.children().size(); c++) {
+        if (into(*t.children()[c], d)) return false;
+      }
+      return true;
+    default: break;
+    }
+    const LeafAt& at = leaves.at(&t);
+    if (at.c.where != Where::On) return at.c.where == Where::In;
+    for (const Vector3d& n : at.normals) {
+      if (n.dot(d) >= 0) return false;  // never 0: d is a cell's, off every plane
+    }
+    return true;
+  };
+  const std::size_t cells = std::size_t(1) << k;
+  std::vector<char> inside(cells, 0);
+  for (std::size_t cell = 0; cell < cells; cell++) {
+    Vector3d s(0, 0, 0);
+    for (std::size_t i = 0; i < k; i++) s[long(i)] = (cell >> i) & 1 ? 1.0 : -1.0;
+    inside[cell] = into(tree, inverse * s) ? 1 : 0;
+  }
+  bool any_in = false, any_out = false;
+  for (const char c : inside) (c != 0 ? any_in : any_out) = true;
+  if (!any_out) return of(Where::In, &tree);
+  if (!any_in) return of(Where::Out, &tree);
+  Classification out{Where::On, {}, &tree};
+  for (std::size_t i = 0; i < k; i++) {
+    bool parts = false;
+    for (std::size_t cell = 0; cell < cells && !parts; cell++) {
+      parts = inside[cell] != inside[cell ^ (std::size_t(1) << i)];
+    }
+    if (parts) out.on.insert(out.on.end(), planes[i].bounds.begin(), planes[i].bounds.end());
+  }
+  return out;
+}
+
+/*! The boolean's answer, and - where it is left open by a point on two
+ * operands at once - the half-spaces' (neighbourhood). */
+Classification settled(const SolidTree& tree, const Vector3d& p, Classification c)
+{
+  if (c.where == Where::Unknown && c.because == nullptr) return neighbourhood(tree, p);
+  return c;
 }
 
 }  // namespace
@@ -121,11 +280,11 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
   case Op::Union:
     if (const auto *c = first(Where::In)) return of(Where::In, c->because);
     if (const auto *c = first(Where::Unknown)) return of(Where::Unknown, c->because);
-    return oneOn(parts, Where::Out);
+    return settled(tree, p, oneOn(parts, Where::Out));
   case Op::Intersection:
     if (const auto *c = first(Where::Out)) return of(Where::Out, c->because);
     if (const auto *c = first(Where::Unknown)) return of(Where::Unknown, c->because);
-    return oneOn(parts, Where::In);
+    return settled(tree, p, oneOn(parts, Where::In));
   case Op::Difference: {
     // The first operand less every other: a subtracted operand holding the
     // point takes it out, whatever the first one is - and is the reason.
@@ -139,8 +298,8 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
     const std::vector<Classification> cut(parts.begin() + 1, parts.end());
     const Classification cut_on = oneOn(cut, Where::Out);  // Out: none On
     if (head.where == Where::In)
-      return cut_on.where == Where::Out ? of(Where::In, head.because) : cut_on;
-    return cut_on.where == Where::Out ? head : of(Where::Unknown);
+      return cut_on.where == Where::Out ? of(Where::In, head.because) : settled(tree, p, cut_on);
+    return cut_on.where == Where::Out ? head : neighbourhood(tree, p);
   }
   default: return of(Where::Unknown);
   }

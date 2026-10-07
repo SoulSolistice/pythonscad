@@ -113,8 +113,8 @@ TEST_CASE("unions and intersections, and where two faces meet it says so", "[cla
   CHECK(at(u, 1.5, 1, 1) == Where::In);
   CHECK(at(u, 2.5, 1, 1) == Where::In);
   CHECK(at(u, 4, 1, 1) == Where::Out);
-  CHECK(at(u, 3, 1, 1) == Where::On);         // only b's face
-  CHECK(at(u, 1.5, 0, 1) == Where::Unknown);  // both on y = 0: needs the half-spaces
+  CHECK(at(u, 3, 1, 1) == Where::On);    // only b's face
+  CHECK(at(u, 1.5, 0, 1) == Where::On);  // both on y = 0: the half-spaces say the union's face
   const auto x = SolidTree::combine(Op::Intersection, a, b);
   CHECK(at(x, 1.5, 1, 1) == Where::In);
   CHECK(at(x, 0.5, 1, 1) == Where::Out);
@@ -223,4 +223,39 @@ TEST_CASE("a hull holds each of its operands, whatever they are", "[classify][hu
   const auto cut = SolidTree::combine(Op::Difference, slab, hull);
   CHECK(at(cut, 0.5, 0.5, 0.5) == Where::Out);
   CHECK(at(cut, -0.5, 0.5, 0.5) == Where::In);
+}
+
+TEST_CASE("on two operands at once, the half-spaces each keeps decide", "[classify][neighbourhood]")
+{
+  // A cube less a cube sharing its face x = 1 - the eps = 0 cut: at (1, 0.5,
+  // 0.5) both are on the plane, the first keeping x < 1, the second x > 1, so
+  // the difference keeps x < 1 and the point is on its face.
+  const auto a = box({0, 0, 0}, {1, 1, 1}), b = box({1, 0, 0}, {2, 1, 1});
+  const auto d = SolidTree::combine(Op::Difference, a, b);
+  const auto face = classify(*d, Vector3d(1, 0.5, 0.5));
+  CHECK(face.where == Where::On);
+  CHECK_FALSE(face.on.empty());
+  // Two halves of one cube joined across x = 1: the seam is inside the union.
+  const auto whole = SolidTree::combine(Op::Union, a, b);
+  CHECK(at(whole, 1, 0.5, 0.5) == Where::In);
+  // The same two halves, intersected: they share only the plane, and a
+  // boolean of solids is regularized - what has no inside is no solid - so
+  // there is nothing there, and the point is out.
+  const auto touch = SolidTree::combine(Op::Intersection, a, b);
+  CHECK(at(touch, 1, 0.5, 0.5) == Where::Out);
+
+  // A half cylinder: r = 10 about z, 0 <= z <= 4, less the box x < 0. Where the
+  // wall meets the cut, at (0, 10, 2), the wall keeps r < 10 and the box x < 0,
+  // so the result keeps r < 10, x > 0 - an edge of it, on both surfaces.
+  const auto half =
+    SolidTree::combine(Op::Difference, cylinder(10, 10, 0, 4), box({-20, -11, -1}, {0, 11, 5}));
+  const auto edge = classify(*half, Vector3d(0, 10, 2));
+  CHECK(edge.where == Where::On);
+  CHECK(edge.on.size() == 2);
+  // On the cut plane inside the wall: the cut's face.
+  CHECK(at(half, 0, 5, 2) == Where::On);
+  // On the wall's far side from the cut: the wall alone, as before.
+  CHECK(at(half, 10, 0, 2) == Where::On);
+  // On the wall where the box removed it: outside.
+  CHECK(at(half, -10, 0, 2) == Where::Out);
 }

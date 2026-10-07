@@ -6074,6 +6074,37 @@ past the chord is inside only by the grid's word; with the side rule flipped,
 that case fails. `solid_tree_test.cc`'s tetrahedron now asserts the region
 it is, where it asserted its box.
 
+**The hull, and the point on two operands.** A hull is the set of its
+operands' convex combinations (Caratheodory), its support value in each
+direction their largest, so a point on an operand's smooth boundary, outward
+normal n, is on the hull's exactly where no operand reaches further along n -
+and buried where one does (`recognition/Support.h`; values in closed form for
+the declared primitives, unions and nested hulls). Proven on its own and
+landed deciding nothing: every hull the corpus still leaves open is a hull of
+sectors - lid10's and the bayonet's lug channels, step-hull-of-sectors - whose
+operands are CSG trees with no support value of their own yet.
+
+Their support value needs the model's exact vertices and curves - the
+critical points of n . x on the boundary - and those lie on two or three
+operands at once, where the classifier said "a point on two surfaces". So that
+came first: at a point on several operands each keeps the half-space its
+tangent plane bounds there, and the boolean of those decides (Requicha's
+neighbourhood classification) - at most three planes, the directions parted
+into cells, the tree asked in one direction of each; all in In, all out Out,
+else On, on the planes that part an in cell from an out one. Coinciding planes
+are one plane, the eps = 0 cut decided exactly; a curved bound tangent to
+another stays Unknown, as does more than three planes. Booleans are
+regularized: two halves sharing a plane intersect in nothing.
+
+Across the corpus "a point on two surfaces" fell 200 -> 30, and the verdicts
+barely moved - because of what the settled points uncovered: 52 more facets
+now read "crosses the model's boundary", partly on a face of their surface and
+partly off it - the cut facets and the fins' inner walls, which the model's
+edge runs through, and which excision must split along that exact curve; 78
+more now stop at the hull. No file moved. *Tests:* `classify_test.cc` - the
+eps = 0 difference, the union's seam, the regularized intersection, a sector's
+edge; with the normals' orientation dropped, four fail.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`
