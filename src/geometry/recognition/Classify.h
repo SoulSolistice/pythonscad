@@ -44,4 +44,10 @@ struct Classification {
 /*! Where `p` is with respect to the solid `tree` describes. See the file comment. */
 [[nodiscard]] Classification classify(const SolidTree& tree, const Vector3d& p);
 
+/*! The same, for a point that lies on each of `on` - bounds of the tree's own
+ * leaves - by construction: a vertex or a curve point computed from them,
+ * which is on them whatever its rounding says, and asked so. */
+[[nodiscard]] Classification classifyAt(const SolidTree& tree, const Vector3d& p,
+                                        const std::vector<const Surface *>& on);
+
 }  // namespace recognition

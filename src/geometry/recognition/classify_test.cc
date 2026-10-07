@@ -259,3 +259,22 @@ TEST_CASE("on two operands at once, the half-spaces each keeps decide", "[classi
   // On the wall where the box removed it: outside.
   CHECK(at(half, -10, 0, 2) == Where::Out);
 }
+
+TEST_CASE("a curved bound tangent to a plane is decided where the cells disagree",
+          "[classify][neighbourhood]")
+{
+  // A cylinder r = 10 about z less the box x < 0, |y| <= 10: the box's face
+  // y = 10 touches the wall along x = 0, y = 10, where the box's face x = 0
+  // meets it too. There the result - the half cylinder - keeps x > 0 inside
+  // the wall: the cells disagree, and the point is on it.
+  const auto half =
+    SolidTree::combine(Op::Difference, cylinder(10, 10, 0, 4), box({-20, -10, -1}, {0, 10, 5}));
+  CHECK(at(half, 0, 10, 2) == Where::On);
+  // A box whose face y = 10 touches a cylinder's wall, less the cylinder:
+  // between the face and the wall a cusp of the box survives, touching the
+  // line of contact. Every cell says out; a cusp they cannot see says on, so
+  // the answer is not theirs to give.
+  const auto cusp =
+    SolidTree::combine(Op::Difference, box({-5, 0, 0}, {5, 10, 4}), cylinder(10, 10, 0, 4));
+  CHECK(at(cusp, 0, 10, 2) == Where::Unknown);
+}

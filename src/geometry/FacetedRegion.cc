@@ -75,12 +75,18 @@ FacetedRegion::FacetedRegion(std::vector<Face> faces) : faces_(std::move(faces))
     closed_ = closed_ && n == 1 && back != edges.end() && back->second == 1;
   }
   orientation_ = volume > 0 ? 1 : -1;
+  if (!extent(box_)) box_.setEmpty();
 }
 
 SolidRegion::Answer FacetedRegion::classify(const Vector3d& p) const
 {
   if (!closed_) return Answer{};
   const double err = forwardError(64, p.norm() + reach_);
+  // Beyond the box every face and every band lies in, out - without asking
+  // each face.
+  if (!box_.isEmpty() &&
+      ((p.array() < box_.min().array() - err).any() || (p.array() > box_.max().array() + err).any()))
+    return Answer{Where::Out, {}};
   // Which faces the point is near: a named one within its record's band, a
   // plane within the arithmetic's error.
   const GridSurface *record = nullptr;
@@ -122,6 +128,19 @@ SolidRegion::Answer FacetedRegion::classify(const Vector3d& p) const
   const double side = (p - q).dot(n);
   if (side == 0) return Answer{};
   return Answer{side > 0 ? Where::Out : Where::In, {}};
+}
+
+SolidRegion::Answer FacetedRegion::classifyOn(const Vector3d& p,
+                                              const std::vector<const Surface *>& on) const
+{
+  // Projected onto a grid already, the point need not be projected again.
+  for (const Face& f : faces_) {
+    if (f.record == nullptr) continue;
+    for (const Surface *s : on) {
+      if (s == f.record.get() || f.record->sameAs(*s)) return Answer{Where::On, {f.record.get()}};
+    }
+  }
+  return classify(p);
 }
 
 std::shared_ptr<const SolidRegion> FacetedRegion::transformed(const Transform3d& mat,

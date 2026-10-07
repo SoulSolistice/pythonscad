@@ -44,7 +44,8 @@ std::vector<Exists> existence(const FacetGraph& graph,
         no_point = true;
         continue;
       }
-      const Classification c = classify(*tree, on);
+      // Taken onto the surface, it is on it by construction.
+      const Classification c = classifyAt(*tree, on, {surface});
       if (c.where == Where::On) any_on = true;
       if (c.where == Where::In || c.where == Where::Out) any_off = true;
       if (c.where == Where::On || c.where == Where::Unknown) decided_off = false;

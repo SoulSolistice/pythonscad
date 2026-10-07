@@ -77,6 +77,15 @@ public:
   };
   virtual ~SolidRegion() = default;
   [[nodiscard]] virtual Answer classify(const Vector3d& p) const = 0;
+  /*! The same, for a point that lies on each of `on` by construction - taken
+   * onto one of them, say. A region bounded by one of those may answer from
+   * that alone; by default it asks as classify() does. */
+  [[nodiscard]] virtual Answer classifyOn(const Vector3d& p,
+                                          const std::vector<const Surface *>& on) const
+  {
+    (void)on;
+    return classify(p);
+  }
   /*! This region moved by `mat`, or null where it cannot be represented
    * afterwards - the leaf is then opaque, not wrong. */
   [[nodiscard]] virtual std::shared_ptr<const SolidRegion> transformed(
@@ -154,6 +163,10 @@ public:
   [[nodiscard]] const DeclaredSolid *solid() const { return solid_.get(); }
   /*! The region of a Region leaf; null otherwise. */
   [[nodiscard]] const SolidRegion *region() const { return region_.get(); }
+  /*! What a reader derived from this tree and keeps with it - computed once:
+   * the tree is immutable, so the derivation holds for its life. */
+  [[nodiscard]] const std::shared_ptr<const void>& derived() const { return derived_; }
+  void keepDerived(std::shared_ptr<const void> d) const { derived_ = std::move(d); }
   /*! A leaf's name, from its generator; empty for a node, or where none was given. */
   [[nodiscard]] const std::string& what() const { return what_; }
   /*! How many leaves, and how many of them declared. */
@@ -181,5 +194,6 @@ private:
   std::vector<std::shared_ptr<const SolidTree>> children_;
   std::shared_ptr<const DeclaredSolid> solid_;
   std::shared_ptr<const SolidRegion> region_;
+  mutable std::shared_ptr<const void> derived_;
   std::string what_;
 };

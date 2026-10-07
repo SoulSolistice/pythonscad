@@ -45,6 +45,10 @@ public:
   explicit FacetedRegion(std::vector<Face> faces);
 
   [[nodiscard]] Answer classify(const Vector3d& p) const override;
+  /*! A point on a grid this solid is bounded by, by construction, is on it:
+   * the grid between the solid's ends is its boundary there. */
+  [[nodiscard]] Answer classifyOn(const Vector3d& p,
+                                  const std::vector<const Surface *>& on) const override;
   [[nodiscard]] std::shared_ptr<const SolidRegion> transformed(
     const Transform3d& mat, const Similarity& similarity) const override;
   bool extent(BoundingBox& out) const override;
@@ -57,4 +61,5 @@ private:
   bool closed_ = false;
   double orientation_ = 1;  // the sign of the faces' signed volume
   double reach_ = 0;        // how far from the origin any vertex is
+  BoundingBox box_;         // the faces' box, grown by the widest band: outside it, out
 };

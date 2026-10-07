@@ -1,6 +1,7 @@
 /*! Where a point is with respect to the model's solid - see Classify.h. */
 #include "geometry/recognition/Classify.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <functional>
@@ -15,6 +16,63 @@
 namespace recognition {
 
 namespace {
+
+/*! The bounds the point being asked lies on by construction (classifyAt). */
+thread_local const std::vector<const Surface *> *constructed_on = nullptr;
+
+bool onByConstruction(const Surface *bound)
+{
+  return constructed_on != nullptr &&
+         std::find(constructed_on->begin(), constructed_on->end(), bound) != constructed_on->end();
+}
+
+/*! A bound's normal at p: a plane's its own, a curved bound's its normal
+ * there; false where it has none. */
+bool normalOf(const Surface *bound, const Vector3d& p, Vector3d& n)
+{
+  if (const auto *plane = dynamic_cast<const PlaneSurface *>(bound)) n = plane->normdir;
+  else if (!bound->normalAt(p, n)) return false;
+  return n.norm() > 0;
+}
+
+/*! Whether p lies in the convex hull of `at`, all on one plane through p,
+ * within `slack`: a point, a segment, or a polygon. */
+bool withinHull(const Vector3d& p, std::vector<Vector3d> at, double slack)
+{
+  // One point each, of those that coincide.
+  std::vector<Vector3d> pts;
+  for (const Vector3d& x : at) {
+    bool seen = false;
+    for (const Vector3d& y : pts) seen = seen || (x - y).norm() <= slack;
+    if (!seen) pts.push_back(x);
+  }
+  if (pts.empty()) return false;
+  if (pts.size() == 1) return (p - pts[0]).norm() <= slack;
+  if (pts.size() == 2) {
+    const Vector3d e = pts[1] - pts[0];
+    const double s = std::clamp((p - pts[0]).dot(e) / e.squaredNorm(), 0.0, 1.0);
+    return (pts[0] + e * s - p).norm() <= slack;
+  }
+  // A polygon in its plane: p is in their hull where no edge of the hull has
+  // it outside - every point on one side of the line through any two of them
+  // that the others are all on.
+  Vector3d normal(0, 0, 0);
+  for (std::size_t i = 1; i + 1 < pts.size(); i++)
+    normal += (pts[i] - pts[0]).cross(pts[i + 1] - pts[0]);
+  if (normal.norm() == 0) return false;
+  normal.normalize();
+  for (std::size_t i = 0; i < pts.size(); i++) {
+    for (std::size_t j = 0; j < pts.size(); j++) {
+      if (i == j) continue;
+      const Vector3d edge = normal.cross(pts[j] - pts[i]);  // points to one side of i -> j
+      bool all = true;
+      for (std::size_t k = 0; k < pts.size() && all; k++)
+        all = edge.dot(pts[k] - pts[i]) >= -slack * edge.norm();
+      if (all && edge.dot(p - pts[i]) < -slack * edge.norm()) return false;
+    }
+  }
+  return true;
+}
 
 Classification of(Where where, const SolidTree *because = nullptr)
 {
@@ -34,7 +92,7 @@ Classification leaf(const SolidTree& tree, const Vector3d& p)
     // An interior the declaration's own bound passes through is no interior:
     // the declaration is wrong, and says nothing.
     if (std::fabs(in.value) <= in.bound) return of(Where::Unknown, &tree);
-    if (std::fabs(at.value) <= at.bound) {
+    if (onByConstruction(bound.get()) || std::fabs(at.value) <= at.bound) {
       out.on.push_back(bound.get());
       continue;
     }
@@ -72,9 +130,11 @@ struct TangentPlane {
  * the tree is asked in one direction of each. Every cell in: In; every cell
  * out: Out; else On, and On those planes that part an inside cell from an
  * outside one. Two coinciding planes are one plane - the eps = 0 case,
- * decided exactly - but a curved bound tangent to another is not what its
- * tangent plane says there, and is Unknown; so is more than three planes, or
- * an operand on the point that states no side. */
+ * decided exactly. A curved bound tangent to another is not what its tangent
+ * plane says there to second order: the cells, open cones of directions, are
+ * still right where they disagree - the point is On - but where they all agree
+ * a cusp between the two may still touch the point, and that is Unknown. So is
+ * more than three planes, or an operand on the point that states no side. */
 Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
 {
   using Op = SolidTree::Op;
@@ -108,12 +168,8 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
         return;
       }
       for (const Surface *b : at.c.on) {
-        // A plane's normal is its own; a curved bound's, its normal at p.
         Vector3d n;
-        const auto *plane = dynamic_cast<const PlaneSurface *>(b);
-        if (plane != nullptr) n = plane->normdir;
-        else if (!b->normalAt(p, n)) n = Vector3d::Zero();
-        if (n.norm() == 0) {
+        if (!normalOf(b, p, n)) {
           stated = false;
           return;
         }
@@ -135,9 +191,9 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
   };
   gather(tree);
   if (!stated || planes.empty() || planes.size() > 3) return of(Where::Unknown);
-  for (const auto& plane : planes) {
-    if (plane.curved && plane.bounds.size() > 1) return of(Where::Unknown);
-  }
+  bool curved_tangency = false;
+  for (const auto& plane : planes)
+    curved_tangency = curved_tangency || (plane.curved && plane.bounds.size() > 1);
   // A direction in each cell: m_i . d = s_i, and nothing along the directions
   // the planes leave free.
   const std::size_t k = planes.size();
@@ -192,6 +248,7 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
   }
   bool any_in = false, any_out = false;
   for (const char c : inside) (c != 0 ? any_in : any_out) = true;
+  if ((!any_out || !any_in) && curved_tangency) return of(Where::Unknown);
   if (!any_out) return of(Where::In, &tree);
   if (!any_in) return of(Where::Out, &tree);
   Classification out{Where::On, {}, &tree};
@@ -223,7 +280,9 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
   case Op::Declared: return leaf(tree, p);
   // A region its declaration bounds answers for itself, as exactly.
   case Op::Region:   {
-    const SolidRegion::Answer a = tree.region()->classify(p);
+    const SolidRegion::Answer a = constructed_on != nullptr
+                                    ? tree.region()->classifyOn(p, *constructed_on)
+                                    : tree.region()->classify(p);
     switch (a.where) {
     case SolidRegion::Where::In:  return of(Where::In, &tree);
     case SolidRegion::Where::Out: return of(Where::Out, &tree);
@@ -253,13 +312,37 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
           c.because->solid() == nullptr)
         continue;
       Vector3d n;
-      if (!c.on.front()->normalAt(p, n)) continue;
+      if (!normalOf(c.on.front(), p, n)) continue;
+      n.normalize();
       if (n.dot(c.because->solid()->interior - p) > 0) n = -n;
       double reach = 0, reach_err = 0;
       if (!supportValue(tree, n, reach, reach_err)) break;
       const double slack = reach_err + forwardError(32, p.norm() + n.norm() + std::fabs(reach));
       if (reach <= n.dot(p) + slack) return Classification{Where::On, c.on, &tree};
       return of(Where::In, &tree);
+    }
+    // On a surface the hull itself makes - the cone between two rims - with
+    // normal n there: out where the hull reaches less far along n or -n than
+    // the point, a plane separating them; on it where the hull reaches exactly
+    // that far and the point lies in the convex hull of where it does - the
+    // hull's face there; out beyond that face.
+    if (constructed_on != nullptr) {
+      for (const Surface *s : *constructed_on) {
+        Vector3d n;
+        if (!normalOf(s, p, n)) continue;
+        n.normalize();
+        for (const double sign : {1.0, -1.0}) {
+          const Vector3d m = n * sign;
+          Reach r;
+          if (!reachOf(tree, m, r)) return of(Where::Unknown, &tree);
+          const double slack = 2 * r.err + forwardError(32, p.norm() + std::fabs(r.h));
+          if (r.h < m.dot(p) - slack) return of(Where::Out, &tree);
+          if (r.h > m.dot(p) + slack) continue;
+          if (!r.finite) return of(Where::Unknown, &tree);
+          return withinHull(p, r.at, slack) ? Classification{Where::On, {s}, &tree}
+                                            : of(Where::Out, &tree);
+        }
+      }
     }
     return of(Where::Unknown, &tree);
   }
@@ -303,6 +386,16 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
   }
   default: return of(Where::Unknown);
   }
+}
+
+Classification classifyAt(const SolidTree& tree, const Vector3d& p,
+                          const std::vector<const Surface *>& on)
+{
+  const auto *outer = constructed_on;
+  constructed_on = &on;
+  Classification c = classify(tree, p);
+  constructed_on = outer;
+  return c;
 }
 
 }  // namespace recognition

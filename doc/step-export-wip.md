@@ -6105,6 +6105,50 @@ more now stop at the hull. No file moved. *Tests:* `classify_test.cc` - the
 eps = 0 difference, the union's seam, the regularized intersection, a sector's
 edge; with the normals' orientation dropped, four fail.
 
+**The model's vertices, and a hull of booleans.** The boundary of a boolean of
+declared primitives is pieces of their surfaces meeting along their
+intersection curves at their triple points - the model's exact edges and
+vertices, each a closed form of two or three declarations
+(`recognition/Arrangement.h`): three planes; two planes and a quadric (a line
+meeting it); a plane and two coaxial quadrics (a circle meeting it); and on each
+pair's curve the points where n . x is stationary - a plane's ellipse or circle
+across a quadric, coaxial quadrics' circles, a sphere's own two. In closed form
+where every pair meets in lines or conics, and refused where not (two
+cylinders on different axes meet in a quartic) - never a point left out.
+A tangency within the arithmetic's error is the model's statement, and its
+double root is well conditioned. Each point is asked as lying on the surfaces
+it was computed from (`classifyAt`), so no rounding takes a vertex off them.
+
+A boolean operand's reach is then the farthest of those it holds, and where
+it is attained; a hull's face in direction n is the convex hull of where its
+operands reach that far. So a point on a surface the hull itself makes - the
+cone between two rims - is on the hull where it lies in that face, out beyond
+it, and out where the hull reaches less far than it along n or -n. Existence
+asks each point as lying on the surface it was taken onto, which hands the
+hull that surface. And the half-space rule refuses a curved bound tangent to
+another only where its cells agree: where they disagree they are open cones of
+directions, which curvature cannot touch, and the point is on; where they
+agree a cusp between the two may still reach it (a box less a cylinder tangent
+to its face).
+
+step-hull-of-sectors 0 -> 34 of 34 decided; the bayonet 101 -> 37 undecided;
+lid10's sector hulls 274 -> 25, its open facets now stopped at the next
+operand that states only a box - the lug channel's polyhedron, named for
+cylinders, not a grid. No file moved. The same vertices are what an audit of
+the written corners, and corner placement, will read. *Tests:*
+`support_test.cc` - a half cylinder's four vertices of all its triple points,
+its reach along three directions, the hull of two halves on its operands'
+faces and on its cone; without the vertices, without the face's extent, the
+tests fail. `classify_test.cc` - the half cylinder's tangent edge on, the
+cusp unknown; without the guard the cusp fails.
+
+What it cost: the faceted region had made the measure 620 s -> 962 s, each
+point near a grid projected twice - once by existence, again by the region -
+and every point summing every face's solid angle. A point taken onto a grid the
+solid is bounded by is now on it without a second projection
+(`SolidRegion::classifyOn`), and one beyond the faces' box is out at once:
+1045 s -> 741 s, 0 differences.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

@@ -3,9 +3,12 @@
 #include "geometry/recognition/Support.h"
 
 #include <catch2/catch_all.hpp>
+#include <cmath>
 #include <memory>
+#include <vector>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Arrangement.h"
 #include "geometry/recognition/Classify.h"
 
 namespace {
@@ -73,4 +76,96 @@ TEST_CASE("a point on an operand is on the hull where nothing reaches further", 
   // On the capsule's straight side, where both balls reach exactly as far.
   CHECK(recognition::classify(*hull, {0, 1, 0}).where == Where::On);
   CHECK(recognition::classify(*hull, {3, 0, 1}).where == Where::On);
+}
+
+namespace {
+
+/*! cylinder(r, h) about z from z0 less the box x < 0 - a half cylinder, as
+ * step-hull-of-sectors builds its operands. */
+std::shared_ptr<const SolidTree> halfCylinder(double r, double z0, double h)
+{
+  auto wall = std::make_shared<DeclaredSolid>();
+  wall->bounds = {std::make_shared<CylinderSurface>(Vector3d(0, 0, z0), Vector3d(0, 0, 1), r),
+                  std::make_shared<PlaneSurface>(Vector3d(0, 0, z0), Vector3d(0, 0, 1)),
+                  std::make_shared<PlaneSurface>(Vector3d(0, 0, z0 + h), Vector3d(0, 0, 1))};
+  wall->interior = {0, 0, z0 + h / 2};
+  auto cut = std::make_shared<DeclaredSolid>();
+  const Vector3d lo(-2 * r, -r - 1, z0 - 1), hi(0, r + 1, z0 + h + 1);
+  for (int k = 0; k < 3; k++) {
+    Vector3d e(0, 0, 0);
+    e[k] = 1;
+    cut->bounds.push_back(std::make_shared<PlaneSurface>(lo, e));
+    cut->bounds.push_back(std::make_shared<PlaneSurface>(hi, e));
+  }
+  cut->interior = (lo + hi) / 2;
+  return SolidTree::combine(SolidTree::Op::Difference, SolidTree::declared(wall),
+                            SolidTree::declared(cut));
+}
+
+}  // namespace
+
+TEST_CASE("a half cylinder's vertices are where its declarations meet on it", "[support][arrangement]")
+{
+  const auto half = halfCylinder(10, 0, 4);
+  std::vector<const Surface *> surfaces;
+  REQUIRE(recognition::leafSurfaces(*half, surfaces));
+  std::vector<recognition::ArrangementPoint> points;
+  REQUIRE(recognition::triplePoints(surfaces, points));
+  // Of every triple point of its nine surfaces the solid holds four: the half
+  // disc's two corners on each cap, where the cut x = 0 meets the rim.
+  std::vector<Vector3d> on;
+  for (const auto& p : points) {
+    if (recognition::classifyAt(*half, p.at, p.on).where == recognition::Where::On) on.push_back(p.at);
+  }
+  REQUIRE(on.size() == 4);
+  for (const Vector3d& want :
+       {Vector3d(0, 10, 0), Vector3d(0, -10, 0), Vector3d(0, 10, 4), Vector3d(0, -10, 4)}) {
+    bool found = false;
+    for (const Vector3d& p : on) found = found || (p - want).norm() < 1e-12;
+    CHECK(found);
+  }
+}
+
+TEST_CASE("a boolean operand reaches as far as its boundary's farthest point", "[support][arrangement]")
+{
+  const auto half = halfCylinder(10, 0, 4);
+  double h = 0, err = 0;
+  REQUIRE(recognition::supportValue(*half, {1, 0, 0}, h, err));
+  CHECK(h == Catch::Approx(10).margin(1e-12));  // the rim at +x
+  REQUIRE(recognition::supportValue(*half, {-1, 0, 0}, h, err));
+  CHECK(h == Catch::Approx(0).margin(1e-12));  // the cut
+  REQUIRE(recognition::supportValue(*half, {0, 1, 1}, h, err));
+  CHECK(h == Catch::Approx(14).margin(1e-12));  // the corner (0, 10, 4)
+}
+
+TEST_CASE("a hull of half cylinders decides its operands' faces", "[support][hull]")
+{
+  // step-hull-of-sectors: half(10, 4) raised by 2 and half(8, 4), hulled.
+  const auto big = halfCylinder(10, 2, 4), small = halfCylinder(8, 0, 4);
+  const auto hull = SolidTree::enveloping(BoundingBox(Vector3d(-10, -10, 0), Vector3d(10, 10, 6)),
+                                          {big, small}, "hull()");
+  using recognition::Where;
+  CHECK(recognition::classify(*hull, {10, 0, 4}).where == Where::On);  // the big wall, exposed
+  CHECK(recognition::classify(*hull, {8, 0, 1}).where == Where::In);   // the small wall, under the cone
+  CHECK(recognition::classify(*hull, {4, 0, 0}).where == Where::On);   // the small half's floor
+  CHECK(recognition::classify(*hull, {5, 0, 6}).where == Where::On);   // the big half's top
+}
+
+TEST_CASE("a point on the cone a hull makes is on it between the rims", "[support][hull][bridging]")
+{
+  // The same hull: between the big half's bottom rim (r = 10, z = 2) and the
+  // small half's (r = 8, z = 0) it is the cone r = 8 + z, on the side x > 0
+  // both halves keep. A point is asked as lying on that cone, the record the
+  // hull's facets there are made on.
+  const auto big = halfCylinder(10, 2, 4), small = halfCylinder(8, 0, 4);
+  const auto hull = SolidTree::enveloping(BoundingBox(Vector3d(-10, -10, 0), Vector3d(10, 10, 6)),
+                                          {big, small}, "hull()");
+  const ConeSurface cone(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 8, 1);
+  using recognition::Where;
+  const auto at = [&](const Vector3d& p) { return recognition::classifyAt(*hull, p, {&cone}).where; };
+  CHECK(at({9, 0, 1}) == Where::On);  // between the rims
+  // On the cone past the big rim - at 45 degrees, inside the hull's box, so
+  // only the face's extent can rule it out.
+  CHECK(at({11 * std::cos(M_PI / 4), 11 * std::sin(M_PI / 4), 3}) == Where::Out);
+  CHECK(at({-9, 0, 1}) == Where::Out);  // on the side the halves are cut from
 }
