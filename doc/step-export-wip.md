@@ -6149,6 +6149,41 @@ solid is bounded by is now on it without a second projection
 (`SolidRegion::classifyOn`), and one beyond the faces' box is out at once:
 1045 s -> 741 s, 0 differences.
 
+**A polyhedron named for a cylinder.** lid10's lug channel is a polyhedron
+whose walls the model names for the two declared cylinders they are chords of
+(the `labels` in `bayonetChannel`); its roof and floor are its own planes. The
+faceted region took only faces named for a grid, so the channel stated a box
+and stopped 249 facets. A named face now carries how far its record may lie
+from it, in closed form for the record's kind (`Surface::facetBound`): a
+plane's, the corners' heights; a cylinder's, |rho - r| over the triangle - rho
+convex, so its greatest at a corner, and its least that of the triangle's
+shadow across the axis, which is on an edge unless the axis meets the shadow,
+and no nearer than the edges less the shadow's inradius. One formula for any
+shadow: a wall along the axis casts a segment of no inradius, and its band is
+the sagitta 10 (1 - cos 30) the hexagon in the test reads off. A record with no
+closed form (a cone, an elliptic cylinder, so a cylinder under an uneven
+scale) leaves the solid unstated.
+
+Two rules had to be stated that the grid had let pass. A point on the record is
+on the solid only in the piece the faces stand for - where the record's normal
+there meets a face named for it within its band; an infinite cylinder is on
+the channel nowhere else, and a point taken onto it far away had been On. A
+grid states no normal: its nearest point is asked only within its own net's
+band, whose cells the sweeps that declare one name in full, and a polyhedron
+naming only some of a grid's cells is not told apart - open, until the grid
+states a normal from its spline. And near a named face, a plane face as near
+as the band leaves the side Unknown: the record's side says nothing about the
+plane's.
+
+lid10 287 -> 167 undecided, 1726 -> 1846 on a face, phantoms 64 unchanged; the
+channel stops nothing for "an operand stated nothing" any more. 132 of its
+facets now read "a point on two surfaces" - they lie on the channel's wall and
+on the lid body's cylinder at once, and the half-space rule asks only a
+declared primitive which side it keeps. A region stating its side at a point
+is the next step. step-exchange-never-surrender 87 -> 12 undecided; one facet
+of step-declare-grid-two-bands face -> undecided, by the plane rule. No file
+moved.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

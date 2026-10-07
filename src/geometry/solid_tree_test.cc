@@ -340,13 +340,20 @@ TEST_CASE("a faceted leaf becomes the envelope its faces span", "[solidtree][env
   const uint32_t wall = named->surfaces[0]->tags.back();
   for (std::size_t f = 0; f < named->indices.size(); f++)
     named->surface_tags.push_back(f < 8 ? wall : 0);
+  // Named, the walls are the cylinder's within 10 (1 - cos 45) = 2.93 of their
+  // chords, and the leaf states the solid they and the caps bound (open item
+  // 42): in at 9.9 along x, past the chord; on at 10; out at 10.5, beyond the
+  // band; out above the top cap.
   const auto tree = manifoldOf(*named)->toPolySet()->solid_tree;
-  REQUIRE(tree->op() == SolidTree::Op::Enveloped);
+  REQUIRE(tree->op() == SolidTree::Op::Region);
+  CHECK(tree->region()->classify({9.9, 0, 2.5}).where == SolidRegion::Where::In);
+  CHECK(tree->region()->classify({10, 0, 2.5}).where == SolidRegion::Where::On);
+  CHECK(tree->region()->classify({10.5, 0, 2.5}).where == SolidRegion::Where::Out);
+  CHECK(tree->region()->classify({0, 0, 6}).where == SolidRegion::Where::Out);
   BoundingBox box;
-  for (const auto& b : tree->solid()->bounds) box.extend(b->refpt);
+  REQUIRE(tree->extent(box));
   CHECK(box.max()[0] == Catch::Approx(10).margin(1e-12));
   CHECK(box.min()[1] == Catch::Approx(-10).margin(1e-12));
-  CHECK(box.max()[2] == Catch::Approx(5).margin(1e-12));
 
   // The same prism with the cylinder declared over it and no face named for
   // it - a declare_cylinder() around a polyhedron(): which faces the cylinder

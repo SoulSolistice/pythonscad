@@ -126,3 +126,67 @@ TEST_CASE("near a grid face, the grid decides the side, not the face", "[faceted
   CHECK(region.classify(at(10.6)).where == W::In);  // past the chord, inside the grid
   CHECK(region.classify(at(12)).where == W::Out);   // beyond the outer wall
 }
+
+TEST_CASE("a face named for a declared cylinder is that cylinder's, where its faces stand",
+          "[faceted-region]")
+{
+  // A hexagonal prism, z from 0 to 5, its corners on the cylinder r = 10 about
+  // z and its six walls named for it; its caps its own planes. A wall's
+  // chord passes 10 cos 30 = 8.660 from the axis, so the wall stands for the
+  // cylinder within 10 (1 - cos 30) = 1.340 of it.
+  const auto cyl = std::make_shared<const CylinderSurface>(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  const auto polar = [](double r, double degrees, double z) {
+    const double t = degrees * M_PI / 180;
+    return Vector3d(r * cos(t), r * sin(t), z);
+  };
+  std::vector<FacetedRegion::Face> faces;
+  for (int k = 0; k < 6; k++) {
+    // The last wall closes on the first corner itself: sin(360 degrees) is not 0.
+    const int next = 60 * ((k + 1) % 6);
+    const Vector3d b0 = polar(10, 60 * k, 0), b1 = polar(10, next, 0);
+    const Vector3d t0 = polar(10, 60 * k, 5), t1 = polar(10, next, 5);
+    faces.push_back({b0, b1, t1, cyl});
+    faces.push_back({b0, t1, t0, cyl});
+  }
+  for (int k = 1; k < 5; k++) {
+    faces.push_back({polar(10, 0, 0), polar(10, 60 * (k + 1), 0), polar(10, 60 * k, 0), nullptr});
+    faces.push_back({polar(10, 0, 5), polar(10, 60 * k, 5), polar(10, 60 * (k + 1), 5), nullptr});
+  }
+  const FacetedRegion region(faces);
+  REQUIRE(region.closed());
+  CHECK(region.classify({0, 0, 2.5}).where == W::In);
+  CHECK(region.classify({20, 0, 2.5}).where == W::Out);
+  // At 30 degrees, mid wall: 9.5 is past the chord - the faces' winding says
+  // Out - and inside the cylinder.
+  CHECK(region.classify(polar(9.5, 30, 2.5)).where == W::In);
+  const auto wall = region.classify(polar(10, 30, 2.5));
+  REQUIRE(wall.where == W::On);
+  REQUIRE(wall.on.size() == 1);
+  CHECK(wall.on.front() == cyl.get());
+  // At 10 degrees the chord is 8.660 / cos 20 = 9.216 out: 9.5 is past it,
+  // 10.05 past the cylinder.
+  CHECK(region.classify(polar(9.5, 10, 2.5)).where == W::In);
+  CHECK(region.classify(polar(10.05, 10, 2.5)).where == W::Out);
+  // At the top, 0.84 beside the cap and inside the cylinder: the cap's plane
+  // is as near as the wall's band, and which side of it the point is the
+  // cylinder does not say.
+  CHECK(region.classify(polar(9.5, 30, 5)).where == W::Unknown);
+  // On the cylinder 0.2 above the walls: within their band, and beyond the
+  // piece they stand for - its normal there meets no wall.
+  CHECK(region.classify(polar(10, 10, 5.2)).where == W::Unknown);
+  // A point taken onto the cylinder is on the solid where the walls stand,
+  // and nowhere else on the infinite cylinder.
+  const std::vector<const Surface *> on{cyl.get()};
+  CHECK(region.classifyOn(polar(10, 30, 2.5), on).where == W::On);
+  CHECK(region.classifyOn(polar(10, 30, 50), on).where == W::Out);
+  // Moved evenly, still stated; squashed, the cylinder is elliptic and states
+  // no band, and nor does the solid.
+  Transform3d turn = Transform3d::Identity();
+  turn.rotate(Eigen::AngleAxisd(M_PI / 4, Vector3d::UnitZ()));
+  const auto turned = region.transformed(turn, Similarity::by(1.0));
+  REQUIRE(turned != nullptr);
+  CHECK(turned->classify(polar(9.5, 75, 2.5)).where == W::In);
+  Transform3d squash = Transform3d::Identity();
+  squash.scale(Vector3d(2, 1, 1));
+  CHECK(region.transformed(squash, scaleSimilarity(Vector3d(2, 1, 1))) == nullptr);
+}

@@ -248,9 +248,11 @@ std::shared_ptr<const SolidTree> facetedSolid(const PolySet& ps,
     if (closed) return SolidTree::region(region, what);
   }
   // Otherwise the faces themselves, each the model's own plane or a piece of
-  // the declared grid it is named for - where every named face is named for a
-  // grid, and no curved record the leaf carries goes unnamed (a declaration
-  // that names no face says the solid is on it, and nobody says where).
+  // the record it is named for - a declared grid, a declared cylinder - where
+  // each named face's record states how far it may lie from the face
+  // (FacetedRegion), and no curved record the leaf carries goes unnamed (a
+  // declaration that names no face says the solid is on it, and nobody says
+  // where).
   std::set<uint32_t> carried;
   if (ps.surface_tags.size() == ps.indices.size())
     carried.insert(ps.surface_tags.begin(), ps.surface_tags.end());
@@ -265,27 +267,21 @@ std::shared_ptr<const SolidTree> facetedSolid(const PolySet& ps,
   }
   if (every_record_named) {
     std::vector<FacetedRegion::Face> faces;
-    std::map<const Surface *, std::shared_ptr<const GridSurface>> grids;
-    bool grids_only = true;
-    for (size_t f = 0; f < ps.indices.size() && grids_only; f++) {
+    std::map<const Surface *, std::shared_ptr<const Surface>> records;
+    bool triangles = true;
+    for (size_t f = 0; f < ps.indices.size() && triangles; f++) {
       const auto& tri = ps.indices[f];
-      if (tri.size() != 3) {
-        grids_only = false;
-        break;
-      }
+      triangles = tri.size() == 3;
+      if (!triangles) break;
       FacetedRegion::Face face{ps.vertices[tri[0]], ps.vertices[tri[1]], ps.vertices[tri[2]], nullptr};
       if (const Surface *record = record_of(f)) {
-        if (dynamic_cast<const GridSurface *>(record) == nullptr) {
-          grids_only = false;
-          break;
-        }
-        auto& grid = grids[record];
-        if (grid == nullptr) grid = std::dynamic_pointer_cast<const GridSurface>(record->clone());
-        face.record = grid;
+        auto& own = records[record];
+        if (own == nullptr) own = record->clone();
+        face.record = own;
       }
       faces.push_back(std::move(face));
     }
-    if (grids_only) {
+    if (triangles) {
       auto region = std::make_shared<FacetedRegion>(std::move(faces));
       if (region->closed()) return SolidTree::region(region, what);
     }

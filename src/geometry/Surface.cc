@@ -3300,6 +3300,64 @@ bool CylinderSurface::envelope(const std::vector<Vector3d>& corners, BoundingBox
   return true;
 }
 
+bool Surface::facetBound(const Vector3d&, const Vector3d&, const Vector3d&, double&) const
+{
+  return false;
+}
+
+bool PlaneSurface::facetBound(const Vector3d& a, const Vector3d& b, const Vector3d& c,
+                              double& bound) const
+{
+  // The height over the plane is linear, so at its most at a corner: the unit
+  // normal (9), the difference (1) and the dot (5).
+  const Vector3d n = normdir.normalized();
+  bound = 0;
+  double scale = 0;
+  for (const Vector3d& p : {a, b, c}) {
+    bound = std::max(bound, std::fabs(n.dot(p - refpt)));
+    scale = std::max(scale, p.norm());
+  }
+  bound += forwardError(15, scale + refpt.norm());
+  return true;
+}
+
+bool CylinderSurface::facetBound(const Vector3d& a, const Vector3d& b, const Vector3d& c,
+                                 double& bound) const
+{
+  // A point is |rho - r| off, rho its distance from the axis; rho is convex,
+  // so the triangle's furthest from the axis is a corner, and its nearest is
+  // the nearest of the triangle's shadow across the axis - P below - to the
+  // axis. That is on an edge where the axis misses the shadow, and nearer than
+  // any edge by at most the shadow's inradius where it does not: no point of
+  // a triangle is further than that from all three edges. So the nearest lies
+  // in [edges - inradius, edges], one formula for a shadow of any shape - a
+  // facet along the axis casts a segment, of no inradius.
+  const Vector3d u = normdir.normalized();
+  Vector3d P[3];
+  double far = 0, scale = 0;
+  int k = 0;
+  for (const Vector3d& p : {a, b, c}) {
+    const Vector3d rel = p - refpt;
+    P[k] = rel - u * rel.dot(u);
+    far = std::max(far, P[k].norm());
+    scale = std::max(scale, p.norm());
+    k++;
+  }
+  double edges = std::numeric_limits<double>::infinity(), perimeter = 0;
+  for (int i = 0; i < 3; i++) {
+    const Vector3d& s = P[i];
+    const Vector3d d = P[(i + 1) % 3] - s;
+    const double dd = d.dot(d);
+    const double t = dd > 0 ? std::clamp(-s.dot(d) / dd, 0.0, 1.0) : 0.0;
+    edges = std::min(edges, (s + d * t).norm());
+    perimeter += std::sqrt(dd);
+  }
+  const double inradius = perimeter > 0 ? (P[1] - P[0]).cross(P[2] - P[0]).norm() / perimeter : 0.0;
+  const double near = std::max(0.0, edges - inradius);
+  bound = std::max({far - r, r - near, 0.0}) + forwardError(48, scale + refpt.norm() + std::fabs(r));
+  return true;
+}
+
 bool ConeSurface::envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const
 {
   // The part of the cone a facet stands for lies between its corners' levels

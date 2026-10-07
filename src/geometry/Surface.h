@@ -157,6 +157,11 @@ public:
    * kind has none to give. What an operand that states no solid can still say
    * of where it is: its envelope (SolidTree.h). */
   virtual bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const;
+  /*! The most any point of the triangle (a, b, c) is from this surface, in
+   * closed form and rounding included - the band a facet made on it, and the
+   * piece of it the facet stands for, lie in. False where this kind has none
+   * to give. */
+  virtual bool facetBound(const Vector3d& a, const Vector3d& b, const Vector3d& c, double& bound) const;
   /*! The point of this surface nearest `p`, or false where there is none to give. */
   virtual bool closestPoint(const Vector3d& p, Vector3d& out) const;
   /*! The unit normal where this surface passes nearest `p`, or false. */
@@ -515,6 +520,7 @@ public:
   [[nodiscard]] double residualOver(const std::vector<double>& lo,
                                     const std::vector<double>& hi) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
+  bool facetBound(const Vector3d& a, const Vector3d& b, const Vector3d& c, double& bound) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;
 
@@ -573,6 +579,7 @@ public:
   [[nodiscard]] double residualOver(const std::vector<double>& lo,
                                     const std::vector<double>& hi) const override;
   bool envelope(const std::vector<Vector3d>& corners, BoundingBox& box) const override;
+  bool facetBound(const Vector3d& a, const Vector3d& b, const Vector3d& c, double& bound) const override;
   bool closestPoint(const Vector3d& p, Vector3d& out) const override;
   bool normalAt(const Vector3d& p, Vector3d& out) const override;
   bool implicitAt(const Vector3d& p, double& f, Vector3d& grad) const override;

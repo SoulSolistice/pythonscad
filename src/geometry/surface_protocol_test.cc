@@ -511,3 +511,28 @@ TEST_CASE("a torus and an elliptic cylinder each take a point onto themselves", 
   const Vector3d grad(on[0] / 16, on[1] / 4, 0);
   CHECK((p - on).cross(grad).norm() < 1e-13);
 }
+
+TEST_CASE("a facet's distance from its surface is bounded over the whole triangle", "[surface][facet]")
+{
+  double bound = 0;
+  // A plane z = 0: the corners' heights, the largest 2.
+  const PlaneSurface plane(Vector3d(0, 0, 0), Vector3d(0, 0, 1));
+  REQUIRE(plane.facetBound({0, 0, 1}, {1, 0, -2}, {0, 1, 0.5}, bound));
+  CHECK(std::fabs(bound - 2) < 1e-14);
+
+  // A cylinder about z, r = 10. A wall facet over 60 degrees: its corners on
+  // the cylinder, its middle on the chord, 10 cos 30 from the axis - so
+  // 10 (1 - cos 30) inside.
+  const CylinderSurface cyl(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  const double c = std::cos(M_PI / 3), s = std::sin(M_PI / 3);
+  REQUIRE(cyl.facetBound({10, 0, 0}, {10 * c, 10 * s, 0}, {10 * c, 10 * s, 5}, bound));
+  CHECK(std::fabs(bound - 10 * (1 - std::cos(M_PI / 6))) < 1e-12);
+  // A facet whose shadow across the axis holds the axis: it passes through
+  // the axis, 10 inside. Its edges come no nearer than 1.34 - only the
+  // shadow's inradius says the axis may be inside it.
+  REQUIRE(cyl.facetBound({3, 0, 0}, {-3, 3, 1}, {-3, -3, 2}, bound));
+  CHECK(std::fabs(bound - 10) < 1e-12);
+  // And a facet outside: its corners at radius 12, 2 beyond.
+  REQUIRE(cyl.facetBound({12, 0, 0}, {12, 0, 1}, {0, 12, 0}, bound));
+  CHECK(std::fabs(bound - std::max(2.0, 10 - 12 / std::sqrt(2.0))) < 1e-12);
+}
