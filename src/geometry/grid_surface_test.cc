@@ -902,3 +902,37 @@ TEST_CASE("a sweep's clone is the same record, identity and all", "[surface][swe
   CHECK(copy->witnesses == sweep.witnesses);
   CHECK(copy->sameAs(sweep));
 }
+
+TEST_CASE("a grid finds a point it made, on a crease too, at machine precision",
+          "[surface][grid][project]")
+{
+  // A square profile, radius 9 to 11, swept round z and up 0.3 a station at
+  // nine stations 22.5 degrees apart, closed: four spans, creased at each
+  // column. Every point evaluate() makes is a point project() must find again,
+  // to what evaluating the surface is off by, twice - on the creases too. A
+  // descent on one span that steps past its edge is on the next span's
+  // surface; held to its own, it meets the crease. Not so held, the corner at
+  // v = 3/4 was approached and missed by up to 9.5e-9.
+  std::vector<std::vector<Vector3d>> ring;
+  const double profile[4][2] = {{9, -1}, {11, -1}, {11, 1}, {9, 1}};
+  for (int k = 0; k < 9; k++) {
+    const double t = M_PI / 8 * k;
+    ring.emplace_back();
+    for (const auto& q : profile) ring.back().emplace_back(q[0] * cos(t), q[0] * sin(t), q[1] + 0.3 * k);
+  }
+  std::string why;
+  const auto grid = GridSurface::fromRows(ring, true, why);
+  REQUIRE(grid != nullptr);
+  REQUIRE(grid->interpolated());
+  const double exact = 2 * grid->evaluationBound();
+  double worst = 0;
+  for (int i = 1; i < 50; i++) {
+    for (int j = 0; j <= 16; j++) {
+      const Vector3d p = grid->evaluate(i / 50.0, j / 16.0);
+      double u = 0, v = 0;
+      REQUIRE(grid->project(p, u, v));
+      worst = std::max(worst, (grid->evaluate(u, v) - p).norm());
+    }
+  }
+  CHECK(worst <= exact);
+}

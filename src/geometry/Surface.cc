@@ -1716,6 +1716,12 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
     double bu = bu_per[span], bv = bv_per[span];
     double best_d = best_per[span];
     double lambda = 1e-9;
+    // The piece being descended, and its edges. A step past one lands on the
+    // next piece, a surface this piece's derivatives do not describe, and is
+    // rejected or misled: a point on the crease between them was approached
+    // and never reached - 9.5e-9 short on a closed ring, where the arithmetic
+    // allows 1.7e-13. Held to its span, the descent meets the crease.
+    const double vlo = double(span) / nspans, vhi = double(span + 1) / nspans;
     for (int iter = 0; iter < 64; iter++) {
       const Vector3d r = evaluate(bu, bv) - pt;
       const Vector3d du =
@@ -1726,7 +1732,6 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
       // and points nowhere useful. Held inside the piece being descended it
       // measures that piece. Worth 7.8e-07 down to rounding on the band family's
       // ridge, whose worst case sits exactly on a boundary.
-      const double vlo = double(span) / nspans, vhi = double(span + 1) / nspans;
       const Vector3d dv = (evaluate(bu, std::min(vhi, bv + h)) - evaluate(bu, std::max(vlo, bv - h))) /
                           (std::min(vhi, bv + h) - std::max(vlo, bv - h));
       Eigen::Matrix2d jtj;
@@ -1751,7 +1756,7 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
           continue;
         }
         const double nu = std::clamp(bu + step[0], 0.0, 1.0);
-        const double nv = std::clamp(bv + step[1], 0.0, 1.0);
+        const double nv = std::clamp(bv + step[1], vlo, vhi);
         const double nd = (evaluate(nu, nv) - pt).squaredNorm();
         if (nd < best_d) {
           const bool settled = fabs(nu - bu) < 1e-14 && fabs(nv - bv) < 1e-14;
