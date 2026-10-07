@@ -6278,6 +6278,44 @@ hull of sectors keeping its side there decided them; one facet now stops at
 the hull's own surface, 25 -> 26. Of the facets left to the tessellation,
 those where the boolean is undecided 77 -> 37 and 68 -> 28. No file moved.
 
+**Where the phantoms come from, and topology from the model (proof of
+concept, 2026-10-07).** Read back in SOLIDWORKS, lid10's bayonet ring shows
+the T-shaped and comb faces existence calls phantom and crossing, and the
+coupon's bore is reported as "a face that pierces through the solid". Their
+origin is not the exporter's: Manifold's `difference()` subtracts the
+tessellations, and a cutter `eps` = 0.1 inside a bore whose chords sag 0.107
+(lid10) or 0.128 (the coupon) does not reach the chord's middle - the mesh
+keeps a fin the model does not have, and names its faces correctly for the
+surfaces they were cut from. What makes it a fault in the file is that the
+body build takes its *topology* from the mesh - which faces exist and meet,
+where edges and corners run - and only its geometry from the declarations: the
+bore's face is the mesh's T, put on the exact cylinder r = 15, and so lies
+outside the fin walls at r = 14.9 beside it. D0 makes a face's geometry exact,
+not its existence or its adjacency.
+
+Where every operand is a declared solid the model decides the topology too:
+a face is the part of a declared surface where the tree says the boundary is,
+an edge where two such faces meet, a corner where three do. `brep::fromModel`
+evaluates that for the case where it is a grid - every declared surface a
+coordinate surface of one cylindrical frame (cylinders about one axis, planes
+across it, planes through it): the boxes of the arrangement, each centre
+classified In or Out exactly; the box faces between an In and an Out box, on
+the record there, merged per record and sense; edges radial lines, arcs and
+axial lines; corners grid points. The mesh is not read. Asked for by
+`OPENSCAD_STEP_FROM_MODEL`; anything outside the case is refused with its
+reason and the mesh's body is written. On the coupon: 8 faces, OCCT volume
+10492.919463 - exactly 3340 pi, derived from the model (the mesh's body
+10514.507466 exact, 10487.141772 approximated) - the round trip passing on
+both tiers, the fault census empty. The cutter's wall has no face, because
+every box beside it is in the bore.
+
+Open, before it is more than a proof: the general arrangement (non-coaxial
+quadrics, planes at any angle, the regions and hulls lid10 is built from); an
+edge split at a level of the grid that bounds neither of its faces, written
+as two; OCCT's worst tolerance 1e-5 on the two cylinders that run all the way
+round with two loops and no seam; and where the mesh still has to answer -
+undecided boxes - how the two topologies meet.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

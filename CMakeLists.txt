@@ -1659,6 +1659,7 @@ set(CORE_SOURCES
   src/geometry/Curve.cc
   src/geometry/Surface.cc
   src/geometry/brep/Brep.cc
+  src/geometry/brep/FromModel.cc
   src/geometry/SolidTree.cc
   src/geometry/SweptRegion.cc
   src/geometry/FacetedRegion.cc

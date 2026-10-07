@@ -26,9 +26,13 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
+#include <cstdlib>
 #include <limits>
+#include <optional>
+#include <string>
 #include "StepKernel.h"
 #include "geometry/brep/BodyBuild.h"
+#include "geometry/brep/FromModel.h"
 #include "utils/printutils.h"
 #include <algorithm>  // std::reverse
 #include <iostream>
@@ -63,6 +67,23 @@ void StepKernel::build_tri_body(
   const std::vector<Vector4d>& faceNormals, double tol, bool analytic, bool approximate,
   const std::map<int, std::vector<std::size_t>>& cornerOwners, const SolidTree *solidTree)
 {
+  // A proof of concept, asked for by OPENSCAD_STEP_FROM_MODEL: the B-rep
+  // evaluated from the model's declared tree alone, topology and all, where
+  // the tree can state it - written instead of the mesh's (brep/FromModel.h).
+  if (getenv("OPENSCAD_STEP_FROM_MODEL") != nullptr && solidTree != nullptr) {
+    std::string why;
+    if (const std::optional<brep::Body> body = brep::fromModel(*solidTree, why)) {
+      double size = 1.0;
+      for (const auto& v : body->vertices) size = std::max(size, v.point.norm());
+      LOG(
+        "STEP export: the B-rep evaluated from the model's declarations - %1$d faces, %2$d edges, "
+        "%3$d vertices, the mesh not read",
+        body->faces.size(), body->edges.size(), body->vertices.size());
+      writeBody(name, *body, 1e-9 * size);
+      return;
+    }
+    LOG("STEP export: no B-rep from the model's declarations - %1$s; written from the mesh", why);
+  }
   // The B-rep, decided by the body build; then written, the one place its
   // geometry becomes entities (open item 39, step 3).
   brep::BodyBuild build(mesh_vertices, faces, curves, surfaces, faceOrigin, faceSurface, faceDerived,
