@@ -5,6 +5,8 @@
 #include <cstddef>
 
 #include "geometry/Surface.h"
+#include "geometry/recognition/Support.h"
+#include "geometry/MachinePrecision.h"
 
 namespace recognition {
 
@@ -77,8 +79,28 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
   // solid's boundary says nothing - the leaf may have material beyond it.
   case Op::Enveloped: {
     if (leaf(tree, p).where == Where::Out) return of(Where::Out, &tree);
-    for (const auto& held : tree.children()) {
-      if (classify(*held, p).where == Where::In) return of(Where::In, &tree);
+    std::vector<Classification> held;
+    for (const auto& h : tree.children()) {
+      held.push_back(classify(*h, p));
+      if (held.back().where == Where::In) return of(Where::In, &tree);
+    }
+    // On an operand's smooth boundary, with outward normal n: on the hull's
+    // where no operand reaches further along n than the point - the hull's
+    // supporting plane there would support the operand too, so it is the
+    // tangent plane - and inside it where one does (Caratheodory; see
+    // Support.h). A hull of solids that state no support value says nothing.
+    for (const Classification& c : held) {
+      if (c.where != Where::On || c.on.size() != 1 || c.because == nullptr ||
+          c.because->solid() == nullptr)
+        continue;
+      Vector3d n;
+      if (!c.on.front()->normalAt(p, n)) continue;
+      if (n.dot(c.because->solid()->interior - p) > 0) n = -n;
+      double reach = 0, reach_err = 0;
+      if (!supportValue(tree, n, reach, reach_err)) break;
+      const double slack = reach_err + forwardError(32, p.norm() + n.norm() + std::fabs(reach));
+      if (reach <= n.dot(p) + slack) return Classification{Where::On, c.on, &tree};
+      return of(Where::In, &tree);
     }
     return of(Where::Unknown, &tree);
   }
