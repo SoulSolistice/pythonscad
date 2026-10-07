@@ -2129,6 +2129,37 @@ Vector2d SweepLaws::pointAt(std::size_t i, double t) const
   return f == 0.0 ? profile[k][i] : Vector2d(profile[k][i] + (profile[k + 1][i] - profile[k][i]) * f);
 }
 
+namespace {
+
+/*! The slope of a table linear between its keys, on the span after t (side >
+ * 0) or before it; zero past either end, where the law holds still. */
+template <typename T>
+T lawSlope(const std::vector<double>& at, const std::vector<T>& values, double t, int side,
+           const T& zero)
+{
+  if (at.size() < 2) return zero;
+  if (side > 0 ? (t < at.front() || t >= at.back()) : (t <= at.front() || t > at.back())) return zero;
+  std::size_t k = 0;
+  if (side > 0) k = std::size_t(std::upper_bound(at.begin(), at.end(), t) - at.begin()) - 1;
+  else k = std::size_t(std::lower_bound(at.begin(), at.end(), t) - at.begin()) - 1;
+  return (values[k + 1] - values[k]) / (at[k + 1] - at[k]);
+}
+
+}  // namespace
+
+double SweepLaws::radiusSlope(double t, int side) const
+{
+  return lawSlope(radius_at, radius, t, side, 0.0);
+}
+
+Vector2d SweepLaws::pointSlope(std::size_t i, double t, int side) const
+{
+  std::vector<Vector2d> column;
+  column.reserve(profile.size());
+  for (const auto& key : profile) column.push_back(key[i]);
+  return lawSlope(profile_at, column, t, side, Vector2d(0, 0));
+}
+
 std::vector<double> SweepLaws::corners() const
 {
   std::vector<double> out;
@@ -2320,6 +2351,24 @@ bool SweepSurface::project(const Vector3d& pt, double& u, double& v) const
 int SweepSurface::normalsAt(const Vector3d&, Vector3d[4]) const
 {
   return 0;
+}
+
+void SweepSurface::derivativesAt(double t, std::size_t edge, double s, int side, Vector3d& P,
+                                 Vector3d& Pt, Vector3d& Ps) const
+{
+  const std::size_t n = laws.points();
+  const std::size_t i = edge % n, j = (edge + 1) % n;
+  const Vector2d a = laws.pointAt(i, t), b = laws.pointAt(j, t);
+  const Vector2d q = a + (b - a) * s;
+  const Vector2d dq = laws.pointSlope(i, t, side) * (1 - s) + laws.pointSlope(j, t, side) * s;
+  const double r = laws.radiusAt(t), dr = laws.radiusSlope(t, side);
+  const double theta = 2 * M_PI * turns * t, dtheta = 2 * M_PI * turns;
+  const Vector3d other = normdir.cross(ref);
+  const Vector3d e = ref * cos(theta) + other * sin(theta);
+  const Vector3d e_turned = other * cos(theta) - ref * sin(theta);
+  P = refpt + e * (r + q[0]) + normdir * (pitch * turns * t + q[1]);
+  Pt = e * (dr + dq[0]) + e_turned * ((r + q[0]) * dtheta) + normdir * (pitch * turns + dq[1]);
+  Ps = e * (b - a)[0] + normdir * (b - a)[1];
 }
 
 bool SweepSurface::onSurface(const Vector3d& pt, double tol) const

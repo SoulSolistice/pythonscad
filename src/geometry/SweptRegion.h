@@ -40,6 +40,14 @@ private:
   /*! Where (dr, dz) is against the profile at `t`, within `err` of an edge
    * being On. */
   [[nodiscard]] Where inProfile(double t, const Vector2d& q, double err) const;
+  /*! The side the solid keeps at a point on one pass: at station `t`, offset
+   * `q`, within `err` of an edge and `t_err` of t - on the sweep, its normal
+   * (SweepSurface::derivativesAt) on each profile edge the point is on,
+   * convex where the profile's corner is; at an end, its plane too, the end
+   * cutting the sweep. Nothing at a key of a law, where the sweep is creased
+   * along t, or where an end meets a concave corner. */
+  void stateSides(double t, const Vector2d& q, double err, double t_err, bool at_start, bool at_end,
+                  Answer& a) const;
 
   std::shared_ptr<const SweepSurface> sweep_;
   std::shared_ptr<const PlaneSurface> end0_, end1_;

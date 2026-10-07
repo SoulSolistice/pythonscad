@@ -990,6 +990,12 @@ struct SweepLaws {
   [[nodiscard]] double radiusAt(double t) const;
   /*! Profile point `i` at `t`. */
   [[nodiscard]] Vector2d pointAt(std::size_t i, double t) const;
+  /*! How fast the radius and profile point `i` move with t on the key span
+   * after `t` (side > 0) or before it (side < 0): the same inside a span, the
+   * two spans' at a key, where the law turns a corner; zero past the ends,
+   * where it holds still. */
+  [[nodiscard]] double radiusSlope(double t, int side) const;
+  [[nodiscard]] Vector2d pointSlope(std::size_t i, double t, int side) const;
   [[nodiscard]] std::size_t points() const { return profile.empty() ? 0 : profile.front().size(); }
   /*! The keys of both laws strictly inside (0, 1), merged: where the surface
    * may turn a corner along the sweep. */
@@ -1018,8 +1024,19 @@ public:
   [[nodiscard]] Vector3d evaluate(double u, double v) const override;
   bool project(const Vector3d& pt, double& u, double& v) const override;
   [[nodiscard]] bool onSurface(const Vector3d& pt, double tol) const override;
-  /*! None: the inherited net is a rendering of this closed form, and its
-   * spline's derivatives are not this surface's. */
+  /*! The sweep and its first derivatives at station `t`, a fraction `s` along
+   * profile edge `edge` (from point edge to edge + 1), in closed form:
+   *   P = origin + e(theta) (r + q_r) + axis (pitch turns t + q_z),
+   * theta = 2 pi turns t, q the profile point - so P_s is the edge in the
+   * meridional plane, and P_t the laws' slopes, the rise, and the turning
+   * (r + q_r) theta' along e'. At a key of a law the slopes are the span's on
+   * `side` (SweepLaws::radiusSlope). */
+  void derivativesAt(double t, std::size_t edge, double s, int side, Vector3d& P, Vector3d& Pt,
+                     Vector3d& Ps) const;
+  /*! None here: the inherited net is a rendering of this closed form, and its
+   * spline's derivatives are not this surface's. The sweep's own normal is
+   * derivativesAt()'s, stated by its region (SweptRegion), which knows the
+   * station and the profile edge a point is on. */
   [[nodiscard]] int normalsAt(const Vector3d& p, Vector3d out[4]) const override;
   [[nodiscard]] std::shared_ptr<Surface> clone() const override;
   bool transform(const Transform3d& mat, const Similarity& similarity) override;

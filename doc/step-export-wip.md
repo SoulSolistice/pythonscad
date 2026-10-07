@@ -6239,6 +6239,26 @@ of them is told apart. On a crease the point is in the piece by either
 normal and states no one side. A sweep (SweepSurface) states no normal: its
 net is a rendering of its closed form, not the surface.
 
+**A sweep states its side.** A declared sweep's point is the origin, e(theta)
+(r + q_r) and the axis (pitch turns t + q_z), theta = 2 pi turns t, with the
+radius and the profile linear in t between their keys and the profile a
+polyline: so P_s is a profile edge in the meridional plane, P_t the laws'
+slopes, the rise and the turning (r + q_r) theta' along e', and the normal
+their cross product (`SweepSurface::derivativesAt`). Its meridional part is
+(r + q_r) theta' times the edge's own normal in the profile, which off the
+axis cannot vanish, so the profile's orientation says which way is out. The
+swept region states it: on one profile edge the normal; on a corner of the
+profile both, convex where the corner is; at an end its plane, outward
+against the sweep's way, and on its rim the sweep too, the end cutting it. At
+a key of a law the sweep is creased along t, and an end meeting a concave
+corner of the profile is neither all nor any of its half-spaces: nothing.
+
+No file moved, and no verdict: lid10's ridge now states its side at 1236 of
+the 1252 points it was on and the half-space rule decides them - the ridge
+meeting its socket's cylinder, On - but those were not what held its open
+facets. Traced, every stop left on lid10 is the hull: a hull says On and
+states no side (924 of 944, 360 of them beside a rotate_extrude's region).
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`
