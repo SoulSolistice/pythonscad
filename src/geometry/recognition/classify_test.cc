@@ -308,6 +308,59 @@ std::shared_ptr<const SolidTree> prism(const std::vector<Vector3d>& polygon, dou
 
 }  // namespace
 
+TEST_CASE("a hull states its supporting plane at a point on an operand's face", "[classify][hull]")
+{
+  // hull() of two unit spheres at x = 0 and x = 4: a capsule. (0, 0, 1) is
+  // on the first's top, and no operand reaches above z = 1, so it is on the
+  // hull - which holds the sphere, so is smooth there, normal z, the side it
+  // keeps below.
+  const auto sphere = [](const Vector3d& c) {
+    auto s = std::make_shared<DeclaredSolid>();
+    s->bounds.push_back(std::make_shared<SphereSurface>(c, Vector3d(0, 0, 1), 1.0));
+    s->interior = c;
+    return SolidTree::declared(s);
+  };
+  const auto capsule = SolidTree::enveloping(BoundingBox(Vector3d(-1, -1, -1), Vector3d(5, 1, 1)),
+                                             {sphere({0, 0, 0}), sphere({4, 0, 0})}, "hull()");
+  const auto top = classify(*capsule, Vector3d(0, 0, 1));
+  REQUIRE(top.where == Where::On);
+  REQUIRE(top.sides.size() == 1);
+  CHECK((top.sides.front().outward - Vector3d(0, 0, 1)).norm() < 1e-12);
+  CHECK(top.all);
+  // A box resting on it, [-1, 5] x [-3, 3] x [1, 3], touches the curved top
+  // along a line: between them a cusp of neither reaches the point - (0,
+  // 0.1, 0.999) is below the box and outside the capsule - so the union does
+  // not hold it, and the tangency is not the half-spaces' to decide.
+  const auto lid = box({-1, -3, 1}, {5, 3, 3});
+  CHECK(at(SolidTree::combine(Op::Union, capsule, lid), 0, 0, 1) == Where::Unknown);
+
+  // A hull with a flat top: two unit cubes at x 0..1 and 3..4, stating their
+  // extent, whose hull is [0, 4] x [0, 1]^2. On the first's top, (0.5, 0.5, 1),
+  // the hull keeps z < 1; the box resting on it z > 1, the same plane: united,
+  // every direction is in one, and the point is in; the box less the hull is
+  // on its own face.
+  const auto cube = [](const Vector3d& lo) {
+    auto s = std::make_shared<DeclaredSolid>();
+    for (int i = 0; i < 3; i++) {
+      Vector3d n(0, 0, 0);
+      n[i] = 1;
+      s->bounds.push_back(std::make_shared<PlaneSurface>(lo, n));
+      s->bounds.push_back(std::make_shared<PlaneSurface>(Vector3d(lo + Vector3d(1, 1, 1)), n));
+    }
+    s->interior = lo + Vector3d(0.5, 0.5, 0.5);
+    s->extent = BoundingBox(lo, Vector3d(lo + Vector3d(1, 1, 1)));
+    return SolidTree::declared(s);
+  };
+  const auto bar = SolidTree::enveloping(BoundingBox(Vector3d(0, 0, 0), Vector3d(4, 1, 1)),
+                                         {cube({0, 0, 0}), cube({3, 0, 0})}, "hull()");
+  const auto flat = classify(*bar, Vector3d(0.5, 0.5, 1));
+  REQUIRE(flat.where == Where::On);
+  REQUIRE(flat.sides.size() == 1);
+  CHECK((flat.sides.front().outward - Vector3d(0, 0, 1)).norm() < 1e-12);
+  CHECK(at(SolidTree::combine(Op::Union, bar, lid), 0.5, 0.5, 1) == Where::In);
+  CHECK(at(SolidTree::combine(Op::Difference, lid, bar), 0.5, 0.5, 1) == Where::On);
+}
+
 TEST_CASE("a region states the side it keeps at a point on two operands", "[classify][neighbourhood]")
 {
   // An L, [0, 2] x [0, 1] and [0, 1] x [0, 2], z from 0 to 1, and the box

@@ -115,7 +115,7 @@ Classification ofAnswer(const SolidRegion::Answer& a, const SolidTree& tree)
   switch (a.where) {
   case SolidRegion::Where::In:  return of(Where::In, &tree);
   case SolidRegion::Where::Out: return of(Where::Out, &tree);
-  case SolidRegion::Where::On:  return Classification{Where::On, a.on, &tree};
+  case SolidRegion::Where::On:  return Classification{Where::On, a.on, &tree, a.sides, a.all};
   default:                      return of(Where::Unknown, &tree);
   }
 }
@@ -201,33 +201,24 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
       }
     };
     LeafAt at;
-    SolidRegion::Answer region;
-    if (t.op() == Op::Region) {
-      region = regionAt(t, p);
-      at.c = ofAnswer(region, t);
-    } else {
-      at.c = classify(t, p);
-    }
+    at.c = classify(t, p);
     if (at.c.where == Where::Unknown) {
       stated = false;
       return;
     }
     if (at.c.where == Where::On) {
-      if (t.op() == Op::Region) {
-        if (region.sides.empty()) {
+      if (t.op() != Op::Declared) {
+        // A region or a hull states the side it keeps, where it can.
+        if (at.c.sides.empty()) {
           stated = false;
           return;
         }
-        at.all = region.all;
-        for (const auto& side : region.sides) {
+        at.all = at.c.all;
+        for (const auto& side : at.c.sides) {
           const Vector3d n = side.outward.normalized();
           at.normals.push_back(n);
           place(n, side.bound);
         }
-      } else if (t.op() != Op::Declared) {
-        // Only a declared leaf and a region state which side they keep.
-        stated = false;
-        return;
       } else {
         for (const Surface *b : at.c.on) {
           Vector3d n;
@@ -364,7 +355,11 @@ Classification classify(const SolidTree& tree, const Vector3d& p)
       double reach = 0, reach_err = 0;
       if (!supportValue(tree, n, reach, reach_err)) break;
       const double slack = reach_err + forwardError(32, p.norm() + n.norm() + std::fabs(reach));
-      if (reach <= n.dot(p) + slack) return Classification{Where::On, c.on, &tree};
+      // On it, the hull is smooth there and keeps the operand's side: it holds
+      // the operand, so at a point on both boundaries its normal cone lies
+      // within the operand's - n alone - and it is convex.
+      if (reach <= n.dot(p) + slack)
+        return Classification{Where::On, c.on, &tree, {SolidRegion::Side{n, c.on.front()}}, true};
       return of(Where::In, &tree);
     }
     // On a surface the hull itself makes - the cone between two rims - with

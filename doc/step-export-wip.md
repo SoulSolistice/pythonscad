@@ -6259,6 +6259,25 @@ meeting its socket's cylinder, On - but those were not what held its open
 facets. Traced, every stop left on lid10 is the hull: a hull says On and
 states no side (924 of 944, 360 of them beside a rotate_extrude's region).
 
+**A hull states its supporting plane.** A point on an operand's smooth
+boundary, outward normal n, is on the hull where no operand reaches further
+along n; and there the hull is smooth with that normal - it holds the
+operand, so at a point on both boundaries its normal cone lies within the
+operand's, which is n alone - and convex, so it keeps the one half-space. That
+is the side it now states (`Classification::sides`, which a region's answer
+now rides in too). On a surface the hull itself makes it states nothing: the
+point lies in the face of its supporting direction, but a point at that
+face's edge may be on an edge of the hull, which the support data cannot
+tell from a smooth one. A curved hull tangent to another operand's plane
+keeps the tangency guard: between them a cusp of neither reaches the point,
+and a box resting on a capsule does not make the point In.
+
+lid10 1846 -> 1954 on a face, 167 -> 59 undecided; "a point on two surfaces"
+112 -> 3, the lug channel's walls where they meet the body's cylinder - the
+hull of sectors keeping its side there decided them; one facet now stops at
+the hull's own surface, 25 -> 26. Of the facets left to the tessellation,
+those where the boolean is undecided 77 -> 37 and 68 -> 28. No file moved.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

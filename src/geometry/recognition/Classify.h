@@ -39,6 +39,12 @@ struct Classification {
    * left it open. Null where no one operand is the reason: a point on two
    * surfaces at once. What the ledger names (SolidTree::what). */
   const SolidTree *because = nullptr;
+  /*! Where On, the side the leaf keeps there, where it states one - a
+   * region's (SolidRegion::Answer::sides), a hull's supporting plane - and
+   * whether the solid near the point is in all those half-spaces or in any.
+   * Empty where it states none; a declared leaf's are its bounds' own. */
+  std::vector<SolidRegion::Side> sides;
+  bool all = true;
 };
 
 /*! Where `p` is with respect to the solid `tree` describes. See the file comment. */
