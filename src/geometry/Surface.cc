@@ -1294,7 +1294,77 @@ void basisFuns(const std::vector<double>& knots, int span, double t, double out[
   }
 }
 
+/*! The four non-zero cubic basis functions' derivatives at `t` in its span:
+ * N'_{i,3} = 3 (N_{i,2} / (u_{i+3} - u_i) - N_{i+1,2} / (u_{i+4} - u_{i+1})),
+ * the quadratic basis at the same span by the same recurrence (The NURBS
+ * Book, 2.9). A zero denominator is a repeated knot, whose term is zero. */
+void basisDerivs(const std::vector<double>& knots, int span, double t, double out[GRID_DEGREE + 1])
+{
+  constexpr int p = GRID_DEGREE - 1;
+  double quad[p + 1], left[p + 1], right[p + 1];
+  quad[0] = 1.0;
+  for (int j = 1; j <= p; j++) {
+    left[j] = t - knots[span + 1 - j];
+    right[j] = knots[span + j] - t;
+    double saved = 0.0;
+    for (int r = 0; r < j; r++) {
+      const double denom = right[r + 1] + left[j - r];
+      const double temp = denom != 0.0 ? quad[r] / denom : 0.0;
+      quad[r] = saved + right[r + 1] * temp;
+      saved = left[j - r] * temp;
+    }
+    quad[j] = saved;
+  }
+  // quad[r] is N_{span - 2 + r, 2}; out[k] is N'_{span - 3 + k, 3}.
+  for (int k = 0; k <= GRID_DEGREE; k++) {
+    const int i = span - GRID_DEGREE + k;
+    const double lo = k >= 1 ? quad[k - 1] : 0.0, hi = k <= p ? quad[k] : 0.0;
+    const double d0 = knots[i + GRID_DEGREE] - knots[i], d1 = knots[i + GRID_DEGREE + 1] - knots[i + 1];
+    out[k] = GRID_DEGREE * ((d0 != 0.0 ? lo / d0 : 0.0) - (d1 != 0.0 ? hi / d1 : 0.0));
+  }
+}
+
 }  // namespace
+
+void GridSurface::derivatives(double u, double v, int span, int cell, Vector3d& S, Vector3d& Su,
+                              Vector3d& Sv) const
+{
+  const bool cubic = !poles.empty();
+  const int segs = vspans();
+  if (!cubic && cell < 0) cell = std::clamp(int(u * (rows - 1)), 0, rows - 2);
+  int knot = 0;
+  double basis[GRID_DEGREE + 1], derivs[GRID_DEGREE + 1];
+  if (cubic) {
+    knot = findSpan(uknots, rows, u);
+    basisFuns(uknots, knot, u, basis);
+    basisDerivs(uknots, knot, u, derivs);
+  }
+  // A column's point and derivative along the sweep.
+  auto column = [&](int j, Vector3d& c, Vector3d& dc) {
+    j %= cols;
+    if (!cubic) {
+      const double uf = u * (rows - 1) - cell;
+      c = at(cell, j) * (1 - uf) + at(cell + 1, j) * uf;
+      dc = (at(cell + 1, j) - at(cell, j)) * double(rows - 1);
+      return;
+    }
+    c = dc = Vector3d::Zero();
+    for (int k = 0; k <= GRID_DEGREE; k++) {
+      const Vector3d& pole = poles[std::size_t(knot - GRID_DEGREE + k) * cols + j];
+      c += pole * basis[k];
+      dc += pole * derivs[k];
+    }
+  };
+  // S = C_s (1 - vf) + C_s+1 vf across the span, so S_u blends the columns'
+  // derivatives and S_v = (C_s+1 - C_s) segs.
+  Vector3d c0, d0, c1, d1;
+  column(span, c0, d0);
+  column(span + 1, c1, d1);
+  const double vf = v * segs - span;
+  S = c0 * (1 - vf) + c1 * vf;
+  Su = d0 * (1 - vf) + d1 * vf;
+  Sv = (c1 - c0) * double(segs);
+}
 
 void GridSurface::buildSpline()
 {
@@ -1678,8 +1748,11 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
       }
     }
   }
-  // Then Gauss-Newton on the squared distance, by finite differences: the
-  // surface is piecewise polynomial and this only has to converge locally.
+  // Then Gauss-Newton on the squared distance, with the surface's own
+  // derivatives: piecewise polynomial, so in closed form (derivatives()).
+  // Until 2026-10-07 they were central differences at h = 1e-6, whose error
+  // of about eps / h left the answer well short of the point's own
+  // parameters - a point on a crease of the profile did not land on it.
   //
   // Every step has to *improve* the distance, and that is not a refinement of
   // the method but the whole of its correctness here. Gauss-Newton on a swept
@@ -1708,7 +1781,6 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
   // not help, down when it does. At lambda near zero it *is* Gauss-Newton, so
   // the well-conditioned interior behaves as before; at large lambda the step
   // becomes a short one down the gradient, which is defined everywhere.
-  const double h = 1e-6;
   double answer = std::numeric_limits<double>::infinity();
   double au = 0, av = 0;
   for (int span = 0; span < nspans; span++) {
@@ -1723,17 +1795,15 @@ bool GridSurface::project(const Vector3d& pt, double& u, double& v) const
     // allows 1.7e-13. Held to its span, the descent meets the crease.
     const double vlo = double(span) / nspans, vhi = double(span + 1) / nspans;
     for (int iter = 0; iter < 64; iter++) {
-      const Vector3d r = evaluate(bu, bv) - pt;
-      const Vector3d du =
-        (evaluate(std::min(1.0, bu + h), bv) - evaluate(std::max(0.0, bu - h), bv)) / (2 * h);
-      // Differenced *within* the span, not across it. At a span boundary the
-      // profile has a corner and the v derivative does not exist; a central
-      // difference straddling one measures the average of two different slopes
-      // and points nowhere useful. Held inside the piece being descended it
-      // measures that piece. Worth 7.8e-07 down to rounding on the band family's
-      // ridge, whose worst case sits exactly on a boundary.
-      const Vector3d dv = (evaluate(bu, std::min(vhi, bv + h)) - evaluate(bu, std::max(vlo, bv - h))) /
-                          (std::min(vhi, bv + h) - std::max(vlo, bv - h));
+      // The point and derivatives of the piece being descended, not across
+      // it: at a span boundary the profile has a corner and the v derivative
+      // does not exist, and one straddling it - a central difference did, until
+      // it was held inside the span - measures the average of two slopes and
+      // points nowhere useful. The descent stays in its span, so this is the
+      // surface evaluate() describes there.
+      Vector3d at_uv, du, dv;
+      derivatives(bu, bv, span, -1, at_uv, du, dv);
+      const Vector3d r = at_uv - pt;
       Eigen::Matrix2d jtj;
       jtj << du.dot(du), du.dot(dv), du.dot(dv), dv.dot(dv);
       const Eigen::Vector2d rhs(-r.dot(du), -r.dot(dv));

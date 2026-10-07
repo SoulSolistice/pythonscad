@@ -793,6 +793,13 @@ public:
    * base - while the other 237 still lie on this surface and only lost their
    * original corners. */
   [[nodiscard]] virtual Vector3d evaluate(double u, double v) const;
+  /*! The surface and its first derivatives at (u, v), in closed form: the
+   * cubic's along the sweep - or, where none was fitted, the bilinear cell
+   * `cell` between two stations (-1: the one u is in) - and across, the
+   * ruling of profile span `span`, extended past its ends where v is. What
+   * evaluate() computes, where v is in that span. */
+  void derivatives(double u, double v, int span, int cell, Vector3d& S, Vector3d& Su,
+                   Vector3d& Sv) const;
 
   /*! Closest point on the swept surface, by Newton from a coarse sample.
    *

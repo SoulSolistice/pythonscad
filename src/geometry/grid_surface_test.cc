@@ -936,3 +936,25 @@ TEST_CASE("a grid finds a point it made, on a crease too, at machine precision",
   }
   CHECK(worst <= exact);
 }
+
+TEST_CASE("a grid's derivatives are its spline's, in closed form", "[surface][grid][derivatives]")
+{
+  // The unit square, closed, swept straight up z at five stations: a cubic
+  // interpolating collinear, equally spaced stations at equal chord lengths
+  // is their line, so z = 4 u along every column. On the wall x = 1 - profile
+  // span 1 of 4, from (1, 0) to (1, 1) - S_u = (0, 0, 4) and S_v = (0, 1, 0) 4.
+  std::vector<std::vector<Vector3d>> rows;
+  for (int i = 0; i < 5; i++)
+    rows.push_back({{0, 0, double(i)}, {1, 0, double(i)}, {1, 1, double(i)}, {0, 1, double(i)}});
+  std::string why;
+  const auto grid = GridSurface::fromRows(rows, true, why);
+  REQUIRE(grid != nullptr);
+  REQUIRE(grid->interpolated());
+  Vector3d S, Su, Sv;
+  grid->derivatives(0.675, 0.3, 1, -1, S, Su, Sv);
+  CHECK((S - Vector3d(1, 0.2, 2.7)).norm() <= 1e-14);
+  CHECK((Su - Vector3d(0, 0, 4)).norm() <= 1e-13);
+  CHECK((Sv - Vector3d(0, 4, 0)).norm() <= 1e-14);
+  // And what evaluate() says, where v is in the span.
+  CHECK((S - grid->evaluate(0.675, 0.3)).norm() <= 2 * grid->evaluationBound());
+}
