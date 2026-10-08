@@ -1,5 +1,5 @@
 /*! The model's own vertices and curve points - see Arrangement.h. */
-#include "geometry/recognition/Arrangement.h"
+#include "geometry/model/Arrangement.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,7 +10,14 @@
 #include "geometry/Surface.h"
 #include "geometry/recognition/Exact.h"
 
-namespace recognition {
+namespace model {
+
+using recognition::forwardError;
+using recognition::onLine;
+using recognition::parallel;
+using recognition::perpendicular;
+using recognition::sameLine;
+using recognition::samePoint;
 
 namespace {
 
@@ -349,4 +356,4 @@ bool criticalPoints(const std::vector<const Surface *>& surfaces, const Vector3d
   return true;
 }
 
-}  // namespace recognition
+}  // namespace model

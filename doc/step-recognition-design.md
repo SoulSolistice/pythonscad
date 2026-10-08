@@ -708,7 +708,7 @@ convex, so it can become a declared leaf once it declares every face it has.
 The CGAL backend carries no tree, and an export from it says once that
 existence was the mesh's.
 
-**4. Classification is exact and three-valued.** A `recognition/Classify` unit,
+**4. Classification is exact and three-valued.** A `model/Classify` unit,
 STEP-agnostic and pure (A1): a point against a convex leaf is *in*, *out* or *on*
 by each bounding record's residual against the forward error of computing it
 (`MachinePrecision.h`, C2) - no tolerance anywhere; against an opaque leaf it is
@@ -758,7 +758,7 @@ does not collapse, it is written as the plane it is and named.
 2. **`Classify`, alone.** Unit tests whose expectations are derived by hand:
    points in, out and on a cylinder minus a bore, two cubes sharing a face, a
    cone near its apex, a point beyond an opaque leaf that the tree decides anyway.
-   *(Done 2026-09-27: `recognition/Classify.h`, on `Surface::signedResidual` -
+   *(Done 2026-09-27: `model/Classify.h`, on `Surface::signedResidual` -
    every kind's residual, signed by its own parting of space, `residual()` its
    size. `classify_test.cc` fails without the subtracted-operand rule, with a
    cone taken as both nappes, and with unsigned residuals; `compare` 0.)*

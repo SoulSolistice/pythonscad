@@ -6078,7 +6078,7 @@ it is, where it asserted its box.
 operands' convex combinations (Caratheodory), its support value in each
 direction their largest, so a point on an operand's smooth boundary, outward
 normal n, is on the hull's exactly where no operand reaches further along n -
-and buried where one does (`recognition/Support.h`; values in closed form for
+and buried where one does (`model/Support.h`; values in closed form for
 the declared primitives, unions and nested hulls). Proven on its own and
 landed deciding nothing: every hull the corpus still leaves open is a hull of
 sectors - lid10's and the bayonet's lug channels, step-hull-of-sectors - whose
@@ -6109,7 +6109,7 @@ edge; with the normals' orientation dropped, four fail.
 declared primitives is pieces of their surfaces meeting along their
 intersection curves at their triple points - the model's exact edges and
 vertices, each a closed form of two or three declarations
-(`recognition/Arrangement.h`): three planes; two planes and a quadric (a line
+(`model/Arrangement.h`): three planes; two planes and a quadric (a line
 meeting it); a plane and two coaxial quadrics (a circle meeting it); and on each
 pair's curve the points where n . x is stationary - a plane's ellipse or circle
 across a quadric, coaxial quadrics' circles, a sphere's own two. In closed form

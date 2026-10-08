@@ -1639,9 +1639,9 @@ set(CORE_SOURCES
   src/geometry/recognition/Seam.cc
   src/geometry/recognition/Quadrics.cc
   src/geometry/recognition/Regions.cc
-  src/geometry/recognition/Classify.cc
-  src/geometry/recognition/Support.cc
-  src/geometry/recognition/Arrangement.cc
+  src/geometry/model/Classify.cc
+  src/geometry/model/Support.cc
+  src/geometry/model/Arrangement.cc
   src/geometry/recognition/Existence.cc
   src/geometry/recognition/Pipeline.cc
   src/geometry/recognition/Reports.cc

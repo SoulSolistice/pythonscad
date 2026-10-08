@@ -1,5 +1,5 @@
 /*! Where a point is with respect to the model's solid - see Classify.h. */
-#include "geometry/recognition/Classify.h"
+#include "geometry/model/Classify.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,11 +9,15 @@
 #include <vector>
 
 #include "geometry/Surface.h"
-#include "geometry/recognition/Support.h"
+#include "geometry/model/Support.h"
 #include "geometry/MachinePrecision.h"
 #include "geometry/recognition/Exact.h"
 
-namespace recognition {
+namespace model {
+
+using recognition::forwardError;
+using recognition::parallel;
+using recognition::Residual;
 
 namespace {
 
@@ -493,4 +497,4 @@ bool quadrants(const SolidTree& tree, const Vector3d& p, const Surface *s, const
   return true;
 }
 
-}  // namespace recognition
+}  // namespace model

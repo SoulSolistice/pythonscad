@@ -25,7 +25,7 @@
 #include "geometry/SolidTree.h"
 #include "geometry/linalg.h"
 
-namespace recognition {
+namespace model {
 
 /*! A solid's reach along n: the value, its forward error, and the points that
  * attain it. `finite` is false where they stand for more than themselves - a
@@ -43,4 +43,4 @@ bool reachOf(const SolidTree& tree, const Vector3d& n, Reach& out);
 /*! The support value alone. */
 bool supportValue(const SolidTree& tree, const Vector3d& n, double& h, double& err);
 
-}  // namespace recognition
+}  // namespace model

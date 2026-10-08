@@ -125,7 +125,7 @@ public:
    * points off the surface are in the same part of space, with the surface
    * taken out, exactly when their residuals have one sign. So a point is on the
    * side of a bound its solid's interior is on where the signs agree - which is
-   * what existence asks (recognition/Classify.h) - and each kind answers for
+   * what existence asks (model/Classify.h) - and each kind answers for
    * itself: a cone is one nappe, whose inside is one part and all else the
    * other. For exactness take the size: residual(). */
   [[nodiscard]] virtual recognition::Residual signedResidual(const Vector3d& p) const;

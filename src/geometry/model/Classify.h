@@ -26,7 +26,7 @@
 
 class Surface;
 
-namespace recognition {
+namespace model {
 
 enum class Where { In, Out, On, Unknown };
 
@@ -67,4 +67,4 @@ struct Classification {
 [[nodiscard]] bool quadrants(const SolidTree& tree, const Vector3d& p, const Surface *s,
                              const Surface *t, bool inside[2][2]);
 
-}  // namespace recognition
+}  // namespace model

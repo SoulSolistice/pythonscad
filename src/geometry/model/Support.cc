@@ -1,5 +1,5 @@
 /*! How far a solid reaches in a direction - see Support.h. */
-#include "geometry/recognition/Support.h"
+#include "geometry/model/Support.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,11 +9,14 @@
 
 #include "geometry/MachinePrecision.h"
 #include "geometry/Surface.h"
-#include "geometry/recognition/Arrangement.h"
-#include "geometry/recognition/Classify.h"
+#include "geometry/model/Arrangement.h"
+#include "geometry/model/Classify.h"
 #include "geometry/recognition/Exact.h"
 
-namespace recognition {
+namespace model {
+
+using recognition::forwardError;
+using recognition::parallel;
 
 namespace {
 
@@ -237,4 +240,4 @@ bool supportValue(const SolidTree& tree, const Vector3d& n, double& h, double& e
   return true;
 }
 
-}  // namespace recognition
+}  // namespace model

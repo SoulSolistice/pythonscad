@@ -16,7 +16,7 @@
  * coordinate surface of one cylindrical frame - cylinders about one axis (r =
  * c), planes across it (z = c) and planes through it (theta = c). Their
  * arrangement is then boxes in (r, theta, z); each box's centre is strictly
- * inside it, so the tree says In or Out there exactly (recognition::classify),
+ * inside it, so the tree says In or Out there exactly (model::classify),
  * and the boundary is every box face between an In box and an Out one - on the
  * record at that level, facing out of the In box - merged per record and
  * orientation into faces. Edges are radial lines, arcs and axial lines, each

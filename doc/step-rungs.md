@@ -162,7 +162,7 @@ that decided existence under it (C4):
 
 | rung | rule | class | today |
 | --- | --- | --- | --- |
-| E0 | the model's boolean over declared solids decides the point In, Out or On (`recognition/Classify.h`) | D0 | carried (`SolidTree`), asked per facet (`recognition/Existence.h`); a phantom is an `EXPORT-ERROR` |
+| E0 | the model's boolean over declared solids decides the point In, Out or On (`model/Classify.h`) | D0 | carried (`SolidTree`), asked per facet (`recognition/Existence.h`); a phantom is an `EXPORT-ERROR` |
 | E1 | an envelope a leaf states rules the point Out (a polyhedron's, a hull's, a sweep's laws) | D0 | the same; an envelope never rules a point In |
 | E2 | undecided - an operand states nothing, a point lies on two surfaces, or the facet crosses the boundary - and the mesh boolean's answer stands | D4 | the rest; the ledger's `.existence.tsv` names, per facet, the leaf behind the verdict or what left it open, and the report counts the undecided by it - each operand named there is a declaration to add |
 

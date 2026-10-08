@@ -15,15 +15,15 @@
 #include "geometry/MachinePrecision.h"
 #include "geometry/SolidTree.h"
 #include "geometry/Surface.h"
-#include "geometry/recognition/Classify.h"
+#include "geometry/model/Classify.h"
 #include "geometry/recognition/Exact.h"
 
 namespace brep {
 
 namespace {
 
+using model::Where;
 using recognition::forwardError;
-using recognition::Where;
 
 /*! Every bound of every declared solid in the tree, one record per surface;
  * false where an operand is not a declared solid. */
@@ -178,7 +178,7 @@ std::optional<Body> fromModel(const SolidTree& tree, std::string& why)
         const double z = k == 0    ? zs.front().at - reach
                          : k == nZ ? zs.back().at + reach
                                    : (zs[k - 1].at + zs[k].at) / 2;
-        const recognition::Classification c = recognition::classify(tree, at(r, theta, z));
+        const model::Classification c = model::classify(tree, at(r, theta, z));
         if (c.where != Where::In && c.where != Where::Out) {
           why = "a box of the grid the model does not decide";
           return std::nullopt;

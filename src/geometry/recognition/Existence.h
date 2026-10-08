@@ -10,7 +10,7 @@
  * sag 0.107 leaves slivers in the mesh whose every face is made on a declared
  * surface and none of which the model has. This asks the model: the facet's
  * corners and centroid, each taken onto the surface it was made on, classified
- * against the boolean the model built (recognition/Classify.h).
+ * against the boolean the model built (model/Classify.h).
  *
  * A facet is a **phantom** only where every one of those points is decided Out
  * or In - off the solid's boundary - and none is On or Unknown. A facet whose

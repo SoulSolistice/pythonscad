@@ -26,7 +26,7 @@
 
 class Surface;
 
-namespace recognition {
+namespace model {
 
 /*! A point of the arrangement, with the surfaces it lies on by construction. */
 struct ArrangementPoint {
@@ -48,4 +48,4 @@ bool triplePoints(const std::vector<const Surface *>& surfaces, std::vector<Arra
 bool criticalPoints(const std::vector<const Surface *>& surfaces, const Vector3d& n,
                     std::vector<ArrangementPoint>& out);
 
-}  // namespace recognition
+}  // namespace model

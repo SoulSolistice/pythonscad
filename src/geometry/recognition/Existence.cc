@@ -3,10 +3,14 @@
 
 #include "geometry/SolidTree.h"
 #include "geometry/Surface.h"
-#include "geometry/recognition/Classify.h"
+#include "geometry/model/Classify.h"
 #include "geometry/recognition/Provenance.h"
 
 namespace recognition {
+
+using model::Classification;
+using model::classifyAt;
+using model::Where;
 
 std::vector<Exists> existence(const FacetGraph& graph,
                               const std::vector<std::shared_ptr<Surface>>& surfaces,
