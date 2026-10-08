@@ -157,25 +157,37 @@ struct TangentPlane {
  * declared leaf keeps the inside of every bound it is on; a region states its
  * side itself (SolidRegion::Answer::sides) - all its bounds' half-spaces at a
  * convex edge, any of them at a concave one - or says nothing. */
-Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
-{
-  using Op = SolidTree::Op;
-  std::vector<TangentPlane> planes;
-  // Each leaf's own answer at p, and the outward normal of each bound it is on.
+/*! The solid near a point: each leaf's own answer there, the outward normal
+ * of each bound it is on, and the tangent planes those make - from which
+ * whether a direction from the point goes into the solid is the tree's
+ * boolean of the leaves' half-spaces. Gathered once; asked by the half-space
+ * rule (neighbourhood) and by quadrants(). */
+struct LocalSolid {
   struct LeafAt {
     Classification c;
     std::vector<Vector3d> normals;  // outward, of the bounds it is on
     bool all = true;                // in every half-space they bound, or in any
   };
   std::map<const SolidTree *, LeafAt> leaves;
+  std::vector<TangentPlane> planes;
   bool stated = true;
-  std::function<void(const SolidTree&)> gather = [&](const SolidTree& t) {
+
+  void gather(const SolidTree& tree, const Vector3d& p);
+  /*! Whether direction d from the point goes into `t`'s solid; d off every
+   * bound's tangent plane through the point. */
+  [[nodiscard]] bool into(const SolidTree& t, const Vector3d& d) const;
+};
+
+void LocalSolid::gather(const SolidTree& root, const Vector3d& p)
+{
+  using Op = SolidTree::Op;
+  std::function<void(const SolidTree&)> walk = [&](const SolidTree& t) {
     if (!stated) return;
     switch (t.op()) {
     case Op::Union:
     case Op::Intersection:
     case Op::Difference:
-      for (const auto& child : t.children()) gather(*child);
+      for (const auto& child : t.children()) walk(*child);
       return;
     default: break;
     }
@@ -235,8 +247,46 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
     }
     leaves.emplace(&t, std::move(at));
   };
-  gather(tree);
-  if (!stated || planes.empty() || planes.size() > 3) return of(Where::Unknown);
+  walk(root);
+}
+
+bool LocalSolid::into(const SolidTree& t, const Vector3d& d) const
+{
+  using Op = SolidTree::Op;
+  switch (t.op()) {
+  case Op::Union:
+    for (const auto& child : t.children()) {
+      if (into(*child, d)) return true;
+    }
+    return false;
+  case Op::Intersection:
+    for (const auto& child : t.children()) {
+      if (!into(*child, d)) return false;
+    }
+    return true;
+  case Op::Difference:
+    if (!into(*t.children().front(), d)) return false;
+    for (std::size_t c = 1; c < t.children().size(); c++) {
+      if (into(*t.children()[c], d)) return false;
+    }
+    return true;
+  default: break;
+  }
+  const LeafAt& at = leaves.at(&t);
+  if (at.c.where != Where::On) return at.c.where == Where::In;
+  // Never 0: d is a cell's, off every plane.
+  for (const Vector3d& n : at.normals) {
+    if ((n.dot(d) < 0) != at.all) return !at.all;
+  }
+  return at.all;
+}
+
+Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
+{
+  LocalSolid local;
+  local.gather(tree, p);
+  const std::vector<TangentPlane>& planes = local.planes;
+  if (!local.stated || planes.empty() || planes.size() > 3) return of(Where::Unknown);
   bool curved_tangency = false;
   for (const auto& plane : planes)
     curved_tangency = curved_tangency || (plane.curved && plane.count > 1);
@@ -256,42 +306,12 @@ Classification neighbourhood(const SolidTree& tree, const Vector3d& p)
   }
   if (std::fabs(rows.determinant()) <= forwardError(12, 1.0)) return of(Where::Unknown);
   const Matrix3d inverse = rows.inverse();
-  // Whether a direction d from p goes into the subtree's solid.
-  std::function<bool(const SolidTree&, const Vector3d&)> into = [&](const SolidTree& t,
-                                                                    const Vector3d& d) -> bool {
-    switch (t.op()) {
-    case Op::Union:
-      for (const auto& child : t.children()) {
-        if (into(*child, d)) return true;
-      }
-      return false;
-    case Op::Intersection:
-      for (const auto& child : t.children()) {
-        if (!into(*child, d)) return false;
-      }
-      return true;
-    case Op::Difference:
-      if (!into(*t.children().front(), d)) return false;
-      for (std::size_t c = 1; c < t.children().size(); c++) {
-        if (into(*t.children()[c], d)) return false;
-      }
-      return true;
-    default: break;
-    }
-    const LeafAt& at = leaves.at(&t);
-    if (at.c.where != Where::On) return at.c.where == Where::In;
-    // Never 0: d is a cell's, off every plane.
-    for (const Vector3d& n : at.normals) {
-      if ((n.dot(d) < 0) != at.all) return !at.all;
-    }
-    return at.all;
-  };
   const std::size_t cells = std::size_t(1) << k;
   std::vector<char> inside(cells, 0);
   for (std::size_t cell = 0; cell < cells; cell++) {
     Vector3d s(0, 0, 0);
     for (std::size_t i = 0; i < k; i++) s[long(i)] = (cell >> i) & 1 ? 1.0 : -1.0;
-    inside[cell] = into(tree, inverse * s) ? 1 : 0;
+    inside[cell] = local.into(tree, inverse * s) ? 1 : 0;
   }
   bool any_in = false, any_out = false;
   for (const char c : inside) (c != 0 ? any_in : any_out) = true;
@@ -437,6 +457,40 @@ Classification classifyAt(const SolidTree& tree, const Vector3d& p,
   Classification c = classify(tree, p);
   constructed_on = outer;
   return c;
+}
+
+bool quadrants(const SolidTree& tree, const Vector3d& p, const Surface *s, const Surface *t,
+               bool inside[2][2])
+{
+  const auto *outer = constructed_on;
+  const std::vector<const Surface *> on{s, t};
+  constructed_on = &on;
+  LocalSolid local;
+  local.gather(tree, p);
+  constructed_on = outer;
+  if (!local.stated) return false;
+  Vector3d ns, nt;
+  if (!normalOf(s, p, ns) || !normalOf(t, p, nt)) return false;
+  ns.normalize();
+  nt.normalize();
+  // Every tangent plane through the point is one of the two; a third would
+  // part the quadrants further.
+  for (const auto& plane : local.planes) {
+    if (!parallel(plane.m, ns) && !parallel(plane.m, nt)) return false;
+  }
+  const Vector3d e = ns.cross(nt);
+  if (e.norm() <= forwardError(12, 1.0)) return false;  // tangent: no crossing to part
+  Matrix3d rows;
+  rows.row(0) = ns.transpose();
+  rows.row(1) = nt.transpose();
+  rows.row(2) = e.normalized().transpose();
+  const Matrix3d inverse = rows.inverse();
+  for (int i = 0; i < 2; i++) {
+    for (int j = 0; j < 2; j++) {
+      inside[i][j] = local.into(tree, inverse * Vector3d(i ? 1.0 : -1.0, j ? 1.0 : -1.0, 0.0));
+    }
+  }
+  return true;
 }
 
 }  // namespace recognition

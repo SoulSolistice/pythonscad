@@ -395,3 +395,37 @@ TEST_CASE("a region states the side it keeps at a point on two operands", "[clas
   const auto both = SolidTree::combine(Op::Union, cylinder(10, 10, 0, 5), hex);
   CHECK(classify(*both, mid).where == Where::On);
 }
+
+TEST_CASE("at a point on two surfaces, the quadrants say which way the solid is",
+          "[classify][quadrants]")
+{
+  // The unit cube's edge between x = 1 and z = 1, at (1, 0.5, 1): only the
+  // quadrant against both normals goes in - an edge, each face on the side
+  // of the other surface's normal it points against.
+  const auto cube = box({0, 0, 0}, {1, 1, 1});
+  const PlaneSurface x1(Vector3d(1, 0, 0), Vector3d(1, 0, 0)), z1(Vector3d(0, 0, 1), Vector3d(0, 0, 1));
+  bool in[2][2];
+  REQUIRE(recognition::quadrants(*cube, {1, 0.5, 1}, &x1, &z1, in));
+  CHECK(in[0][0]);
+  CHECK_FALSE(in[0][1]);
+  CHECK_FALSE(in[1][0]);
+  CHECK_FALSE(in[1][1]);
+  // A second cube on top, [0, 1]^2 x [1, 2]: z = 1 runs through the union's
+  // side, and parts nothing - every direction against x's normal goes in.
+  const auto tower = SolidTree::combine(Op::Union, cube, box({0, 0, 1}, {1, 1, 2}));
+  REQUIRE(recognition::quadrants(*tower, {1, 0.5, 1}, &x1, &z1, in));
+  CHECK(in[0][0]);
+  CHECK(in[0][1]);
+  CHECK_FALSE(in[1][0]);
+  CHECK_FALSE(in[1][1]);
+  // A cylinder r = 10, z 0 to 20, at its rim (10, 0, 20): the wall's normal is
+  // +x there, the top's +z; only the quadrant against both goes in.
+  const auto drum = cylinder(10, 10, 0, 20);
+  const CylinderSurface wall(Vector3d(0, 0, 0), Vector3d(0, 0, 1), 10);
+  const PlaneSurface top(Vector3d(0, 0, 20), Vector3d(0, 0, 1));
+  REQUIRE(recognition::quadrants(*drum, {10, 0, 20}, &wall, &top, in));
+  CHECK(in[0][0]);
+  CHECK_FALSE(in[0][1]);
+  CHECK_FALSE(in[1][0]);
+  CHECK_FALSE(in[1][1]);
+}

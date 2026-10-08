@@ -56,4 +56,15 @@ struct Classification {
 [[nodiscard]] Classification classifyAt(const SolidTree& tree, const Vector3d& p,
                                         const std::vector<const Surface *>& on);
 
+/*! At a point on two surfaces crossing there - a point of the curve they meet
+ * in, computed from them - which of the four quadrants of directions go into
+ * the solid: inside[i][j], i the side of `s`'s own normal there (0 against, 1
+ * along), j of `t`'s (normalOf: a plane's, a curved surface's at the point).
+ * The half-space rule's cells, asked of two named surfaces: whether the curve
+ * is an edge of the solid, and on which side of it each surface's face lies,
+ * facing which way. False where a leaf on the point states no side, a tangent
+ * plane through it is neither surface's, or the two are tangent there. */
+[[nodiscard]] bool quadrants(const SolidTree& tree, const Vector3d& p, const Surface *s,
+                             const Surface *t, bool inside[2][2]);
+
 }  // namespace recognition
