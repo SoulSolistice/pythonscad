@@ -6307,7 +6307,12 @@ reason and the mesh's body is written. On the coupon: 8 faces, OCCT volume
 10492.919463 - exactly 3340 pi, derived from the model (the mesh's body
 10514.507466 exact, 10487.141772 approximated) - the round trip passing on
 both tiers, the fault census empty. The cutter's wall has no face, because
-every box beside it is in the bore.
+every box beside it is in the bore. Read in SOLIDWORKS by the author
+(2026-10-08, the approximation tier's file opened by hand, its Import
+Diagnostics; import settings the author's defaults, not driven by the kit):
+"No faulty faces or gaps remain", no slivers - where the mesh's body of the
+same coupon showed two faulty faces, the bore "a face that pierces through the
+solid".
 
 Open, before it is more than a proof: the general arrangement (non-coaxial
 quadrics, planes at any angle, the regions and hulls lid10 is built from); an
