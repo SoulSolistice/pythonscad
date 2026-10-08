@@ -26,7 +26,8 @@ class SolidTree;
 
 namespace brep {
 
-/*! The B-rep the declared tree bounds, or nullopt with `why` filled. */
-std::optional<Body> fromModel(const SolidTree& tree, std::string& why);
+/*! The B-rep the declared tree bounds, or nullopt with `why` filled; and
+ * the uncertainty the file is to declare, which its fitted pcurves hold to. */
+std::optional<Body> fromModel(const SolidTree& tree, std::string& why, double& uncertainty);
 
 }  // namespace brep

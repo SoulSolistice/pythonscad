@@ -72,14 +72,13 @@ void StepKernel::build_tri_body(
   // the tree can state it - written instead of the mesh's (brep/FromModel.h).
   if (getenv("OPENSCAD_STEP_FROM_MODEL") != nullptr && solidTree != nullptr) {
     std::string why;
-    if (const std::optional<brep::Body> body = brep::fromModel(*solidTree, why)) {
-      double size = 1.0;
-      for (const auto& v : body->vertices) size = std::max(size, v.point.norm());
+    double uncertainty = 0;
+    if (const std::optional<brep::Body> body = brep::fromModel(*solidTree, why, uncertainty)) {
       LOG(
         "STEP export: the B-rep evaluated from the model's declarations - %1$d faces, %2$d edges, "
         "%3$d vertices, the mesh not read",
         body->faces.size(), body->edges.size(), body->vertices.size());
-      writeBody(name, *body, 1e-9 * size);
+      writeBody(name, *body, uncertainty);
       return;
     }
     LOG("STEP export: no B-rep from the model's declarations - %1$s; written from the mesh", why);

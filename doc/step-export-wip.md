@@ -6360,6 +6360,28 @@ curved faces carry the same gap. Open: certified pcurves for conics on curved
 faces - fitted within the declared uncertainty, their ends exact (C10) - in
 the writer, for both paths.
 
+SOLIDWORKS, read by the author (2026-10-08, that same file - no pcurves - its
+Mass Properties at the highest accuracy; at the default accuracy both volume
+and area read 0.16 short, a tessellation's): volume 3141.592611, area
+1305.237623, centre of mass y 1.443376, z 5.416667 - against 1000 pi =
+3141.592654, 200 pi + 100 pi + 115.47 pi = 1305.2377, 2.5 tan 30 and 65 / 12.
+It fits its own pcurves to the curve; OCCT, at 1e-5, does not.
+
+**Pcurves on a cylinder, from the model's side.** `brep::fromModel` now
+writes each use's pcurve on a cylinder face: a ruling and a circle across the
+axis are straight lines in (angle, height), exactly; an oblique conic is v =
+h0 + A cos u + B sin u, written as cubic Hermite pieces - value and slope exact
+at every joint, u exact throughout - within Delta^4 R / 384 of the curve for
+pieces Delta apart, R = |(A, B)|, so as many pieces as bring that within the
+uncertainty the file declares (which `fromModel` now states, and the pcurves
+hold to). Its parameter is the written conic's: the shift from the boundary's
+t to the conic's own is returned with its principal axes - a circle keeps its
+own, where t* would be read from rounding - and each use's pcurve is taken the
+whole turns on that chain it to the one before in its loop. OCCT then reads
+the oblique cut as 3141.592652989, 6e-7 from 1000 pi, at its own boolean's
+agreement; the phantom coupon unchanged. The mesh path's conics on curved
+faces still carry none.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`
