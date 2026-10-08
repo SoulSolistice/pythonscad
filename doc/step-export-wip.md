@@ -6321,6 +6321,45 @@ as two; OCCT's worst tolerance 1e-5 on the two cylinders that run all the way
 round with two loops and no seam; and where the mesh still has to answer -
 undecided boxes - how the two topologies meet.
 
+**The model as a layer of its own, and its boundary as an edge graph
+(2026-10-08).** The ground truth the tree decides stands on its own now:
+`src/geometry/model/` - `Classify` (with the half-space rule's cells exposed
+as `quadrants`), `Arrangement`, `Support`, moved out of recognition, which is
+one of their callers (b9bd1b8ff, a pure move). And the grid gave way to the
+general form, `model::evaluate` (`model/Boundary.h`): the curves every pair
+of declared surfaces meets in, in closed form (two planes a line, a plane and
+a cylinder a circle, an ellipse or two rulings); the triple points as
+vertices, one per place; each piece of a curve between them classified at
+its middle - in or out of the solid it bounds nothing, whatever else passes
+through it; on it, the quadrants say whether it is an edge, on which side of
+it each surface's face lies and which way it faces; and on each surface the
+edges' uses chained into loops, grouped on a plane by exact signed area and
+containment, round a cylinder into bands by height. `brep::fromModel` is its
+writer's half - conics to principal axes, faces to forms - and nothing else.
+
+The oblique-cut coupon (`examples/step_test/oblique-cut.scad`, volume 1000 pi
+derived by hand): three faces, two edges each a whole conic, material on the
+axis - none of which the grid could do; the phantom coupon unchanged through
+it, still exactly 3340 pi. Its cube's front edge lies exactly in the cylinder's
+bottom plane - three declared planes on one line, outside the solid - which
+the evaluation reads as no edge because the tree puts the line out, before any
+quadrant is asked.
+
+**What OCCT's volume says, and does not.** OCCT reads the oblique cut as
+3141.586996, 0.0057 short of 1000 pi, at its own integration's error estimate
+below 1e-12; its own boolean of the same solid gives 3141.592653555. The
+file's geometry is the model's - by hand, V = 1/3 of the integral of x . n:
+the wall 2000 pi / 3, the bottom 0, the cut 1000 pi / 3. The difference is
+what the file does not carry: pcurves. An ellipse on a cylinder is h = h0 + A
+cos theta + B sin theta in the cylinder's parameters, which no rational
+B-spline is exactly, so a reader fits its own, at OCCT's 1e-5 - about the
+gap's size over a perimeter of 60 at radius 10; on the phantom coupon every
+pcurve is a straight line in (theta, h), and the volume was exact. The mesh
+path writes pcurves only for its B-spline crossing curves, so its conics on
+curved faces carry the same gap. Open: certified pcurves for conics on curved
+faces - fitted within the declared uncertainty, their ends exact (C10) - in
+the writer, for both paths.
+
 ### 43. Warnings are loud to nobody - every one is named by the fixture that raises it
 
 **Opened and closed 2026-10-05**, as item 32 was for errors. An `EXPORT-WARNING`

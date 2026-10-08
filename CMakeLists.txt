@@ -1642,6 +1642,7 @@ set(CORE_SOURCES
   src/geometry/model/Classify.cc
   src/geometry/model/Support.cc
   src/geometry/model/Arrangement.cc
+  src/geometry/model/Boundary.cc
   src/geometry/recognition/Existence.cc
   src/geometry/recognition/Pipeline.cc
   src/geometry/recognition/Reports.cc
